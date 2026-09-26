@@ -37,6 +37,11 @@ pub const WATER_BOTTLE: ItemId = 271;
 /// Water boiled in a furnace: safe to drink.
 pub const PURIFIED_WATER: ItemId = 272;
 pub const IRON_NUGGET: ItemId = 273;
+pub const FLINT: ItemId = 274;
+pub const GUNPOWDER: ItemId = 275;
+/// Lights TNT; wears out like a tool.
+pub const FLINT_AND_STEEL: ItemId = 276;
+pub const CREEPER_SPAWN_EGG: ItemId = 277;
 const TOOL_BASE: ItemId = 300;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -158,6 +163,7 @@ pub type Slot = Option<Stack>;
 pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
+        FLINT_AND_STEEL => 1,
         WATER_BUCKET | LAVA_BUCKET => 1,
         BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
         _ => 64,
@@ -211,6 +217,9 @@ pub fn attack_damage(id: ItemId) -> f32 {
 }
 
 pub fn max_damage(id: ItemId) -> u16 {
+    if id == FLINT_AND_STEEL {
+        return 64;
+    }
     tool_of(id).map(|(_, t)| t.durability()).unwrap_or(0)
 }
 
@@ -297,6 +306,7 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
     (CHEST, "chest", "Chest", "Láda"),
     (TORCH, "torch", "Torch", "Fáklya"),
     (LANTERN, "lantern", "Lantern", "Lámpás"),
+    (TNT, "tnt", "TNT", "TNT"),
 ];
 
 /// The other items (ids from 256, tools aside), in creative inventory order: the id, key,
@@ -305,6 +315,21 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
     (STICK, "stick", "Stick", "Bot", tex::STICK),
     (COAL, "coal", "Coal", "Szén", tex::COAL),
     (CHARCOAL, "charcoal", "Charcoal", "Faszén", tex::CHARCOAL),
+    (FLINT, "flint", "Flint", "Kovakő", tex::FLINT),
+    (
+        GUNPOWDER,
+        "gunpowder",
+        "Gunpowder",
+        "Puskapor",
+        tex::GUNPOWDER,
+    ),
+    (
+        FLINT_AND_STEEL,
+        "flint_and_steel",
+        "Flint and Steel",
+        "Kovakő és acél",
+        tex::FLINT_AND_STEEL,
+    ),
     (
         IRON_INGOT,
         "iron_ingot",
@@ -391,6 +416,13 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Pig Spawn Egg",
         "Disznó idéző tojás",
         tex::PIG_SPAWN_EGG,
+    ),
+    (
+        CREEPER_SPAWN_EGG,
+        "creeper_spawn_egg",
+        "Creeper Spawn Egg",
+        "Creeper idéző tojás",
+        tex::CREEPER_SPAWN_EGG,
     ),
 ];
 
@@ -506,6 +538,7 @@ pub fn block_name(b: u8) -> String {
         AIR => "-".into(),
         _ if is_water(b) => (if is_hungarian() { "Víz" } else { "Water" }).into(),
         _ if is_lava(b) => (if is_hungarian() { "Láva" } else { "Lava" }).into(),
+        FIRE => (if is_hungarian() { "Tűz" } else { "Fire" }).into(),
         _ => item_of_block(b).map(name).unwrap_or_else(|| "?".into()),
     }
 }

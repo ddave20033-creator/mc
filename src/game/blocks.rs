@@ -70,7 +70,9 @@ impl Game {
         }
         let b = self.join_chest(at, b);
         self.set_block(at, b);
-        if is_furnace(b) {
+        if b == FIRE {
+            self.fire_placed(at, 0);
+        } else if is_furnace(b) {
             self.block_entities.furnaces.insert(at, Default::default());
         } else if is_chest(b) {
             self.block_entities.chests.insert(at, Box::new([None; 27]));
@@ -244,6 +246,20 @@ impl Game {
                 self.break_naturally(q);
             }
         }
+        // Fire goes out without anything to burn or stand on.
+        for d in [
+            IVec3::X,
+            IVec3::NEG_X,
+            IVec3::Y,
+            IVec3::NEG_Y,
+            IVec3::Z,
+            IVec3::NEG_Z,
+        ] {
+            let q = p + d;
+            if self.terrain.world.geti(q) == FIRE && !Self::fire_survives(&self.terrain.world, q) {
+                self.put_out(q);
+            }
+        }
         let w = &self.terrain.world;
         if has_gravity(w.geti(above)) && !is_solid(w.geti(p)) {
             self.start_fall(above);
@@ -330,6 +346,32 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fire_needs_a_sturdy_block_or_something_to_burn() {
+        let mut world = World::new();
+        let mut chunk = ChunkData::new();
+        chunk.set(8, 10, 8, STONE);
+        chunk.set(3, 20, 3, PLANKS);
+        world.chunks.insert((0, 0), Arc::new(chunk));
+        // On stone, and in the air beside planks (on any side), but not in empty air.
+        assert!(Game::fire_survives(&world, IVec3::new(8, 11, 8)));
+        for d in [
+            IVec3::X,
+            IVec3::NEG_X,
+            IVec3::Y,
+            IVec3::NEG_Y,
+            IVec3::Z,
+            IVec3::NEG_Z,
+        ] {
+            assert!(Game::fire_survives(&world, IVec3::new(3, 20, 3) + d));
+        }
+        assert!(!Game::fire_survives(&world, IVec3::new(12, 30, 12)));
+        assert!(!is_solid(FIRE) && !is_opaque(FIRE) && is_replaceable(FIRE));
+        assert_eq!(emission(FIRE), 15);
+        assert!(burn_odds(TNT) > 0 && burn_odds(STONE) == 0 && ignite_odds(OAK_LEAVES) == 30);
+        assert!(lava_ignites(CRAFTING_TABLE) && burn_odds(CRAFTING_TABLE) == 0);
+    }
 
     #[test]
     pub(super) fn wall_torch_needs_its_mounting_block() {

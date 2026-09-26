@@ -247,7 +247,9 @@ impl Game {
             }
             Screen::Dead => self.update_world(dt),
             // A LAN game keeps running behind the pause menu.
-            Screen::Paused | Screen::Options { in_game: true } | Screen::ResourcePacks { in_game: true }
+            Screen::Paused
+            | Screen::Options { in_game: true }
+            | Screen::ResourcePacks { in_game: true }
                 if self.net.is_some() =>
             {
                 self.update_player(dt, false);
@@ -593,6 +595,9 @@ impl Game {
                 ..pose
             };
             build_player(&mut scene.entity, &pose, &limbs, player_sky, player_blk);
+            if pose.burning && third_person {
+                crate::model::emit_entity_fire(&mut scene.entity, pose.pos, 0.6, 1.8, cam);
+            }
             scene.player_vertex_count = scene.entity.len();
             // First-person body: a headless copy drawn with the particles (which cast no shadow;
             // the full model above already does). Like the First Person Model mod, it sits
@@ -612,7 +617,7 @@ impl Game {
             }
         }
         if in_world {
-            self.build_world_entities(&mut scene, third_person, dt);
+            self.build_world_entities(&mut scene, third_person, cam, dt);
         }
         scene.entity_visible = third_person;
 
@@ -652,7 +657,7 @@ impl Game {
 
     /// Dropped items, falling blocks, mobs, the other LAN players, chest lids and items on
     /// crafting tables near the player.
-    fn build_world_entities(&mut self, scene: &mut Scene, third_person: bool, dt: f32) {
+    fn build_world_entities(&mut self, scene: &mut Scene, third_person: bool, cam: Vec3, dt: f32) {
         let world = &self.terrain.world;
         // Items and falling blocks must always be visible, so in first person they go into
         // the particle range (which is drawn normally) instead.
@@ -669,6 +674,10 @@ impl Game {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
             f.build(target, sky, blk);
         }
+        for t in &self.tnt {
+            let (sky, blk) = world.light_estimate(t.center());
+            t.build(target, sky, blk);
+        }
         // Mobs always go into the entity range so they cast shadows; in first person that
         // range only draws shadows, so they are copied into the particle range to be seen too.
         let mut mob_verts = Vec::new();
@@ -678,8 +687,12 @@ impl Game {
             }
             let (sky, blk) = world.light_estimate(m.center());
             m.build(&mut mob_verts, sky, blk);
+            if m.fire > 0.0 && m.alive() {
+                let (hw, tall) = m.kind.size();
+                crate::model::emit_entity_fire(&mut mob_verts, m.pos, hw * 2.0, tall, cam);
+            }
         }
-        multi::build_remote_players(&mut self.remotes, world, self.time, &mut mob_verts, dt);
+        multi::build_remote_players(&mut self.remotes, world, self.time, &mut mob_verts, cam, dt);
         let near = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < 48.0 * 48.0;
         let light = |p: IVec3| world.light_estimate(p.as_vec3() + Vec3::new(0.5, 1.2, 0.5));
         for p in self.block_entities.chests.keys().filter(|p| near(p)) {

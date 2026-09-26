@@ -531,6 +531,93 @@ impl Builder {
         }
     }
 
+    /// Fire, like Minecraft's models (units of 1/16 block, flames 22.4 tall): on the ground
+    /// four planes leaning across the block plus one along each side; otherwise a plane
+    /// against each flammable neighbour, and two hanging from a flammable block above.
+    /// Drawn from both sides and glowing; world.frag plays the animation.
+    fn fire(&mut self, r: &Region, x: i32, y: i32, z: i32) {
+        let (wx, wz) = (x + self.ox, z + self.oz);
+        let variant = (wx.wrapping_mul(31) ^ y.wrapping_mul(17) ^ wz.wrapping_mul(7)) & 1;
+        let layer = if variant == 0 {
+            tex::FIRE_0
+        } else {
+            tex::FIRE_1
+        };
+        let (s, b) = r.light(x, y, z);
+        let light = [255, (s * 17) as u8, (b * 17) as u8, 6];
+        let origin = Vec3::new(wx as f32, y as f32, wz as f32);
+        let flammable = |dx: i32, dy: i32, dz: i32| ignite_odds(r.get(x + dx, y + dy, z + dz)) > 0;
+        let below = r.get(x, y - 1, z);
+        let floor = sturdy_top(below) || ignite_odds(below) > 0;
+        const H: f32 = 22.4;
+        // A 16 x H plane standing at z = `at` (texture upright), turned by `m` (in 1/16 units).
+        let mut plane = |m: Mat4, at: f32, top: f32| {
+            let corners = [
+                (Vec3::new(0.0, 0.0, at), [0.0, 1.0]),
+                (Vec3::new(16.0, 0.0, at), [1.0, 1.0]),
+                (Vec3::new(16.0, top, at), [1.0, 0.0]),
+                (Vec3::new(0.0, top, at), [0.0, 0.0]),
+            ];
+            let base = self.verts.len() as u32;
+            for (c, uv) in corners {
+                let p = origin + m.transform_point3(c) / 16.0;
+                self.push(Vertex {
+                    pos: p.to_array(),
+                    uv,
+                    layer: layer as f32,
+                    light,
+                    tint: [255, 255, 255, flags::EMISSIVE],
+                });
+            }
+            self.opaque
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            self.opaque
+                .extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+        };
+        let center = Vec3::splat(8.0);
+        let about = |o: Vec3, rot: Quat, scale: Vec3| {
+            Mat4::from_translation(o)
+                * Mat4::from_scale(scale)
+                * Mat4::from_quat(rot)
+                * Mat4::from_translation(-o)
+        };
+        // Minecraft's `rescale`: a 22.5 degree turn is stretched back to the block's size.
+        let k = 1.0 / 22.5f32.to_radians().cos();
+        let yaw = |quarter: u32| {
+            about(
+                center,
+                Quat::from_rotation_y(-(quarter as f32) * std::f32::consts::FRAC_PI_2),
+                Vec3::ONE,
+            )
+        };
+        if floor {
+            let a = 22.5f32.to_radians();
+            let sx = Vec3::new(1.0, k, k);
+            plane(about(center, Quat::from_rotation_x(-a), sx), 8.8, H);
+            plane(about(center, Quat::from_rotation_x(a), sx), 7.2, H);
+            // The same pair across the other axis.
+            let turn = yaw(1);
+            plane(turn * about(center, Quat::from_rotation_x(-a), sx), 8.8, H);
+            plane(turn * about(center, Quat::from_rotation_x(a), sx), 7.2, H);
+        }
+        // Sides: north (-Z), east, south, west; all of them on the ground.
+        for (quarter, (dx, dz)) in [(0, (0, -1)), (1, (1, 0)), (2, (0, 1)), (3, (-1, 0))] {
+            if floor || flammable(dx, 0, dz) {
+                plane(yaw(quarter), 0.01, H);
+            }
+        }
+        if !floor && flammable(0, 1, 0) {
+            // Two planes hanging from the block above, sloping down toward the middle.
+            let a = 22.5f32.to_radians();
+            let flat = Mat4::from_translation(Vec3::new(0.0, 16.0, 0.0))
+                * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2);
+            let sz = Vec3::new(k, k, 1.0);
+            let hang = |o: Vec3, ang: f32| about(o, Quat::from_rotation_z(ang), sz) * flat;
+            plane(hang(Vec3::new(16.0, 16.0, 8.0), a), 0.0, 16.0);
+            plane(hang(Vec3::new(0.0, 16.0, 8.0), -a), 0.0, 16.0);
+        }
+    }
+
     fn plant(&mut self, r: &Region, x: i32, y: i32, z: i32, layer: u32, tint: [u8; 3]) {
         let (s, b) = r.light(x, y, z);
         let light = [255, (s * 17) as u8, (b * 17) as u8, 6];
@@ -816,6 +903,10 @@ pub fn mesh_chunk(
                 }
                 if is_fluid(b) {
                     m.fluid(&r, x, y, z, b);
+                    continue;
+                }
+                if b == FIRE {
+                    m.fire(&r, x, y, z);
                     continue;
                 }
                 if is_lantern(b) {

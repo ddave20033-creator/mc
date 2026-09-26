@@ -703,7 +703,8 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
             let r = 5.5 + (a * 3.0).sin() * 0.8;
             (fx - 16.0).hypot(fy - 17.0) < r
         }),
-        tex::PIG_SPAWN_EGG => {
+        tex::PIG_SPAWN_EGG | tex::CREEPER_SPAWN_EGG => {
+            let creeper = l == tex::CREEPER_SPAWN_EGG;
             let egg = |fx: f32, fy: f32| {
                 // Narrower at the top, like an egg.
                 let ry = if fy < 17.0 { 11.0 } else { 9.0 };
@@ -719,10 +720,11 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
             let spot = spots
                 .iter()
                 .any(|&(sx, sy, r)| (fx - sx).hypot(fy - sy) < r);
-            let c = if spot {
-                [196.0, 88.0, 96.0]
-            } else {
-                [240.0, 164.0, 162.0]
+            let c = match (creeper, spot) {
+                (false, true) => [196.0, 88.0, 96.0],
+                (false, false) => [240.0, 164.0, 162.0],
+                (true, true) => [20.0, 20.0, 20.0],
+                (true, false) => [13.0, 168.0, 18.0],
             };
             shape(x, y, c, egg)
         }
@@ -812,9 +814,163 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
                 })
             })
         }
+        tex::FLINT => {
+            let outline = [
+                (15.0, 5.0),
+                (22.0, 9.0),
+                (26.0, 17.0),
+                (22.0, 26.0),
+                (12.0, 27.0),
+                (7.0, 20.0),
+                (9.0, 11.0),
+            ];
+            // Chipped facets: a lighter one at the top left, a darker one at the bottom right.
+            let facet = if fx + fy < 24.0 {
+                1.18
+            } else if fx - fy > 2.0 {
+                0.82
+            } else {
+                1.0
+            };
+            shape(x, y, [58.0, 56.0, 60.0], |fx, fy| {
+                in_polygon(fx, fy, &outline)
+            })
+            .map(|p| {
+                col(
+                    [p[0] as f32, p[1] as f32, p[2] as f32],
+                    facet * (0.92 + 0.16 * n),
+                    255,
+                )
+            })
+        }
+        tex::GUNPOWDER => {
+            // A little heap of dark grains.
+            let heap = |fx: f32, fy: f32| {
+                let top = 12.0 + ((fx - 16.0) / 11.0).powi(2) * 12.0;
+                fy > top && fy < 25.0 && (fx - 16.0).abs() < 11.5
+            };
+            shape(x, y, [84.0, 84.0, 84.0], heap).map(|p| {
+                // Salt-and-pepper grains, a few texels each.
+                let g = hash(l, x / 3, y / 3, 441);
+                let v = if g > 0.86 {
+                    1.5
+                } else if g < 0.18 {
+                    0.55
+                } else {
+                    0.85 + 0.3 * n
+                };
+                col([p[0] as f32, p[1] as f32, p[2] as f32], v, 255)
+            })
+        }
+        tex::FLINT_AND_STEEL => {
+            // A C-shaped steel striker with a piece of flint below it on the right.
+            let striker = |fx: f32, fy: f32| {
+                let r = (fx - 13.0).hypot(fy - 13.0);
+                let open = fx > 13.0 && fy > 13.0;
+                (6.0..9.5).contains(&r) && !open
+            };
+            let flint = [
+                (18.0, 17.0),
+                (26.0, 19.0),
+                (27.0, 26.0),
+                (20.0, 28.0),
+                (16.0, 23.0),
+            ];
+            shape(x, y, [60.0, 58.0, 62.0], |fx, fy| {
+                in_polygon(fx, fy, &flint)
+            })
+            .or_else(|| shape(x, y, [170.0, 172.0, 180.0], striker))
+        }
         _ => Some(tool_icon(l, x, y)).filter(|p| p[3] > 0),
     };
     out.unwrap_or([0, 0, 0, 0])
+}
+
+/// A frame of fire (without a resource pack): flames rising from the bottom edge, their
+/// noise scrolling up a full period over the animation so it loops.
+fn fire_frame(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let (base, variant) = if l >= tex::FIRE_1 {
+        (tex::FIRE_1, 1)
+    } else {
+        (tex::FIRE_0, 0)
+    };
+    let k = (l - base) as i32;
+    // Scroll by 4 texels per frame: 32 frames = one 128 texel period of the noise.
+    let n = fbm(tex::FIRE_0 + variant, x, y + k * 4, 460);
+    let h = 1.0 - (y as f32 + 0.5) / TILE as f32;
+    let heat = n * 1.25 - h * 1.05 + 0.1;
+    if heat < 0.0 {
+        return [0, 0, 0, 0];
+    }
+    let c = lerp3([200.0, 60.0, 10.0], [255.0, 240.0, 150.0], heat * 2.2);
+    col(c, 1.0, 255)
+}
+
+/// A frame of an explosion puff (without a resource pack): a ball of smoke that grows,
+/// brightens and then breaks up.
+fn explosion_frame(k: u32, x: i32, y: i32) -> [u8; 4] {
+    let t = k as f32 / (tex::EXPLOSION_FRAMES - 1) as f32;
+    let (fx, fy) = (d(x) - 16.0, d(y) - 16.0);
+    let n = fbm(tex::EXPLOSION, x, y, 470);
+    let r = fx.hypot(fy) / 16.0;
+    if r > 0.45 + 0.5 * t.sqrt() + (n - 0.5) * 0.3 || n < t * 0.75 {
+        return [0, 0, 0, 0];
+    }
+    let v = 0.7 + 0.5 * n - 0.3 * t;
+    col([230.0, 226.0, 220.0], v, 255)
+}
+
+/// TNT: red paper wrapped around the sticks, a white label with "TNT" on the sides, and the
+/// stick ends (with the fuse on top) on the top and bottom.
+fn tnt(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let (fx, fy) = (d(x), d(y));
+    let n = grain(l, x, y, 450);
+    const RED: [f32; 3] = [196.0, 44.0, 30.0];
+    if l == tex::TNT_SIDE {
+        if (11.0..21.0).contains(&fy) {
+            const GLYPHS: [[&str; 5]; 2] = [
+                ["#####", "..#..", "..#..", "..#..", "..#.."],
+                ["#...#", "##..#", "#.#.#", "#..##", "#...#"],
+            ];
+            let (gx, gy) = (fx.floor() as i32 - 7, fy.floor() as i32 - 13);
+            let ink = (0..17).contains(&gx) && (0..5).contains(&gy) && gx % 6 < 5 && {
+                let glyph = GLYPHS[(gx / 6 == 1) as usize];
+                glyph[gy as usize].as_bytes()[(gx % 6) as usize] == b'#'
+            };
+            let edge = !(11.6..20.4).contains(&fy);
+            return if ink {
+                col([30.0, 28.0, 28.0], 1.0, UNTINTED)
+            } else {
+                col(
+                    [236.0, 232.0, 222.0],
+                    if edge { 0.8 } else { 0.94 + 0.08 * n },
+                    UNTINTED,
+                )
+            };
+        }
+        // Vertical folds in the paper, one per stick.
+        let fold = (fx / 4.0).fract();
+        let v = 0.78 + 0.3 * (fold * std::f32::consts::PI).sin() + 0.08 * n;
+        return col(RED, v, UNTINTED);
+    }
+    // Top and bottom: four stick ends in the wrapping, the fuse sticking out of the middle.
+    let (cx, cy) = (
+        (fx / 16.0).floor() * 16.0 + 8.0,
+        (fy / 16.0).floor() * 16.0 + 8.0,
+    );
+    let r = (fx - cx).hypot(fy - cy);
+    let bottom = l == tex::TNT_BOTTOM;
+    if !bottom && (fx - 16.0).hypot(fy - 16.0) < 2.2 {
+        return col([60.0, 58.0, 56.0], 0.9 + 0.2 * n, UNTINTED);
+    }
+    let v = if r < 5.5 {
+        1.0 + 0.1 * n - r * 0.02
+    } else if r < 6.8 {
+        0.62
+    } else {
+        0.78 + 0.1 * n
+    };
+    col(RED, v * if bottom { 0.85 } else { 1.0 }, UNTINTED)
 }
 
 const LANTERN_METAL: [f32; 3] = [64.0, 70.0, 86.0];
@@ -871,6 +1027,34 @@ fn chain(x: i32, y: i32) -> [u8; 4] {
 
 /// Built-in pig skin, laid out like Minecraft's pig texture (64x64 texel atlas, 2 px per
 /// texel here): head at (0,0), snout at (16,16), legs at (0,16), body at (28,8).
+/// Creeper atlas (64x32 texels in the top half of the layer): mottled green, with the face
+/// on the head's front (texels 8..16 x 8..16).
+fn creeper_skin(x: i32, y: i32) -> [u8; 4] {
+    let (tx, ty) = (x / 2, y / 2);
+    if ty >= 32 {
+        return [0, 0, 0, 0];
+    }
+    const FACE: [&str; 8] = [
+        "........", "........", ".##..##.", ".##..##.", "...##...", "..####..", "..####..",
+        "..#..#..",
+    ];
+    if (8..16).contains(&tx) && (8..16).contains(&ty) {
+        let row = FACE[(ty - 8) as usize].as_bytes();
+        if row[(tx - 8) as usize] == b'#' {
+            return [18, 22, 18, 255];
+        }
+    }
+    let n = hash(tex::CREEPER, tx, ty, 480);
+    let g = if n > 0.8 {
+        [180.0, 220.0, 170.0]
+    } else if n < 0.3 {
+        [60.0, 140.0, 50.0]
+    } else {
+        [94.0, 178.0, 80.0]
+    };
+    col(g, 1.0, UNTINTED)
+}
+
 fn pig_skin(x: i32, y: i32) -> [u8; 4] {
     let (u, v) = (x / 2, y / 2);
     let l = tex::PIG;
@@ -1709,8 +1893,14 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         }
         tex::SHIRT_BACK => character(tex::SHIRT, x, y),
         tex::PIG => pig_skin(x, y),
+        tex::CREEPER => creeper_skin(x, y),
         tex::LANTERN => lantern(x, y),
         tex::CHAIN => chain(x, y),
+        tex::TNT_SIDE | tex::TNT_TOP | tex::TNT_BOTTOM => tnt(l, x, y),
+        _ if is_fire(l) => fire_frame(l, x, y),
+        _ if (tex::EXPLOSION..tex::EXPLOSION + tex::EXPLOSION_FRAMES).contains(&l) => {
+            explosion_frame(l - tex::EXPLOSION, x, y)
+        }
         _ if is_item_icon(l) => item_icon(l, x, y),
         _ => {
             // Break cracks, stage 0..9

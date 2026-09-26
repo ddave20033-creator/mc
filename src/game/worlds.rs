@@ -322,6 +322,8 @@ impl Game {
             &mut self.mobs,
         );
         self.falling.clear();
+        self.tnt.clear();
+        self.fires.clear();
         self.cursor = None;
         self.craft = [None; 9];
         self.drag = None;

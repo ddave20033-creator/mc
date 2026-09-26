@@ -22,9 +22,9 @@ fn mining(b: u8) -> Option<Mining> {
         })
     };
     match b {
-        AIR | BEDROCK => None,
+        AIR | BEDROCK | FIRE => None,
         _ if is_fluid(b) => None,
-        _ if is_plant(b) || is_torch(b) => m(0.0, None, None),
+        _ if is_plant(b) || is_torch(b) || b == TNT => m(0.0, None, None),
         _ if is_lantern(b) => m(3.5, Some(Pickaxe), Some(0)),
         _ if is_leaves(b) => m(0.2, Some(Sword), None),
         GRASS | SNOWY_GRASS | GRAVEL | CLAY => m(0.6, Some(Shovel), None),
@@ -86,6 +86,11 @@ pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
     if !can_harvest(b, held) {
         return Vec::new();
     }
+    harvest_drops(b, r)
+}
+
+/// Items dropped by `b` when it drops at all (mined with the right tool, or blown up).
+pub fn harvest_drops(b: u8, r: f32) -> Vec<Stack> {
     let one = |id: ItemId| vec![Stack::one(id)];
     match b {
         GRASS | SNOWY_GRASS => one(DIRT as ItemId),
@@ -94,6 +99,7 @@ pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
         DIAMOND_ORE => one(DIAMOND),
         CLAY => vec![Stack::new(CLAY_BALL, 4)],
         GLASS | ICE | TALL_GRASS => Vec::new(),
+        GRAVEL if r < 0.1 => one(FLINT),
         DEAD_BUSH => {
             let n = (r * 3.0) as u8;
             if n > 0 {
@@ -120,6 +126,19 @@ pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
             .filter(|&i| block_of(i).is_some())
             .map(one)
             .unwrap_or_default(),
+    }
+}
+
+/// Minecraft's blast resistance: how much of an explosion's strength a block soaks up.
+pub fn blast_resistance(b: u8) -> f32 {
+    match b {
+        AIR => 0.0,
+        BEDROCK => 3_600_000.0,
+        OBSIDIAN => 1200.0,
+        _ if is_fluid(b) => 100.0,
+        STONE | COBBLE | BRICKS | STONE_BRICKS | IRON_BLOCK | GOLD_BLOCK | DIAMOND_BLOCK
+        | COAL_BLOCK => 6.0,
+        _ => mining(b).map_or(0.0, |m| m.hardness),
     }
 }
 

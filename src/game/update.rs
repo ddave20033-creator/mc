@@ -1,5 +1,5 @@
 //! The per-frame simulation: the player (movement, targeting, mining, using) and the world
-//! (chest lids, fluids, furnaces, saplings, dropped items, mobs, falling blocks, torch fire,
+//! (chest lids, fluids, furnaces, saplings, dropped items, mobs, falling blocks, TNT, torch fire,
 //! time of day and autosave).
 
 use super::*;
@@ -115,7 +115,14 @@ impl Game {
         }
         self.action_cooldown -= dt;
         let mut breaking = None;
-        if control && self.left_down && self.action_cooldown <= 0.0 {
+        // Blocking with a sword: no hitting or mining until the right button is let go.
+        let swing = control && !self.blocking;
+        if self.blocking {
+            self.mining = None;
+            self.dig_timer = 0.0;
+        } else if swing && self.left_pressed && self.punch_fire() {
+            self.mining = None;
+        } else if swing && self.left_down && self.action_cooldown <= 0.0 {
             if let Some((hit, _)) = self.target {
                 let b = self.terrain.world.geti(hit);
                 let time =
@@ -148,7 +155,7 @@ impl Game {
             self.mining = None;
             self.dig_timer = 0.0;
         }
-        if control && self.left_pressed && self.target.is_none() {
+        if swing && self.left_pressed && self.target.is_none() {
             if let Some(i) = self.mob_target {
                 self.attack(Some(i), None);
             }
@@ -335,6 +342,7 @@ impl Game {
         // Mobs
         self.update_mobs(dt);
         self.spawn_animals(dt);
+        self.spawn_monsters(dt);
 
         // Falling sand / gravel.
         let mut landed = Vec::new();
@@ -364,6 +372,9 @@ impl Game {
                 self.spawn_drop(f.pos + Vec3::Y * 0.5, Stack::one(f.block as ItemId));
             }
         }
+
+        self.update_tnt(dt);
+        self.update_fire(dt);
 
         if self.torch_particles {
             self.torch_fire(dt);

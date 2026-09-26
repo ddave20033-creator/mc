@@ -314,16 +314,27 @@ impl Game {
             if in_lava {
                 ui.solid(0.0, 0.0, w, h, rgba(255, 90, 10, 150));
             }
-            if self.fire > 0.0 && !creative {
-                let flicker = 0.8 + 0.2 * (self.time * 17.0).sin();
-                ui.gradient(
-                    0.0,
-                    h * 0.55,
-                    w,
-                    h * 0.45,
-                    rgba(255, 120, 20, 0),
-                    rgba(255, 90, 10, (150.0 * flicker) as u8),
-                );
+            if self.fire > 0.0 && !creative && self.camera.mode == 0 {
+                // Minecraft's burning overlay (first person only; the other views show the
+                // flames on the model): the animated fire texture rising from both
+                // bottom corners (the right one mirrored).
+                use crate::world::textures::tex;
+                let frame = (self.time * 20.0) as u32 % tex::FIRE_FRAMES;
+                let layer = tex::FIRE_1 + frame;
+                let (fw, fh) = (w * 0.56, h * 0.62);
+                let (top, bottom) = (h - fh, h + fh * 0.12);
+                for (x0, x1) in [(-w * 0.06, fw - w * 0.06), (w * 1.06, w * 1.06 - fw)] {
+                    ui.tex_quad(
+                        [
+                            Vec2::new(x0, top),
+                            Vec2::new(x1, top),
+                            Vec2::new(x1, bottom),
+                            Vec2::new(x0, bottom),
+                        ],
+                        layer,
+                        1.0,
+                    );
+                }
             }
             if self.hurt_time > 0.0 {
                 ui.vignette(rgba(200, 0, 0, (self.hurt_time / 0.4 * 200.0) as u8));

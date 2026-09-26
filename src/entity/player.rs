@@ -1,4 +1,4 @@
-use crate::world::{is_fluid, is_lava, is_solid, World, AIR};
+use crate::world::{is_fluid, is_lava, is_solid, World, AIR, FIRE};
 use glam::{IVec3, Vec3};
 
 pub const EYE_HEIGHT: f32 = 1.62;
@@ -262,7 +262,9 @@ impl Player {
 
 /// Voxel DDA raycast. Returns (hit block, the empty block in front of it).
 pub fn raycast(world: &World, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<(IVec3, IVec3)> {
-    raycast_by(world, origin, dir, max_dist, |b| b != AIR && !is_fluid(b))
+    raycast_by(world, origin, dir, max_dist, |b| {
+        b != AIR && !is_fluid(b) && b != FIRE
+    })
 }
 
 /// Like `raycast`, but also stops at fluid source blocks (for buckets).
@@ -273,7 +275,7 @@ pub fn raycast_fluid(
     max_dist: f32,
 ) -> Option<(IVec3, IVec3)> {
     raycast_by(world, origin, dir, max_dist, |b| {
-        b != AIR && (!is_fluid(b) || crate::world::fluid_level(b) == 0)
+        b != AIR && b != FIRE && (!is_fluid(b) || crate::world::fluid_level(b) == 0)
     })
 }
 

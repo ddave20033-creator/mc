@@ -1,4 +1,5 @@
-//! Particles: block debris, torch flames and smoke, food crumbs and the puff of a dying mob.
+//! Particles: block debris, torch flames and smoke, food crumbs, the puff of a dying mob and
+//! explosions.
 
 use crate::util::{vertex_light, Rng};
 use crate::world::mesh::{flags, Vertex};
@@ -13,6 +14,8 @@ enum Kind {
     Flame,
     /// Torch smoke: rises and drifts through the smoke sprites.
     Smoke,
+    /// Explosion puff: stays put, glows and plays the explosion sprites.
+    Explosion,
 }
 
 pub struct Particle {
@@ -157,6 +160,57 @@ impl Particles {
         }
     }
 
+    /// An explosion, like Minecraft's: 6 animated explosion puffs per tick for 8 ticks,
+    /// scattered up to 2 blocks around (each takes 6 to 9 ticks to play), and dark smoke
+    /// drifting up after them.
+    pub fn explosion(&mut self, center: Vec3, sky: u8, blk: u8) {
+        for tick in 0..8 {
+            for _ in 0..6 {
+                let off = Vec3::new(
+                    self.rand() - self.rand(),
+                    self.rand() - self.rand(),
+                    self.rand() - self.rand(),
+                ) * 4.0;
+                let life = (6.0 + self.rand() * 4.0) / 20.0;
+                // Minecraft tints them 0.6..1.0 gray; they glow, so a bit darker here.
+                let gray = (110.0 + self.rand() * 70.0) as u8;
+                let size = 2.0 * (1.0 - self.rand() * 0.5);
+                self.list.push(Particle {
+                    kind: Kind::Explosion,
+                    pos: center + off,
+                    vel: Vec3::ZERO,
+                    // Waits for its tick before it shows.
+                    life: life + tick as f32 / 20.0,
+                    max_life: life,
+                    layer: tex::EXPLOSION,
+                    uv0: [0.0, 0.0],
+                    size,
+                    tint: [gray; 3],
+                    light: [15, 15],
+                });
+            }
+        }
+        for _ in 0..24 {
+            let d = Vec3::new(self.rand(), self.rand(), self.rand()) * 2.0 - Vec3::ONE;
+            let life = 1.0 + self.rand() * 1.5;
+            let gray = (50.0 + self.rand() * 50.0) as u8;
+            let size = 0.1 + self.rand() * 0.12;
+            let vel = d * 0.8 + Vec3::Y * (0.5 + self.rand() * 0.7);
+            self.list.push(Particle {
+                kind: Kind::Smoke,
+                pos: center + d * 1.8,
+                vel,
+                life,
+                max_life: life,
+                layer: tex::SMOKE,
+                uv0: [0.0, 0.0],
+                size,
+                tint: [gray; 3],
+                light: [sky, blk],
+            });
+        }
+    }
+
     pub fn update(&mut self, dt: f32, world: &World) {
         for p in &mut self.list {
             p.life -= dt;
@@ -182,12 +236,17 @@ impl Particles {
     }
 
     pub fn build(&self, out: &mut Vec<Vertex>, right: Vec3, up: Vec3) {
-        for p in &self.list {
+        for p in self.list.iter().filter(|p| p.life <= p.max_life) {
             // Age 0..1 over the particle's life.
             let t = (1.0 - p.life / p.max_life).clamp(0.0, 1.0);
             let (size, layer, s, fl) = match p.kind {
                 Kind::Debris => (p.size, p.layer, 0.25, 0),
                 Kind::Flame => (p.size * (1.0 - t * t * 0.5), p.layer, 1.0, flags::EMISSIVE),
+                Kind::Explosion => {
+                    let frames = tex::EXPLOSION_FRAMES;
+                    let frame = ((t * frames as f32) as u32).min(frames - 1);
+                    (p.size, p.layer + frame, 1.0, flags::EMISSIVE)
+                }
                 Kind::Smoke => {
                     let frame =
                         SMOKE_FRAMES - 1 - ((t * SMOKE_FRAMES as f32) as u32).min(SMOKE_FRAMES - 1);

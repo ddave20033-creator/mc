@@ -130,7 +130,7 @@ impl Game {
     }
 
     /// Host: sends a message to every player (but `except`).
-    fn broadcast(&self, m: &Msg, except: Option<u8>) {
+    pub(super) fn broadcast(&self, m: &Msg, except: Option<u8>) {
         if let Some(Net::Host(h)) = &self.net {
             for p in h.peers.iter().filter(|p| p.joined && Some(p.id) != except) {
                 p.conn.send(m);
@@ -168,6 +168,21 @@ impl Game {
             self.remotes
                 .iter()
                 .filter(|r| r.alive())
+                .map(|r| r.target.pos),
+        );
+        v
+    }
+
+    /// Players monsters hunt: alive and not in creative.
+    pub(super) fn prey_positions(&self) -> Vec<Vec3> {
+        let mut v = Vec::new();
+        if self.player.spawned && self.screen != Screen::Dead && !self.creative() {
+            v.push(self.player.pos);
+        }
+        v.extend(
+            self.remotes
+                .iter()
+                .filter(|r| r.alive() && r.target.flags & pose_flags::CREATIVE == 0)
                 .map(|r| r.target.pos),
         );
         v
@@ -352,6 +367,7 @@ pub(super) fn build_remote_players(
     world: &World,
     time: f32,
     out: &mut Vec<Vertex>,
+    cam: Vec3,
     dt: f32,
 ) {
     {
@@ -400,6 +416,9 @@ pub(super) fn build_remote_players(
                 world.sky_estimate(c),
                 world.block_light_estimate(c),
             );
+            if pose.burning {
+                crate::model::emit_entity_fire(out, pose.pos, 0.6, 1.8, cam);
+            }
         }
     }
 }

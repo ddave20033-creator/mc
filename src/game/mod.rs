@@ -8,7 +8,9 @@ mod health;
 mod hud;
 mod items;
 mod mobs;
+mod fire;
 mod multi;
+mod tnt;
 mod update;
 mod worlds;
 
@@ -16,7 +18,7 @@ use crate::engine::Gpu;
 use crate::entity::mob::{Mob, MobCtx, MobEvent, MobKind};
 use crate::entity::player::{look_dir, Player};
 use crate::entity::survival::{EffectKind, Needs};
-use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
+use crate::entity::{BlockEntities, FallingBlock, ItemEntity, PrimedTnt};
 use crate::item::inventory::Inventory;
 use crate::item::{self, ItemId, Slot, NONE};
 use crate::lang::t;
@@ -200,9 +202,16 @@ pub struct Game {
     block_entities: BlockEntities,
     items: Vec<ItemEntity>,
     falling: Vec<FallingBlock>,
+    tnt: Vec<PrimedTnt>,
+    /// Burning fire blocks (host and single player).
+    fires: crate::world::FastMap<IVec3, fire::Fire>,
+    /// Random ticks owed to the world (fractions carry over between frames).
+    random_tick_budget: f32,
     mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
     mob_spawn_timer: f32,
+    /// Seconds until the next tries to spawn monsters.
+    monster_spawn_timer: f32,
     /// The mob the crosshair is on (index into `mobs`), when it is closer than any block.
     mob_target: Option<usize>,
     saplings: Vec<(IVec3, f32)>,
@@ -400,8 +409,12 @@ impl Game {
             block_entities: BlockEntities::default(),
             items: Vec::new(),
             falling: Vec::new(),
+            tnt: Vec::new(),
+            fires: Default::default(),
+            random_tick_budget: 0.0,
             mobs: Vec::new(),
             mob_spawn_timer: 5.0,
+            monster_spawn_timer: 0.0,
             mob_target: None,
             saplings: Vec::new(),
             slot_name_timer: 0.0,

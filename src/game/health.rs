@@ -11,7 +11,7 @@ impl Game {
         }
         // Blocking with a sword takes about half of blockable damage, like Minecraft 1.8:
         // (1 + amount) / 2. Falling, burning, drowning, suffocating and the void go through.
-        let blockable = matches!(cause, "death.lava" | "death.cactus");
+        let blockable = matches!(cause, "death.lava" | "death.cactus" | "death.explosion");
         let amount = if self.blocking && blockable {
             (1.0 + amount) * 0.5
         } else {
@@ -104,6 +104,13 @@ impl Game {
             self.damage(4.0, "death.lava");
             if !creative {
                 self.fire = 8.0;
+            }
+        }
+        if self.touching(0.0, |b| b == FIRE) {
+            // Standing in fire: hurts (every half second at most) and sets you alight.
+            self.damage(1.0, "death.in_fire");
+            if !creative {
+                self.fire = self.fire.max(8.0);
             }
         }
         if self.touching(0.0, is_water) {

@@ -94,7 +94,9 @@ impl Game {
             BUCKET => self.fill_bucket(),
             WATER_BUCKET | LAVA_BUCKET => self.empty_bucket(held),
             PIG_SPAWN_EGG => self.use_spawn_egg(MobKind::Pig),
+            CREEPER_SPAWN_EGG => self.use_spawn_egg(MobKind::Creeper),
             GLASS_BOTTLE => self.fill_bottle(),
+            FLINT_AND_STEEL => self.use_flint_and_steel(),
             _ if block_of(held).is_some() => self.place_block(held),
             _ => {}
         }

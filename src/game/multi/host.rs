@@ -240,12 +240,19 @@ impl Game {
                     .filter(|f| f.pos.distance(at) < ITEM_RANGE)
                     .map(|f| (f.pos, f.block))
                     .collect();
+                let tnt = self
+                    .tnt
+                    .iter()
+                    .filter(|t| t.pos.distance(at) < MOB_RANGE)
+                    .map(|t| (t.pos, t.fuse))
+                    .collect();
                 self.send_to(
                     *id,
                     &Msg::Entities {
                         mobs,
                         items,
                         falling,
+                        tnt,
                     },
                 );
             }
@@ -382,6 +389,11 @@ impl Game {
                 let actual = self.terrain.world.geti(p);
                 self.send_to(id, &Msg::Blocks(vec![(p, actual)]));
             }
+            Msg::Ignite { p } => {
+                self.ignite_tnt(p, crate::entity::TNT_FUSE);
+                let actual = self.terrain.world.geti(p);
+                self.send_to(id, &Msg::Blocks(vec![(p, actual)]));
+            }
             Msg::AttackMob {
                 id: mob,
                 dmg,
@@ -403,8 +415,8 @@ impl Game {
                 }
             }
             Msg::SpawnMob { kind, pos } => {
-                if kind == MobKind::Pig as u8 {
-                    self.spawn_mob(MobKind::Pig, pos);
+                if let Some(kind) = MobKind::from_id(kind) {
+                    self.spawn_mob(kind, pos);
                 }
             }
             Msg::DropItem {

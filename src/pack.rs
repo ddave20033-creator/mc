@@ -234,6 +234,19 @@ impl Pack {
             .insert(path.to_string(), img.clone());
         img
     }
+
+    /// Every frame of an animated texture (a vertical strip of squares), top first.
+    pub fn frames(&self, path: &str) -> Option<Vec<Image>> {
+        let img = self
+            .read(&format!("{TEXTURES}{path}.png"))
+            .and_then(|d| decode_png(&d))?;
+        let n = (img.h / img.w.max(1)).max(1);
+        Some(
+            (0..n)
+                .map(|i| img.crop(0, i * img.w, img.w, img.w))
+                .collect(),
+        )
+    }
 }
 
 /// The active packs, highest priority first. Like in Minecraft, each texture comes from the
@@ -261,6 +274,11 @@ impl Packs {
         self.0
             .iter()
             .find_map(|pack| paths.split('|').find_map(|p| pack.texture(p)))
+    }
+
+    /// The frames of an animated texture (see `Pack::frames`) from the highest pack that has it.
+    pub fn frames(&self, path: &str) -> Option<Vec<Image>> {
+        self.0.iter().find_map(|pack| pack.frames(path))
     }
 }
 

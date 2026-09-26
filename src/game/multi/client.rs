@@ -173,7 +173,9 @@ impl Game {
                 mobs,
                 items,
                 falling,
-            } => self.sync_entities(mobs, items, falling),
+                tnt,
+            } => self.sync_entities(mobs, items, falling, tnt),
+            Msg::Explosion { pos, power } => self.explosion_effects(pos, power),
             Msg::Give(stack) => self.give(stack),
             Msg::Hurt { dmg, from, knock } => self.hit_by_player(dmg, from, knock),
             Msg::BreakFx { p, block } => self.break_fx(p, block, true, None),
@@ -277,12 +279,14 @@ impl Game {
         }
     }
 
-    /// LAN player: mobs, dropped items and falling blocks near this player, from the host.
+    /// LAN player: mobs, dropped items, falling blocks and primed TNT near this player, from
+    /// the host.
     pub(super) fn sync_entities(
         &mut self,
         mobs: Vec<crate::net::MobNet>,
         items: Vec<ItemNet>,
         falling: Vec<(Vec3, u8)>,
+        tnt: Vec<(Vec3, f32)>,
     ) {
         // Mobs
         let ids: FastSet<u32> = mobs.iter().map(|m| m.id).collect();
@@ -338,6 +342,14 @@ impl Game {
                 pos,
                 vel_y: 0.0,
                 block,
+            })
+            .collect();
+        self.tnt = tnt
+            .into_iter()
+            .map(|(pos, fuse)| crate::entity::PrimedTnt {
+                pos,
+                vel: Vec3::ZERO,
+                fuse,
             })
             .collect();
     }

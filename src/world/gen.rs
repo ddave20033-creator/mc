@@ -629,6 +629,7 @@ impl Generator {
             }
         }
 
+        self.place_gravel(&mut c, cx, cz);
         self.place_ores(&mut c, cx, cz);
         self.place_plants(&mut c, x0, z0, &cols);
         self.place_trees(&mut c, x0, z0, &cols);
@@ -664,6 +665,34 @@ impl Generator {
                         4 => z += 1,
                         _ => z -= 1,
                     }
+                }
+            }
+        }
+    }
+
+    /// Pockets of gravel in the stone, like Minecraft's (big random-walk blobs).
+    fn place_gravel(&self, c: &mut ChunkData, cx: i32, cz: i32) {
+        let mut rng = Rng(((hash(self.seed ^ 0x6A7E1, cx, 0, cz) * 1e9) as u64) | 1);
+        for _ in 0..6 {
+            let (mut x, mut y, mut z) = (rng.range(0, 16), rng.range(5, 100), rng.range(0, 16));
+            for _ in 0..33 {
+                for (dx, dy, dz) in [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)] {
+                    let (px, py, pz) = (x + dx, y + dy, z + dz);
+                    if (0..16).contains(&px)
+                        && (0..16).contains(&pz)
+                        && (1..HEIGHT as i32).contains(&py)
+                        && c.get(px as usize, py as usize, pz as usize) == STONE
+                    {
+                        c.set_raw(px as usize, py as usize, pz as usize, GRAVEL);
+                    }
+                }
+                match rng.next() % 6 {
+                    0 => x += 1,
+                    1 => x -= 1,
+                    2 => y += 1,
+                    3 => y -= 1,
+                    4 => z += 1,
+                    _ => z -= 1,
                 }
             }
         }

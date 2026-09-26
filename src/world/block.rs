@@ -54,6 +54,10 @@ pub const WALL_TORCH: u8 = 55;
 /// Lantern standing on a block, and hanging from the block above.
 pub const LANTERN: u8 = 59;
 pub const LANTERN_HANGING: u8 = 60;
+/// Lit with flint and steel (or by another explosion) it turns into primed TNT.
+pub const TNT: u8 = 61;
+/// Fire: spreads to and burns up flammable blocks (its age lives in `Game::fires`).
+pub const FIRE: u8 = 62;
 
 /// Fluids: base id + level. Level 0 = source, 1..7 = flowing, 8 = falling.
 pub const WATER: u8 = 64;
@@ -96,6 +100,38 @@ pub fn is_sapling(b: u8) -> bool {
 #[inline]
 pub fn is_torch(b: u8) -> bool {
     b == TORCH || (WALL_TORCH..WALL_TORCH + 4).contains(&b)
+}
+
+/// Minecraft's fire encouragement: how readily fire spreads next to this block.
+pub fn ignite_odds(b: u8) -> u32 {
+    match b {
+        PLANKS | OAK_LOG | BIRCH_LOG | SPRUCE_LOG | COAL_BLOCK => 5,
+        TNT => 15,
+        _ if is_leaves(b) => 30,
+        TALL_GRASS | POPPY | DANDELION | DEAD_BUSH => 60,
+        _ => 0,
+    }
+}
+
+/// Minecraft's flammability: how quickly fire burns this block away.
+pub fn burn_odds(b: u8) -> u32 {
+    match b {
+        PLANKS => 20,
+        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | COAL_BLOCK => 5,
+        _ if is_leaves(b) => 60,
+        TNT | TALL_GRASS | POPPY | DANDELION | DEAD_BUSH => 100,
+        _ => 0,
+    }
+}
+
+/// Lava sets fire next to these (flammable blocks, and a few that do not burn away).
+pub fn lava_ignites(b: u8) -> bool {
+    ignite_odds(b) > 0 || b == CRAFTING_TABLE || is_chest(b)
+}
+
+/// A full top face that fire (and other things) can sit on.
+pub fn sturdy_top(b: u8) -> bool {
+    is_solid(b) && !is_chest(b) && b != CACTUS
 }
 
 #[inline]
@@ -202,17 +238,18 @@ pub fn is_opaque(b: u8) -> bool {
         || is_leaves(b)
         || is_plant(b)
         || is_fluid(b)
-        || is_chest(b))
+        || is_chest(b)
+        || b == FIRE)
 }
 /// Blocks player movement.
 #[inline]
 pub fn is_solid(b: u8) -> bool {
-    !(b == AIR || is_torch(b) || is_lantern(b) || is_plant(b) || is_fluid(b))
+    !(b == AIR || is_torch(b) || is_lantern(b) || is_plant(b) || is_fluid(b) || b == FIRE)
 }
 /// Can be overwritten by placing a block or by flowing fluid.
 #[inline]
 pub fn is_replaceable(b: u8) -> bool {
-    b == AIR || b == TALL_GRASS || is_fluid(b)
+    b == AIR || b == TALL_GRASS || is_fluid(b) || b == FIRE
 }
 /// Flowing fluid washes these away.
 #[inline]
@@ -222,13 +259,13 @@ pub fn fluid_breaks(b: u8) -> bool {
 /// Stops full-strength sunlight (used for the heightmap).
 #[inline]
 pub fn attenuates_sky(b: u8) -> bool {
-    !(b == AIR || b == GLASS || is_torch(b) || is_lantern(b) || is_plant(b))
+    !(b == AIR || b == GLASS || is_torch(b) || is_lantern(b) || is_plant(b) || b == FIRE)
 }
 #[inline]
 pub fn emission(b: u8) -> u8 {
     match b {
         _ if is_lava(b) => 15,
-        GLOWSTONE => 15,
+        GLOWSTONE | FIRE => 15,
         _ if is_torch(b) => 14,
         _ if is_lantern(b) => 15,
         _ if (FURNACE_LIT..FURNACE_LIT + 4).contains(&b) => 13,
@@ -359,6 +396,12 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
         DIAMOND_BLOCK => tex::DIAMOND_BLOCK,
         COAL_BLOCK => tex::COAL_BLOCK,
         STONE_BRICKS => tex::STONE_BRICKS,
+        TNT => match face {
+            2 => tex::TNT_TOP,
+            3 => tex::TNT_BOTTOM,
+            _ => tex::TNT_SIDE,
+        },
+        FIRE => tex::FIRE_0,
         _ if is_water(b) => tex::WATER,
         _ if is_lava(b) => tex::LAVA,
         _ => tex::STONE,

@@ -503,6 +503,12 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Játékos kiesett a világból",
     ),
     ("death.drown", "Player drowned", "Játékos vízbe fulladt"),
+    ("death.explosion", "Player blew up", "Játékos felrobbant"),
+    (
+        "death.in_fire",
+        "Player went up in flames",
+        "Játékos lángra kapott",
+    ),
     ("death.kill", "Player was killed", "Játékost megölték"),
     (
         "death.starve",

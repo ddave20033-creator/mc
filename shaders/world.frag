@@ -31,6 +31,13 @@ const float TORCH_FLAME_LAYER = 113.0;
 const float GLASS_LAYER = 13.0;
 const float FURNACE_ANIM_LAYER = 117.0;
 const float FURNACE_FRAMES = 12.0;
+// Must match tex::TNT_SIDE, tex::FIRE_0, tex::FIRE_1 and tex::FIRE_FRAMES.
+const float TNT_SIDE_LAYER = 356.0;
+const float TNT_BOTTOM_LAYER = 358.0;
+const float FIRE_0_LAYER = 362.0;
+const float FIRE_1_LAYER = 394.0;
+const float FIRE_FRAMES = 32.0;
+const float CREEPER_LAYER = 442.0;
 
 const vec3 NORMALS[7] = vec3[7](
     vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0),
@@ -102,6 +109,13 @@ void main() {
     }
     bool torchFire = abs(vLayer - TORCH_FLAME_LAYER) < 0.5;
     vec4 tex = texture(blocks, vec3(uv, vLayer));
+    if (vLayer > FIRE_0_LAYER - 0.5 && vLayer < FIRE_1_LAYER + FIRE_FRAMES - 0.5) {
+        // Fire: Minecraft's animations at one frame per tick (fire_0's .mcmeta starts halfway
+        // through its strip).
+        bool first = vLayer < FIRE_1_LAYER - 0.5;
+        float frame = mod(floor(time * 20.0) + (first ? 16.0 : 0.0), FIRE_FRAMES);
+        tex = texture(blocks, vec3(uv, (first ? FIRE_0_LAYER : FIRE_1_LAYER) + frame));
+    }
     bool furnaceLit = abs(vLayer - FURNACE_LIT_LAYER) < 0.5;
     if (furnaceLit && tex.a > 0.9) {
         // A resource pack's lit furnace (full alpha; built-in opaque textures use 0.6) plays
@@ -180,6 +194,16 @@ void main() {
     }
     vec3 col = albedo * (light * ao + vec3(0.02));
     if (emissive) col = albedo * 1.4;
+    // Flames on a burning entity: full bright like Minecraft, not blown out to white.
+    bool entityFire = emissive && (vFlags & F_ENTITY) != 0
+        && vLayer > FIRE_0_LAYER - 0.5 && vLayer < FIRE_1_LAYER + FIRE_FRAMES - 0.5;
+    if (entityFire) col = albedo * 0.85;
+    // Primed TNT and a swelling creeper flashing: lit normally, washed out to white
+    // (Minecraft's white overlay).
+    bool tntFlash = emissive && (vFlags & F_ENTITY) != 0
+        && ((vLayer > TNT_SIDE_LAYER - 0.5 && vLayer < TNT_BOTTOM_LAYER + 0.5)
+            || abs(vLayer - CREEPER_LAYER) < 0.5);
+    if (tntFlash) col = mix(albedo * (light * ao + vec3(0.02)), vec3(1.2), 0.6);
     if (torchFire) col = flame.rgb * 1.25;
     if (furnaceFire) col = mix(col, flame.rgb * 0.88, flame.a);
 

@@ -1,5 +1,5 @@
-//! Dropped items (bobbing, merging, flying to whoever picks them up) and falling sand and
-//! gravel.
+//! Dropped items (bobbing, merging, flying to whoever picks them up), falling sand and
+//! gravel, and primed TNT.
 
 use crate::item::Stack;
 use crate::model::{emit_box, emit_item_flat_or_block};
@@ -30,6 +30,19 @@ pub struct FallingBlock {
     pub vel_y: f32,
     pub block: u8,
 }
+
+/// Lit TNT: falls and slides like a block-sized entity, then explodes when the fuse runs out.
+pub struct PrimedTnt {
+    /// Center of the bottom face.
+    pub pos: Vec3,
+    pub vel: Vec3,
+    /// Seconds until it explodes.
+    pub fuse: f32,
+}
+
+/// Minecraft's TNT fuse: 80 ticks.
+pub const TNT_FUSE: f32 = 4.0;
+const TNT_HALF: f32 = 0.49;
 
 fn solid_at(w: &World, p: Vec3) -> bool {
     is_solid(w.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32))
@@ -138,6 +151,80 @@ impl ItemEntity {
                 * Mat4::from_rotation_y(self.age * 1.6 + time * 0.2);
             emit_item_flat_or_block(out, m, self.stack.item, size, light, flags::ENTITY);
         }
+    }
+}
+
+impl PrimedTnt {
+    fn blocked(w: &World, pos: Vec3) -> bool {
+        let min = pos - Vec3::new(TNT_HALF, 0.0, TNT_HALF);
+        let max = pos + Vec3::new(TNT_HALF, 2.0 * TNT_HALF, TNT_HALF);
+        let (a, b) = (min.floor().as_ivec3(), max.floor().as_ivec3());
+        (a.x..=b.x).any(|x| (a.y..=b.y).any(|y| (a.z..=b.z).any(|z| is_solid(w.get(x, y, z)))))
+    }
+
+    /// Returns true when the fuse has run out.
+    pub fn update(&mut self, dt: f32, w: &World) -> bool {
+        self.fuse -= dt;
+        self.vel.y = (self.vel.y - 16.0 * dt).max(-40.0);
+        let in_fluid = is_fluid(w.get(
+            self.pos.x.floor() as i32,
+            (self.pos.y + 0.3).floor() as i32,
+            self.pos.z.floor() as i32,
+        ));
+        let drag = if in_fluid { 4.0 } else { 0.4 };
+        let keep = 1.0 - (drag * dt).min(1.0);
+        self.vel.x *= keep;
+        self.vel.z *= keep;
+        if in_fluid {
+            self.vel.y *= keep;
+        }
+        for axis in [1, 0, 2] {
+            let mut p = self.pos;
+            p[axis] += self.vel[axis] * dt;
+            if Self::blocked(w, p) {
+                if axis == 1 && self.vel.y < 0.0 {
+                    // Landed: snap onto the block and slow down on the ground.
+                    self.pos.y = p.y.floor() + 1.0;
+                    if Self::blocked(w, self.pos) {
+                        self.pos.y -= 1.0;
+                    }
+                    self.vel.x *= 0.7;
+                    self.vel.z *= 0.7;
+                }
+                self.vel[axis] = 0.0;
+            } else {
+                self.pos[axis] = p[axis];
+            }
+        }
+        self.fuse <= 0.0
+    }
+
+    /// Where it explodes from.
+    pub fn center(&self) -> Vec3 {
+        self.pos + Vec3::Y * TNT_HALF
+    }
+
+    /// The TNT block, flashing white every quarter second (Minecraft: every 5 ticks) and
+    /// swelling just before it explodes, like Minecraft's.
+    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8) {
+        let flash = (self.fuse * 4.0).max(0.0) as i32 % 2 == 0;
+        // world.frag turns emissive TNT on an entity white.
+        let light = vertex_light(sky, blk);
+        let fl = flags::ENTITY | if flash { flags::EMISSIVE } else { 0 };
+        let swell = (1.0 - self.fuse / 0.5).clamp(0.0, 1.0);
+        let half = 0.5 * (1.0 + swell * swell * 0.3);
+        let layers = std::array::from_fn(|f| face_texture(TNT, f));
+        let c = self.pos + Vec3::Y * 0.5;
+        emit_box(
+            out,
+            Mat4::IDENTITY,
+            c - Vec3::splat(half),
+            c + Vec3::splat(half),
+            layers,
+            [[255; 3]; 6],
+            light,
+            fl,
+        );
     }
 }
 

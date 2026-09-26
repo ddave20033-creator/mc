@@ -16,7 +16,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 6;
+pub const PROTOCOL: u16 = 10;
 
 // ---------------------------------------------------------------------------- data
 
@@ -67,6 +67,9 @@ pub struct MobNet {
     pub hurt: bool,
     /// Seconds since dying, or negative while alive.
     pub death: f32,
+    /// Creeper: seconds of swelling.
+    pub swell: f32,
+    pub burning: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -138,6 +141,10 @@ pub enum Msg {
         stack: Stack,
         delay: f32,
     },
+    /// Lit the TNT at `p` with flint and steel.
+    Ignite {
+        p: IVec3,
+    },
     /// Opened the block entity at `p` (the host answers with its contents).
     Open {
         p: IVec3,
@@ -177,12 +184,20 @@ pub enum Msg {
         mobs: Vec<MobNet>,
         items: Vec<ItemNet>,
         falling: Vec<(Vec3, u8)>,
+        /// Primed TNT: position and fuse left.
+        tnt: Vec<(Vec3, f32)>,
     },
     Give(Stack),
     /// Someone broke a block here: debris flies (the block change comes separately).
     BreakFx {
         p: IVec3,
         block: u8,
+    },
+    /// Something exploded here: smoke, and damage and knockback for whoever is close (the
+    /// block changes come separately).
+    Explosion {
+        pos: Vec3,
+        power: f32,
     },
     /// Hit by another player.
     Hurt {
@@ -473,6 +488,10 @@ impl Msg {
                 w.stack(*stack);
                 w.f32(*delay);
             }
+            Msg::Ignite { p } => {
+                w.u8(11);
+                w.ivec3(*p);
+            }
             Msg::Open { p } => {
                 w.u8(8);
                 w.ivec3(*p);
@@ -556,6 +575,7 @@ impl Msg {
                 mobs,
                 items,
                 falling,
+                tnt,
             } => {
                 w.u8(29);
                 w.u32(mobs.len() as u32);
@@ -568,6 +588,8 @@ impl Msg {
                     }
                     w.bool(m.hurt);
                     w.f32(m.death);
+                    w.f32(m.swell);
+                    w.bool(m.burning);
                 }
                 w.u32(items.len() as u32);
                 for it in items {
@@ -581,6 +603,16 @@ impl Msg {
                     w.vec3(*p);
                     w.u8(*b);
                 }
+                w.u32(tnt.len() as u32);
+                for (p, fuse) in tnt {
+                    w.vec3(*p);
+                    w.f32(*fuse);
+                }
+            }
+            Msg::Explosion { pos, power } => {
+                w.u8(33);
+                w.vec3(*pos);
+                w.f32(*power);
             }
             Msg::Give(s) => {
                 w.u8(30);
@@ -665,6 +697,7 @@ impl Msg {
                 delay: r.f32()?,
             },
             8 => Msg::Open { p: r.ivec3()? },
+            11 => Msg::Ignite { p: r.ivec3()? },
             9 => Msg::Command(r.str()?),
             10 => Msg::Save(r.state()?),
             20 => Msg::Welcome {
@@ -704,6 +737,8 @@ impl Msg {
                         limb_amount: r.f32()?,
                         hurt: r.bool()?,
                         death: r.f32()?,
+                        swell: r.f32()?,
+                        burning: r.bool()?,
                     })
                 })?,
                 items: r.list(|r| {
@@ -715,6 +750,11 @@ impl Msg {
                     })
                 })?,
                 falling: r.list(|r| Some((r.vec3()?, r.u8()?)))?,
+                tnt: r.list(|r| Some((r.vec3()?, r.f32()?)))?,
+            },
+            33 => Msg::Explosion {
+                pos: r.vec3()?,
+                power: r.f32()?,
             },
             30 => Msg::Give(r.stack()?),
             32 => Msg::BreakFx {
@@ -826,6 +866,8 @@ mod tests {
                 limb_amount: 0.4,
                 hurt: true,
                 death: -1.0,
+                swell: 0.5,
+                burning: true,
             }],
             items: vec![ItemNet {
                 id: 9,
@@ -834,6 +876,14 @@ mod tests {
                 age: 2.0,
             }],
             falling: vec![(Vec3::Z, 4)],
+            tnt: vec![(Vec3::X, 2.5)],
+        });
+        roundtrip(Msg::Ignite {
+            p: IVec3::new(-4, 60, 9),
+        });
+        roundtrip(Msg::Explosion {
+            pos: Vec3::new(1.5, 64.49, -2.5),
+            power: 4.0,
         });
         roundtrip(Msg::Container {
             p: IVec3::new(3, 4, 5),

@@ -4,7 +4,7 @@
 use crate::entity::mob::{Mob, MobKind};
 use crate::entity::{BlockEntities, Furnace, ItemEntity};
 use crate::item::{from_key, key, Slot, Stack};
-use crate::world::{ChunkData, ChunkPos};
+use crate::world::{ChunkData, ChunkPos, AIR, FIRE};
 use glam::{IVec3, Vec3};
 use std::fs;
 use std::path::PathBuf;
@@ -452,7 +452,13 @@ fn save_chunks(folder: &str, chunks: &[(ChunkPos, Arc<ChunkData>)]) {
     let mut body = Vec::new();
     let mut count = 0u32;
     for (p, c) in chunks {
-        let enc = rle(c.raw());
+        // Fire is not saved (its age and spreading are not either): it goes out.
+        let raw: Vec<u8> = c
+            .raw()
+            .iter()
+            .map(|&b| if b == FIRE { AIR } else { b })
+            .collect();
+        let enc = rle(&raw);
         body.extend(p.0.to_le_bytes());
         body.extend(p.1.to_le_bytes());
         body.extend((enc.len() as u32).to_le_bytes());

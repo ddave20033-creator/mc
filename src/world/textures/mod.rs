@@ -136,7 +136,26 @@ pub mod tex {
     /// `crate::world::mesh::chest_open_layer`), 4 edges each (right, left, top, bottom of the
     /// texture).
     pub const CHEST_OPEN: u32 = CUSTOM_SKIN_START + CUSTOM_SKIN_LAYERS * CUSTOM_SKIN_SLOTS as u32;
-    pub const LAYERS: usize = (CHEST_OPEN + 16) as usize;
+    pub const TNT_SIDE: u32 = CHEST_OPEN + 16;
+    pub const TNT_TOP: u32 = TNT_SIDE + 1;
+    pub const TNT_BOTTOM: u32 = TNT_SIDE + 2;
+    pub const FLINT: u32 = TNT_SIDE + 3;
+    pub const GUNPOWDER: u32 = TNT_SIDE + 4;
+    pub const FLINT_AND_STEEL: u32 = TNT_SIDE + 5;
+    /// Fire animations (Minecraft's fire_0 and fire_1, 32 frames each, 20 per second); the
+    /// mesh uses the first frame of each and world.frag plays the rest. Must match world.frag
+    /// and shadow.frag.
+    pub const FIRE_0: u32 = FLINT_AND_STEEL + 1;
+    pub const FIRE_1: u32 = FIRE_0 + FIRE_FRAMES;
+    pub const FIRE_FRAMES: u32 = 32;
+    /// Explosion particle sprites (Minecraft's explosion_0..15).
+    pub const EXPLOSION: u32 = FIRE_1 + FIRE_FRAMES;
+    pub const EXPLOSION_FRAMES: u32 = 16;
+    /// Creeper skin: a whole Minecraft entity atlas (64x32 texels, in the top half of the
+    /// layer) like the pig's; must match world.frag (it flashes white before exploding).
+    pub const CREEPER: u32 = EXPLOSION + EXPLOSION_FRAMES;
+    pub const CREEPER_SPAWN_EGG: u32 = CREEPER + 1;
+    pub const LAYERS: usize = (CREEPER_SPAWN_EGG + 1) as usize;
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -209,6 +228,8 @@ pub const SMOKE_FRAMES: u32 = 8;
 fn is_item_icon(l: u32) -> bool {
     (tex::STICK..tex::CHEST_INSIDE).contains(&l)
         || (tex::PIG_SPAWN_EGG..=tex::IRON_NUGGET).contains(&l)
+        || (tex::FLINT..=tex::FLINT_AND_STEEL).contains(&l)
+        || l == tex::CREEPER_SPAWN_EGG
 }
 
 fn is_crack(l: u32) -> bool {
@@ -268,6 +289,13 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::CHAIN
         || l == tex::FLAME_PARTICLE
         || (tex::SMOKE..tex::SMOKE + SMOKE_FRAMES).contains(&l)
+        || is_fire(l)
+        || (tex::EXPLOSION..tex::EXPLOSION + tex::EXPLOSION_FRAMES).contains(&l)
+}
+
+/// A fire animation frame.
+pub fn is_fire(l: u32) -> bool {
+    (tex::FIRE_0..tex::FIRE_1 + tex::FIRE_FRAMES).contains(&l)
 }
 
 /// Resolution of the opaque-pixel masks used to extrude flat item sprites into 3D models.
@@ -320,7 +348,8 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
             let batch: Vec<(usize, &mut [u8])> = chunks.drain(..per.min(chunks.len())).collect();
             scope.spawn(move || {
                 for (l, out) in batch {
-                    if l as u32 >= tex::CUSTOM_SKIN_START {
+                    // Uploaded skins and double chest faces are filled in afterwards.
+                    if (tex::CUSTOM_SKIN_START..tex::TNT_SIDE).contains(&(l as u32)) {
                         continue;
                     }
                     for y in 0..TILE {
@@ -578,6 +607,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The shaders hard-code some layer numbers.
+    #[test]
+    fn shader_layer_constants_match() {
+        let world = include_str!("../../../shaders/world.frag");
+        let shadow = include_str!("../../../shaders/shadow.frag");
+        let has = |src: &str, name: &str, v: u32| {
+            assert!(
+                src.contains(&format!("const float {name} = {v}.0;")),
+                "{name} should be {v}"
+            );
+        };
+        has(world, "TNT_SIDE_LAYER", tex::TNT_SIDE);
+        has(world, "TNT_BOTTOM_LAYER", tex::TNT_BOTTOM);
+        has(world, "FIRE_0_LAYER", tex::FIRE_0);
+        has(world, "FIRE_1_LAYER", tex::FIRE_1);
+        has(world, "FIRE_FRAMES", tex::FIRE_FRAMES);
+        has(world, "FURNACE_ANIM_LAYER", tex::FURNACE_ANIM);
+        has(world, "CREEPER_LAYER", tex::CREEPER);
+        has(shadow, "FIRE_0_LAYER", tex::FIRE_0);
+        has(shadow, "FIRE_END_LAYER", tex::FIRE_1 + tex::FIRE_FRAMES);
     }
 
     #[test]
