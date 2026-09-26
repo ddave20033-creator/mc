@@ -1,0 +1,569 @@
+//! UI translations (English / Hungarian). Strings are looked up by key; `{}` placeholders
+//! are filled in order by `tf`.
+
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+
+static HUNGARIAN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_hungarian(hu: bool) {
+    HUNGARIAN.store(hu, Ordering::Relaxed);
+}
+
+pub fn is_hungarian() -> bool {
+    HUNGARIAN.load(Ordering::Relaxed)
+}
+
+/// (key, English, Hungarian)
+const TABLE: &[(&str, &str, &str)] = &[
+    // Main menu
+    ("menu.singleplayer", "Singleplayer", "Egyjátékos"),
+    ("menu.multiplayer", "Multiplayer", "Többjátékos"),
+    ("menu.skin", "Skin", "Skin"),
+    ("skin.classic", "Classic", "Klasszikus"),
+    ("skin.forest", "Forest", "Erdő"),
+    ("skin.red", "Red", "Piros"),
+    ("skin.night", "Night", "Éjszaka"),
+    ("skin.custom", "Custom", "Saját"),
+    ("skin.upload", "Upload PNG", "PNG feltöltése"),
+    ("menu.credits", "Credits", "Készítők"),
+    ("menu.options", "Options...", "Beállítások..."),
+    ("menu.quit", "Quit Game", "Kilépés"),
+    ("menu.edition", "VULKAN EDITION", "VULKAN KIADÁS"),
+    (
+        "menu.madewith",
+        "Made with Rust + Vulkan",
+        "Rust + Vulkan alapokon",
+    ),
+    // Options
+    ("opt.title", "Options", "Beállítások"),
+    ("opt.tab.graphics", "Graphics", "Grafika"),
+    ("opt.tab.controls", "Controls", "Irányítás"),
+    ("opt.tab.interface", "Interface", "Felület"),
+    ("opt.l.render", "Render Distance", "Látótávolság"),
+    ("opt.l.fov", "Field of View", "Látószög"),
+    ("opt.l.shadows", "Shadows", "Árnyékok"),
+    ("opt.l.clouds", "Clouds", "Felhők"),
+    ("opt.l.fullscreen", "Fullscreen", "Teljes képernyő"),
+    ("opt.l.vsync", "VSync", "VSync"),
+    ("opt.l.sens", "Mouse Sensitivity", "Egér érzékenység"),
+    ("opt.l.bobbing", "View Bobbing", "Fejmozgás"),
+    ("opt.l.fp_body", "First Person Body", "Test belső nézetben"),
+    ("opt.l.language", "Language", "Nyelv"),
+    ("opt.l.gui", "GUI Scale", "Felület mérete"),
+    ("opt.l.dark_ui", "Dark Mode", "Sötét mód"),
+    ("opt.l.fps", "Show FPS", "FPS kijelzése"),
+    ("opt.v.normal", "Normal", "Normál"),
+    ("opt.v.auto", "Auto", "Automatikus"),
+    ("opt.v.language", "English", "Magyar"),
+    (
+        "opt.d.render",
+        "How far you can see. Lower is faster.",
+        "Milyen messzire látsz. Kisebb = gyorsabb.",
+    ),
+    (
+        "opt.d.fov",
+        "How wide the view is.",
+        "Mennyire széles a látómező.",
+    ),
+    (
+        "opt.d.shadows",
+        "Sun and moon shadows. Off is faster.",
+        "Nap- és holdárnyékok. Kikapcsolva gyorsabb.",
+    ),
+    ("opt.d.clouds", "Clouds in the sky.", "Felhők az égen."),
+    (
+        "opt.d.fullscreen",
+        "Fill the whole screen (F11).",
+        "Az egész képernyőt kitölti (F11).",
+    ),
+    (
+        "opt.d.vsync",
+        "Syncs to the monitor: no tearing, FPS capped.",
+        "Monitorhoz igazít: nincs szakadás, FPS korlátozva.",
+    ),
+    (
+        "opt.d.sens",
+        "How fast the camera turns with the mouse.",
+        "Milyen gyorsan fordul a kamera az egérrel.",
+    ),
+    (
+        "opt.d.bobbing",
+        "The view bobs while walking.",
+        "Járás közben billeg a kép.",
+    ),
+    (
+        "opt.d.fp_body",
+        "See your own body when looking down.",
+        "Lefelé nézve látod a saját tested.",
+    ),
+    (
+        "opt.d.language",
+        "Menu and chat language.",
+        "A menük és a chat nyelve.",
+    ),
+    (
+        "opt.d.gui",
+        "Size of menus and the HUD.",
+        "A menük és a kijelzők mérete.",
+    ),
+    (
+        "opt.d.dark_ui",
+        "Dark theme for the inventory screens.",
+        "Sötét téma az inventory ablakokhoz.",
+    ),
+    (
+        "opt.d.fps",
+        "Frames per second in the top left corner.",
+        "Képkocka/másodperc a bal felső sarokban.",
+    ),
+    ("opt.l.packs", "Resource Packs", "Textúracsomagok"),
+    ("opt.v.packs", "Open...", "Megnyitás..."),
+    (
+        "opt.d.packs",
+        "Minecraft resource packs over the built-in Faithful.",
+        "Minecraft textúracsomagok a beépített Faithful fölé.",
+    ),
+    ("packs.title", "Select Resource Packs", "Textúracsomagok kiválasztása"),
+    (
+        "packs.hint",
+        "Put Minecraft resource packs (.zip) in the folder",
+        "Tedd a Minecraft textúracsomagokat (.zip) a mappába",
+    ),
+    ("packs.available", "Available", "Elérhető"),
+    ("packs.selected", "Selected", "Kiválasztott"),
+    (
+        "packs.empty",
+        "No resource packs yet. Open the folder and put some in.",
+        "Még nincs textúracsomag. Nyisd meg a mappát, és tegyél bele.",
+    ),
+    ("packs.folder", "Open Pack Folder", "Mappa megnyitása"),
+    ("packs.add", "Select", "Kiválasztás"),
+    ("packs.remove", "Deselect", "Eltávolítás"),
+    ("packs.up", "Move up", "Feljebb"),
+    ("packs.down", "Move down", "Lejjebb"),
+    ("packs.builtin", "Built-in, always on", "Beépített, mindig aktív"),
+    (
+        "packs.builtin_tip",
+        "The packs above it override its textures",
+        "A fölötte lévő csomagok felülírják a textúráit",
+    ),
+    ("credits.textures", "Textures", "Textúrák"),
+    ("credits.3_pack", "Procedural terrain", "Generált terep"),
+    (
+        "credits.open_link",
+        "Open in browser",
+        "Megnyitás böngészőben",
+    ),
+    ("opt.on", "ON", "BE"),
+    ("opt.off", "OFF", "KI"),
+    ("gui.done", "Done", "Kész"),
+    ("gui.cancel", "Cancel", "Mégse"),
+    ("gui.back", "Back", "Vissza"),
+    // Pause / death / loading
+    ("pause.title", "Game Menu", "Játékmenü"),
+    ("pause.resume", "Back to Game", "Vissza a játékba"),
+    ("pause.lan", "Open to LAN", "Megnyitás LAN-ra"),
+    ("pause.lan_open", "LAN:", "LAN:"),
+    ("pause.disconnect", "Disconnect", "Lecsatlakozás"),
+    // LAN multiplayer
+    ("mp.title", "Play Multiplayer", "Többjátékos"),
+    ("mp.name", "Player name:", "Játékosnév:"),
+    (
+        "mp.lan_games",
+        "Games on your network",
+        "Játékok a hálózaton",
+    ),
+    (
+        "mp.searching",
+        "Searching for LAN games",
+        "LAN játékok keresése",
+    ),
+    (
+        "mp.search_failed",
+        "LAN search is not available here, use Direct Connect",
+        "A LAN keresés itt nem megy, használd a közvetlen kapcsolódást",
+    ),
+    (
+        "mp.other_version",
+        "Different game version",
+        "Más játékverzió",
+    ),
+    ("mp.direct", "Direct Connect:", "Közvetlen IP:"),
+    ("mp.connect", "Connect", "Kapcsolódás"),
+    ("mp.join", "Join Game", "Csatlakozás"),
+    ("mp.connecting", "Connecting...", "Csatlakozás..."),
+    ("mp.connecting_to", "Joining {}", "Kapcsolódás ide: {}"),
+    (
+        "mp.connect_failed",
+        "Could not connect: {}",
+        "Nem sikerült kapcsolódni: {}",
+    ),
+    ("mp.disconnected", "Disconnected", "Kapcsolat bontva"),
+    (
+        "mp.lost",
+        "Lost connection to the host",
+        "Megszakadt a kapcsolat a gazdával",
+    ),
+    (
+        "mp.back_to_menu",
+        "Back to Title Screen",
+        "Vissza a főmenübe",
+    ),
+    (
+        "lan.opened",
+        "Local game hosted at {} - others can join from Multiplayer",
+        "Helyi játék megnyitva: {} - a többiek a Többjátékos menüben csatlakozhatnak",
+    ),
+    (
+        "lan.failed",
+        "Could not open to LAN: {}",
+        "Nem sikerült megnyitni LAN-ra: {}",
+    ),
+    (
+        "lan.host_left",
+        "The host closed the world",
+        "A gazda bezárta a világot",
+    ),
+    (
+        "lan.bad_version",
+        "The host runs a different game version",
+        "A gazdánál más játékverzió fut",
+    ),
+    (
+        "lan.bad_name",
+        "Choose a player name first",
+        "Előbb adj meg egy játékosnevet",
+    ),
+    (
+        "lan.name_taken",
+        "Someone with this name is already playing",
+        "Ezzel a névvel már játszik valaki",
+    ),
+    (
+        "lan.joined",
+        "{} joined the game",
+        "{} csatlakozott a játékhoz",
+    ),
+    ("lan.players", "Players online: {}", "Játékosok: {}"),
+    ("lan.host_tag", "(host)", "(gazda)"),
+    ("lan.left", "{} left the game", "{} kilépett a játékból"),
+    (
+        "death.player",
+        "Player was slain by another player",
+        "Játékost megölte egy másik játékos",
+    ),
+    (
+        "pause.quit",
+        "Save and Quit to Title",
+        "Mentés és kilépés a főmenübe",
+    ),
+    ("death.title", "You died!", "Meghaltál!"),
+    ("death.respawn", "Respawn", "Újraéledés"),
+    ("death.title_screen", "Title Screen", "Főmenü"),
+    ("loading.generating", "Generating world", "Világ generálása"),
+    ("loading.saving", "Saving world", "Világ mentése"),
+    (
+        "tip.1",
+        "Tip: /gamemode creative lets you fly (needs cheats)",
+        "Tipp: /gamemode creative módban repülhetsz (csalás kell)",
+    ),
+    (
+        "tip.2",
+        "Tip: press T to chat, Tab completes commands",
+        "Tipp: T a chat, Tab kiegészíti a parancsokat",
+    ),
+    (
+        "tip.3",
+        "Tip: punch a tree, craft planks, then a crafting table",
+        "Tipp: üss ki egy fát, barkácsolj deszkát, majd asztalt",
+    ),
+    (
+        "tip.4",
+        "Tip: iron ore needs at least a stone pickaxe",
+        "Tipp: a vasérchez legalább kőcsákány kell",
+    ),
+    (
+        "tip.5",
+        "Tip: F5 switches to third person view",
+        "Tipp: F5-tel harmadik személyű nézetre válthatsz",
+    ),
+    (
+        "tip.6",
+        "Tip: smelt iron ore in a furnace to get iron ingots",
+        "Tipp: a vasércet kemencében égesd vasrúddá",
+    ),
+    // Credits
+    (
+        "credits.1",
+        "A voxel sandbox made from scratch",
+        "Egy nulláról megírt kockajáték",
+    ),
+    (
+        "credits.2",
+        "Custom Vulkan engine in Rust",
+        "Saját Vulkan motor Rustban",
+    ),
+    (
+        "credits.3",
+        "Procedural terrain and textures",
+        "Generált terep és textúrák",
+    ),
+    (
+        "credits.4",
+        "Inspired by Minecraft.",
+        "A Minecraft ihlette.",
+    ),
+    (
+        "credits.5",
+        "Not affiliated with Mojang or Microsoft.",
+        "Nem kapcsolódik a Mojanghoz vagy a Microsofthoz.",
+    ),
+    // World selection / creation
+    ("worlds.title", "Select World", "Világ kiválasztása"),
+    ("worlds.play", "Play Selected World", "Világ indítása"),
+    ("worlds.create", "Create New World", "Új világ létrehozása"),
+    ("worlds.delete", "Delete", "Törlés"),
+    (
+        "worlds.empty",
+        "No worlds yet - create one!",
+        "Még nincs világod - hozz létre egyet!",
+    ),
+    ("worlds.cheats", "Cheats", "Csalások"),
+    (
+        "worlds.delete_q",
+        "Are you sure you want to delete this world?",
+        "Biztosan törlöd ezt a világot?",
+    ),
+    (
+        "worlds.delete_warn",
+        "'{}' will be lost forever! (A long time!)",
+        "'{}' örökre elvész! (Az hosszú idő!)",
+    ),
+    ("create.name", "World Name", "Világ neve"),
+    ("create.default_name", "New World", "Új világ"),
+    (
+        "create.seed",
+        "Seed for the World Generator",
+        "Seed a világgenerátorhoz",
+    ),
+    (
+        "create.seed_hint",
+        "Leave blank for random",
+        "Üresen hagyva véletlen",
+    ),
+    ("create.mode", "Game Mode: {}", "Játékmód: {}"),
+    (
+        "create.cheats",
+        "Allow Cheats: {}",
+        "Csalások engedélyezése: {}",
+    ),
+    (
+        "create.survival_desc",
+        "Search for resources, craft tools, survive",
+        "Gyűjts nyersanyagot, barkácsolj, maradj életben",
+    ),
+    (
+        "create.creative_desc",
+        "Unlimited resources, free flying, instant breaking",
+        "Végtelen nyersanyag, repülés, azonnali bontás",
+    ),
+    ("mode.survival", "Survival", "Túlélő"),
+    ("mode.creative", "Creative", "Kreatív"),
+    ("mode.survival_long", "Survival Mode", "Túlélő mód"),
+    ("mode.creative_long", "Creative Mode", "Kreatív mód"),
+    // Containers
+    ("gui.inventory", "Inventory", "Tárgylista"),
+    ("gui.crafting", "Crafting", "Barkácsolás"),
+    ("gui.furnace", "Furnace", "Kemence"),
+    ("gui.chest", "Chest", "Láda"),
+    ("gui.large_chest", "Large Chest", "Nagy láda"),
+    ("gui.creative", "Creative Items", "Kreatív tárgyak"),
+    ("gui.trash", "Destroy Item", "Tárgy megsemmisítése"),
+    ("gui.search", "Search...", "Keresés..."),
+    ("gui.no_results", "No items found", "Nincs találat"),
+    (
+        "gui.durability",
+        "Durability: {} / {}",
+        "Tartósság: {} / {}",
+    ),
+    // HUD
+    (
+        "hud.hint",
+        "WASD move | LMB mine | RMB use/place | E inventory | T chat | F5 view",
+        "WASD mozgás | Bal: bányászás | Jobb: használat | E tárgylista | T chat | F5 nézet",
+    ),
+    // Chat / commands
+    (
+        "chat.welcome",
+        "Welcome! Press T to chat, /help for commands.",
+        "Üdv! T-vel chatelhetsz, /help a parancsokhoz.",
+    ),
+    (
+        "cmd.unknown",
+        "Unknown command. Type /help for help.",
+        "Ismeretlen parancs. Írd be: /help",
+    ),
+    (
+        "cmd.no_cheats",
+        "Cheats are not enabled in this world.",
+        "Ebben a világban nincsenek engedélyezve a csalások.",
+    ),
+    ("cmd.help", "--- Commands ---", "--- Parancsok ---"),
+    ("cmd.time_set", "Set the time to {}", "Idő beállítva: {}"),
+    ("cmd.time_add", "Added {} to the time", "Idő hozzáadva: {}"),
+    ("cmd.time_query", "The time is {}", "Az idő: {}"),
+    ("cmd.bad_time", "Invalid time: {}", "Érvénytelen idő: {}"),
+    (
+        "cmd.bad_number",
+        "Invalid number: {}",
+        "Érvénytelen szám: {}",
+    ),
+    (
+        "cmd.gamemode",
+        "Set own game mode to {}",
+        "Saját játékmód beállítva: {}",
+    ),
+    (
+        "cmd.bad_mode",
+        "Unknown game mode: {}",
+        "Ismeretlen játékmód: {}",
+    ),
+    (
+        "cmd.tp",
+        "Teleported Player to {}, {}, {}",
+        "Játékos teleportálva ide: {}, {}, {}",
+    ),
+    (
+        "cmd.bad_coords",
+        "Invalid coordinates",
+        "Érvénytelen koordináták",
+    ),
+    (
+        "cmd.spawn",
+        "Teleported to spawn",
+        "Teleportálva a kezdőpontra",
+    ),
+    ("cmd.seed", "Seed: [{}]", "Seed: [{}]"),
+    (
+        "cmd.give",
+        "Gave {} [{}] to Player",
+        "{} db [{}] átadva a játékosnak",
+    ),
+    ("cmd.bad_item", "Unknown item: {}", "Ismeretlen tárgy: {}"),
+    ("cmd.summon", "Summoned new {}", "Megidézve: {}"),
+    (
+        "cmd.bad_entity",
+        "Unknown entity: {}",
+        "Ismeretlen entitás: {}",
+    ),
+    ("cmd.effect", "Applied effect: {}", "Hatás megadva: {}"),
+    (
+        "cmd.effect_clear",
+        "Removed all effects",
+        "Minden hatás törölve",
+    ),
+    (
+        "cmd.bad_effect",
+        "Unknown effect: {}",
+        "Ismeretlen hatás: {}",
+    ),
+    ("cmd.saved", "Saved the game", "Játék elmentve"),
+    // Death messages
+    (
+        "death.fall",
+        "Player hit the ground too hard",
+        "Játékos túl nagyot esett",
+    ),
+    (
+        "death.lava",
+        "Player tried to swim in lava",
+        "Játékos megpróbált úszni a lávában",
+    ),
+    (
+        "death.fire",
+        "Player burned to death",
+        "Játékos halálra égett",
+    ),
+    (
+        "death.cactus",
+        "Player was pricked to death",
+        "Játékost halálra szurkálta egy kaktusz",
+    ),
+    (
+        "death.suffocate",
+        "Player suffocated in a wall",
+        "Játékos megfulladt a falban",
+    ),
+    (
+        "death.void",
+        "Player fell out of the world",
+        "Játékos kiesett a világból",
+    ),
+    ("death.drown", "Player drowned", "Játékos vízbe fulladt"),
+    ("death.kill", "Player was killed", "Játékost megölték"),
+    (
+        "death.starve",
+        "Player starved to death",
+        "Játékos éhen halt",
+    ),
+    (
+        "death.thirst",
+        "Player died of thirst",
+        "Játékos szomjan halt",
+    ),
+    (
+        "death.poison",
+        "Player was poisoned",
+        "Játékos megmérgeződött",
+    ),
+    ("effect.poison", "Poison", "Mérgezés"),
+    ("effect.nausea", "Nausea", "Hányinger"),
+];
+
+fn map() -> &'static HashMap<&'static str, (&'static str, &'static str)> {
+    static MAP: OnceLock<HashMap<&'static str, (&'static str, &'static str)>> = OnceLock::new();
+    MAP.get_or_init(|| TABLE.iter().map(|&(k, en, hu)| (k, (en, hu))).collect())
+}
+
+/// Translated string for `key` (the key itself if missing).
+pub fn t(key: &'static str) -> &'static str {
+    match map().get(key) {
+        Some(&(en, hu)) => {
+            if is_hungarian() {
+                hu
+            } else {
+                en
+            }
+        }
+        None => key,
+    }
+}
+
+/// Translated string with `{}` placeholders filled in order.
+pub fn tf(key: &'static str, args: &[&dyn Display]) -> String {
+    let mut out = String::new();
+    let mut rest = t(key);
+    for a in args {
+        match rest.find("{}") {
+            Some(i) => {
+                out.push_str(&rest[..i]);
+                out.push_str(&a.to_string());
+                rest = &rest[i + 2..];
+            }
+            None => break,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+pub fn on_off(b: bool) -> &'static str {
+    if b {
+        t("opt.on")
+    } else {
+        t("opt.off")
+    }
+}

@@ -1,0 +1,24 @@
+[package]
+name = "rustcraft"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+ash = "0.38"
+ash-window = "0.13"
+winit = "0.30"
+glam = "0.29"
+font8x8 = "0.3"
+png = "0.17"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+rfd = "0.17.2"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"

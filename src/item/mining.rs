@@ -1,0 +1,133 @@
+//! Mining: how long a block takes to break with a held item, whether it drops, what it drops
+//! and how much the tool wears.
+
+use super::*;
+
+struct Mining {
+    /// Minecraft hardness (break time with bare hands = hardness * 1.5 s when harvestable).
+    hardness: f32,
+    /// The tool that mines this faster.
+    tool: Option<ToolKind>,
+    /// Only drops when mined with `tool` of at least this harvest level.
+    needs: Option<u8>,
+}
+
+fn mining(b: u8) -> Option<Mining> {
+    use ToolKind::*;
+    let m = |hardness, tool, needs| {
+        Some(Mining {
+            hardness,
+            tool,
+            needs,
+        })
+    };
+    match b {
+        AIR | BEDROCK => None,
+        _ if is_fluid(b) => None,
+        _ if is_plant(b) || is_torch(b) => m(0.0, None, None),
+        _ if is_lantern(b) => m(3.5, Some(Pickaxe), Some(0)),
+        _ if is_leaves(b) => m(0.2, Some(Sword), None),
+        GRASS | SNOWY_GRASS | GRAVEL | CLAY => m(0.6, Some(Shovel), None),
+        DIRT | SAND => m(0.5, Some(Shovel), None),
+        SNOW => m(0.2, Some(Shovel), Some(0)),
+        ICE => m(0.5, Some(Pickaxe), None),
+        GLASS | GLOWSTONE => m(0.3, None, None),
+        CACTUS => m(0.4, None, None),
+        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | PLANKS => m(2.0, Some(Axe), None),
+        CRAFTING_TABLE => m(2.5, Some(Axe), None),
+        _ if is_chest(b) => m(2.5, Some(Axe), None),
+        STONE | STONE_BRICKS => m(1.5, Some(Pickaxe), Some(0)),
+        COBBLE | BRICKS => m(2.0, Some(Pickaxe), Some(0)),
+        SANDSTONE => m(0.8, Some(Pickaxe), Some(0)),
+        _ if is_furnace(b) => m(3.5, Some(Pickaxe), Some(0)),
+        COAL_ORE => m(3.0, Some(Pickaxe), Some(0)),
+        IRON_ORE => m(3.0, Some(Pickaxe), Some(1)),
+        GOLD_ORE | DIAMOND_ORE => m(3.0, Some(Pickaxe), Some(2)),
+        COAL_BLOCK => m(5.0, Some(Pickaxe), Some(0)),
+        IRON_BLOCK => m(5.0, Some(Pickaxe), Some(1)),
+        GOLD_BLOCK => m(3.0, Some(Pickaxe), Some(2)),
+        DIAMOND_BLOCK => m(5.0, Some(Pickaxe), Some(2)),
+        OBSIDIAN => m(50.0, Some(Pickaxe), Some(3)),
+        _ => m(1.0, None, None),
+    }
+}
+
+/// Can `held` mine `b` so that it drops?
+pub fn can_harvest(b: u8, held: ItemId) -> bool {
+    let Some(m) = mining(b) else { return false };
+    match m.needs {
+        None => true,
+        Some(level) => match tool_of(held) {
+            Some((kind, tier)) => Some(kind) == m.tool && tier.level() >= level,
+            None => false,
+        },
+    }
+}
+
+/// Seconds to break `b` holding `held` (None = unbreakable).
+pub fn break_time(b: u8, held: ItemId) -> Option<f32> {
+    let m = mining(b)?;
+    let mut speed = 1.0;
+    if let Some((kind, tier)) = tool_of(held) {
+        if Some(kind) == m.tool {
+            speed = if kind == ToolKind::Sword {
+                1.5
+            } else {
+                tier.speed()
+            };
+        }
+    }
+    let mult = if can_harvest(b, held) { 1.5 } else { 5.0 };
+    Some(m.hardness * mult / speed)
+}
+
+/// Items dropped when `b` is mined with `held` (survival). `r` is a random number in 0..1.
+pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
+    if !can_harvest(b, held) {
+        return Vec::new();
+    }
+    let one = |id: ItemId| vec![Stack::one(id)];
+    match b {
+        GRASS | SNOWY_GRASS => one(DIRT as ItemId),
+        STONE => one(COBBLE as ItemId),
+        COAL_ORE => one(COAL),
+        DIAMOND_ORE => one(DIAMOND),
+        CLAY => vec![Stack::new(CLAY_BALL, 4)],
+        GLASS | ICE | TALL_GRASS => Vec::new(),
+        DEAD_BUSH => {
+            let n = (r * 3.0) as u8;
+            if n > 0 {
+                vec![Stack::new(STICK, n)]
+            } else {
+                Vec::new()
+            }
+        }
+        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES => {
+            if r < 0.05 {
+                let sapling = match b {
+                    BIRCH_LEAVES => BIRCH_SAPLING,
+                    SPRUCE_LEAVES => SPRUCE_SAPLING,
+                    _ => OAK_SAPLING,
+                };
+                one(sapling as ItemId)
+            } else if b == OAK_LEAVES && r > 0.98 {
+                one(STICK)
+            } else {
+                Vec::new()
+            }
+        }
+        _ => item_of_block(b)
+            .filter(|&i| block_of(i).is_some())
+            .map(one)
+            .unwrap_or_default(),
+    }
+}
+
+/// Durability cost of breaking a block with a tool (swords wear twice as fast).
+pub fn wear(held: ItemId, b: u8) -> u16 {
+    match tool_of(held) {
+        Some((ToolKind::Sword, _)) => 2,
+        Some(_) if mining(b).is_some_and(|m| m.hardness > 0.0) => 1,
+        _ => 0,
+    }
+}

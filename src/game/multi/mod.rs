@@ -1,0 +1,592 @@
+//! LAN multiplayer: opening a world to LAN, joining one, and keeping everything in sync.
+//!
+//! The host runs the world as usual and is the authority for blocks, fluids, mobs, dropped
+//! items, falling blocks and block entities. Each player moves, fights, eats and manages
+//! their own inventory, and tells the host what they do to the world; the host applies it
+//! with the world's rules and sends the result to everyone. A player's inventory, position,
+//! health and hunger are kept by the host between visits (`saves/<world>/players/`).
+
+mod client;
+mod host;
+mod lan_ui;
+
+use super::*;
+
+use crate::lang::tf;
+use crate::model::player::{hand_pivot, limb_targets};
+use crate::net::{
+    container, pose_flags, Conn, Finder, ItemNet, Msg, PlayerState, Pose, Server, NO_BLOCK,
+    PROTOCOL,
+};
+use crate::save::{rle, unrle};
+use crate::util::lerp_angle;
+use std::path::PathBuf;
+
+/// Seconds between pose and entity updates (20 per second, Minecraft's tick rate).
+const TICK: f32 = 0.05;
+/// How far around a player mobs are sent; items and falling blocks a bit less.
+const MOB_RANGE: f32 = 96.0;
+const ITEM_RANGE: f32 = 64.0;
+/// `Msg::Open` at this height means the player closed their container.
+const CLOSED_Y: i32 = i32::MIN;
+/// How far away other players' names show.
+const NAME_RANGE: f32 = 48.0;
+/// The host's player id.
+const HOST_ID: u8 = 0;
+
+/// Another player, as drawn here.
+pub(super) struct RemotePlayer {
+    pub id: u8,
+    pub name: String,
+    /// Smoothed pose that is drawn, and the latest one received.
+    pub pose: Pose,
+    target: Pose,
+    has_pose: bool,
+    limbs: LimbSmoother,
+    /// Swing of a lantern in their hand.
+    lantern: crate::model::lantern::SmoothSwing,
+}
+
+impl RemotePlayer {
+    /// Alive according to the latest pose received.
+    fn alive(&self) -> bool {
+        self.has_pose && self.target.flags & pose_flags::DEAD == 0
+    }
+
+    /// Drawn: alive in the smoothed pose that is shown.
+    fn shown(&self) -> bool {
+        self.has_pose && self.pose.flags & pose_flags::DEAD == 0
+    }
+}
+
+/// A connected player, on the host.
+struct Peer {
+    id: u8,
+    name: String,
+    conn: Conn,
+    joined: bool,
+    /// Latest saved state (inventory, health...) from the player.
+    state: Option<PlayerState>,
+    pose: Option<Pose>,
+    /// Block entity the player has open, and what was last sent of it.
+    open: Option<IVec3>,
+    sent_container: Option<Vec<u8>>,
+    leaving: bool,
+}
+
+pub(super) struct Host {
+    server: Server,
+    peers: Vec<Peer>,
+    tick: f32,
+    time_tick: f32,
+    /// Crafting table grids as the players last got them (items lie on the tables).
+    tables_sent: FastMap<IVec3, [Slot; 9]>,
+    /// "192.168.1.20:25565", shown in the pause menu.
+    pub address: String,
+}
+
+pub(super) struct Client {
+    conn: Conn,
+    pub(super) id: u8,
+    tick: f32,
+    /// Where the host says each dropped item is; they glide there.
+    item_targets: FastMap<u32, Vec3>,
+    /// The open container as last sent to or received from the host.
+    container_known: Option<Vec<u8>>,
+}
+
+pub(super) enum Net {
+    Host(Host),
+    Client(Client),
+}
+
+fn color_bytes(c: Color) -> [u8; 4] {
+    c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+fn color_from(b: [u8; 4]) -> Color {
+    b.map(|v| v as f32 / 255.0)
+}
+
+impl Game {
+    pub(super) fn is_client(&self) -> bool {
+        matches!(self.net, Some(Net::Client(_)))
+    }
+
+    /// LAN player: sends a message to the host.
+    pub(super) fn send(&self, m: Msg) {
+        if let Some(Net::Client(c)) = &self.net {
+            c.conn.send(&m);
+        }
+    }
+
+    /// Host: sends a message to one player.
+    pub(super) fn send_to(&self, id: u8, m: &Msg) {
+        if let Some(Net::Host(h)) = &self.net {
+            if let Some(p) = h.peers.iter().find(|p| p.id == id && p.joined) {
+                p.conn.send(m);
+            }
+        }
+    }
+
+    /// Host: sends a message to every player (but `except`).
+    fn broadcast(&self, m: &Msg, except: Option<u8>) {
+        if let Some(Net::Host(h)) = &self.net {
+            for p in h.peers.iter().filter(|p| p.joined && Some(p.id) != except) {
+                p.conn.send(m);
+            }
+        }
+    }
+
+    pub(super) fn entity_id(&mut self) -> u32 {
+        self.next_entity_id = self.next_entity_id.wrapping_add(1).max(1);
+        self.next_entity_id
+    }
+
+    /// Adds a dropped item to the world (a LAN player hands it to the host).
+    pub(super) fn add_item(&mut self, mut it: ItemEntity) {
+        if self.is_client() {
+            self.send(Msg::DropItem {
+                pos: it.pos,
+                vel: it.vel,
+                stack: it.stack,
+                delay: it.pickup_delay,
+            });
+            return;
+        }
+        it.id = self.entity_id();
+        self.items.push(it);
+    }
+
+    /// Feet of all living players: this one and the others on the LAN.
+    pub(super) fn player_positions(&self) -> Vec<Vec3> {
+        let mut v = Vec::new();
+        if self.player.spawned && self.screen != Screen::Dead {
+            v.push(self.player.pos);
+        }
+        v.extend(
+            self.remotes
+                .iter()
+                .filter(|r| r.alive())
+                .map(|r| r.target.pos),
+        );
+        v
+    }
+
+    pub(super) fn remote_pos(&self, id: u8) -> Option<Vec3> {
+        self.remotes.iter().find(|r| r.id == id).map(|r| r.pose.pos)
+    }
+
+    /// This player's pose, as the others should see it.
+    fn my_pose(&self) -> Pose {
+        let mut flags = 0;
+        if self.fire > 0.0 {
+            flags |= pose_flags::BURNING;
+        }
+        if self.blocking {
+            flags |= pose_flags::BLOCKING;
+        }
+        if self.hurt_time > 0.0 {
+            flags |= pose_flags::HURT;
+        }
+        if self.screen == Screen::Dead || !self.player.spawned {
+            flags |= pose_flags::DEAD;
+        }
+        if self.creative() {
+            flags |= pose_flags::CREATIVE;
+        }
+        Pose {
+            pos: self.player.pos,
+            yaw: self.visual_head_yaw(),
+            pitch: self.pitch,
+            body_yaw: self.body_yaw,
+            limb_swing: self.limb_swing,
+            limb_amount: self.limb_amount,
+            attack: self.hand.attack(),
+            crouch: self.player.crouch,
+            held: self.held(),
+            skin: self.effective_skin(),
+            flags,
+            mining: self.mining.map(|(p, _)| p).unwrap_or(NO_BLOCK),
+            mine_progress: match self.mining {
+                Some((_, prog)) if !self.creative() => prog.min(1.0),
+                _ => 0.0,
+            },
+            open: match self.screen {
+                Screen::Container(c) => Self::container_pos(c).unwrap_or(NO_BLOCK),
+                _ => NO_BLOCK,
+            },
+        }
+    }
+
+    /// Chests the other players have open (their lids open here too).
+    pub(super) fn remote_open_chests(&self) -> Vec<IVec3> {
+        self.remotes
+            .iter()
+            .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
+            .map(|r| r.target.open)
+            .filter(|p| is_chest(self.terrain.world.geti(*p)))
+            .collect()
+    }
+
+    /// Torches and lanterns in the other players' hands: (id, where the light is, item).
+    pub(super) fn remote_held_lights(&self) -> Vec<(u8, Vec3, ItemId)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.shown())
+            .filter(|r| crate::model::player::held_up(r.pose.held))
+            .map(|r| {
+                // Like this player's own: just below the eyes, where the hand holds it up.
+                let eye = 1.62 - 0.35 * r.pose.crouch;
+                (r.id, r.pose.pos + Vec3::Y * (eye - 0.35), r.pose.held)
+            })
+            .collect()
+    }
+
+    /// Crack overlays of the blocks the other players are mining.
+    pub(super) fn remote_cracks(&self) -> Vec<(IVec3, f32)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.has_pose && r.target.mine_progress > 0.02 && r.target.mining != NO_BLOCK)
+            .map(|r| (r.target.mining, r.target.mine_progress))
+            .collect()
+    }
+
+    /// Debris from a block broken by someone: shown here if `local`, and the host sends it to
+    /// the other players (but `except`, who broke it).
+    pub(super) fn break_fx(&mut self, p: IVec3, block: u8, local: bool, except: Option<u8>) {
+        if block == AIR {
+            return;
+        }
+        if local {
+            let tint = self.block_tint(p, block);
+            self.particles
+                .burst(&self.terrain.world, p, block, 28, tint);
+        }
+        if self.is_host() {
+            self.broadcast(&Msg::BreakFx { p, block }, except);
+        }
+    }
+
+    pub(super) fn is_host(&self) -> bool {
+        matches!(self.net, Some(Net::Host(_)))
+    }
+
+    /// Hit by another player: damage and knockback.
+    fn hit_by_player(&mut self, dmg: f32, from: Vec3, knock: f32) {
+        let before = self.health;
+        self.damage(dmg, "death.player");
+        if self.health < before {
+            let away = (self.player.pos - from) * Vec3::new(1.0, 0.0, 1.0);
+            let away = away.try_normalize().unwrap_or(Vec3::X);
+            self.player.vel.x = away.x * 6.0 * knock;
+            self.player.vel.z = away.z * 6.0 * knock;
+            self.player.vel.y = self.player.vel.y.max(5.0);
+        }
+    }
+
+    // ------------------------------------------------------------------ every frame
+
+    /// Network work for this frame (host or player).
+    pub(super) fn net_tick(&mut self, dt: f32) {
+        match self.net {
+            Some(Net::Host(_)) => self.host_tick(dt),
+            Some(Net::Client(_)) => self.client_tick(dt),
+            None => {}
+        }
+        // Other players glide toward their latest pose.
+        let k = 1.0 - (-15.0 * dt).exp();
+        for r in &mut self.remotes {
+            let (p, t) = (&mut r.pose, r.target);
+            p.pos = if p.pos.distance_squared(t.pos) > 64.0 {
+                t.pos
+            } else {
+                p.pos.lerp(t.pos, k)
+            };
+            p.yaw = lerp_angle(p.yaw, t.yaw, k);
+            p.body_yaw = lerp_angle(p.body_yaw, t.body_yaw, k);
+            p.pitch += (t.pitch - p.pitch) * k;
+            p.limb_swing += (t.limb_swing - p.limb_swing) * k;
+            p.limb_amount += (t.limb_amount - p.limb_amount) * k;
+            p.crouch += (t.crouch - p.crouch) * k;
+            p.attack = t.attack;
+            p.held = t.held;
+            p.flags = t.flags;
+        }
+    }
+
+    fn set_remote_pose(&mut self, id: u8, pose: Pose) {
+        if let Some(r) = self.remotes.iter_mut().find(|r| r.id == id) {
+            if !r.has_pose {
+                r.pose = pose;
+            }
+            r.target = pose;
+            r.has_pose = true;
+        }
+    }
+
+    /// Another player left: their model and skin go.
+    fn remove_remote(&mut self, id: u8) {
+        self.remotes.retain(|r| r.id != id);
+        self.custom_skins.remove(&id);
+        self.skin_pngs.remove(&id);
+    }
+
+    fn add_remote(&mut self, id: u8, name: String) {
+        self.remotes.retain(|r| r.id != id);
+        self.remotes.push(RemotePlayer {
+            id,
+            name,
+            pose: Pose::default(),
+            target: Pose::default(),
+            has_pose: false,
+            limbs: LimbSmoother::default(),
+            lantern: Default::default(),
+        });
+    }
+}
+
+/// Other players' models (into the entity and particle ranges, like mobs).
+pub(super) fn build_remote_players(
+    remotes: &mut [RemotePlayer],
+    world: &World,
+    time: f32,
+    out: &mut Vec<Vertex>,
+    dt: f32,
+) {
+    {
+        for r in remotes.iter_mut() {
+            let p = r.pose;
+            if !r.shown() {
+                continue;
+            }
+            let pose = PlayerPose {
+                pos: p.pos,
+                body_yaw: p.body_yaw,
+                head_yaw: p.yaw,
+                pitch: p.pitch,
+                limb_swing: p.limb_swing,
+                limb_amount: p.limb_amount,
+                attack: p.attack,
+                crouch: p.crouch,
+                held: p.held,
+                skin: p.skin,
+                time,
+                hurt: p.flags & pose_flags::HURT != 0,
+                first_person: false,
+                burning: p.flags & pose_flags::BURNING != 0,
+                blocking: p.flags & pose_flags::BLOCKING != 0,
+                hide_arms: false,
+                hide_right_arm: false,
+                lantern: None,
+            };
+            let limbs = r.limbs.update(limb_targets(&pose), dt);
+            let lantern = if pose.held == LANTERN as ItemId {
+                Some(r.lantern.update(
+                    crate::model::lantern::ON_MODEL,
+                    hand_pivot(&pose, &limbs),
+                    dt,
+                ))
+            } else {
+                r.lantern = Default::default();
+                None
+            };
+            let pose = PlayerPose { lantern, ..pose };
+            let c = p.pos + Vec3::Y;
+            build_player(
+                out,
+                &pose,
+                &limbs,
+                world.sky_estimate(c),
+                world.block_light_estimate(c),
+            );
+        }
+    }
+}
+
+impl Game {
+    /// The other player the crosshair is on, and how far away.
+    pub(super) fn pick_player(&self, eye: Vec3, dir: Vec3, reach: f32) -> Option<(u8, f32)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.alive())
+            .filter_map(|r| {
+                let p = r.pose.pos;
+                let half = Vec3::new(0.4, 0.0, 0.4);
+                crate::util::ray_box(
+                    eye,
+                    dir,
+                    p - half - Vec3::Y * 0.1,
+                    p + half + Vec3::Y * 1.9,
+                    reach,
+                )
+                .map(|d| (r.id, d))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
+    /// A chat line typed by this player.
+    pub(super) fn chat_line(&mut self, text: &str) {
+        match &self.net {
+            Some(Net::Client(_)) => self.send(Msg::Chat {
+                text: text.to_string(),
+                color: color_bytes(chat::WHITE),
+            }),
+            Some(Net::Host(_)) => {
+                let line = format!("<{}> {text}", self.settings.name);
+                self.broadcast(
+                    &Msg::Chat {
+                        text: line.clone(),
+                        color: color_bytes(chat::WHITE),
+                    },
+                    None,
+                );
+                self.say(line, chat::WHITE);
+            }
+            None => {
+                let line = format!("<{}> {text}", self.settings.name);
+                self.say(line, chat::WHITE);
+            }
+        }
+    }
+
+    /// Host: a chat message to everyone (and here).
+    fn announce(&mut self, text: String, color: Color) {
+        self.broadcast(
+            &Msg::Chat {
+                text: text.clone(),
+                color: color_bytes(color),
+            },
+            None,
+        );
+        self.say(text, color);
+    }
+
+    /// Contents of the block entity at `p` as a message (a LAN player's open crafting table
+    /// uses its live grid).
+    fn container_msg(&self, p: IVec3) -> Option<Msg> {
+        let b = self.terrain.world.geti(p);
+        let table_open = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
+        let (kind, slots, burn, burn_total, cook) = if is_chest(b) {
+            // A double chest sends both halves (54 slots).
+            self.block_entities.chests.get(&p)?;
+            (container::CHEST, self.chest_slots(p), 0.0, 0.0, 0.0)
+        } else if is_furnace(b) {
+            let f = self.block_entities.furnaces.get(&p)?;
+            (
+                container::FURNACE,
+                vec![f.input, f.fuel, f.output],
+                f.burn,
+                f.burn_total,
+                f.cook,
+            )
+        } else if b == CRAFTING_TABLE {
+            let grid = if table_open && self.is_client() {
+                self.craft
+            } else {
+                self.block_entities
+                    .tables
+                    .get(&p)
+                    .copied()
+                    .unwrap_or([None; 9])
+            };
+            (container::TABLE, grid.to_vec(), 0.0, 0.0, 0.0)
+        } else {
+            return None;
+        };
+        Some(Msg::Container {
+            p,
+            kind,
+            slots,
+            burn,
+            burn_total,
+            cook,
+        })
+    }
+
+    /// Stores received contents. `progress`: also take the furnace's burn/cook times (from the
+    /// host; a player's copy of them is only for display).
+    fn apply_container(
+        &mut self,
+        p: IVec3,
+        kind: u8,
+        slots: &[Slot],
+        progress: Option<(f32, f32, f32)>,
+    ) {
+        let get = |i: usize| slots.get(i).copied().flatten();
+        match kind {
+            container::CHEST => {
+                let n = if self.chest_halves(p).1.is_some() {
+                    54
+                } else {
+                    27
+                };
+                let all: Vec<Slot> = (0..n).map(get).collect();
+                self.set_chest_slots(p, &all);
+            }
+            container::FURNACE => {
+                let f = self.block_entities.furnaces.entry(p).or_default();
+                f.input = get(0);
+                f.fuel = get(1);
+                f.output = get(2);
+                if let Some((burn, total, cook)) = progress {
+                    (f.burn, f.burn_total, f.cook) = (burn, total, cook);
+                }
+            }
+            container::TABLE => {
+                let grid: [Slot; 9] = std::array::from_fn(get);
+                let open_here =
+                    matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
+                if open_here && self.is_client() {
+                    self.craft = grid;
+                } else if grid.iter().any(|s| s.is_some()) {
+                    self.block_entities.tables.insert(p, grid);
+                } else {
+                    self.block_entities.tables.remove(&p);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// LAN player opened a container: the host sends its contents.
+    pub(super) fn net_container_opened(&mut self, p: IVec3) {
+        if let Some(Net::Client(c)) = &mut self.net {
+            c.container_known = None;
+            c.conn.send(&Msg::Open { p });
+        }
+    }
+
+    pub(super) fn net_container_closed(&mut self) {
+        if let Some(Net::Client(c)) = &mut self.net {
+            c.container_known = None;
+            c.conn.send(&Msg::Open {
+                p: IVec3::new(0, CLOSED_Y, 0),
+            });
+        }
+    }
+
+    /// LAN player: sends the open container if this player changed it.
+    pub(super) fn net_container_sync(&mut self) {
+        if !self.is_client() {
+            return;
+        }
+        let Screen::Container(c) = self.screen else {
+            return;
+        };
+        let Some(p) = Self::container_pos(c) else {
+            return;
+        };
+        let Some(msg) = self.container_msg(p) else {
+            return;
+        };
+        let bytes = msg.encode();
+        if let Some(Net::Client(c)) = &mut self.net {
+            // Nothing known yet: wait for the host's copy instead of overwriting it.
+            if c.container_known.as_ref().is_some_and(|k| *k != bytes) {
+                c.conn.send(&msg);
+                c.container_known = Some(bytes);
+            }
+        }
+    }
+}
