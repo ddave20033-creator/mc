@@ -90,12 +90,7 @@ fn main() {
                     assert!(status.success(), "shader compilation failed: {name}");
                     continue;
                 }
-                Err(_) => {
-                    missing_glslc = true;
-                    println!(
-                        "cargo:warning=glslc not found (Vulkan SDK) - using the precompiled shaders in shaders/spv"
-                    );
-                }
+                Err(_) => missing_glslc = true,
             }
         }
         std::fs::copy(format!("shaders/spv/{name}.spv"), &spv)
