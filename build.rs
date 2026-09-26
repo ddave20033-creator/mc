@@ -1,5 +1,6 @@
 //! Compiles the GLSL shaders to SPIR-V (with glslc from the Vulkan SDK) into OUT_DIR, where
-//! `render` includes them, and lists the built-in resource pack's files (`builtin/faithful`)
+//! `render` includes them - without glslc it falls back to the precompiled copies in
+//! `shaders/spv` (refresh those with glslc after editing a shader), and lists the built-in resource pack's files (`builtin/faithful`)
 //! for `pack` to embed.
 
 use std::env;
@@ -73,15 +74,31 @@ fn main() {
     for inc in INCLUDES {
         println!("cargo:rerun-if-changed=shaders/{inc}");
     }
+    let mut missing_glslc = false;
     for name in SHADERS {
         println!("cargo:rerun-if-changed=shaders/{name}");
-        let status = Command::new(&glslc)
-            .arg(format!("shaders/{name}"))
-            .arg("-O")
-            .arg("-o")
-            .arg(out.join(format!("{name}.spv")))
-            .status()
-            .expect("failed to run glslc - install the Vulkan SDK");
-        assert!(status.success(), "shader compilation failed: {name}");
+        let spv = out.join(format!("{name}.spv"));
+        if !missing_glslc {
+            match Command::new(&glslc)
+                .arg(format!("shaders/{name}"))
+                .arg("-O")
+                .arg("-o")
+                .arg(&spv)
+                .status()
+            {
+                Ok(status) => {
+                    assert!(status.success(), "shader compilation failed: {name}");
+                    continue;
+                }
+                Err(_) => {
+                    missing_glslc = true;
+                    println!(
+                        "cargo:warning=glslc not found (Vulkan SDK) - using the precompiled shaders in shaders/spv"
+                    );
+                }
+            }
+        }
+        std::fs::copy(format!("shaders/spv/{name}.spv"), &spv)
+            .unwrap_or_else(|e| panic!("no glslc and no precompiled shaders/spv/{name}.spv: {e}"));
     }
 }
