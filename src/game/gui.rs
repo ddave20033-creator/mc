@@ -1,10 +1,11 @@
-//! Item screens: inventory, crafting table, furnace, chest and creative inventory.
+//! Item screens: the inventory and the creative inventory, and the slot handling shared
+//! with the chest and crafting table views (`station`).
 //! Slot interaction follows Minecraft: left click picks up / places / swaps, right click
 //! splits / places one, shift-click moves between sections, 1-9 swaps with the hotbar,
 //! dragging a held stack spreads it over slots and double-click collects matching items.
+//! A stack can also be dragged out of a slot and let go over another one.
 
 use super::*;
-use crate::entity::SMELT_TIME;
 use crate::item::inventory::{add_to, click, take};
 use crate::item::*;
 use crate::lang::tf;
@@ -18,7 +19,6 @@ pub(super) enum SlotRef {
     Inv(usize),
     Craft(usize),
     CraftOut,
-    Furnace(usize),
     Chest(usize),
     Creative(ItemId),
     Trash,
@@ -107,10 +107,7 @@ fn fits(cur: Slot, st: &Stack) -> bool {
 
 /// Slots that accept items from the cursor.
 fn droppable(r: SlotRef) -> bool {
-    matches!(
-        r,
-        SlotRef::Inv(_) | SlotRef::Craft(_) | SlotRef::Chest(_) | SlotRef::Furnace(0 | 1)
-    )
+    matches!(r, SlotRef::Inv(_) | SlotRef::Craft(_) | SlotRef::Chest(_))
 }
 
 /// Lowercase without Hungarian accents, so "gyemant" finds "Gyémánt".
@@ -312,7 +309,9 @@ impl Game {
             self.net_container_opened(p);
         }
         self.drag = None;
+        self.press_pick = None;
         self.search_focused = false;
+        self.open_station(c);
         self.screen = Screen::Container(c);
         self.set_grab(false);
         self.keys.clear();
@@ -336,6 +335,7 @@ impl Game {
     /// go back to the inventory.
     pub(super) fn close_container(&mut self) {
         self.drag = None;
+        self.press_pick = None;
         self.search_focused = false;
         if let Screen::Container(c) = self.screen {
             if Self::container_pos(c).is_some() {
@@ -356,7 +356,7 @@ impl Game {
     /// The block a container screen belongs to.
     pub(super) fn container_pos(c: Container) -> Option<IVec3> {
         match c {
-            Container::Crafting(p) | Container::Furnace(p) | Container::Chest(p) => Some(p),
+            Container::Crafting(p) | Container::Chest(p) => Some(p),
             Container::Inventory | Container::Creative => None,
         }
     }
@@ -404,16 +404,6 @@ impl Game {
         match r {
             SlotRef::Inv(i) => Some(&mut self.inventory.slots[i]),
             SlotRef::Craft(i) => Some(&mut self.craft[i]),
-            SlotRef::Furnace(i) => match c {
-                Container::Furnace(p) => {
-                    self.block_entities.furnaces.get_mut(&p).map(|f| match i {
-                        0 => &mut f.input,
-                        1 => &mut f.fuel,
-                        _ => &mut f.output,
-                    })
-                }
-                _ => None,
-            },
             SlotRef::Chest(i) => match c {
                 Container::Chest(p) => {
                     let (a, b) = self.chest_halves(p);
@@ -426,7 +416,7 @@ impl Game {
         }
     }
 
-    fn craft_result(&self, c: Container) -> Option<Stack> {
+    pub(super) fn craft_result(&self, c: Container) -> Option<Stack> {
         let n = Self::craft_size(c);
         craft(&self.craft[..n * n], n)
     }
@@ -459,18 +449,6 @@ impl Game {
                 let left = add_to(&mut slots, stack);
                 self.set_chest_slots(p, &slots);
                 left
-            }
-            (Container::Furnace(p), SlotRef::Inv(i)) => {
-                let f = self.block_entities.furnaces.get_mut(&p);
-                match f {
-                    Some(f) if smelt(stack.item).is_some() => {
-                        add_to(std::slice::from_mut(&mut f.input), stack)
-                    }
-                    Some(f) if fuel_time(stack.item).is_some() => {
-                        add_to(std::slice::from_mut(&mut f.fuel), stack)
-                    }
-                    _ => self.move_within_inventory(i, stack),
-                }
             }
             (_, SlotRef::Inv(i)) => self.move_within_inventory(i, stack),
             _ => self.inventory.add(stack),
@@ -515,35 +493,6 @@ impl Game {
                     _ => return,
                 }
                 self.consume_craft_inputs(c);
-            }
-            SlotRef::Furnace(2) => {
-                // Output: take only.
-                let cursor = &mut self.cursor;
-                let Some(out) = (match c {
-                    Container::Furnace(p) => self
-                        .block_entities
-                        .furnaces
-                        .get_mut(&p)
-                        .map(|f| &mut f.output),
-                    _ => None,
-                }) else {
-                    return;
-                };
-                let Some(st) = *out else { return };
-                if shift {
-                    *out = None;
-                    self.give(st);
-                    return;
-                }
-                match cursor {
-                    None => *cursor = out.take(),
-                    Some(cur) if cur.stacks_with(&st) => {
-                        let n = (max_stack(st.item) - cur.count).min(st.count);
-                        cur.count += n;
-                        take(out, n);
-                    }
-                    _ => {}
-                }
             }
             SlotRef::Creative(id) => {
                 if shift {
@@ -690,7 +639,13 @@ impl Game {
     }
 
     /// Main inventory (3 rows) and hotbar at GUI offset (ox, oy) = top-left of the main rows.
-    fn inventory_slots(&mut self, px: f32, py: f32, oy: f32, hovered: &mut Option<SlotRef>) {
+    pub(super) fn inventory_slots(
+        &mut self,
+        px: f32,
+        py: f32,
+        oy: f32,
+        hovered: &mut Option<SlotRef>,
+    ) {
         let s = self.ui.s;
         for i in 9..36 {
             let (cx, cy) = ((i - 9) % 9, (i - 9) / 9);
@@ -773,43 +728,6 @@ impl Game {
             };
             let color = if c < fill { th.progress } else { th.idle };
             self.ui.solid(x + c * s, y + y0 * s, s, h * s, color);
-        }
-    }
-
-    /// Furnace flame (14x14); the top part burns away as the fuel runs out.
-    fn flame(&mut self, x: f32, y: f32, k: f32) {
-        const MASK: [&str; 14] = [
-            "......#.......",
-            "......##......",
-            ".....###......",
-            ".....####.....",
-            "....#####.....",
-            "....######....",
-            "...#######.#..",
-            "...#########..",
-            "..###########.",
-            "..###########.",
-            ".#############",
-            ".#############",
-            "..###########.",
-            "...#########..",
-        ];
-        let s = self.ui.s;
-        let lit_from = (14.0 * (1.0 - k.clamp(0.0, 1.0))).round() as usize;
-        for (row, line) in MASK.iter().enumerate() {
-            let lit = k > 0.0 && row >= lit_from;
-            let t = row as f32 / 13.0;
-            let color = if lit {
-                [1.0, 0.95 - 0.5 * t, 0.35 - 0.3 * t, 1.0]
-            } else {
-                self.theme().idle
-            };
-            for (col, ch) in line.bytes().enumerate() {
-                if ch == b'#' {
-                    self.ui
-                        .solid(x + col as f32 * s, y + row as f32 * s, s, s, color);
-                }
-            }
         }
     }
 
@@ -943,13 +861,16 @@ impl Game {
 
     /// Draws the open item screen and handles clicks.
     pub(super) fn container_screen(&mut self, c: Container) {
+        if matches!(c, Container::Chest(_) | Container::Crafting(_)) {
+            let hovered = self.station_screen(c);
+            self.slot_input(c, hovered, None, None);
+            return;
+        }
         let s = self.ui.s;
         let mut hovered: Option<SlotRef> = None;
         let mut hovered_stack: Option<Stack> = None;
         let (panel_w, panel_h) = match c {
             Container::Creative => (195.0, 160.0),
-            Container::Chest(p) if self.chest_halves(p).1.is_some() => (176.0, 222.0),
-            Container::Chest(_) => (176.0, 168.0),
             _ => (176.0, 166.0),
         };
         let (px, py) = self.panel(panel_w, panel_h);
@@ -959,7 +880,8 @@ impl Game {
         let at = |gx: f32, gy: f32| (px + gx * s, py + gy * s);
 
         match c {
-            Container::Inventory | Container::Crafting(_) => {
+            Container::Chest(_) | Container::Crafting(_) => {}
+            Container::Inventory => {
                 let n = Self::craft_size(c);
                 // Grid origin, result slot frame (26 px) origin, arrow x and width.
                 let (grid_x, grid_y, out_x, out_y, arrow_x, arrow_w) = if n == 3 {
@@ -995,65 +917,6 @@ impl Game {
                     self.label(t("gui.inventory"), lx, ly);
                 }
                 self.inventory_slots(px, py, 84.0, &mut hovered);
-            }
-            Container::Furnace(p) => {
-                let (tx, ty) = at(8.0, 6.0);
-                self.label(t("gui.furnace"), tx, ty);
-                let f = self
-                    .block_entities
-                    .furnaces
-                    .get(&p)
-                    .cloned()
-                    .unwrap_or_default();
-                for (i, (gx, gy, size)) in
-                    [(55.0, 16.0, SLOT), (55.0, 52.0, SLOT), (111.0, 30.0, 26.0)]
-                        .into_iter()
-                        .enumerate()
-                {
-                    let (x, y) = at(gx, gy);
-                    let content = [f.input, f.fuel, f.output][i];
-                    if self.draw_slot_sized(x, y, size, content) {
-                        hovered = Some(SlotRef::Furnace(i));
-                    }
-                }
-                // Flame (fuel left) and arrow (smelting progress).
-                let burn = if f.burn > 0.0 && f.burn_total > 0.0 {
-                    f.burn / f.burn_total
-                } else {
-                    0.0
-                };
-                let (fx, fy) = at(57.0, 36.0);
-                self.flame(fx, fy, burn);
-                let (ax, ay) = at(80.0, 35.5);
-                self.arrow(ax, ay, 24.0, f.cook / SMELT_TIME);
-                let (lx, ly) = at(8.0, 72.0);
-                self.label(t("gui.inventory"), lx, ly);
-                self.inventory_slots(px, py, 84.0, &mut hovered);
-            }
-            Container::Chest(p) => {
-                let slots = self.chest_slots(p);
-                let double = slots.len() > 27;
-                let (tx, ty) = at(8.0, 6.0);
-                self.label(
-                    t(if double {
-                        "gui.large_chest"
-                    } else {
-                        "gui.chest"
-                    }),
-                    tx,
-                    ty,
-                );
-                for (i, st) in slots.iter().enumerate() {
-                    let (x, y) = at(8.0 + (i % 9) as f32 * SLOT, 18.0 + (i / 9) as f32 * SLOT);
-                    if self.draw_slot(x, y, *st) {
-                        hovered = Some(SlotRef::Chest(i));
-                    }
-                }
-                // Three more rows push the inventory down.
-                let extra = if double { 3.0 * SLOT } else { 0.0 };
-                let (lx, ly) = at(8.0, 74.0 + extra);
-                self.label(t("gui.inventory"), lx, ly);
-                self.inventory_slots(px, py, 86.0 + extra, &mut hovered);
             }
             Container::Creative => {
                 let (tx, ty) = at(8.0, 6.0);
@@ -1154,6 +1017,33 @@ impl Game {
             }
         }
 
+        let panel = (px, py, panel_w * s, panel_h * s);
+        self.slot_input(c, hovered, hovered_stack, Some(panel));
+    }
+
+    /// Tooltips, clicks, drags and number keys on the slot under the mouse (`hovered`;
+    /// `hovered_stack` for creative items), and the stack on the cursor. A click outside
+    /// `panel` (x, y, w, h) throws the held stack.
+    fn slot_input(
+        &mut self,
+        c: Container,
+        hovered: Option<SlotRef>,
+        hovered_stack: Option<Stack>,
+        panel: Option<(f32, f32, f32, f32)>,
+    ) {
+        let s = self.ui.s;
+        // A stack dragged out of a slot and let go over another slot goes there.
+        if let Some(from) = self.press_pick {
+            if !self.left_down {
+                self.press_pick = None;
+                if let Some(r) = hovered.filter(|&r| r != from && droppable(r)) {
+                    if self.cursor.is_some() {
+                        self.click_slot(c, r, false, false);
+                    }
+                }
+            }
+        }
+
         // Tooltip for the hovered stack.
         if self.cursor.is_none() {
             if let Some(r) = hovered {
@@ -1225,20 +1115,26 @@ impl Game {
                         self.apply_drag(c, &d);
                         self.drag = Some(d);
                     }
-                    _ => self.click_slot(c, r, right, shift && !right),
+                    _ => {
+                        let empty = self.cursor.is_none();
+                        let (grid, made) = (self.craft, self.craft_result(c));
+                        self.click_slot(c, r, right, shift && !right);
+                        if let (SlotRef::CraftOut, Some(made)) = (r, made) {
+                            if self.craft != grid {
+                                self.start_craft_fx(c, grid, made);
+                            }
+                        }
+                        if empty && !right && !shift && self.cursor.is_some() {
+                            self.press_pick = Some(r);
+                        }
+                    }
                 }
             }
             if let Some(d) = self.digit {
                 // Number key: swap with that hotbar slot.
                 // Swapping a hotbar slot with itself is a no-op (and would otherwise lose the item).
                 if r != SlotRef::Inv(d)
-                    && !matches!(
-                        r,
-                        SlotRef::CraftOut
-                            | SlotRef::Creative(_)
-                            | SlotRef::Trash
-                            | SlotRef::Furnace(2)
-                    )
+                    && !matches!(r, SlotRef::CraftOut | SlotRef::Creative(_) | SlotRef::Trash)
                 {
                     let mut hot = self.inventory.slots[d].take();
                     if let Some(slot) = self.slot_mut(c, r) {
@@ -1249,7 +1145,7 @@ impl Game {
             }
         } else if self.ui.pressed || self.ui.right_pressed {
             // Clicking outside the window throws the held stack.
-            let inside = self.ui.hit(px, py, panel_w * s, panel_h * s);
+            let inside = panel.is_none_or(|(x, y, w, h)| self.ui.hit(x, y, w, h));
             if !inside {
                 if let Some(st) = self.cursor {
                     if self.ui.right_pressed {

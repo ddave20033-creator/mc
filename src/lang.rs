@@ -450,6 +450,14 @@ const TABLE: &[(&str, &str, &str)] = &[
     // Containers
     ("gui.inventory", "Inventory", "Tárgylista"),
     ("gui.crafting", "Crafting", "Barkácsolás"),
+    ("furnace.put", "Right click: put on", "Jobb klikk: rátevés"),
+    (
+        "furnace.meat",
+        "Right click: take off · Sneak + right click: turn over",
+        "Jobb klikk: leszedés · Guggolás + jobb klikk: megfordítás",
+    ),
+    ("furnace.insert", "Right click: put in", "Jobb klikk: berakás"),
+    ("furnace.take", "Right click: take out", "Jobb klikk: kivétel"),
     ("gui.furnace", "Furnace", "Kemence"),
     ("gui.chest", "Chest", "Láda"),
     ("gui.large_chest", "Large Chest", "Nagy láda"),

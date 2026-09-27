@@ -95,6 +95,7 @@ impl Game {
                 .map(|(t, _)| eye + dir * t)
                 .unwrap_or(hit.as_vec3() + Vec3::splat(0.5));
         }
+        self.aim_furnace();
         // A mob in front of the targeted block takes the crosshair (entity reach: 3 blocks).
         self.mob_target = None;
         self.player_target = None;
@@ -235,6 +236,7 @@ impl Game {
             *k > 0.0 || target > 0.0
         });
 
+        self.furnace_fx(dt);
         if self.is_client() {
             // A LAN player's world is run by the host: only follow what it sends.
             self.client_world(dt);
@@ -256,25 +258,8 @@ impl Game {
             }
         }
 
-        // Furnaces: smelt, and switch between lit/unlit blocks.
-        let mut relight = Vec::new();
-        for (p, f) in self.block_entities.furnaces.iter_mut() {
-            let lit = f.update(dt);
-            let b = self.terrain.world.geti(*p);
-            if let (true, Some(fac)) = (is_furnace(b), facing(b)) {
-                let want = if lit {
-                    FURNACE_LIT + fac
-                } else {
-                    FURNACE + fac
-                };
-                if want != b {
-                    relight.push((*p, want));
-                }
-            }
-        }
-        for (p, b) in relight {
-            self.set_block(p, b);
-        }
+        // Furnaces: cook, smelt, and switch between lit/unlit blocks.
+        self.update_furnaces(dt);
 
         // Saplings grow into trees.
         let mut grow = Vec::new();

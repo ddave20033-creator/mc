@@ -27,7 +27,7 @@ const UI_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.frag.spv"));
 pub const SHADOW_SIZE: u32 = 4096;
 const SHADOW_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 const UI_MAX_VERTS: usize = 150_000;
-const DYN_MAX_VERTS: usize = 60_000;
+const DYN_MAX_VERTS: usize = 250_000;
 const MAX_UPLOADS_PER_FRAME: usize = 24;
 /// Indirect draw commands per frame (chunks' opaque parts, a few each).
 const MAX_INDIRECT: usize = 65536;

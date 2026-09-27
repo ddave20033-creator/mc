@@ -165,7 +165,18 @@ pub mod tex {
     pub const WATER_ANIM: u32 = SHEEP_SPAWN_EGG + 1;
     pub const LAVA_ANIM: u32 = WATER_ANIM + FLUID_FRAMES;
     pub const FLUID_FRAMES: u32 = 32;
-    pub const LAYERS: usize = (LAVA_ANIM + FLUID_FRAMES) as usize;
+    /// Grilled meat (made from the raw and cooked textures by `synth_grilled`).
+    pub const HALF_COOKED_PORKCHOP: u32 = LAVA_ANIM + FLUID_FRAMES;
+    pub const HALF_COOKED_MUTTON: u32 = HALF_COOKED_PORKCHOP + 1;
+    pub const BURNT_PORKCHOP: u32 = HALF_COOKED_PORKCHOP + 2;
+    pub const BURNT_MUTTON: u32 = HALF_COOKED_PORKCHOP + 3;
+    /// A soft rounded highlight (drawn multiplied): the slot under the mouse, the spot of a
+    /// furnace to put meat on.
+    pub const SLOT_GLOW: u32 = BURNT_MUTTON + 1;
+    /// The furnace front with its openings cut out, and the sooty stone inside them.
+    pub const FURNACE_FRONT_CUT: u32 = SLOT_GLOW + 1;
+    pub const FURNACE_INSIDE: u32 = SLOT_GLOW + 2;
+    pub const LAYERS: usize = (FURNACE_INSIDE + 1) as usize;
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -241,6 +252,7 @@ fn is_item_icon(l: u32) -> bool {
         || l == tex::DOOR_ITEM
         || l == tex::BED_ITEM
         || (tex::MUTTON..=tex::SHEEP_SPAWN_EGG).contains(&l)
+        || (tex::HALF_COOKED_PORKCHOP..=tex::BURNT_MUTTON).contains(&l)
 }
 
 fn is_crack(l: u32) -> bool {
@@ -302,6 +314,8 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::DOOR_BOTTOM
         || (tex::BED_HEAD_EAST..=tex::BED_FOOT_END).contains(&l)
         || l == tex::FLAME_PARTICLE
+        || l == tex::SLOT_GLOW
+        || l == tex::FURNACE_FRONT_CUT
         || (tex::SMOKE..tex::SMOKE + SMOKE_FRAMES).contains(&l)
 }
 
@@ -373,6 +387,10 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
     });
     apply_pack(packs, &mut base);
     synth_doors(&mut base);
+    synth_grilled(&mut base);
+    synth_glow(&mut base);
+    synth_furnace_cut(&mut base);
+    synth_furnace_inside(&mut base);
     // Fluids without animation frames: every frame is the still texture (it still scrolls).
     for (still, anim) in [(tex::WATER, tex::WATER_ANIM), (tex::LAVA, tex::LAVA_ANIM)] {
         let src = still as usize * layer_bytes;
@@ -578,6 +596,149 @@ fn synth_doors(base: &mut [u8]) {
                 }
                 let i = o + (y * TILE + x) * 4;
                 base[i..i + 4].copy_from_slice(&px);
+            }
+        }
+    }
+}
+
+/// The highlight of a slot or spot: a soft rounded patch that slightly brightens what is under
+/// it (drawn multiplied: mid-gray changes nothing), with a faintly brighter rim. Clear outside.
+fn synth_glow(base: &mut [u8]) {
+    let o = tex::SLOT_GLOW as usize * TILE * TILE * 4;
+    let t = TILE as f32;
+    let radius = t * 0.2;
+    let feather = t * 0.08;
+    for y in 0..TILE {
+        for x in 0..TILE {
+            let p = [x as f32 + 0.5, y as f32 + 0.5];
+            let q = p.map(|v| (v - t * 0.5).abs() - (t * 0.5 - radius));
+            let outside =
+                (q[0].max(0.0).powi(2) + q[1].max(0.0).powi(2)).sqrt() + q[0].max(q[1]).min(0.0);
+            // Distance inward from the rounded edge.
+            let depth = radius - outside;
+            let i = o + (y * TILE + x) * 4;
+            if depth <= 0.0 {
+                continue;
+            }
+            let fade = (depth / feather).min(1.0);
+            let rim = (1.0 - ((depth - feather * 0.9) / (t * 0.05)).abs()).clamp(0.0, 1.0);
+            let v = (150.0 + 30.0 * rim) as u8;
+            let a = (26.0 + 229.0 * fade) as u8;
+            base[i..i + 4].copy_from_slice(&[v, v, v, a]);
+        }
+    }
+}
+
+/// The furnace front with its two openings cut out (the mouth above, the firebox below), for
+/// the furnace model with real hollows behind them: in each row, everything between the
+/// dark outline of an opening is made clear.
+fn synth_furnace_cut(base: &mut [u8]) {
+    let layer_bytes = TILE * TILE * 4;
+    let src = base[tex::FURNACE_FRONT as usize * layer_bytes..][..layer_bytes].to_vec();
+    let o = tex::FURNACE_FRONT_CUT as usize * layer_bytes;
+    let dark = |x: usize, y: usize| {
+        let i = (y * TILE + x) * 4;
+        (src[i] as u32 + src[i + 1] as u32 + src[i + 2] as u32) < 60
+    };
+    for y in 0..TILE {
+        let row = &mut base[o + y * TILE * 4..][..TILE * 4];
+        row.copy_from_slice(&src[y * TILE * 4..][..TILE * 4]);
+        for px in row.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        if !(TILE / 10..TILE - 2).contains(&y) {
+            continue;
+        }
+        let first = (TILE / 16..TILE - TILE / 16).find(|&x| dark(x, y));
+        let last = (TILE / 16..TILE - TILE / 16).rev().find(|&x| dark(x, y));
+        if let (Some(a), Some(b)) = (first, last) {
+            if b - a >= TILE / 8 {
+                for x in a..=b {
+                    row[x * 4 + 3] = 0;
+                }
+            }
+        }
+    }
+}
+
+/// Inside a furnace: its stone blackened with soot, darkest deep inside.
+fn synth_furnace_inside(base: &mut [u8]) {
+    let layer_bytes = TILE * TILE * 4;
+    let src = base[tex::FURNACE_SIDE as usize * layer_bytes..][..layer_bytes].to_vec();
+    let o = tex::FURNACE_INSIDE as usize * layer_bytes;
+    for i in (0..layer_bytes).step_by(4) {
+        let k = 0.52;
+        base[o + i] = (src[i] as f32 * k + 6.0) as u8;
+        base[o + i + 1] = (src[i + 1] as f32 * k + 4.0) as u8;
+        base[o + i + 2] = (src[i + 2] as f32 * k + 3.0) as u8;
+        base[o + i + 3] = 255;
+    }
+}
+
+/// Grilled meat made from the final raw and cooked textures (unless a pack has them): one
+/// side cooked shows the cooked meat over its upper left half, burnt meat is cooked meat
+/// charred almost black with a few glowing embers.
+fn synth_grilled(base: &mut [u8]) {
+    let layer_bytes = TILE * TILE * 4;
+    let get = |base: &[u8], l: u32| base[l as usize * layer_bytes..][..layer_bytes].to_vec();
+    for (raw, cooked, half, burnt) in [
+        (
+            tex::PORKCHOP,
+            tex::COOKED_PORKCHOP,
+            tex::HALF_COOKED_PORKCHOP,
+            tex::BURNT_PORKCHOP,
+        ),
+        (
+            tex::MUTTON,
+            tex::COOKED_MUTTON,
+            tex::HALF_COOKED_MUTTON,
+            tex::BURNT_MUTTON,
+        ),
+    ] {
+        let (r, c) = (get(base, raw), get(base, cooked));
+        let empty = |base: &[u8], l: u32| get(base, l).iter().all(|&v| v == 0);
+        if empty(base, half) {
+            let o = half as usize * layer_bytes;
+            for y in 0..TILE {
+                for x in 0..TILE {
+                    let i = (y * TILE + x) * 4;
+                    // A slightly ragged diagonal between the two halves.
+                    let wobble = ((x * 7 + y * 13) % 5) as i32 - 2;
+                    let cooked_side = (x + y) as i32 + wobble * 2 < TILE as i32;
+                    let src = if (cooked_side && c[i + 3] > 127) || r[i + 3] <= 127 {
+                        &c
+                    } else {
+                        &r
+                    };
+                    base[o + i..o + i + 4].copy_from_slice(&src[i..i + 4]);
+                }
+            }
+        }
+        if empty(base, burnt) {
+            let o = burnt as usize * layer_bytes;
+            for y in 0..TILE {
+                for x in 0..TILE {
+                    let i = (y * TILE + x) * 4;
+                    let h = (x as u32)
+                        .wrapping_mul(0x9E37_79B1)
+                        .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B));
+                    let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
+                    let noise = ((h >> 8) & 0xFF) as f32 / 255.0;
+                    let luma =
+                        (c[i] as f32 * 0.3 + c[i + 1] as f32 * 0.59 + c[i + 2] as f32 * 0.11)
+                            / 255.0;
+                    let k = 0.16 + 0.22 * luma + 0.06 * noise;
+                    let mut px = [
+                        (c[i] as f32 * k + 10.0) as u8,
+                        (c[i + 1] as f32 * k * 0.8 + 6.0) as u8,
+                        (c[i + 2] as f32 * k * 0.7 + 4.0) as u8,
+                        c[i + 3],
+                    ];
+                    if noise > 0.985 && px[3] > 127 {
+                        px = [168, 58, 18, 255];
+                    }
+                    base[o + i..o + i + 4].copy_from_slice(&px);
+                }
             }
         }
     }

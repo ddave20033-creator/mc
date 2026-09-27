@@ -76,6 +76,12 @@ impl Game {
             if !sneaking && opens && !self.right_pressed {
                 return;
             }
+            // Furnaces have no screen: meat goes on top, the rest into the front.
+            if let Some((p, k)) = self.furnace_part.filter(|(p, _)| *p == hit) {
+                if self.right_pressed && self.use_furnace(p, k, sneaking) {
+                    return;
+                }
+            }
             if !sneaking {
                 if hb == CRAFTING_TABLE {
                     // Whatever was left on the table is still there.
@@ -89,8 +95,6 @@ impl Game {
                     return;
                 }
                 if is_furnace(hb) {
-                    self.block_entities.furnaces.entry(hit).or_default();
-                    self.open_container(Container::Furnace(hit));
                     return;
                 }
                 if is_door(hb) {

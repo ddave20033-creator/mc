@@ -42,6 +42,12 @@ pub const COOKED_MUTTON: ItemId = 275;
 /// Shear sheep, and mine leaves, grass and dead bushes so they drop themselves.
 pub const SHEARS: ItemId = 276;
 pub const SHEEP_SPAWN_EGG: ItemId = 277;
+/// Meat grilled on one side only (on top of a furnace): half as filling as cooked.
+pub const HALF_COOKED_PORKCHOP: ItemId = 278;
+pub const HALF_COOKED_MUTTON: ItemId = 279;
+/// Meat left on the fire too long.
+pub const BURNT_PORKCHOP: ItemId = 280;
+pub const BURNT_MUTTON: ItemId = 281;
 /// Minecraft's shears durability.
 const SHEARS_DURABILITY: u16 = 238;
 const TOOL_BASE: ItemId = 300;
@@ -194,10 +200,26 @@ pub fn consumable(id: ItemId) -> Option<crate::entity::survival::Consumable> {
         COOKED_PORKCHOP => food(8.0, 12.8),
         MUTTON => food(2.0, 1.2),
         COOKED_MUTTON => food(6.0, 9.6),
+        HALF_COOKED_PORKCHOP => food(4.0, 6.4),
+        HALF_COOKED_MUTTON => food(3.0, 4.8),
+        BURNT_PORKCHOP => food(2.0, 1.0),
+        BURNT_MUTTON => food(1.0, 0.6),
         WATER_BOTTLE => drink(6.0, true),
         PURIFIED_WATER => drink(10.0, false),
         _ => return None,
     })
+}
+
+/// Meat that is grilled on top of a furnace: (raw, one side cooked, cooked, burnt).
+pub fn meat(id: ItemId) -> Option<[ItemId; 4]> {
+    const PORK: [ItemId; 4] = [
+        PORKCHOP,
+        HALF_COOKED_PORKCHOP,
+        COOKED_PORKCHOP,
+        BURNT_PORKCHOP,
+    ];
+    const LAMB: [ItemId; 4] = [MUTTON, HALF_COOKED_MUTTON, COOKED_MUTTON, BURNT_MUTTON];
+    [PORK, LAMB].into_iter().find(|m| m.contains(&id))
 }
 
 /// Damage dealt when hitting a mob with this item (Minecraft 1.8 values; 1 = bare hand).
@@ -388,6 +410,34 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Cooked Mutton",
         "Sült ürühús",
         tex::COOKED_MUTTON,
+    ),
+    (
+        HALF_COOKED_PORKCHOP,
+        "half_cooked_porkchop",
+        "Half-Cooked Porkchop",
+        "Félig sült disznóhús",
+        tex::HALF_COOKED_PORKCHOP,
+    ),
+    (
+        HALF_COOKED_MUTTON,
+        "half_cooked_mutton",
+        "Half-Cooked Mutton",
+        "Félig sült ürühús",
+        tex::HALF_COOKED_MUTTON,
+    ),
+    (
+        BURNT_PORKCHOP,
+        "burnt_porkchop",
+        "Burnt Porkchop",
+        "Szenes disznóhús",
+        tex::BURNT_PORKCHOP,
+    ),
+    (
+        BURNT_MUTTON,
+        "burnt_mutton",
+        "Burnt Mutton",
+        "Szenes ürühús",
+        tex::BURNT_MUTTON,
     ),
     (SHEARS, "shears", "Shears", "Olló", tex::SHEARS),
     (

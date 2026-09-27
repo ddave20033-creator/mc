@@ -332,6 +332,21 @@ pub fn save_entities(
             slots_str(&[f.input, f.fuel, f.output])
         );
     }
+    for (p, f) in &be.furnaces {
+        for (i, g) in f.grill.iter().enumerate() {
+            if let Some(g) = g {
+                s += &format!(
+                    "grill:{}:{}:{}:{},{}:{}\n",
+                    pos_str(*p),
+                    i,
+                    crate::item::key(g.raw),
+                    g.cook[0],
+                    g.cook[1],
+                    g.down
+                );
+            }
+        }
+    }
     for (p, c) in &be.chests {
         s += &format!("chest:{}:{}\n", pos_str(*p), slots_str(&c[..]));
     }
@@ -395,6 +410,25 @@ pub fn load_entities(
                     (f.burn, f.burn_total, f.cook) = (t[0], t[1], t[2]);
                 }
                 be.furnaces.insert(p, f);
+            }
+            // Meat on a furnace's top (after its furnace line).
+            "grill" if parts.len() >= 6 => {
+                let t: Vec<f32> = parts[4].split(',').filter_map(|x| x.parse().ok()).collect();
+                let (Ok(i), Some(raw), 2) = (
+                    parts[2].parse::<usize>(),
+                    crate::item::from_key(parts[3]),
+                    t.len(),
+                ) else {
+                    continue;
+                };
+                if let (Some(f), true) = (be.furnaces.get_mut(&p), i < 4) {
+                    f.grill[i] = Some(crate::entity::Grilled {
+                        raw,
+                        cook: [t[0], t[1]],
+                        down: parts[5].parse::<u8>().unwrap_or(1) & 1,
+                        flip: 0.0,
+                    });
+                }
             }
             "chest" if parts.len() >= 3 => {
                 let mut slots = Box::new([None; 27]);

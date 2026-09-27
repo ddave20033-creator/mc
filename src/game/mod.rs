@@ -3,6 +3,7 @@ mod blocks;
 mod camera;
 mod commands;
 mod frame;
+mod furnace;
 mod gui;
 mod health;
 mod hud;
@@ -10,6 +11,7 @@ mod items;
 mod mobs;
 mod multi;
 mod sleep;
+mod station;
 mod update;
 mod worlds;
 
@@ -65,7 +67,6 @@ pub enum Container {
     Inventory,
     /// Crafting table (3x3) at a position; the grid stays in the table.
     Crafting(IVec3),
-    Furnace(IVec3),
     Chest(IVec3),
     Creative,
 }
@@ -185,6 +186,9 @@ pub struct Game {
     /// F5 view mode and the third-person camera's state.
     camera: camera::Rig,
     target: Option<(IVec3, IVec3)>,
+    /// The furnace part under the crosshair: a corner of the top (0..4) or the front's
+    /// upper or lower half (`block_entity::part`).
+    furnace_part: Option<(IVec3, u8)>,
     /// Where the look ray meets the targeted block.
     target_point: Vec3,
 
@@ -209,6 +213,19 @@ pub struct Game {
     door_swing: crate::world::FastMap<IVec3, f32>,
     /// Slot drag in progress (Minecraft-style stack spreading).
     drag: Option<gui::Drag>,
+    /// The slot a stack was just picked up from with the button still held: letting go
+    /// over another slot puts it there.
+    press_pick: Option<gui::SlotRef>,
+    /// The camera over an open chest or crafting table (and gliding back after).
+    station: Option<station::Station>,
+    /// What the mouse points at in the chest or on the table, and the frame drawn around
+    /// its slot there.
+    station_hover: Option<gui::SlotRef>,
+    station_frame: Option<[Vec3; 4]>,
+    /// Something just crafted at a table, shown flying together.
+    craft_fx: Option<station::CraftFx>,
+    /// The side each crafting table was last used from (its grid faces that way).
+    table_sides: crate::world::FastMap<IVec3, u8>,
     /// Time and slot of the last left click, for double-click collecting.
     slot_click: (f32, Option<gui::SlotRef>),
     block_entities: BlockEntities,
@@ -411,6 +428,7 @@ impl Game {
             limbs: LimbSmoother::default(),
             camera: camera::Rig::default(),
             target: None,
+            furnace_part: None,
             target_point: Vec3::ZERO,
             inventory: Inventory::new(),
             hotbar_slot: 0,
@@ -425,6 +443,12 @@ impl Game {
             chest_open: Default::default(),
             door_swing: Default::default(),
             drag: None,
+            press_pick: None,
+            station: None,
+            station_hover: None,
+            station_frame: None,
+            table_sides: Default::default(),
+            craft_fx: None,
             slot_click: (-1.0, None),
             block_entities: BlockEntities::default(),
             items: Vec::new(),
