@@ -392,6 +392,11 @@ impl Ui {
         );
     }
 
+    /// Hard-edged solid quad of any shape (a triangle when two corners are the same).
+    pub fn quad(&mut self, p: [Vec2; 4], c: Color) {
+        self.push(p, [[0.0; 2]; 4], [c; 4], [1e6, 1e6, 0.0, 0.0], MODE_RECT);
+    }
+
     pub fn solid(&mut self, x: f32, y: f32, w: f32, h: f32, c: Color) {
         self.gradient(x, y, w, h, c, c);
     }

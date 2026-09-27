@@ -7,6 +7,7 @@ impl Game {
     pub(in crate::game) fn draw_name_tags(&mut self) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let cam = self.player.eye();
+        let time = self.time;
         for r in &self.remotes {
             let p = r.pose;
             if !r.shown() {
@@ -41,6 +42,7 @@ impl Game {
             let alpha = if p.crouch > 0.5 { 0.5 } else { 1.0 } * fade;
             self.ui
                 .text_centered(&r.name, x, by + fs, fs, with_alpha(WHITE, alpha), false);
+            status_bubble(&mut self.ui, x, by - 1.5 * fs, fs * 0.28, p.status, time, fade);
         }
     }
 
@@ -325,5 +327,88 @@ impl Game {
             }
         }
         Action::None
+    }
+}
+
+/// The bubble above a player's name showing what they are busy with (`net::status`): an
+/// animated icon, no text. Its pointer ends at (x, bottom); `u` is the size of one of the
+/// 56 x 46 units the bubble is drawn in (the same design as tools/status_icons).
+fn status_bubble(ui: &mut Ui, x: f32, bottom: f32, u: f32, status: u8, time: f32, fade: f32) {
+    use crate::net::status;
+    let accent = match status {
+        status::TYPING => rgba(77, 163, 255, 255),
+        status::MENU => rgba(255, 181, 71, 255),
+        status::AFK => rgba(167, 139, 250, 255),
+        status::INVENTORY => rgba(74, 222, 128, 255),
+        _ => return,
+    };
+    // The inactive slots of the grid: the accent sunk into the bubble.
+    let dim = with_alpha(crate::ui::lerp_color(accent, rgba(18, 19, 24, 255), 0.62), fade);
+    let (bg, accent) = (rgba(18, 19, 24, (255.0 * fade) as u8), with_alpha(accent, fade));
+    // One loop of the animation every 1.12 s; `ease` goes 0..1..0 over it.
+    let t = (time / 1.12).fract();
+    let ease = |t: f32| 0.5 - 0.5 * (t * TAU).cos();
+    let circle = |ui: &mut Ui, cx: f32, cy: f32, r: f32, c: Color| {
+        ui.rect(cx - r, cy - r, 2.0 * r, 2.0 * r, c, r)
+    };
+
+    let (bw, bh) = (56.0 * u, 46.0 * u);
+    let (x0, y0) = (x - bw * 0.5, bottom - 7.0 * u - bh);
+    ui.rect(x0, y0, bw, bh, bg, 16.0 * u);
+    let tip = Vec2::new(x, bottom);
+    ui.quad(
+        [
+            Vec2::new(x - 7.0 * u, y0 + bh),
+            Vec2::new(x + 7.0 * u, y0 + bh),
+            tip,
+            tip,
+        ],
+        bg,
+    );
+
+    let (cx, cy) = (x, y0 + bh * 0.5);
+    match status {
+        status::TYPING => {
+            // Three dots bouncing one after the other.
+            for i in 0..3 {
+                let phase = (t - i as f32 * 0.15).rem_euclid(1.0);
+                let lift = if phase < 0.5 { (phase * TAU).sin() } else { 0.0 };
+                let dx = (i as f32 - 1.0) * 11.0 * u;
+                circle(ui, cx + dx, cy - lift * 5.0 * u, 4.0 * u, accent);
+            }
+        }
+        status::MENU => {
+            // Pause bars, breathing slightly.
+            let k = 0.9 + 0.1 * ease(t);
+            let (w, h) = (6.0 * u * k, 20.0 * u * k);
+            for side in [-1.0, 1.0] {
+                let bx = cx + side * (2.0 * u + w * 0.5) - w * 0.5;
+                ui.rect(bx, cy - h * 0.5, w, h, accent, 2.0 * u);
+            }
+        }
+        status::AFK => {
+            // Crescent moon with two stars twinkling in turn.
+            let (mx, my, r) = (cx - 3.0 * u, cy + u, 10.0 * u);
+            circle(ui, mx, my, r, accent);
+            circle(ui, mx + 6.0 * u, my - 4.0 * u, r, bg);
+            for (k, (sx, sy, size)) in [(11.0, -9.0, 5.0), (15.0, 3.0, 3.8)].into_iter().enumerate() {
+                let r = size * u * (0.45 + 0.55 * ease(t + k as f32 * 0.5));
+                let (px, py, n) = (cx + sx * u, cy + sy * u, r * 0.28);
+                let v = Vec2::new;
+                ui.quad([v(px, py - r), v(px + n, py), v(px, py + r), v(px - n, py)], accent);
+                ui.quad([v(px - r, py), v(px, py - n), v(px + r, py), v(px, py + n)], accent);
+            }
+        }
+        _ => {
+            // A 3x3 grid of slots; the lit one goes along them.
+            let (sz, gap) = (7.0 * u, 2.5 * u);
+            let lit = (t * 9.0) as usize % 9;
+            for i in 0..9 {
+                let sx = cx - 1.5 * sz - gap + (i % 3) as f32 * (sz + gap);
+                let sy = cy - 1.5 * sz - gap + (i / 3) as f32 * (sz + gap);
+                let c = if i == lit { accent } else { dim };
+                ui.rect(sx, sy, sz, sz, c, 1.8 * u);
+            }
+        }
     }
 }

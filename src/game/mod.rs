@@ -213,6 +213,8 @@ pub struct Game {
     /// Creative inventory search text; typing goes to it while it is focused.
     creative_search: String,
     search_focused: bool,
+    /// The open tab of the creative inventory (index into `gui::TABS`); kept between openings.
+    creative_tab: usize,
     /// Chest lid animation 0..1 per chest position.
     chest_open: crate::world::FastMap<IVec3, f32>,
     /// How far each door half is swung open (0..1), easing toward its state.
@@ -322,6 +324,8 @@ pub struct Game {
     /// LAN game: hosting or joined, the other players, and the multiplayer screen state.
     net: Option<multi::Net>,
     remotes: Vec<multi::RemotePlayer>,
+    /// The game window is in front (not tabbed out): the others see "away" otherwise.
+    focused: bool,
     next_entity_id: u32,
     finder: Option<crate::net::Finder>,
     mp_address: String,
@@ -456,6 +460,7 @@ impl Game {
             scroll_drag: false,
             creative_search: String::new(),
             search_focused: false,
+            creative_tab: 0,
             chest_open: Default::default(),
             door_swing: Default::default(),
             drag: None,
@@ -527,6 +532,7 @@ impl Game {
             vram_timer: 0.0,
             net: None,
             remotes: Vec::new(),
+            focused: true,
             next_entity_id: 0,
             finder: None,
             mp_address: String::new(),
@@ -777,7 +783,9 @@ impl Game {
                     }
                 }
             }
+            WindowEvent::Focused(true) => self.focused = true,
             WindowEvent::Focused(false) => {
+                self.focused = false;
                 self.keys.clear();
                 self.w_sprint = false;
                 self.last_w = -1.0;
