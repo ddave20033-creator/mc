@@ -1434,31 +1434,9 @@ fn cartridge(fx: f32, fy: f32, a: (f32, f32), b: (f32, f32), r: f32) -> Option<[
     Some(base.map(|c| c * v))
 }
 
-/// A cartridge standing on its base, seen from above (`r` = radius, design units).
-fn standing_cartridge(fx: f32, fy: f32, cx: f32, cy: f32, r: f32) -> Option<[f32; 3]> {
-    let dd = (fx - cx).hypot(fy - cy) / r;
-    if dd > 1.0 {
-        return None;
-    }
-    let light = ((cx - fx) + (cy - fy)) / r * 0.2;
-    if dd > 0.72 {
-        Some(BRASS.map(|c| c * (0.95 + light)))
-    } else if dd > 0.62 {
-        Some(BRASS.map(|c| c * 0.6))
-    } else {
-        let spec = if (fx - cx + 0.3 * r).hypot(fy - cy + 0.3 * r) < 0.2 * r {
-            0.35
-        } else {
-            0.0
-        };
-        Some(COPPER.map(|c| c * (1.0 + light + spec)))
-    }
-}
-
-/// The gun station: a small steel workbench with cartridges on its top.
+/// The gun station: a small steel workbench with a plain steel top.
 fn gun_station(l: u32, x: i32, y: i32) -> [u8; 4] {
     let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-    let (dx, dy) = (d(x), d(y));
     let steel = |v: f32| col([150.0, 154.0, 162.0], v, UNTINTED);
     let dark = |v: f32| col([74.0, 78.0, 86.0], v, UNTINTED);
     let rivet = |cx: i32, cy: i32| (x - cx).pow(2) + (y - cy).pow(2) <= 6;
@@ -1472,50 +1450,10 @@ fn gun_station(l: u32, x: i32, y: i32) -> [u8; 4] {
                     .any(|&(cx, cy)| rivet(cx, cy));
                 return dark(if r { v * 1.35 } else { v });
             }
-            // Cartridges lying on the plate, with a soft shadow.
-            let lying = [
-                ((4.0, 9.5), (13.0, 6.5)),
-                ((5.0, 14.0), (14.0, 12.5)),
-                ((4.5, 25.5), (12.5, 20.0)),
-            ];
-            for &(a, b) in &lying {
-                if let Some(c) = cartridge(dx, dy, a, b, 1.35) {
-                    return col(c, 1.0, UNTINTED);
-                }
-            }
-            let shadow = lying.iter().any(|&(a, b)| {
-                let o = (-0.5, -0.6);
-                cartridge(dx + o.0, dy + o.1, a, b, 1.35).is_some()
-            });
-            // Ammo tray (top right) holding six standing cartridges.
-            if (17.5..28.0).contains(&dx) && (3.5..12.5).contains(&dy) {
-                for row in 0..2 {
-                    for c in 0..3 {
-                        let (cx, cy) = (19.8 + c as f32 * 3.1, 5.8 + row as f32 * 4.3);
-                        if let Some(p) = standing_cartridge(dx, dy, cx, cy, 1.35) {
-                            return col(p, 1.0, UNTINTED);
-                        }
-                    }
-                }
-                let v = bevel(fx, fy, 70.0, 14.0, 112.0, 50.0, 3.0).recip();
-                return col([62.0, 70.0, 52.0], v * (0.85 + 0.15 * grain(l, x, y, 601)), UNTINTED);
-            }
-            // Rubber mat (bottom right) with a cleaning rod and a small brush.
-            if (15.5..28.5).contains(&dx) && (16.0..28.5).contains(&dy) {
-                if seg_dist(dx, dy, (17.5, 26.5), (26.5, 18.5)) < 0.45 {
-                    return col(GUN_STEEL_C, 1.0, UNTINTED);
-                }
-                if seg_dist(dx, dy, (19.0, 19.0), (22.0, 19.0)) < 0.9 {
-                    let bristle = (x % 3 == 0) as i32 as f32;
-                    return col([150.0, 110.0, 70.0], 0.85 + 0.2 * bristle, UNTINTED);
-                }
-                let grid = (x - 62) % 12 == 0 || (y - 64) % 12 == 0;
-                let v = if grid { 0.78 } else { 0.95 + 0.1 * grain(l, x, y, 602) };
-                return col([56.0, 66.0, 60.0], v, UNTINTED);
-            }
-            let scratch = vn2(l, x, y, 64, 1, 603) > 0.86;
-            let v = brushed(l, x, y, 604) * if shadow { 0.72 } else { 1.0 } * if scratch { 1.08 } else { 1.0 };
-            steel(v)
+            // A plain brushed steel plate, a few faint scratches on it.
+            let scratch = vn2(l, x, y, 64, 1, 603) > 0.9;
+            let v = brushed(l, x, y, 604) * if scratch { 1.05 } else { 1.0 };
+            steel(v * 1.08)
         }
         tex::GUN_STATION_BOTTOM => {
             let foot = [(10, 10), (117, 10), (10, 117), (117, 117)]
@@ -1594,6 +1532,49 @@ fn gun_surface(l: u32, x: i32, y: i32) -> [u8; 4] {
         _ => (GUN_POLYMER_C, 0.82 + 0.3 * grain(l, x, y, 622)),
     };
     col(c, v * edge, 255)
+}
+
+/// Muzzle flash sprites (drawn glowing, tinted): a star of uneven spikes around a white-hot
+/// middle seen from the front; from the side a flame tongue leaving the muzzle at the left.
+/// The colour runs from white in the middle to yellow and orange at the edges.
+fn muzzle_flash(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let (u, v) = ((x as f32 + 0.5) / TILE as f32, (y as f32 + 0.5) / TILE as f32);
+    // How far out this texel is, 0 in the middle .. 1 at the flame's edge (None: outside).
+    let edge = if l == tex::MUZZLE_FLASH {
+        let (dx, dy) = (u - 0.5, v - 0.5);
+        let r = dx.hypot(dy) * 2.0;
+        let a = dy.atan2(dx);
+        // Eight spikes of different lengths, and a round core.
+        let spikes = (0..8)
+            .map(|i| {
+                let ang = i as f32 * std::f32::consts::TAU / 8.0 + hash(l, i, 0, 700) * 0.3;
+                let len = 0.55 + 0.45 * hash(l, i, 1, 701);
+                let d = ((a - ang + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI).abs();
+                len * (1.0 - d / 0.28).max(0.0).powf(1.6)
+            })
+            .fold(0.0f32, f32::max);
+        let reach = (0.38 + 0.08 * vn(l, x, y, 16, 702)).max(spikes);
+        (r < reach).then(|| r / reach)
+    } else {
+        // Along the tongue: widest a third of the way out, ragged edges, a pointed tip.
+        let along = u;
+        let half = 0.42 * (along / 0.3).min(1.0).powf(0.6) * (1.0 - along).max(0.0).powf(0.8);
+        let ragged = half * (0.8 + 0.35 * vn(l, x, y, 8, 703));
+        let off = (v - 0.5).abs();
+        (off < ragged && along > 0.02).then(|| (off / ragged.max(1e-3)).max(along * 0.8))
+    };
+    let Some(k) = edge else {
+        return [0, 0, 0, 0];
+    };
+    let white = [255.0, 250.0, 230.0];
+    let yellow = [255.0, 214.0, 110.0];
+    let orange = [255.0, 130.0, 40.0];
+    let c = if k < 0.35 {
+        lerp3(white, yellow, k / 0.35)
+    } else {
+        lerp3(yellow, orange, (k - 0.35) / 0.65)
+    };
+    col(c, 0.92 + 0.08 * grain(l, x, y, 704), 255)
 }
 
 /// Ammunition icons: a .50 AE round (short and fat), a 5.56 mm round (long and slim), a
@@ -2271,6 +2252,7 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         tex::GUN_BLUED | tex::GUN_STEEL | tex::GUN_POLYMER | tex::GUN_GLASS | tex::GUN_WOOD => {
             gun_surface(l, x, y)
         }
+        tex::MUZZLE_FLASH | tex::MUZZLE_FLASH_SIDE => muzzle_flash(l, x, y),
         // Filled from the packs' animations, or copies of the still texture.
         _ if (tex::WATER_ANIM..tex::GUN_STATION_TOP).contains(&l) => [0, 0, 0, 0],
         // Wool: soft white fibres. The sheep atlases are plain: skin and a white coat.

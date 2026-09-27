@@ -501,11 +501,18 @@ impl Game {
                 self.set_chest_slots(p, &slots);
                 left
             }
-            (Container::GunStation(_), SlotRef::Inv(_))
-                if GunKind::of(stack.item).is_some() && self.guns.bench.gun.is_none() =>
+            // A gun goes onto the table to be cleaned or tuned (swapped with the one there).
+            (Container::GunStation(_), SlotRef::Inv(i))
+                if GunKind::of(stack.item).is_some()
+                    && self.guns.bench.mode != super::guns::BenchMode::Assemble
+                    && self.guns.bench.fit.is_none() =>
             {
-                self.guns.bench.gun = Some(stack);
-                None
+                let old = self.guns.bench.gun.replace(stack);
+                let bench = &mut self.guns.bench;
+                bench.placed_at = self.time;
+                bench.from_slot = Some(i);
+                bench.had_gun = true;
+                old
             }
             // An attachment goes onto the pistol being tuned, if it does not have one yet.
             (Container::GunStation(_), SlotRef::Inv(i))
@@ -520,13 +527,11 @@ impl Game {
                             })
                     }) =>
             {
-                let (bit, _) = *ATTACHMENTS.iter().find(|a| a.1 == stack.item).unwrap();
-                if let Some(g) = &mut self.guns.bench.gun {
-                    set_gun_mods(g, gun_mods(g) | bit);
-                }
-                let mut rest = stack;
-                rest.count -= 1;
-                (rest.count > 0).then_some(rest).and_then(|r| self.move_within_inventory(i, r))
+                // Back in its slot: the hand takes one from there and fits it.
+                self.inventory.slots[i] = Some(stack);
+                let index = ATTACHMENTS.iter().position(|a| a.1 == stack.item).unwrap();
+                self.click_gun_mod(index, false);
+                None
             }
             (_, SlotRef::Inv(i)) => self.move_within_inventory(i, stack),
             _ => self.inventory.add(stack),
@@ -957,6 +962,12 @@ impl Game {
 
     /// Draws the open item screen and handles clicks.
     pub(super) fn container_screen(&mut self, c: Container) {
+        if let Container::GunStation(p) = c {
+            let hovered = self.gun_station_screen(p);
+            let inside = self.station_inside;
+            self.slot_input(c, hovered, None, inside);
+            return;
+        }
         if matches!(c, Container::Chest(_) | Container::Crafting(_)) {
             let hovered = self.station_screen(c);
             let inside = self.station_inside;
@@ -968,7 +979,6 @@ impl Game {
         let mut hovered_stack: Option<Stack> = None;
         let (panel_w, panel_h) = match c {
             Container::Creative => (195.0, 160.0),
-            Container::GunStation(_) => gun_station::PANEL,
             _ => (176.0, 166.0),
         };
         let (px, py) = self.panel(panel_w, panel_h);
@@ -978,7 +988,7 @@ impl Game {
         let at = |gx: f32, gy: f32| (px + gx * s, py + gy * s);
 
         match c {
-            Container::Chest(_) | Container::Crafting(_) => {}
+            Container::Chest(_) | Container::Crafting(_) | Container::GunStation(_) => {}
             Container::Inventory => {
                 let n = Self::craft_size(c);
                 // Grid origin, result slot frame (26 px) origin, arrow x and width.
@@ -1016,7 +1026,6 @@ impl Game {
                 }
                 self.inventory_slots(px, py, 84.0, &mut hovered);
             }
-            Container::GunStation(_) => self.gun_station_panel(px, py, &mut hovered),
             Container::Creative => {
                 let (tx, ty) = at(8.0, 6.0);
                 self.label(t("gui.creative"), tx, ty);

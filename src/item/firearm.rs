@@ -56,6 +56,8 @@ pub struct Stats {
     pub dirt_max: u16,
     /// Always has a scope (it cannot be fitted or taken off).
     pub builtin_scope: bool,
+    /// How big its muzzle flash is.
+    pub flash: f32,
 }
 
 const PISTOL_STATS: Stats = Stats {
@@ -81,6 +83,7 @@ const PISTOL_STATS: Stats = Stats {
     scope_zoom: 0.25,
     dirt_max: 40,
     builtin_scope: false,
+    flash: 1.0,
 };
 
 const DEAGLE_STATS: Stats = Stats {
@@ -99,6 +102,7 @@ const DEAGLE_STATS: Stats = Stats {
     reload: 2.2,
     sight_zoom: 0.75,
     dirt_max: 30,
+    flash: 1.6,
     ..PISTOL_STATS
 };
 
@@ -121,6 +125,7 @@ const M16_STATS: Stats = Stats {
     sight_zoom: 0.7,
     scope_zoom: 0.3,
     dirt_max: 150,
+    flash: 1.2,
     ..PISTOL_STATS
 };
 
@@ -144,6 +149,7 @@ const SNIPER_STATS: Stats = Stats {
     scope_zoom: 0.12,
     dirt_max: 25,
     builtin_scope: true,
+    flash: 2.2,
     ..PISTOL_STATS
 };
 
@@ -168,6 +174,7 @@ const SHOTGUN_STATS: Stats = Stats {
     sight_zoom: 0.85,
     scope_zoom: 0.4,
     dirt_max: 60,
+    flash: 1.9,
     ..PISTOL_STATS
 };
 

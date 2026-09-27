@@ -206,7 +206,10 @@ pub mod tex {
     /// 3D models), and of their ammunition (.50 AE, 5.56 mm, .50 BMG, 12 gauge).
     pub const GUN_ICONS: u32 = GUN_WOOD + 1;
     pub const AMMO_ICONS: u32 = GUN_ICONS + 4;
-    pub const LAYERS: usize = (AMMO_ICONS + 4) as usize;
+    /// Muzzle flash: the star seen from the front, and a flame tongue seen from the side.
+    pub const MUZZLE_FLASH: u32 = AMMO_ICONS + 4;
+    pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
+    pub const LAYERS: usize = (MUZZLE_FLASH_SIDE + 1) as usize;
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -347,6 +350,8 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::DOOR_BOTTOM
         || (tex::BED_HEAD_EAST..=tex::BED_FOOT_END).contains(&l)
         || l == tex::FLAME_PARTICLE
+        || l == tex::MUZZLE_FLASH
+        || l == tex::MUZZLE_FLASH_SIDE
         || l == tex::SLOT_GLOW
         || l == tex::FURNACE_FRONT_CUT
         || (tex::SMOKE..tex::SMOKE + SMOKE_FRAMES).contains(&l)

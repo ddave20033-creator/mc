@@ -498,8 +498,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("gun.again", "Click to build another one.", "Kattints egy újabbhoz."),
     (
         "gun.put_gun",
-        "Put a gun in the slot on the right.",
-        "Tedd a fegyvert a jobb oldali helyre!",
+        "Hold a gun, or put one on the table (shift-click it in the inventory).",
+        "Vegyél kézbe egy fegyvert, vagy tedd az asztalra (shift+kattintás a tárgylistában)!",
     ),
     (
         "gun.scrub",
@@ -526,8 +526,13 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("gun.attachments", "Attachments", "Kiegészítők"),
     (
         "gun.tune_hint",
-        "Put the gun in, then attachments in the slots on the right.",
-        "Tedd be a fegyvert, majd a kiegészítőket a jobb oldali helyekre!",
+        "Click an attachment beside the gun: it goes on. Click one on the gun to take it off.",
+        "Kattints egy kiegészítőre a fegyver mellett, és felkerül. A fegyveren lévőt rákattintva leveszed.",
+    ),
+    (
+        "gun.no_attachments",
+        "You have no attachments for it yet: craft some.",
+        "Még nincs hozzá kiegészítőd: barkácsolj egyet!",
     ),
     (
         "gun.tune_ready",

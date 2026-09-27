@@ -58,6 +58,10 @@ pub struct HandAnim {
     pub torch_tip: Option<Vec3>,
     /// A held pistol's kick after a shot: 1 right after it, back to 0 as it settles.
     recoil: f32,
+    /// The muzzle flash of the last shot: how much is left (1 .. 0), its size and its turn.
+    flash: f32,
+    flash_size: f32,
+    flash_seed: f32,
     /// Where the held pistol's muzzle was drawn last frame (like `torch_tip`).
     pub muzzle_tip: Option<Vec3>,
     /// And its ejection port, where the spent cases fly out, and its laser sight's lens.
@@ -99,6 +103,9 @@ impl HandAnim {
             lantern_swing: crate::model::lantern::SmoothSwing::default(),
             torch_tip: None,
             recoil: 0.0,
+            flash: 0.0,
+            flash_size: 1.0,
+            flash_seed: 0.0,
             muzzle_tip: None,
             eject_tip: None,
             laser_tip: None,
@@ -112,9 +119,15 @@ impl HandAnim {
         }
     }
 
-    /// A shot from the held pistol: it kicks up and back, and the slide flies back.
-    pub fn shoot(&mut self) {
+    /// A shot from the held gun: it kicks up and back, the slide flies back, and a muzzle
+    /// flash of this size (0: none, silenced) turned by `seed` (0..1) lights up for a moment.
+    pub fn shoot(&mut self, flash: f32, seed: f32) {
         self.recoil = 1.0;
+        if flash > 0.0 {
+            self.flash = 1.0;
+            self.flash_size = flash;
+            self.flash_seed = seed;
+        }
     }
 
     /// One swing per action (breaking or placing a block, hitting, throwing). The swing
@@ -188,6 +201,7 @@ impl HandAnim {
         }
         self.equip = (self.equip + dt * 4.0).min(1.0);
         self.recoil = (self.recoil - dt / 0.25).max(0.0);
+        self.flash = (self.flash - dt / 0.06).max(0.0);
         // The sword swings into the blocking pose and back in about 0.15 s.
         let target = if self.blocking { 1.0 } else { 0.0 };
         let step = dt / 0.15;
@@ -427,6 +441,7 @@ impl HandAnim {
         let span = |p: f32, a: f32, b: f32| smooth((p - a) / (b - a));
         let spec = gun::spec(kind);
         let long = spec.support.is_some();
+        let cam = base.w_axis.truncate();
         let mods = kind.shown_mods(self.gun_mods);
         let scope = mods & gun_mod::SCOPE != 0;
         let shells = kind.stats().shells;
@@ -475,7 +490,8 @@ impl HandAnim {
         let hip = base
             * t(-0.2 * f1, 0.1 * (sq * TAU).sin(), -0.2 * (s * PI).sin())
             * t(spec.hip.x, spec.hip.y - (1.0 - eq) * 0.6, spec.hip.z)
-            * ry(92.0 + if long { 8.0 } else { 18.0 } * tilt)
+            // A long gun is turned in more, so its side shows instead of just its stock.
+            * ry(if long { 104.0 + 8.0 * tilt } else { 92.0 + 18.0 * tilt })
             * scale
             * Mat4::from_translation(-spec.grip);
         let (height, eye) = if scope {
@@ -500,8 +516,10 @@ impl HandAnim {
         let (back, turn_up) = if long { (3.0, 7.0 - 4.0 * a) } else { (1.5, 16.0 - 10.0 * a) };
         let recoil = about_grip(t(-back * kick, 0.0, 0.0) * rz(kick * turn_up));
         let (up, roll) = if long { (12.0, 28.0) } else { (22.0, 34.0) };
+        // Working a bolt rolls the gun over a little; racking a pump dips its muzzle.
+        let (bolt_roll, pump_dip) = if shells { (0.0, 3.0) } else { (8.0, 0.0) };
         let turn = about_grip(
-            rz(up * tilt + 3.0 * bump) * rx(roll * tilt + 8.0 * cycled),
+            rz(up * tilt + 3.0 * bump - pump_dip * cycled) * rx(roll * tilt + bolt_roll * cycled),
         );
         let m = pose * recoil * turn;
 
@@ -530,19 +548,38 @@ impl HandAnim {
         let rest = spec.support.map(|s| s + pump);
         let home = rest.unwrap_or(away);
         let lerp = |a: Vec3, b: Vec3, k: f32| a + (b - a) * k;
-        let arm_dir = Vec3::new(-0.1, 1.0, 0.6).normalize();
-        let fist = if !reloading {
-            home
-        } else if shells {
-            // Each shell: down and away for it, up under the port, pushed in, and back.
-            let below = holding(5.0);
-            if p < 0.4 {
-                lerp(home, below, span(p, 0.0, 0.4))
-            } else if p < 0.62 {
-                lerp(below, holding(0.0), span(p, 0.4, 0.6))
+        // The forearm comes up from below and a little from the left, out of the bottom of
+        // the view (not toward the eye).
+        let arm_dir = if long {
+            Vec3::new(0.3, 1.0, 0.35).normalize()
+        } else {
+            Vec3::new(-0.1, 1.0, 0.6).normalize()
+        };
+        // Loading shells: the hand stays by the loading port. For each shell it reaches down
+        // for it, brings it up under the port, pushes it in (up and forward into the tube) and
+        // goes down for the next.
+        let loading = if shells {
+            let grab = holding(9.0) + Vec3::new(-3.0, 0.0, -4.0);
+            let pushed = holding(0.0) + Vec3::X * 2.5;
+            let q = if reloading { p } else { 1.0 };
+            let at = if q < 0.35 {
+                lerp(grab, holding(3.5), span(q, 0.0, 0.35))
+            } else if q < 0.5 {
+                lerp(holding(3.5), holding(0.0), span(q, 0.35, 0.5))
+            } else if q < 0.6 {
+                lerp(holding(0.0), pushed, span(q, 0.5, 0.6))
             } else {
-                lerp(holding(0.0), home, span(p, 0.62, 1.0))
-            }
+                lerp(pushed, grab, span(q, 0.6, 1.0))
+            };
+            Some(at)
+        } else {
+            None
+        };
+        let fist = if let Some(at) = loading {
+            // Between the pump and the loading port as the gun turns over and back.
+            lerp(home, at, tilt)
+        } else if !reloading {
+            home
         } else if p < 0.25 {
             lerp(home, away, span(p, 0.0, 0.15))
         } else if p < 0.55 {
@@ -603,7 +640,7 @@ impl HandAnim {
             if hand_shown {
                 // The left hand and forearm, fist first (model pixels, about a grip across).
                 let rot = glam::Quat::from_rotation_arc(Vec3::Y, arm_dir);
-                let px = 1.0 / 16.0 / spec.view_scale * 0.45;
+                let px = 1.0 / 16.0 / spec.view_scale * if long { 0.34 } else { 0.45 };
                 let arm = m * Mat4::from_scale_rotation_translation(Vec3::splat(px), rot, fist);
                 emit_box(
                     out,
@@ -615,7 +652,7 @@ impl HandAnim {
                     light,
                     fl,
                 );
-                if shells && reloading && p < 0.6 {
+                if shells && reloading && p < 0.55 && tilt > 0.5 {
                     // The shell between the fingers: red hull, brass head.
                     let sh = m * Mat4::from_translation(fist + Vec3::Y * 1.2);
                     emit_box(out, sh, Vec3::new(-1.2, -0.7, -0.7), Vec3::new(1.4, 0.7, 0.7), [crate::world::textures::tex::WOOL; 6], [[200, 40, 36]; 6], light, fl);
@@ -623,7 +660,13 @@ impl HandAnim {
                 }
             }
         }
-        self.muzzle_tip = Some(m.transform_point3(gun::muzzle(kind, mods)));
+        let muzzle = m.transform_point3(gun::muzzle(kind, mods));
+        self.muzzle_tip = Some(muzzle);
+        if self.flash > 0.0 && !(scope && self.aim > 0.97) {
+            let dir = m.transform_vector3(Vec3::X);
+            let size = 0.11 * self.flash_size;
+            super::ballistics::emit_muzzle_flash(out, muzzle, dir, cam, size, self.flash_seed, self.flash);
+        }
         self.eject_tip = Some(m.transform_point3(spec.eject));
         if mods & gun_mod::LASER != 0 {
             self.laser_tip = Some(m.transform_point3(spec.laser));
