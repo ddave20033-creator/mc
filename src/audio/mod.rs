@@ -102,6 +102,10 @@ struct Voice {
     pos: f64,
     step: f64,
     gain: [f32; 2],
+    /// Air takes the highs off far sounds: a low-pass (its coefficient, 1 = open) and its
+    /// state.
+    lp: f32,
+    z: f32,
 }
 
 /// A looping sound of a source in the world, gliding toward its target loudness.
@@ -139,6 +143,8 @@ impl Mixer {
                 let i = v.pos as usize;
                 let f = (v.pos - i as f64) as f32;
                 let s = v.data[i] + (v.data[i + 1] - v.data[i]) * f;
+                v.z += v.lp * (s - v.z);
+                let s = v.z;
                 l += s * v.gain[0];
                 r += s * v.gain[1];
                 v.pos += v.step;
@@ -265,11 +271,21 @@ impl Audio {
             return;
         }
         let step = pitch as f64 * RATE as f64 / self.device_rate as f64;
+        // Darker the farther: about 3 kHz left at a hundred blocks.
+        let d = at.map_or(0.0, |p| p.distance(self.listener));
+        let fc = (18000.0 / (1.0 + d / 18.0)).max(350.0);
+        let lp = if d < 2.0 {
+            1.0
+        } else {
+            1.0 - (-std::f32::consts::TAU * fc / self.device_rate).exp()
+        };
         let voice = Voice {
             data: bank[sound as usize].clone(),
             pos: -(delay as f64) * RATE as f64,
             step,
             gain,
+            lp,
+            z: 0.0,
         };
         if let Ok(mut m) = self.mixer.lock() {
             if m.voices.len() >= MAX_VOICES {
@@ -393,6 +409,8 @@ mod tests {
                 pos: -3.0,
                 step,
                 gain: [1.0; 2],
+                lp: 1.0,
+                z: 0.0,
             });
         }
         let mut out = vec![0.0f32; 200];

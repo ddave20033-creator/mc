@@ -167,37 +167,141 @@ fn echo(buf: &mut Vec<f32>, delays: &[(f32, f32)]) {
     }
 }
 
-/// A gunshot: the crack of the bullet, the muzzle blast (noise closing down from `bright`
-/// to `dark` Hz, dying away over `tau`), the thump of the gas at `thump` Hz, and the
-/// surroundings answering for `tail` seconds.
-fn gunshot(seed: u32, tau: f32, bright: f32, dark: f32, thump: f32, tail: f32) -> Vec<f32> {
-    let len = samples(tau * 8.0 + 0.05);
+/// What makes one gun's report its own (see `gunshot`).
+struct Report {
+    seed: u32,
+    /// The supersonic bullet's crack: how loud (0: none) and how long its N-wave is (ms).
+    crack: f32,
+    crack_ms: f32,
+    /// The muzzle blast: how fast it dies away (s) and the band it rings in (Hz).
+    blast_tau: f32,
+    blast_hz: f32,
+    /// The gas thump: its pitch (Hz), how long it lasts (s) and how loud.
+    boom_hz: f32,
+    boom_tau: f32,
+    boom: f32,
+    /// The surroundings answering: how long (s) and how much of it.
+    tail: f32,
+    wet: f32,
+    /// Echoes off far hills: (delay s, loudness).
+    echoes: &'static [(f32, f32)],
+    /// The action working right after the shot: (delay s, pitch Hz, loudness, a spring's
+    /// ring instead of a slide's clack).
+    action: Option<(f32, f32, f32, bool)>,
+}
+
+/// A gunshot as it sounds outdoors: the bullet's sharp crack (an N-wave), the muzzle blast
+/// (a burst of noise rising in under a millisecond, ringing in the gun's band), the low
+/// thump of the gas, the action cycling, the first reflections off the ground and nearby
+/// surfaces, then the report rolling away over the land, and echoes off far hills.
+fn gunshot(r: &Report) -> Vec<f32> {
+    let seed = r.seed;
+    let mut dry = Vec::new();
+    // The crack: pressure jumps up, falls linearly through zero to as far below, and snaps
+    // back.
+    if r.crack > 0.0 {
+        let n = samples(r.crack_ms / 1000.0).max(4);
+        let mut wave: Vec<f32> = (0..n + 8)
+            .map(|i| if i < n { 1.0 - 2.0 * i as f32 / n as f32 } else { 0.0 })
+            .collect();
+        highpass(&mut wave, 600.0);
+        mix(&mut dry, &wave, 0.0, r.crack);
+    }
+    // The muzzle blast.
+    let len = samples(r.blast_tau * 10.0 + 0.02);
     let mut blast = noise(len, seed);
     for (i, x) in blast.iter_mut().enumerate() {
         let t = i as f32 / FS;
-        *x *= (-t / tau).exp();
+        *x *= (1.0 - (-t / 0.0003).exp()) * (-t / r.blast_tau).exp();
     }
-    lowpass_sweep(&mut blast, |t| dark + (bright - dark) * (-t / (tau * 0.6)).exp());
-    let mut crack = noise(samples(0.004), seed ^ 0x55);
-    highpass(&mut crack, 2500.0);
-    for (i, x) in crack.iter_mut().enumerate() {
-        *x *= (-(i as f32) / FS / 0.0012).exp();
-    }
-    let mut body: Vec<f32> = (0..samples(0.25))
+    let mut band = blast.clone();
+    bandpass(&mut band, r.blast_hz, 1.1);
+    lowpass_sweep(&mut blast, |t| 1800.0 + 7000.0 * (-t / (r.blast_tau * 0.5)).exp());
+    mix(&mut dry, &blast, 0.0, 0.8);
+    mix(&mut dry, &band, 0.0, 1.4);
+    // The thump: a falling low tone and rumbling low noise.
+    let boom_len = samples(r.boom_tau * 7.0);
+    let tone: Vec<f32> = (0..boom_len)
         .map(|i| {
             let t = i as f32 / FS;
-            let f = thump * (1.0 + 0.8 * (-t / 0.02).exp());
-            (TAU * f * t).sin() * (-t / 0.07).exp()
+            let f = r.boom_hz * (1.0 + 0.9 * (-t / 0.012).exp());
+            (TAU * f * t).sin() * (-t / r.boom_tau).exp() * (1.0 - (-t / 0.001).exp())
         })
         .collect();
-    lowpass(&mut body, 400.0);
-    let mut out = Vec::new();
-    mix(&mut out, &blast, 0.0, 1.0);
-    mix(&mut out, &crack, 0.0, 0.6);
-    mix(&mut out, &body, 0.0, 0.8);
-    saturate(&mut out, 2.2);
-    reverb(&mut out, tail, 0.35, seed);
-    normalize(&mut out, 0.95);
+    let mut rumble = noise(boom_len, seed ^ 0x77);
+    for (i, x) in rumble.iter_mut().enumerate() {
+        *x *= (-(i as f32) / FS / (r.boom_tau * 1.3)).exp();
+    }
+    lowpass(&mut rumble, r.boom_hz * 2.5);
+    lowpass(&mut rumble, r.boom_hz * 2.5);
+    mix(&mut dry, &tone, 0.0, r.boom);
+    mix(&mut dry, &rumble, 0.0, r.boom * 2.5);
+    // Punchy: the peak pressed down, the body brought up.
+    normalize(&mut dry, 1.0);
+    for x in dry.iter_mut() {
+        *x = (*x * 3.0).tanh() / 3f32.tanh();
+    }
+    if let Some((at, hz, loud, spring)) = r.action {
+        let part = if spring {
+            ring_of(&[(hz, 0.5), (hz * 1.51, 0.3), (hz * 2.23, 0.2)], 0.06)
+        } else {
+            clack(seed ^ 0x33, hz, 0.02)
+        };
+        mix(&mut dry, &part, at, loud);
+    }
+
+    // First reflections: the ground at once, then nearby surfaces, each darker.
+    let mut out = dry.clone();
+    for (k, &(at, gain, fc)) in [
+        (0.004, 0.55, 5000.0),
+        (0.017, 0.3, 3000.0),
+        (0.043, 0.22, 2000.0),
+        (0.089, 0.14, 1300.0),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut e = dry.clone();
+        lowpass(&mut e, fc);
+        let jitter = 0.002 * (k as f32 + 1.0) * ((seed % 7) as f32 / 7.0);
+        mix(&mut out, &e, at + jitter, gain);
+    }
+    // The report rolling away: the first ten milliseconds of the shot heard through a long,
+    // dark, uneven decay (as over fields and trees).
+    let ir_len = samples(r.tail);
+    let mut ir = noise(ir_len, seed ^ 0x1234);
+    let mut wobble = Noise(seed ^ 0x99);
+    let mut level = 1.0f32;
+    for (i, x) in ir.iter_mut().enumerate() {
+        let t = i as f32 / FS;
+        if i % 900 == 0 {
+            level = 0.55 + 0.9 * wobble.unit();
+        }
+        let rise = ((t - 0.03) / 0.05).clamp(0.0, 1.0);
+        *x *= rise * (-t / (r.tail * 0.22)).exp() * level;
+    }
+    lowpass_sweep(&mut ir, |t| 600.0 + 2400.0 * (-t / 0.35).exp());
+    lowpass(&mut ir, 2500.0);
+    let head = &dry[..dry.len().min(samples(0.01))];
+    let mut tail = vec![0.0f32; ir_len + head.len()];
+    for (i, &h) in head.iter().enumerate() {
+        if h.abs() < 1e-4 {
+            continue;
+        }
+        for (j, &g) in ir.iter().enumerate() {
+            tail[i + j] += h * g;
+        }
+    }
+    normalize(&mut tail, r.wet);
+    mix(&mut out, &tail, 0.0, 1.0);
+    // Far hills answer.
+    for &(at, gain) in r.echoes {
+        let mut e = dry.clone();
+        lowpass(&mut e, 700.0);
+        lowpass(&mut e, 700.0);
+        mix(&mut out, &e, at, gain);
+    }
+    normalize(&mut out, 0.97);
     fade_ends(&mut out);
     out
 }
@@ -308,28 +412,94 @@ fn crackles(seed: u32, len: f32, per_sec: f32) -> Vec<f32> {
 
 fn make(sound: Sound) -> Vec<f32> {
     match sound {
-        Sound::ShotPistol => gunshot(11, 0.028, 6500.0, 1400.0, 95.0, 0.8),
-        Sound::ShotMagnum => gunshot(12, 0.05, 5000.0, 900.0, 70.0, 1.1),
-        Sound::ShotRifle => gunshot(13, 0.032, 8000.0, 2000.0, 85.0, 0.9),
-        Sound::ShotSniper => {
-            let mut s = gunshot(14, 0.085, 4500.0, 600.0, 55.0, 1.6);
-            echo(&mut s, &[(0.38, 0.3), (0.85, 0.18), (1.4, 0.08)]);
-            normalize(&mut s, 0.95);
-            s
-        }
-        Sound::ShotShotgun => {
-            let mut s = gunshot(15, 0.07, 3200.0, 700.0, 60.0, 1.2);
-            echo(&mut s, &[(0.45, 0.15)]);
-            normalize(&mut s, 0.95);
-            s
-        }
+        Sound::ShotPistol => gunshot(&Report {
+            seed: 11,
+            crack: 0.25,
+            crack_ms: 0.25,
+            blast_tau: 0.011,
+            blast_hz: 1600.0,
+            boom_hz: 115.0,
+            boom_tau: 0.028,
+            boom: 0.45,
+            tail: 1.5,
+            wet: 0.3,
+            echoes: &[(0.42, 0.08)],
+            action: Some((0.028, 2700.0, 0.16, false)),
+        }),
+        Sound::ShotMagnum => gunshot(&Report {
+            seed: 12,
+            crack: 0.35,
+            crack_ms: 0.35,
+            blast_tau: 0.02,
+            blast_hz: 1050.0,
+            boom_hz: 80.0,
+            boom_tau: 0.05,
+            boom: 0.8,
+            tail: 1.9,
+            wet: 0.36,
+            echoes: &[(0.45, 0.12), (0.9, 0.06)],
+            action: Some((0.032, 2100.0, 0.18, false)),
+        }),
+        Sound::ShotRifle => gunshot(&Report {
+            seed: 13,
+            crack: 0.8,
+            crack_ms: 0.35,
+            blast_tau: 0.01,
+            blast_hz: 2200.0,
+            boom_hz: 95.0,
+            boom_tau: 0.032,
+            boom: 0.5,
+            tail: 1.7,
+            wet: 0.32,
+            echoes: &[(0.4, 0.1)],
+            action: Some((0.018, 2900.0, 0.1, true)),
+        }),
+        Sound::ShotSniper => gunshot(&Report {
+            seed: 14,
+            crack: 1.0,
+            crack_ms: 0.6,
+            blast_tau: 0.03,
+            blast_hz: 800.0,
+            boom_hz: 52.0,
+            boom_tau: 0.09,
+            boom: 1.0,
+            tail: 3.0,
+            wet: 0.45,
+            echoes: &[(0.55, 0.22), (1.1, 0.15), (1.8, 0.08)],
+            action: None,
+        }),
+        Sound::ShotShotgun => gunshot(&Report {
+            seed: 15,
+            crack: 0.0,
+            crack_ms: 0.0,
+            blast_tau: 0.024,
+            blast_hz: 900.0,
+            boom_hz: 66.0,
+            boom_tau: 0.07,
+            boom: 0.95,
+            tail: 2.2,
+            wet: 0.4,
+            echoes: &[(0.5, 0.14), (1.0, 0.07)],
+            action: None,
+        }),
         Sound::ShotSilenced => {
-            let mut pff = noise(samples(0.08), 16);
-            for (i, x) in pff.iter_mut().enumerate() {
-                *x *= (-(i as f32) / FS / 0.012).exp();
+            // A suppressed shot is still a sharp crack, only short and without the boom:
+            // a quick snap of gas, a dull thud, and the slide working loudly after it.
+            let mut snap = noise(samples(0.05), 16);
+            for (i, x) in snap.iter_mut().enumerate() {
+                let t = i as f32 / FS;
+                *x *= (1.0 - (-t / 0.0004).exp()) * (-t / 0.006).exp();
             }
-            bandpass(&mut pff, 900.0, 0.8);
-            sequence(&[(pff, 0.0, 1.0), (clack(17, 2600.0, 0.02), 0.012, 0.5)], 0.5)
+            bandpass(&mut snap, 1300.0, 0.9);
+            sequence(
+                &[
+                    (snap, 0.0, 1.0),
+                    (thud(17, 260.0, 0.04), 0.0, 1.2),
+                    (clack(170, 2600.0, 0.025), 0.02, 0.9),
+                    (clack(171, 2300.0, 0.03), 0.05, 0.7),
+                ],
+                0.6,
+            )
         }
         Sound::DryFire => sequence(&[(clack(18, 3600.0, 0.015), 0.0, 1.0)], 0.35),
         Sound::MagOut => sequence(
