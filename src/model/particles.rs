@@ -13,6 +13,8 @@ enum Kind {
     Flame,
     /// Torch smoke: rises and drifts through the smoke sprites.
     Smoke,
+    /// A glowing spark from a gun's muzzle: flies fast, falls a little, burns out quickly.
+    Spark,
 }
 
 pub struct Particle {
@@ -93,6 +95,52 @@ impl Particles {
                 uv0,
                 size,
                 tint,
+                light: [sky, blk],
+            });
+        }
+    }
+
+    /// Sparks spraying out of a muzzle along `dir`.
+    pub fn sparks(&mut self, pos: Vec3, dir: Vec3, count: usize) {
+        for _ in 0..count {
+            let spread = Vec3::new(self.rand(), self.rand(), self.rand()) - Vec3::splat(0.5);
+            let vel = (dir + spread * 0.9).normalize_or_zero() * (6.0 + self.rand() * 8.0);
+            let life = 0.08 + self.rand() * 0.14;
+            let size = 0.012 + self.rand() * 0.01;
+            let green = (190.0 + self.rand() * 60.0) as u8;
+            self.list.push(Particle {
+                kind: Kind::Spark,
+                pos,
+                vel,
+                life,
+                max_life: life,
+                layer: crate::world::textures::tex::WOOL,
+                uv0: [0.4, 0.4],
+                size,
+                tint: [255, green, 90],
+                light: [15, 15],
+            });
+        }
+    }
+
+    /// A puff of gun smoke at a muzzle, pushed out along `dir` and slowly rising.
+    pub fn gun_smoke(&mut self, pos: Vec3, dir: Vec3, count: usize, sky: u8, blk: u8) {
+        for _ in 0..count {
+            let spread = Vec3::new(self.rand(), self.rand(), self.rand()) - Vec3::splat(0.5);
+            let vel = dir * (0.3 + self.rand() * 0.6) + spread * 0.3 + Vec3::Y * 0.2;
+            let life = 0.35 + self.rand() * 0.4;
+            let gray = (170.0 + self.rand() * 50.0) as u8;
+            let size = 0.035 + self.rand() * 0.035;
+            self.list.push(Particle {
+                kind: Kind::Smoke,
+                pos: pos + spread * 0.05,
+                vel,
+                life,
+                max_life: life,
+                layer: tex::SMOKE,
+                uv0: [0.0, 0.0],
+                size,
+                tint: [gray; 3],
                 light: [sky, blk],
             });
         }
@@ -211,6 +259,12 @@ impl Particles {
     pub fn update(&mut self, dt: f32, world: &World) {
         for p in &mut self.list {
             p.life -= dt;
+            if p.kind == Kind::Spark {
+                p.vel.y -= 6.0 * dt;
+                p.vel *= 1.0 - dt * 3.0;
+                p.pos += p.vel * dt;
+                continue;
+            }
             if p.kind != Kind::Debris {
                 p.pos += p.vel * dt;
                 continue;
@@ -239,6 +293,7 @@ impl Particles {
             let (size, layer, s, fl) = match p.kind {
                 Kind::Debris => (p.size, p.layer, 0.25, 0),
                 Kind::Flame => (p.size * (1.0 - t * t * 0.5), p.layer, 1.0, flags::EMISSIVE),
+                Kind::Spark => (p.size * (1.0 - t * 0.6), p.layer, 0.2, flags::EMISSIVE),
                 Kind::Smoke => {
                     let frame =
                         SMOKE_FRAMES - 1 - ((t * SMOKE_FRAMES as f32) as u32).min(SMOKE_FRAMES - 1);

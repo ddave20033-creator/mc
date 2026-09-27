@@ -556,6 +556,10 @@ impl Game {
             }
         };
         let mut lights: Vec<(Vec3, f32)> = Vec::new();
+        // A muzzle flash lights up the surroundings for a moment.
+        if let Some(p) = self.guns.flash_light_pos().filter(|_| in_world) {
+            lights.push(p);
+        }
         if in_world && self.player.spawned && self.screen != Screen::Dead && held_up(self.held()) {
             let p = self.player.eye() - Vec3::Y * 0.35;
             lights.push((p, intensity(self.held(), 0.0)));
@@ -700,6 +704,16 @@ impl Game {
                 lantern: None,
                 gun_mods: self.held_gun_mods(),
             };
+            // Where the gun's muzzle and ejection port are on the player model (third person).
+            if let Some(kind) = crate::item::GunKind::of(pose.held) {
+                let mods = pose.gun_mods;
+                let point = |q| crate::model::player::gun_point(&pose, kind, q);
+                self.guns.muzzle_tp = Some(point(crate::model::gun::muzzle(kind, mods)));
+                self.guns.eject_tp = Some(point(crate::model::gun::spec(kind).eject));
+            } else {
+                self.guns.muzzle_tp = None;
+                self.guns.eject_tp = None;
+            }
             let target = limb_targets(&PlayerPose {
                 first_person: fp_body,
                 ..pose
@@ -739,7 +753,8 @@ impl Game {
                 let fp = PlayerPose {
                     pos: pose.pos - body_fwd * back,
                     first_person: true,
-                    hide_arms: !torch && !lantern && !pistol && down <= 30.0,
+                    // A gun is always shown by the first-person view (with its left hand).
+                    hide_arms: pistol || (!torch && !lantern && down <= 30.0),
                     hide_right_arm: lantern || pistol,
                     ..pose
                 };
@@ -752,6 +767,12 @@ impl Game {
         self.held_torch_tip = held_torch_tip;
         if in_world {
             self.build_world_entities(&mut scene, third_person, dt);
+            let target = if third_person {
+                &mut scene.entity
+            } else {
+                &mut scene.particles
+            };
+            self.build_gun_station(target, cam, view.right, view.up);
         }
         scene.entity_visible = third_person;
 

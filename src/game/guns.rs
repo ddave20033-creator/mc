@@ -47,6 +47,18 @@ pub(super) struct Guns {
     pub(super) muzzle: Option<Vec3>,
     pub(super) eject: Option<Vec3>,
     pub(super) laser_from: Option<Vec3>,
+    /// The same on the player model (third person).
+    pub(super) muzzle_tp: Option<Vec3>,
+    pub(super) eject_tp: Option<Vec3>,
+    /// The last muzzle flash as the world sees it (third person; the first-person view draws
+    /// its own on the gun): how much is left, where, which way, how big, its turn.
+    flash: Option<(f32, Vec3, Vec3, f32, f32)>,
+    /// The flash's light on the surroundings: how much is left and where.
+    flash_light: (f32, Vec3),
+    /// How hot the barrel is from firing (smoke curls out of it above 1), and when the last
+    /// wisp came out.
+    heat: f32,
+    wisp: f32,
     /// When the last "jammed" or "no bullets" message was shown.
     last_message: f32,
     pub(super) bench: Bench,
@@ -86,17 +98,47 @@ pub(super) struct Bench {
     pub(super) gun: Slot,
     pub(super) dirt: [f32; PARTS],
     pub(super) dirt_of: Option<(ItemId, u16)>,
-    /// The 3D view: turned by dragging with the right mouse button (sways by itself until
-    /// then), and framed smoothly around what is shown (center, scale).
+    /// The gun floating over the table while it is put together: turned by dragging with the
+    /// right mouse button (it sways by itself until then).
     pub(super) yaw: f32,
-    pub(super) pitch: f32,
     pub(super) turned: bool,
     pub(super) drag_from: Option<Vec2>,
-    pub(super) frame: Option<(Vec2, f32)>,
-    /// Soap bubbles while scrubbing: where (GUI pixels in the view) and when.
-    pub(super) bubbles: Vec<(Vec2, f32)>,
     /// A part was clicked but is not in the inventory: when (flashes its line red).
     pub(super) missing_at: f32,
+    /// When the gun being cleaned or tuned was laid on the table (the hand puts it down), and
+    /// the inventory slot it came from (it goes back there).
+    pub(super) placed_at: f32,
+    pub(super) from_slot: Option<usize>,
+    /// Whether a gun lay on the table last frame (to notice one put there with the mouse).
+    pub(super) had_gun: bool,
+    /// The hand fitting an attachment or taking one off.
+    pub(super) fit: Option<FitAnim>,
+    /// What the mouse points at on the table.
+    pub(super) hover: Option<Pick>,
+    /// The hand with the brush: 0 away .. 1 scrubbing at `scrub_point`.
+    pub(super) brush: f32,
+    pub(super) scrub_point: Vec3,
+}
+
+/// Something on the gun station's table under the mouse.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Pick {
+    /// A part (lying on the table, or on the gun being put together).
+    Part(usize),
+    /// The gun itself.
+    Gun,
+    /// An attachment (index into ATTACHMENTS), on the gun or lying beside it.
+    Attachment(usize),
+    /// The bare table top.
+    Table,
+}
+
+/// The hand fitting an attachment onto the gun on the table, or taking one off.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct FitAnim {
+    pub(super) index: usize,
+    pub(super) removing: bool,
+    pub(super) start: f32,
 }
 
 impl Default for Bench {
@@ -112,12 +154,16 @@ impl Default for Bench {
             dirt: [0.0; PARTS],
             dirt_of: None,
             yaw: 0.0,
-            pitch: 0.3,
             turned: false,
             drag_from: None,
-            frame: None,
-            bubbles: Vec::new(),
             missing_at: -10.0,
+            placed_at: -10.0,
+            from_slot: None,
+            had_gun: false,
+            fit: None,
+            hover: None,
+            brush: 0.0,
+            scrub_point: Vec3::ZERO,
         }
     }
 }
@@ -162,6 +208,14 @@ impl Bench {
             kind,
             ..Self::default()
         };
+    }
+}
+
+impl Guns {
+    /// The light of a muzzle flash going on now: where it is and how bright.
+    pub(super) fn flash_light_pos(&self) -> Option<(Vec3, f32)> {
+        let (k, pos) = self.flash_light;
+        (k > 0.0).then_some((pos, 2.5 * k))
     }
 }
 
@@ -268,6 +322,24 @@ impl Game {
         self.update_bullets(dt);
         self.guns.cases.update(dt, &self.terrain.world);
 
+        // The flash fades in a moment; a hot barrel smokes.
+        if let Some(f) = &mut self.guns.flash {
+            f.0 -= dt / 0.06;
+        }
+        if self.guns.flash.is_some_and(|f| f.0 <= 0.0) {
+            self.guns.flash = None;
+        }
+        self.guns.flash_light.0 = (self.guns.flash_light.0 - dt / 0.08).max(0.0);
+        self.guns.heat = (self.guns.heat - dt * 0.5).max(0.0);
+        self.guns.wisp -= dt;
+        if held.is_some() && self.guns.heat > 2.0 && self.guns.wisp <= 0.0 {
+            self.guns.wisp = 0.35;
+            if let Some(m) = self.muzzle_now() {
+                let (sky, blk) = self.terrain.world.light_estimate(m);
+                self.particles.gun_smoke(m, Vec3::Y * 0.4, 1, sky, blk);
+            }
+        }
+
         // The laser points where the view does; its dot sits on whatever is there.
         self.guns.laser_dot = None;
         if let Some((_, kind)) = held.filter(|_| mods & gun_mod::LASER != 0 && self.screen != Screen::Dead) {
@@ -360,6 +432,7 @@ impl Game {
             return;
         }
         let mods = gun_mods(&gun);
+        let silenced = mods & gun_mod::SILENCER != 0;
         let creative = self.creative();
         if let Some(s) = &mut self.inventory.slots[slot] {
             set_gun_rounds(s, gun_rounds(s) - 1);
@@ -367,7 +440,8 @@ impl Game {
                 s.damage = (s.damage + 1).min(stats.dirt_max);
             }
         }
-        self.hand.shoot();
+        let seed = self.random();
+        self.hand.shoot(if silenced { 0.0 } else { stats.flash }, seed);
 
         let eye = self.player.eye();
         let look = look_dir(self.yaw, self.pitch);
@@ -380,12 +454,7 @@ impl Game {
         let spread = hip + (stats.spread_aimed - hip) * aim + self.guns.bloom * (1.0 - 0.7 * aim);
         self.guns.bloom = (self.guns.bloom + BLOOM_PER_SHOT).min(BLOOM_MAX);
 
-        let right = look.cross(Vec3::Y).normalize_or_zero();
-        let first_person = self.camera.mode == 0;
-        let muzzle = match self.guns.muzzle {
-            Some(m) if first_person => m,
-            _ => eye - Vec3::Y * 0.3 + look * 0.9 + right * 0.3,
-        };
+        let muzzle = self.muzzle_now().unwrap_or(eye + look * 0.9);
         for _ in 0..stats.pellets {
             let (r1, r2) = (self.random(), self.random());
             let dir = scatter(look, spread, r1, r2);
@@ -420,18 +489,26 @@ impl Game {
             self.eject_case(kind);
         }
 
-        // Muzzle flash and smoke (a silencer leaves only a wisp of smoke).
+        // Muzzle flash, its light, sparks and a puff of smoke (a silencer leaves only a
+        // little smoke). The barrel heats up.
         let (sky, blk) = self.terrain.world.light_estimate(muzzle);
-        if mods & gun_mod::SILENCER == 0 {
-            let big = if stats.damage * stats.pellets as f32 > 20.0 { 5 } else { 3 };
-            for _ in 0..big {
-                self.particles.flame(muzzle + look * 0.03);
-            }
-            for _ in 0..2 {
-                self.particles.smoke(muzzle, sky, blk);
-            }
+        let size = stats.flash;
+        if !silenced {
+            self.guns.flash = Some((1.0, muzzle, look, 0.1 * size, seed));
+            self.guns.flash_light = ((0.6 + 0.2 * size).min(1.0), muzzle + look * 0.3);
+            self.particles.sparks(muzzle, look, 3 + (size * 3.0) as usize);
+        }
+        let puff = if size > 1.5 { 2 } else { 1 };
+        self.particles.gun_smoke(muzzle, look, puff, sky, blk);
+        self.guns.heat = (self.guns.heat + 0.07 * size.max(0.8)).min(3.0);
+    }
+
+    /// Where the held gun's muzzle is now: on the first-person gun, or on the player model.
+    fn muzzle_now(&self) -> Option<Vec3> {
+        if self.camera.mode == 0 {
+            self.guns.muzzle
         } else {
-            self.particles.smoke(muzzle, sky, blk);
+            self.guns.muzzle_tp
         }
     }
 
@@ -441,8 +518,8 @@ impl Game {
         let look = look_dir(self.yaw, self.pitch);
         let right = look.cross(Vec3::Y).normalize_or_zero();
         let up = right.cross(look);
-        let port = match self.guns.eject {
-            Some(p) if self.camera.mode == 0 => p,
+        let port = match (self.camera.mode, self.guns.eject, self.guns.eject_tp) {
+            (0, Some(p), _) | (_, _, Some(p)) => p,
             _ => eye - Vec3::Y * 0.25 + look * 0.5 + right * 0.25,
         };
         let r = |g: &mut Self| g.random() - 0.5;
@@ -534,6 +611,10 @@ impl Game {
             }
         }
         self.guns.cases.build(out, &self.terrain.world);
+        // The first-person view draws the flash on its own gun.
+        if let (Some((k, pos, dir, size, seed)), true) = (self.guns.flash, self.camera.mode != 0) {
+            ballistics::emit_muzzle_flash(out, pos, dir, cam, size, seed, k);
+        }
         if let Some(p) = self.guns.laser_dot {
             // A small dot near by, still visible far away.
             let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
@@ -664,17 +745,55 @@ impl Game {
         }
     }
 
-    /// Opens the gun station's screen.
+    /// Opens the gun station: the camera glides over its table. To clean or tune, the held
+    /// gun is laid on it once the camera is there.
     pub(super) fn open_gun_station(&mut self, p: IVec3) {
-        let bench = &mut self.guns.bench;
-        bench.frame = None;
-        bench.drag_from = None;
+        self.guns.bench.drag_from = None;
         self.open_container(Container::GunStation(p));
+        if self.guns.bench.mode != BenchMode::Assemble {
+            self.lay_gun_on_bench(0.3);
+        }
     }
 
-    /// Closing the gun station: what the parts put together so far were made of and the gun
-    /// being cleaned or tuned go back to the player.
+    /// The hand lays a gun on the table to clean or tune it (after `delay` seconds): the held
+    /// one, or else the first in the inventory.
+    pub(super) fn lay_gun_on_bench(&mut self, delay: f32) {
+        if self.guns.bench.gun.is_some() {
+            return;
+        }
+        let is_gun = |s: &Slot| s.is_some_and(|s| GunKind::of(s.item).is_some());
+        let slot = if is_gun(&self.inventory.slots[self.hotbar_slot]) {
+            Some(self.hotbar_slot)
+        } else {
+            self.inventory.slots.iter().position(is_gun)
+        };
+        if let Some(i) = slot {
+            let bench = &mut self.guns.bench;
+            bench.gun = self.inventory.slots[i].take();
+            bench.from_slot = Some(i);
+            bench.placed_at = self.time + delay;
+            bench.had_gun = true;
+        }
+    }
+
+    /// The gun on the table goes back where it came from (or wherever there is room).
+    pub(super) fn take_gun_off_bench(&mut self) {
+        let bench = &mut self.guns.bench;
+        let (Some(gun), from) = (bench.gun.take(), bench.from_slot.take()) else {
+            return;
+        };
+        bench.had_gun = false;
+        bench.fit = None;
+        match from {
+            Some(i) if self.inventory.slots[i].is_none() => self.inventory.slots[i] = Some(gun),
+            _ => self.give(gun),
+        }
+    }
+
+    /// Closing the gun station: what the parts put together so far were made of goes back to
+    /// the player, and the gun on the table back into its slot.
     pub(super) fn close_gun_station(&mut self) {
+        self.take_gun_off_bench();
         let items = self.guns.bench.items();
         self.guns.bench.clear();
         for s in items {

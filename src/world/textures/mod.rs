@@ -206,6 +206,7 @@ pub mod tex {
     /// 3D models), and of their ammunition (.50 AE, 5.56 mm, .50 BMG, 12 gauge).
     pub const GUN_ICONS: u32 = GUN_WOOD + 1;
     pub const AMMO_ICONS: u32 = GUN_ICONS + 4;
+<<<<<<< HEAD
     /// Copper: the ore, the storage block and the ingot.
     pub const COPPER_ORE: u32 = AMMO_ICONS + 4;
     pub const COPPER_BLOCK: u32 = COPPER_ORE + 1;
@@ -244,6 +245,12 @@ pub fn tool_layer(tier: usize, kind: usize) -> u32 {
     } else {
         tex::MORE_TOOLS + i - 20
     }
+=======
+    /// Muzzle flash: the star seen from the front, and a flame tongue seen from the side.
+    pub const MUZZLE_FLASH: u32 = AMMO_ICONS + 4;
+    pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
+    pub const LAYERS: usize = (MUZZLE_FLASH_SIDE + 1) as usize;
+>>>>>>> bbb50fe7188f3b52a28ab9ef57da2c8b3c219260
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -386,6 +393,8 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::DOOR_BOTTOM
         || (tex::BED_HEAD_EAST..=tex::BED_FOOT_END).contains(&l)
         || l == tex::FLAME_PARTICLE
+        || l == tex::MUZZLE_FLASH
+        || l == tex::MUZZLE_FLASH_SIDE
         || l == tex::SLOT_GLOW
         || l == tex::FURNACE_FRONT_CUT
         || l == tex::BLAST_FRONT_CUT

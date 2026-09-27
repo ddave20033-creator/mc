@@ -14,8 +14,15 @@ use crate::entity::block_entity::{
 const FOV: f32 = 60.0;
 /// Seconds the camera takes to glide there (and back).
 const GLIDE: f32 = 0.4;
-/// How steeply the camera looks down at the chest or table.
+/// How steeply the camera looks down at the chest or table (less steeply at a gun station,
+/// where the gun floats over the table).
 const PITCH: f32 = 55.0;
+pub(super) const GUN_PITCH: f32 = 40.0;
+/// How far the camera is from the gun station, what it looks at (that far behind the table's
+/// middle, that high over it), and how far right and down of that it aims.
+const GUN_DIST: f32 = 1.3;
+const GUN_FOCUS: (f32, f32) = (0.05, 0.22);
+const GUN_AIM: (f32, f32) = (0.14, 0.34);
 
 /// The chest or table the view is over, and how far the camera has glided.
 pub(super) struct Station {
@@ -27,14 +34,14 @@ pub(super) struct Station {
 }
 
 /// Where things are on the screen: the view's camera matrix and the window size.
-struct Screen2 {
-    view_proj: Mat4,
-    w: f32,
-    h: f32,
+pub(super) struct Screen2 {
+    pub(super) view_proj: Mat4,
+    pub(super) w: f32,
+    pub(super) h: f32,
 }
 
 impl Screen2 {
-    fn to_screen(&self, p: Vec3) -> Option<Vec2> {
+    pub(super) fn to_screen(&self, p: Vec3) -> Option<Vec2> {
         let c = self.view_proj * p.extend(1.0);
         (c.w > 1e-4).then(|| {
             Vec2::new(
@@ -45,7 +52,7 @@ impl Screen2 {
     }
 
     /// The ray through the screen point `m`.
-    fn ray(&self, m: Vec2) -> (Vec3, Vec3) {
+    pub(super) fn ray(&self, m: Vec2) -> (Vec3, Vec3) {
         let n = Vec2::new(m.x / self.w * 2.0 - 1.0, m.y / self.h * 2.0 - 1.0);
         let inv = self.view_proj.inverse();
         let a = inv.project_point3(Vec3::new(n.x, n.y, 0.0));
@@ -57,9 +64,16 @@ impl Screen2 {
 /// The camera looking down at what lies around `center` from the side `toward` (half
 /// `half_w` wide, `half_d` deep): across it fills most of the width, seen at an angle its
 /// depth about half the height, and it sits in the upper part of the screen, above the
-/// inventory. Returns (position, look direction).
-fn framing(center: Vec3, toward: Vec3, (half_w, half_d): (f32, f32), aspect: f32) -> (Vec3, Vec3) {
-    let pitch = PITCH.to_radians();
+/// inventory. `pitch` is how steeply it looks down (degrees). Returns (position, look
+/// direction).
+pub(super) fn framing(
+    center: Vec3,
+    toward: Vec3,
+    (half_w, half_d): (f32, f32),
+    aspect: f32,
+    pitch: f32,
+) -> (Vec3, Vec3) {
+    let pitch = pitch.to_radians();
     let tv = (FOV.to_radians() * 0.5).tan();
     let th = tv * aspect;
     let look = -toward * pitch.cos() - Vec3::Y * pitch.sin();
@@ -69,8 +83,24 @@ fn framing(center: Vec3, toward: Vec3, (half_w, half_d): (f32, f32), aspect: f32
     (center - look * dist, fwd)
 }
 
+/// The camera over a gun station (`top`: the middle of its table top, `toward`: the side the
+/// player is on): close enough that the parts on the table can be told apart, with the table
+/// and the gun floating over it in the upper left, clear of the panel on the right and the
+/// inventory at the bottom. Returns (position, look direction).
+pub(super) fn gun_framing(top: Vec3, toward: Vec3, aspect: f32) -> (Vec3, Vec3) {
+    let pitch = GUN_PITCH.to_radians();
+    let right = (-toward).cross(Vec3::Y);
+    let look = -toward * pitch.cos() - Vec3::Y * pitch.sin();
+    let focus = top + Vec3::Y * GUN_FOCUS.1 - toward * GUN_FOCUS.0;
+    // Narrower windows need more room across.
+    let dist = GUN_DIST * (16.0 / 9.0 / aspect).max(1.0).powf(0.8);
+    let cam = focus - look * dist;
+    let aim = focus + right * GUN_AIM.0 - Vec3::Y * GUN_AIM.1;
+    (cam, (aim - cam).normalize())
+}
+
 /// Where the ray meets the horizontal plane at height `y` (in front of it).
-fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
+pub(super) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
     if d.y.abs() < 1e-5 {
         return None;
     }
@@ -83,8 +113,9 @@ impl Game {
     pub(super) fn open_station(&mut self, c: Container) {
         let pos = match c {
             Container::Chest(p) => p,
-            Container::Crafting(p) => {
-                // The grid reads like a page from where the player stands.
+            Container::Crafting(p) | Container::GunStation(p) => {
+                // The grid reads like a page from where the player stands (and the gun lies
+                // across the gun station toward them).
                 let d = self.player.pos - (p.as_vec3() + Vec3::splat(0.5));
                 self.table_sides.insert(p, facing_of(d.x, d.z));
                 p
@@ -105,10 +136,14 @@ impl Game {
     /// Keeps the chest and table views right: one whose block is gone (mined by someone
     /// else) closes, and a table another player has open faces them, as it does for them.
     pub(super) fn check_stations(&mut self) {
-        if let Screen::Container(c @ (Container::Chest(p) | Container::Crafting(p))) = self.screen {
+        if let Screen::Container(
+            c @ (Container::Chest(p) | Container::Crafting(p) | Container::GunStation(p)),
+        ) = self.screen
+        {
             let b = self.terrain.world.geti(p);
             let there = match c {
                 Container::Chest(_) => is_chest(b),
+                Container::GunStation(_) => b == GUN_STATION,
                 _ => b == CRAFTING_TABLE,
             };
             if !there {
@@ -143,23 +178,31 @@ impl Game {
     fn station_target(&self, st: &Station, aspect: f32) -> Option<(Vec3, Vec3)> {
         let w = &self.terrain.world;
         let b = w.geti(st.pos);
-        let (center, toward, half_w, half_d) = if b == CRAFTING_TABLE {
+        let (center, toward, half_w, half_d, pitch) = if b == CRAFTING_TABLE {
             let toward = facing_dir(self.table_side(st.pos)).as_vec3();
             (
                 st.pos.as_vec3() + Vec3::new(0.5, 1.05, 0.5),
                 toward,
                 0.4,
                 0.4,
+                PITCH,
             )
+        } else if b == GUN_STATION {
+            let toward = facing_dir(self.table_side(st.pos)).as_vec3();
+            let top = st.pos.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
+            let (want, fwd) = gun_framing(top, toward, aspect);
+            let origin = Vec3::new(top.x, top.y + 0.45, top.z);
+            let cam = origin + super::camera::clamp_offset(w, origin, want - origin);
+            return Some((cam, fwd));
         } else {
             let f = facing(b).filter(|_| is_chest(b))?;
             let (a, other) = self.chest_halves(st.pos);
             let mid = other.map_or(a.as_vec3(), |o| (a.as_vec3() + o.as_vec3()) * 0.5);
             let half_w = if other.is_some() { 0.95 } else { 0.47 };
             let center = mid + Vec3::new(0.5, CHEST_FLOOR + 0.05, 0.5);
-            (center, facing_dir(f).as_vec3(), half_w, 0.45)
+            (center, facing_dir(f).as_vec3(), half_w, 0.45, PITCH)
         };
-        let (want, fwd) = framing(center, toward, (half_w, half_d), aspect);
+        let (want, fwd) = framing(center, toward, (half_w, half_d), aspect, pitch);
         // Not into a wall or ceiling over the block (checked from high enough above it that
         // the block itself is not in the way).
         let origin = Vec3::new(center.x, st.pos.y as f32 + 1.45, center.z);
@@ -182,7 +225,9 @@ impl Game {
         };
         let open = matches!(
             self.screen,
-            Screen::Container(Container::Chest(p) | Container::Crafting(p)) if p == pos
+            Screen::Container(
+                Container::Chest(p) | Container::Crafting(p) | Container::GunStation(p)
+            ) if p == pos
         );
         if !open {
             self.station_hover = None;
@@ -354,7 +399,7 @@ mod tests {
     /// A chest's floor seen through the framing, in screen coordinates (0..1, y down).
     fn floor_on_screen(half_w: f32, aspect: f32) -> Vec<Vec2> {
         let center = Vec3::new(0.5, CHEST_FLOOR + 0.05, 0.5);
-        let (cam, fwd) = framing(center, Vec3::Z, (half_w, 0.45), aspect);
+        let (cam, fwd) = framing(center, Vec3::Z, (half_w, 0.45), aspect, PITCH);
         let mut proj = Mat4::perspective_rh(FOV.to_radians(), aspect, 0.05, 100.0);
         proj.y_axis.y *= -1.0;
         let view = Screen2 {
@@ -394,7 +439,7 @@ mod tests {
 
     #[test]
     fn mouse_ray_goes_through_its_screen_point() {
-        let (cam, fwd) = framing(Vec3::new(0.5, 0.7, 0.5), Vec3::X, (0.47, 0.45), 1.5);
+        let (cam, fwd) = framing(Vec3::new(0.5, 0.7, 0.5), Vec3::X, (0.47, 0.45), 1.5, PITCH);
         let mut proj = Mat4::perspective_rh(FOV.to_radians(), 1.5, 0.05, 100.0);
         proj.y_axis.y *= -1.0;
         let view = Screen2 {

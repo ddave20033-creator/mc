@@ -163,6 +163,56 @@ pub fn emit_laser_dot(out: &mut Vec<Vertex>, pos: Vec3, right: Vec3, up: Vec3, s
     emit_glow_quad(out, [pos - r - u, pos + r - u, pos + r + u, pos - r + u], [255, 40, 30]);
 }
 
+/// A muzzle flash at `pos` for a shot along `dir`, seen from `cam`: a star facing the
+/// camera (an orange one and a smaller white-hot one on it, turned by `seed`) and two flame
+/// tongues shooting ahead, crossed around the line of fire. `size` is the star's width in
+/// blocks; `k` (1 .. 0) how much of the flash is left.
+pub fn emit_muzzle_flash(out: &mut Vec<Vertex>, pos: Vec3, dir: Vec3, cam: Vec3, size: f32, seed: f32, k: f32) {
+    let dir = dir.normalize_or_zero();
+    let view = (cam - pos).normalize_or_zero();
+    if dir == Vec3::ZERO || view == Vec3::ZERO {
+        return;
+    }
+    let grow = 0.7 + 0.3 * k;
+    // The star: in the plane facing the camera, turned by the seed.
+    let right = view.cross(Vec3::Y).normalize_or(Vec3::X);
+    let up = right.cross(view);
+    let turn = seed * std::f32::consts::TAU;
+    let (r, u) = (
+        (right * turn.cos() + up * turn.sin()) * size * 0.5 * grow,
+        (up * turn.cos() - right * turn.sin()) * size * 0.5 * grow,
+    );
+    let quad = |c: Vec3, r: Vec3, u: Vec3| [c - r - u, c + r - u, c + r + u, c - r + u];
+    let full = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    let center = pos + dir * size * 0.15;
+    emit_sprite(out, quad(center, r, u), tex::MUZZLE_FLASH, [255, 170, 80], full);
+    emit_sprite(out, quad(center + view * 0.01, r * 0.55, u * 0.55), tex::MUZZLE_FLASH, [255, 250, 225], full);
+    // Tongues: along the line of fire, one turned toward the camera, one across it.
+    let len = size * 1.6 * grow;
+    let side = dir.cross(view).normalize_or(up);
+    let across = dir.cross(side).normalize_or(up);
+    for (w, tint) in [(side, [255, 190, 90]), (across, [255, 160, 70])] {
+        let w = w * size * 0.45 * grow;
+        let (a, b) = (pos, pos + dir * len);
+        emit_sprite(out, [a - w, b - w, b + w, a + w], tex::MUZZLE_FLASH_SIDE, tint, [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]);
+    }
+}
+
+/// A glowing sprite quad seen from both sides.
+fn emit_sprite(out: &mut Vec<Vertex>, corners: [Vec3; 4], layer: u32, tint: [u8; 3], uvs: [[f32; 2]; 4]) {
+    let mut light = vertex_light(15, 15);
+    light[3] = 6;
+    let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
+        pos: corners[i].to_array(),
+        uv: uvs[i],
+        layer: layer as f32,
+        light,
+        tint: [tint[0], tint[1], tint[2], flags::EMISSIVE],
+    });
+    out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
+    out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+}
+
 /// A bright quad seen from both sides.
 fn emit_glow_quad(out: &mut Vec<Vertex>, corners: [Vec3; 4], tint: [u8; 3]) {
     let uvs = [[0.4, 0.6], [0.6, 0.6], [0.6, 0.4], [0.4, 0.4]];

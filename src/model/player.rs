@@ -171,14 +171,18 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
     } else if let (Some(kind), false, false) =
         (crate::item::GunKind::of(p.held), swinging, p.blocking)
     {
-        // Aiming: the arm points where the head looks; with a long gun the left hand reaches
-        // across to hold it too.
-        let head_yaw = p.head_yaw - p.body_yaw;
-        let up = (PI / 2.0 + p.pitch).clamp(0.2, 3.0);
-        l.right_arm = Vec3::new(up, -(0.1 + head_yaw).clamp(-0.7, 0.7), 0.0);
-        if super::gun::spec(kind).support.is_some() {
-            l.left_arm = Vec3::new(up, -(head_yaw - 0.55).clamp(-0.2, 1.1), 0.0);
-        }
+        // Holding a gun: both arms reach for it where it is (it turns with the head), the
+        // right hand to the grip, the left to the handguard (or the grip, a pistol).
+        let spec = super::gun::spec(kind);
+        let g = gun_on_model(p, kind);
+        let shoulder_y = 22.0 - 3.2 * c;
+        let right_hand = g.transform_point3(spec.hand);
+        let left_hand = g.transform_point3(
+            spec.support
+                .unwrap_or(spec.hand + Vec3::new(0.6, -1.2, -2.2)),
+        );
+        l.right_arm = reach(Vec3::new(5.0, shoulder_y, 0.0), right_hand);
+        l.left_arm = reach(Vec3::new(-5.0, shoulder_y, 0.0), left_hand);
     }
     if p.first_person && !held_up(p.held) {
         // First Person Model's dynamic hands: just past the angle where the body's arms take
@@ -287,10 +291,51 @@ pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u
         let style = crate::model::lantern::ON_MODEL;
         crate::model::lantern::emit_held_lantern(out, style, pivot, dir, p.body_yaw, light, fl);
     } else if let (Some(kind), true) = (crate::item::GunKind::of(p.held), show_right) {
-        super::gun::emit_gun(out, kind, right * super::gun::in_arm(kind), light, fl, p.gun_mods);
+        super::gun::emit_gun(out, kind, root * gun_on_model(p, kind), light, fl, p.gun_mods);
     } else if p.held != NONE && show_right {
         emit_held(out, held_item(p, right), p.held, light, fl);
     }
+}
+
+/// Where a held gun is on the player model (model pixels from the feet, facing -Z), turned
+/// with the head: held out in front at arm's length, a long gun on the right with its stock
+/// back at the shoulder and its sights under the eye, a pistol in the middle in both hands.
+pub fn gun_on_model(p: &PlayerPose, kind: crate::item::GunKind) -> Mat4 {
+    let spec = super::gun::spec(kind);
+    // The right fist on the grip, from the neck in the head's frame.
+    let grip = if spec.support.is_some() {
+        Vec3::new(3.0, -3.0, -9.5)
+    } else {
+        Vec3::new(0.8, -2.2, -9.6)
+    };
+    // Gun space to model space: the muzzle forward (-Z), its right side to the right (+X).
+    let basis = Mat4::from_cols(
+        glam::Vec4::new(0.0, 0.0, -1.0, 0.0),
+        glam::Vec4::Y,
+        glam::Vec4::X,
+        glam::Vec4::W,
+    );
+    t(0.0, 24.0 - 4.2 * p.crouch, 0.0)
+        * Mat4::from_rotation_y(-(p.head_yaw - p.body_yaw))
+        * Mat4::from_rotation_x(p.pitch)
+        * Mat4::from_translation(grip)
+        * basis
+        * Mat4::from_scale(Vec3::splat(spec.arm_scale))
+        * Mat4::from_translation(-spec.hand)
+}
+
+/// A point of the held gun (gun space) in the world.
+pub fn gun_point(p: &PlayerPose, kind: crate::item::GunKind, point: Vec3) -> Vec3 {
+    let root = Mat4::from_translation(p.pos)
+        * Mat4::from_rotation_y(-p.body_yaw - PI / 2.0)
+        * Mat4::from_scale(Vec3::splat(PX));
+    (root * gun_on_model(p, kind)).transform_point3(point)
+}
+
+/// Arm rotation (as in `Limbs`) that points an arm hanging from `shoulder` at `target`.
+fn reach(shoulder: Vec3, target: Vec3) -> Vec3 {
+    let d = (target - shoulder).normalize_or(Vec3::NEG_Y);
+    Vec3::new((-d.y).clamp(-1.0, 1.0).acos(), (-d.x).atan2(-d.z), 0.0)
 }
 
 /// The held item's transform (the unit item of `emit_held`) from the right arm's, placed like
@@ -371,4 +416,57 @@ fn right_arm(p: &PlayerPose, limbs: &Limbs) -> Mat4 {
 /// Where the right hand holds things (just below the fist), in the world.
 pub fn hand_pivot(p: &PlayerPose, limbs: &Limbs) -> Vec3 {
     right_arm(p, limbs).transform_point3(Vec3::new(1.0, -11.0, 0.0))
+}
+
+#[cfg(test)]
+mod gun_hold_tests {
+    use super::*;
+    use crate::item::GUN_KINDS;
+
+    fn pose(held: ItemId, pitch: f32, turn: f32) -> PlayerPose {
+        PlayerPose {
+            pos: Vec3::ZERO,
+            body_yaw: 0.0,
+            head_yaw: turn,
+            pitch,
+            limb_swing: 0.0,
+            limb_amount: 0.0,
+            attack: 0.0,
+            crouch: 0.0,
+            held,
+            skin: 0,
+            time: 0.0,
+            hurt: false,
+            first_person: false,
+            burning: false,
+            blocking: false,
+            hide_arms: false,
+            hide_right_arm: false,
+            lantern: None,
+            gun_mods: 0,
+        }
+    }
+
+    #[test]
+    fn hands_hold_the_gun_that_points_where_the_head_looks() {
+        for kind in GUN_KINDS {
+            for (pitch, turn) in [(0.0, 0.0), (0.5, 0.3), (-0.6, -0.4)] {
+                let p = pose(kind.item(), pitch, turn);
+                let g = gun_on_model(&p, kind);
+                let spec = crate::model::gun::spec(kind);
+                // The muzzle is ahead of the grip, the way the head faces.
+                let look = Mat4::from_rotation_y(-turn)
+                    * Mat4::from_rotation_x(pitch)
+                    * glam::Vec4::new(0.0, 0.0, -1.0, 0.0);
+                let along = g.transform_point3(crate::model::gun::muzzle(kind, 0))
+                    - g.transform_point3(spec.grip);
+                assert!(along.normalize().dot(look.truncate()) > 0.97, "{kind:?}");
+                // The right arm points at the grip; the fist ends within reach of it.
+                let l = limb_targets(&p);
+                let fist = Vec3::new(5.0, 22.0, 0.0) + rot(l.right_arm).transform_vector3(Vec3::new(0.0, -10.0, 0.0));
+                let grip = g.transform_point3(spec.hand);
+                assert!(fist.distance(grip) < 3.0, "{kind:?}: fist {fist}, grip {grip}");
+            }
+        }
+    }
 }

@@ -530,11 +530,13 @@ fn shotgun(k: &mut Builder) -> (f32, f32) {
     k.add([-7.8, -4.5, -0.3], [-7.3, -3.0, 0.3], STEEL, WHITE);
     k.add([-9.0, -3.05, -1.0], [-2.0, -3.0, 1.0], POLY, WHITE);
     k.add([-9.0, 0.0, 1.6], [-3.0, 2.0, 1.64], STEEL, [160; 3]);
-    k.pair([-5.0, 3.0, 0.2], [-4.0, 3.6, 0.6], BLUED, WHITE);
+    // Raised sights (a ghost ring at the back, a post in front) well above the receiver.
+    k.pair([-5.0, 3.0, 0.2], [-4.0, 5.0, 0.6], BLUED, WHITE);
 
     k.part(1);
     k.add([0.0, 1.2, -0.9], [32.0, 3.0, 0.9], BLUED, WHITE);
-    k.add([31.0, 3.0, -0.3], [31.6, 3.6, 0.3], STEEL, BRASS);
+    k.add([30.4, 3.0, -0.25], [31.0, 5.0, 0.25], BLUED, WHITE);
+    k.add([30.36, 4.5, -0.12], [30.4, 4.8, 0.12], PAINT, [255, 150, 60]);
     k.add([25.5, -1.3, -0.9], [27.0, 3.1, 0.9], BLUED, WHITE);
 
     k.part(2);
@@ -556,12 +558,13 @@ fn shotgun(k: &mut Builder) -> (f32, f32) {
     }
 
     k.part(4);
-    k.add([-36.0, -4.0, -1.5], [-14.0, 2.5, 1.5], WOOD, WHITE);
+    // The comb is well under the sight line, so the stock stays out of the aimed view.
+    k.add([-36.0, -4.0, -1.5], [-14.0, 1.0, 1.5], WOOD, WHITE);
     k.add([-36.0, -8.0, -1.5], [-24.0, -4.0, 1.5], WOOD, WHITE);
     k.slant(-20.0, [-16.0, -3.0, 0.0]);
     k.add([-24.0, -6.0, -1.4], [-16.0, -3.0, 1.4], WOOD, WHITE);
     k.part(4);
-    k.add([-37.5, -8.5, -1.7], [-36.0, 3.0, 1.7], POLY, [120; 3]);
+    k.add([-37.5, -8.5, -1.7], [-36.0, 1.5, 1.7], POLY, [120; 3]);
 
     attachments(
         k,
@@ -679,8 +682,8 @@ fn models() -> &'static [Model; 5] {
                 mag_axis: Vec3::new(0.1, -1.0, 0.0).normalize(),
                 slide: None,
                 cycle: None,
-                view_scale: 0.0115,
-                hip: Vec3::new(0.24, -0.22, -0.42),
+                view_scale: 0.0098,
+                hip: Vec3::new(0.27, -0.25, -0.58),
                 eye_gap: 0.12,
                 arm_scale: 0.3,
                 bounds: (Vec3::new(-35.2, -15.0, -2.2), Vec3::new(37.0, 7.9, 2.2)),
@@ -707,8 +710,8 @@ fn models() -> &'static [Model; 5] {
                 mag_axis: Vec3::NEG_Y,
                 slide: None,
                 cycle: Some((2, 5.0)),
-                view_scale: 0.0102,
-                hip: Vec3::new(0.24, -0.21, -0.36),
+                view_scale: 0.0088,
+                hip: Vec3::new(0.27, -0.24, -0.56),
                 eye_gap: 0.12,
                 arm_scale: 0.26,
                 bounds: (Vec3::new(-45.5, -12.2, -2.2), Vec3::new(46.0, 11.4, 4.4)),
@@ -727,7 +730,7 @@ fn models() -> &'static [Model; 5] {
                 silencer: 8.0,
                 eject: Vec3::new(-6.0, 1.0, 1.8),
                 laser: Vec3::new(29.1, -2.2, 0.0),
-                sight_height: 3.55,
+                sight_height: 4.95,
                 rear_sight: -5.0,
                 scope_height,
                 scope_eye,
@@ -736,11 +739,11 @@ fn models() -> &'static [Model; 5] {
                 mag_axis: Vec3::NEG_Y,
                 slide: None,
                 cycle: Some((3, 5.0)),
-                view_scale: 0.0115,
-                hip: Vec3::new(0.24, -0.21, -0.4),
-                eye_gap: 0.12,
+                view_scale: 0.0098,
+                hip: Vec3::new(0.27, -0.26, -0.6),
+                eye_gap: 0.2,
                 arm_scale: 0.28,
-                bounds: (Vec3::new(-37.5, -9.2, -1.8), Vec3::new(32.0, 3.6, 1.8)),
+                bounds: (Vec3::new(-37.5, -9.2, -1.8), Vec3::new(32.0, 5.0, 1.8)),
             },
         };
         [pistol_model, deagle, m16_model, sniper_model, shotgun_model]
@@ -771,10 +774,20 @@ pub fn muzzle(kind: GunKind, mods: u8) -> Vec3 {
 }
 
 /// Where each part's boxes are together (gun space), with these attachments.
-fn part_bounds(kind: GunKind, part: usize, mods: u8) -> (Vec3, Vec3) {
+pub fn part_bounds(kind: GunKind, part: usize, mods: u8) -> (Vec3, Vec3) {
+    bounds_where(kind, |b| b.part == part && b.shown(mods))
+}
+
+/// Where an attachment's own boxes are on the gun (gun space).
+pub fn attachment_bounds(kind: GunKind, bit: u8) -> (Vec3, Vec3) {
+    bounds_where(kind, |b| b.with == bit)
+}
+
+/// The corners around the boxes `pick` chooses (gun space).
+pub fn bounds_where(kind: GunKind, pick: impl Fn(&GunBox) -> bool) -> (Vec3, Vec3) {
     let mut lo = Vec3::splat(f32::MAX);
     let mut hi = Vec3::splat(f32::MIN);
-    for b in boxes(kind).iter().filter(|b| b.part == part && b.shown(mods)) {
+    for b in boxes(kind).iter().filter(|b| pick(b)) {
         let m = b.transform();
         for i in 0..8 {
             let c = Vec3::new(
@@ -894,22 +907,6 @@ pub fn gun_to_unit(kind: GunKind) -> Mat4 {
     let (lo, hi) = spec(kind).bounds;
     let size = (hi - lo).max_element();
     Mat4::from_scale(Vec3::splat(1.0 / size)) * Mat4::from_translation(-(lo + hi) * 0.5)
-}
-
-/// The gun in the right hand of the player model (arm space, model pixels), aimed along the
-/// arm: the muzzle points away from the shoulder and the sights toward the back of the hand.
-pub fn in_arm(kind: GunKind) -> Mat4 {
-    let s = spec(kind);
-    let basis = Mat4::from_cols(
-        glam::Vec4::new(0.0, -1.0, 0.0, 0.0),
-        glam::Vec4::new(0.0, 0.0, -1.0, 0.0),
-        glam::Vec4::new(1.0, 0.0, 0.0, 0.0),
-        glam::Vec4::W,
-    );
-    Mat4::from_translation(Vec3::new(1.0, -11.0, 0.0))
-        * basis
-        * Mat4::from_scale(Vec3::splat(s.arm_scale))
-        * Mat4::from_translation(-s.hand)
 }
 
 /// Average colours of the model's surfaces, for the icons.
@@ -1087,17 +1084,6 @@ mod tests {
                 .collect();
             assert!(!tops.is_empty(), "{kind:?}");
             assert!(tops.iter().all(|&y| (y - s.sight_height).abs() < 0.11), "{kind:?}: {tops:?}");
-        }
-    }
-
-    #[test]
-    fn guns_point_along_the_raised_arm() {
-        for kind in GUN_KINDS {
-            // Arm space: the arm hangs along -Y; the muzzle must be further along it.
-            let m = in_arm(kind);
-            let grip = m.transform_point3(spec(kind).grip);
-            let muzzle = m.transform_point3(muzzle(kind, 0));
-            assert!(muzzle.y < grip.y - 4.0, "{kind:?}: grip {grip}, muzzle {muzzle}");
         }
     }
 
