@@ -66,6 +66,19 @@ impl Game {
         if GunKind::of(held).is_some() {
             return;
         }
+        if self.throw_grenade() {
+            return;
+        }
+        // Armor in hand: put it on (swapping with what is worn).
+        if let Some((piece, _)) = armor_of(held) {
+            if self.right_pressed {
+                let slot = self.hotbar_slot;
+                std::mem::swap(&mut self.inventory.slots[slot], &mut self.inventory.armor[piece]);
+                self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
+                self.hand.swing();
+            }
+            return;
+        }
         let sneaking = self.sneaking();
         if let Some(i) = self.mob_target {
             if held == SHEARS && self.mobs[i].can_shear() {

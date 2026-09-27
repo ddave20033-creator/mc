@@ -96,6 +96,11 @@ pub fn break_time(b: u8, held: ItemId) -> Option<f32> {
     Some(m.hardness * mult / speed)
 }
 
+/// How hard a block is (Minecraft hardness); None for what cannot be mined.
+pub fn hardness(b: u8) -> Option<f32> {
+    mining(b).map(|m| m.hardness)
+}
+
 /// Items dropped when `b` is mined with `held` (survival). `r` is a random number in 0..1.
 pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
     if !can_harvest(b, held) {

@@ -77,7 +77,10 @@ impl Cases {
     }
 
     /// Falls, bounces off blocks (a little less each time) and comes to rest lying down.
-    pub fn update(&mut self, dt: f32, world: &World) {
+    /// Returns where cases hit the ground hard enough to be heard: (where, a shotgun hull,
+    /// how hard 0..1).
+    pub fn update(&mut self, dt: f32, world: &World) -> Vec<(Vec3, bool, f32)> {
+        let mut clinks = Vec::new();
         let solid = |p: Vec3| {
             is_solid(world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32))
         };
@@ -100,6 +103,10 @@ impl Cases {
                     continue;
                 }
                 if axis == 1 && c.vel.y < 0.0 {
+                    let hard = (-c.vel.y / 6.0).min(1.0);
+                    if hard > 0.15 {
+                        clinks.push((p, c.kind == CaseKind::Shell, hard));
+                    }
                     // Landed: bounce a little, lose speed, spin slower.
                     p.y = q.y.floor() + 1.0 + c.kind.look().0.y;
                     c.vel.y *= -0.3;
@@ -125,6 +132,7 @@ impl Cases {
             }
         }
         self.list.retain(|c| c.age < CASE_LIFE);
+        clinks
     }
 
     pub fn build(&self, out: &mut Vec<Vertex>, world: &World) {

@@ -82,7 +82,7 @@ impl Game {
             creative: self.creative(),
             flying: self.player.flying,
             slot: self.hotbar_slot as u8,
-            inventory: slots.to_vec(),
+            inventory: slots.iter().chain(&self.inventory.armor).copied().collect(),
             bed: self.bed_spawn,
         }
     }
@@ -176,7 +176,20 @@ impl Game {
                 falling,
             } => self.sync_entities(mobs, items, falling),
             Msg::Give(stack) => self.give(stack),
-            Msg::Hurt { dmg, from, knock } => self.hit_by_player(dmg, from, knock),
+            Msg::Hurt {
+                dmg,
+                from,
+                knock,
+                kind,
+            } => self.hit_by_player(dmg, from, knock, kind),
+            Msg::Grenade {
+                id,
+                kind,
+                pos,
+                vel,
+                seed,
+            } => self.remote_grenade(id, kind, pos, vel, seed),
+            Msg::Blast { pos, seed } => self.remote_blast(pos, seed),
             Msg::BreakFx { p, block } => self.break_fx(p, block, true, None),
             Msg::Furnace {
                 p,
@@ -247,6 +260,8 @@ impl Game {
         if let Some(s) = state {
             self.bed_spawn = s.bed;
             self.inventory.slots = std::array::from_fn(|i| s.inventory.get(i).copied().flatten());
+            let worn = crate::item::inventory::SIZE;
+            self.inventory.armor = std::array::from_fn(|i| s.inventory.get(worn + i).copied().flatten());
             self.needs = Needs::from_array(s.needs);
             self.game_mode = if s.creative {
                 GameMode::Creative

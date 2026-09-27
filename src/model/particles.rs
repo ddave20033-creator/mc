@@ -15,6 +15,9 @@ enum Kind {
     Smoke,
     /// A glowing spark from a gun's muzzle: flies fast, falls a little, burns out quickly.
     Spark,
+    /// A big puff of a smoke cloud (smoke grenade, explosion): drifts out, slows down and
+    /// hangs in the air, growing.
+    Cloud,
 }
 
 pub struct Particle {
@@ -256,9 +259,78 @@ impl Particles {
         }
     }
 
+    /// A puff of a smoke grenade's cloud at `pos`, pushed out to spread the cloud around it.
+    pub fn smoke_cloud(&mut self, pos: Vec3, sky: u8, blk: u8) {
+        let dir = Vec3::new(self.rand() - 0.5, self.rand() * 0.6, self.rand() - 0.5);
+        let life = 8.0 + self.rand() * 4.0;
+        let gray = (205.0 + self.rand() * 35.0) as u8;
+        let size = 0.45 + self.rand() * 0.35;
+        let vel = dir.normalize_or_zero() * (1.5 + self.rand() * 2.5) + Vec3::Y * 0.4;
+        self.list.push(Particle {
+            kind: Kind::Cloud,
+            pos,
+            vel,
+            life,
+            max_life: life,
+            layer: tex::SMOKE,
+            uv0: [0.0, 0.0],
+            size,
+            tint: [gray; 3],
+            light: [sky, blk],
+        });
+    }
+
+    /// An explosion: a ball of fire, sparks flying and dark smoke rolling out.
+    pub fn explosion(&mut self, pos: Vec3, sky: u8, blk: u8) {
+        for _ in 0..26 {
+            let dir = Vec3::new(self.rand() - 0.5, self.rand() - 0.3, self.rand() - 0.5).normalize_or_zero();
+            let life = 0.25 + self.rand() * 0.35;
+            let size = 0.25 + self.rand() * 0.35;
+            let vel = dir * (2.0 + self.rand() * 4.0);
+            self.list.push(Particle {
+                kind: Kind::Flame,
+                pos: pos + dir * 0.3,
+                vel,
+                life,
+                max_life: life,
+                layer: tex::FLAME_PARTICLE,
+                uv0: [0.0, 0.0],
+                size,
+                tint: [255; 3],
+                light: [15, 15],
+            });
+        }
+        self.sparks(pos, Vec3::Y, 30);
+        for _ in 0..24 {
+            let dir = Vec3::new(self.rand() - 0.5, self.rand() * 0.8, self.rand() - 0.5).normalize_or_zero();
+            let life = 2.5 + self.rand() * 2.5;
+            let gray = (45.0 + self.rand() * 45.0) as u8;
+            let size = 0.4 + self.rand() * 0.5;
+            let vel = dir * (2.0 + self.rand() * 4.0) + Vec3::Y * 0.8;
+            self.list.push(Particle {
+                kind: Kind::Cloud,
+                pos: pos + dir * 0.4,
+                vel,
+                life,
+                max_life: life,
+                layer: tex::SMOKE,
+                uv0: [0.0, 0.0],
+                size,
+                tint: [gray; 3],
+                light: [sky, blk],
+            });
+        }
+    }
+
     pub fn update(&mut self, dt: f32, world: &World) {
         for p in &mut self.list {
             p.life -= dt;
+            if p.kind == Kind::Cloud {
+                p.vel *= (-1.4 * dt).exp();
+                p.vel.y += 0.06 * dt;
+                p.pos += p.vel * dt;
+                continue;
+            }
             if p.kind == Kind::Spark {
                 p.vel.y -= 6.0 * dt;
                 p.vel *= 1.0 - dt * 3.0;
@@ -298,6 +370,12 @@ impl Particles {
                     let frame =
                         SMOKE_FRAMES - 1 - ((t * SMOKE_FRAMES as f32) as u32).min(SMOKE_FRAMES - 1);
                     (p.size, p.layer + frame, 1.0, 0)
+                }
+                Kind::Cloud => {
+                    // The biggest puff, growing; it breaks up over the last fifth.
+                    let end = ((t - 0.8) / 0.2).max(0.0);
+                    let frame = SMOKE_FRAMES - 1 - ((end * SMOKE_FRAMES as f32) as u32).min(SMOKE_FRAMES - 1);
+                    (p.size * (0.7 + 0.8 * t.min(0.6)), p.layer + frame, 1.0, 0)
                 }
             };
             let (r, u) = (right * size, up * size);

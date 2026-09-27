@@ -9,6 +9,7 @@ use crate::entity::player::{ray_boxes, raycast_solid};
 use crate::item::*;
 use crate::lang::tf;
 use crate::model::ballistics::{self, CaseKind, Cases};
+use crate::audio::Sound;
 use crate::model::gun::{self, PARTS};
 
 /// Seconds to raise the gun to the eye.
@@ -58,7 +59,7 @@ pub(super) struct Guns {
     /// its own on the gun): how much is left, where, which way, how big, its turn.
     flash: Option<(f32, Vec3, Vec3, f32, f32)>,
     /// The flash's light on the surroundings: how much is left and where.
-    flash_light: (f32, Vec3),
+    pub(super) flash_light: (f32, Vec3),
     /// How hot the barrel is from firing (smoke curls out of it above 1), and when the last
     /// wisp came out.
     heat: f32,
@@ -266,6 +267,20 @@ fn zeroed(dir: Vec3, dist: f32, speed: f32, gravity: f32) -> Vec3 {
     (dir * dist + Vec3::Y * 0.5 * gravity * t * t).normalize_or(dir)
 }
 
+/// What a gun sounds like firing.
+fn shot_sound(kind: GunKind, silenced: bool) -> Sound {
+    if silenced {
+        return Sound::ShotSilenced;
+    }
+    match kind {
+        GunKind::Pistol => Sound::ShotPistol,
+        GunKind::DesertEagle => Sound::ShotMagnum,
+        GunKind::M16 => Sound::ShotRifle,
+        GunKind::Sniper => Sound::ShotSniper,
+        GunKind::Shotgun => Sound::ShotShotgun,
+    }
+}
+
 /// The case a gun throws out.
 fn case_kind(kind: GunKind) -> CaseKind {
     match kind {
@@ -344,7 +359,25 @@ impl Game {
 
         if let (Some(t), Some((_, kind))) = (self.guns.reload, held) {
             let length = kind.stats().reload;
-            let t = t + dt;
+            let (was, t) = (t / length, t + dt);
+            let now = t / length;
+            let at = self.player.eye();
+            let crossed = |k: f32| was < k && now >= k;
+            if kind.stats().shells {
+                if crossed(0.45) {
+                    self.audio.play(Sound::ShellIn, Some(at), 0.8);
+                }
+            } else {
+                if crossed(0.12) {
+                    self.audio.play(Sound::MagOut, Some(at), 0.8);
+                }
+                if crossed(0.6) {
+                    self.audio.play(Sound::MagIn, Some(at), 0.9);
+                }
+                if crossed(0.84) && self.guns.reload_empty {
+                    self.audio.play(Sound::SlideRelease, Some(at), 0.9);
+                }
+            }
             if t >= length {
                 self.guns.reload = None;
                 self.finish_reload();
@@ -355,6 +388,11 @@ impl Game {
         // The bolt or the pump: the spent case comes out halfway.
         if let (Some(t), Some((_, kind))) = (self.guns.cycle, held) {
             let length = kind.stats().cycle;
+            let start = length * 0.12;
+            if t < start && t + dt >= start {
+                let sound = if kind == GunKind::Shotgun { Sound::PumpCycle } else { Sound::BoltCycle };
+                self.audio.play(sound, Some(self.player.eye()), 0.9);
+            }
             let t = t + dt;
             if t >= length * 0.35 && !self.guns.cycle_ejected {
                 self.guns.cycle_ejected = true;
@@ -378,7 +416,10 @@ impl Game {
         self.hand.reload_empty = self.guns.reload_empty;
 
         self.update_bullets(dt);
-        self.guns.cases.update(dt, &self.terrain.world);
+        for (at, shell, hard) in self.guns.cases.update(dt, &self.terrain.world) {
+            let sound = if shell { Sound::CaseShell } else { Sound::CaseBrass };
+            self.audio.play(sound, Some(at), 0.25 + 0.75 * hard);
+        }
 
         // The flash fades in a moment; a hot barrel smokes.
         if let Some(f) = &mut self.guns.flash {
@@ -478,6 +519,7 @@ impl Game {
                 self.start_reload();
             } else {
                 self.gun_message(t("gun.no_ammo"));
+                self.audio.play(Sound::DryFire, None, 0.8);
             }
             return;
         }
@@ -485,6 +527,7 @@ impl Game {
         // Dirt makes it jam more and more often; a completely dirty one does not fire at all.
         if dirt >= 1.0 || (dirt > 0.6 && self.random() < (dirt - 0.6) * 1.2) {
             self.gun_message(t("gun.jammed"));
+            self.audio.play(Sound::DryFire, None, 0.8);
             return;
         }
         let mods = gun_mods(&gun);
@@ -563,6 +606,8 @@ impl Game {
             self.eject_case(kind);
         }
 
+        self.audio.play(shot_sound(kind, silenced), Some(muzzle), 1.0);
+
         // Muzzle flash, its light, sparks and a puff of smoke (a silencer leaves only a
         // little smoke). The barrel heats up.
         let (sky, blk) = self.terrain.world.light_estimate(muzzle);
@@ -632,9 +677,11 @@ impl Game {
                 small: stats.pellets > 1,
             });
         }
+        let silenced = mods & gun_mod::SILENCER != 0;
+        self.audio.play(shot_sound(kind, silenced), Some(muzzle), 1.0);
         let (sky, blk) = self.terrain.world.light_estimate(muzzle);
         let size = stats.flash;
-        if mods & gun_mod::SILENCER == 0 {
+        if !silenced {
             self.guns.remote_flashes.push((1.0, muzzle, look, 0.1 * size, seed));
             self.guns.flash_light = ((0.6 + 0.2 * size).min(1.0), muzzle + look * 0.3);
             self.particles.sparks(muzzle, look, 3 + (size * 3.0) as usize);
@@ -715,9 +762,11 @@ impl Game {
                 }
             } else if let Some((id, _)) = player {
                 if self.is_client() {
-                    self.send(Msg::AttackPlayer { id, dmg, knock });
+                    let kind = crate::net::hurt::BULLET;
+                    self.send(Msg::AttackPlayer { id, dmg, knock, kind });
                 } else {
-                    self.send_to(id, &Msg::Hurt { dmg, from, knock });
+                    let kind = crate::net::hurt::BULLET;
+                    self.send_to(id, &Msg::Hurt { dmg, from, knock, kind });
                 }
                 return false;
             }
@@ -738,6 +787,7 @@ impl Game {
                 let at = b.pos + dir * d;
                 self.particles
                     .impact(&self.terrain.world, at + n * 0.02, n, b_id, tint);
+                self.audio.play(Sound::Impact, Some(at), 0.7);
                 // A hole where it went in (smaller from a shotgun's pellets).
                 if self.guns.holes.len() >= MAX_HOLES {
                     self.guns.holes.remove(0);

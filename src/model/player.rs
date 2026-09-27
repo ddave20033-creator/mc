@@ -47,6 +47,8 @@ pub struct PlayerPose {
     pub lantern: Option<Vec3>,
     /// The held pistol's attachments.
     pub gun_mods: u8,
+    /// What is worn (`item::armor_code`).
+    pub armor: u16,
 }
 
 // Face order for layers: +X, -X, +Y, -Y, +Z (back), -Z (front)
@@ -282,6 +284,55 @@ pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u
     let ll = root * t(-hip.x, hip.y, hip.z) * rot(limbs.left_leg);
     box_(out, ll, [-2.0, -12.0, -2.0], [2.0, 0.0, 2.0], LEG);
 
+    // Armor over the body: a helmet (the face left free), a chestplate with shoulder pads,
+    // leggings from the hips, boots, and the vest over the chest with its pouches.
+    let (worn, vest) = crate::item::unpack_armor(p.armor);
+    let piece = |out: &mut Vec<Vertex>, m: Mat4, min: [f32; 3], max: [f32; 3], material: usize| {
+        let (layer, color) = match material {
+            0 => (tex::ARMOR_WOOL, [196, 184, 160]),
+            1 => (tex::ARMOR_METAL, [226, 146, 96]),
+            2 => (tex::ARMOR_METAL, [176, 184, 198]),
+            _ => (tex::ARMOR_METAL, [120, 228, 232]),
+        };
+        let c: [u8; 3] = std::array::from_fn(|i| (color[i] as u32 * tint[i] as u32 / 255) as u8);
+        emit_box(out, m, Vec3::from(min), Vec3::from(max), [layer; 6], [c; 6], light, fl);
+    };
+    if let (Some(m), false) = (worn[0], p.first_person) {
+        piece(out, head, [-4.6, 4.6, -4.6], [4.6, 8.7, 4.6], m);
+        piece(out, head, [-4.6, 0.5, 1.2], [4.6, 4.6, 4.6], m);
+        piece(out, head, [-4.6, 1.5, -4.6], [-3.6, 4.6, 1.2], m);
+        piece(out, head, [3.6, 1.5, -4.6], [4.6, 4.6, 1.2], m);
+    }
+    if let Some(m) = worn[1] {
+        piece(out, body, [-4.6, -10.8, -2.6], [4.6, 0.5, 2.6], m);
+        if show_right {
+            piece(out, right, [-1.6, -4.0, -2.6], [3.6, 2.6, 2.6], m);
+        }
+        if !p.hide_arms {
+            piece(out, left, [-3.6, -4.0, -2.6], [1.6, 2.6, 2.6], m);
+        }
+    }
+    if let Some(m) = worn[2] {
+        piece(out, body, [-4.5, -12.4, -2.5], [4.5, -9.8, 2.5], m);
+        piece(out, rl, [-2.5, -8.5, -2.5], [2.5, 0.3, 2.5], m);
+        piece(out, ll, [-2.5, -8.5, -2.5], [2.5, 0.3, 2.5], m);
+    }
+    if let Some(m) = worn[3] {
+        piece(out, rl, [-2.6, -12.4, -2.6], [2.6, -8.3, 2.6], m);
+        piece(out, ll, [-2.6, -12.4, -2.6], [2.6, -8.3, 2.6], m);
+    }
+    if vest {
+        let olive: [u8; 3] = std::array::from_fn(|i| ([118u32, 124, 92][i] * tint[i] as u32 / 255) as u8);
+        let dark: [u8; 3] = olive.map(|c| (c as u32 * 4 / 5) as u8);
+        let v = |out: &mut Vec<Vertex>, min: [f32; 3], max: [f32; 3], c: [u8; 3]| {
+            emit_box(out, body, Vec3::from(min), Vec3::from(max), [tex::VEST; 6], [c; 6], light, fl);
+        };
+        v(out, [-4.9, -10.2, -3.0], [4.9, 0.6, 3.0], olive);
+        for (x0, x1) in [(-3.8, -1.5), (-1.1, 1.1), (1.5, 3.8)] {
+            v(out, [x0, -9.6, -3.7], [x1, -6.6, -3.0], dark);
+        }
+    }
+
     // Held item, placed like Minecraft's ItemInHandLayer followed by the item model's
     // `thirdperson_righthand` display transform (handheld tools, flat items, blocks).
     if p.held == crate::world::LANTERN as ItemId && show_right {
@@ -444,6 +495,7 @@ mod gun_hold_tests {
             hide_right_arm: false,
             lantern: None,
             gun_mods: 0,
+            armor: 0,
         }
     }
 

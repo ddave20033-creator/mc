@@ -7,12 +7,15 @@ pub const SIZE: usize = 36;
 pub struct Inventory {
     /// 0..9 hotbar, 9..36 main inventory.
     pub slots: [Slot; SIZE],
+    /// Worn: helmet, chestplate, leggings, boots, bulletproof vest.
+    pub armor: [Slot; crate::item::ARMOR_SLOTS],
 }
 
 impl Inventory {
     pub fn new() -> Self {
         Self {
             slots: [None; SIZE],
+            armor: [None; crate::item::ARMOR_SLOTS],
         }
     }
 

@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::entity::block_entity::{doneness, grill_box, part, Doneness, BURN_TIME};
+use crate::audio::Sound;
 use crate::entity::Furnace;
 use crate::item::inventory;
 use crate::item::*;
@@ -190,6 +191,41 @@ impl Game {
         for (p, b) in relight {
             self.set_block(p, b);
         }
+    }
+
+    /// What the burning furnaces near the player sound like: a furnace crackles, a blast or
+    /// advanced furnace roars with its bellows (looping sounds: an id, the sound, where, how
+    /// loud). A furnace that just finished smelting something dings.
+    pub(super) fn furnace_sounds(&mut self) -> Vec<(u64, Sound, Vec3, f32)> {
+        let near = self.player.pos;
+        let mut loops = Vec::new();
+        let mut dings = Vec::new();
+        for (p, f) in &self.block_entities.furnaces {
+            let at = p.as_vec3() + Vec3::splat(0.5);
+            if at.distance_squared(near) > 24.0 * 24.0 {
+                continue;
+            }
+            let made = f.output.map_or(0, |s| s.count as u32);
+            let before = self.furnace_heard.insert(*p, made);
+            if before.is_some_and(|b| made > b) {
+                dings.push(at);
+            }
+            if f.burn <= 0.0 {
+                continue;
+            }
+            let id = (p.x as u64 & 0xfffff) << 40 | (p.y as u64 & 0xfffff) << 20 | (p.z as u64 & 0xfffff);
+            let sound = match furnace_base(self.terrain.world.geti(*p)) {
+                Some(FURNACE) | None => Sound::FireCrackle,
+                Some(_) => Sound::BlastRoar,
+            };
+            loops.push((id, sound, at, 0.8));
+        }
+        self.furnace_heard
+            .retain(|p, _| self.block_entities.furnaces.contains_key(p));
+        for at in dings {
+            self.audio.play(Sound::SmeltDone, Some(at), 0.8);
+        }
+        loops
     }
 
     /// Steam and smoke off the meat on lit furnaces near the player: light while it cooks,

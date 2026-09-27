@@ -34,9 +34,11 @@ impl Game {
             (Some(i), _) => self.mobs[i].hurt(dmg, Some(from), knock),
             (None, Some(id)) => {
                 if self.is_client() {
-                    self.send(Msg::AttackPlayer { id, dmg, knock });
+                    let kind = crate::net::hurt::MELEE;
+                    self.send(Msg::AttackPlayer { id, dmg, knock, kind });
                 } else {
-                    self.send_to(id, &Msg::Hurt { dmg, from, knock });
+                    let kind = crate::net::hurt::MELEE;
+                    self.send_to(id, &Msg::Hurt { dmg, from, knock, kind });
                 }
                 true
             }

@@ -312,6 +312,11 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Játékost megölte egy másik játékos",
     ),
     (
+        "death.explosion",
+        "Player blew up",
+        "Játékos felrobbant",
+    ),
+    (
         "pause.quit",
         "Save and Quit to Title",
         "Mentés és kilépés a főmenübe",
