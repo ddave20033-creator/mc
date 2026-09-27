@@ -305,6 +305,7 @@ impl Game {
         }
         self.particles.update(dt, &self.terrain.world);
         self.update_craft_fx(dt);
+        self.update_book(dt);
         if self.in_world_view() {
             self.check_stations();
         }
@@ -586,6 +587,10 @@ impl Game {
     fn build_scene(&mut self, view: &View, dt: f32) -> Scene {
         let (in_world, third_person, cam) = (view.in_world, view.third_person, view.cam);
         let mut scene = Scene::default();
+        if in_world {
+            // The pages the books in hands are open at.
+            self.update_book_views(dt);
+        }
         self.particles
             .build(&mut scene.particles, view.right, view.up);
         if in_world {
@@ -619,9 +624,11 @@ impl Game {
         // so is a pistol (the body's arm would point it at the ground when looking down).
         let lantern = self.held() == LANTERN as ItemId;
         let pistol = self.holding_gun();
+        // The guide book is always held open in both first-person hands.
+        let book = self.held() == crate::item::GUIDE_BOOK;
         let down = -self.pitch.to_degrees();
         let lower = &mut self.hand.lower;
-        if !fp_body || torch || lantern || pistol || down <= 15.0 {
+        if !fp_body || torch || lantern || pistol || book || down <= 15.0 {
             *lower = (*lower + 8.0 * dt).min(1.0);
         } else if down < 30.0 {
             *lower = 15.0 / down;
@@ -631,7 +638,7 @@ impl Game {
         if in_world
             && !third_person
             && !self.hide_hud
-            && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol)))
+            && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol && !book)))
             && self.screen != Screen::Dead
             && self.sleep.is_none()
             && !self.in_station()
@@ -646,6 +653,7 @@ impl Game {
                 cam.extend(1.0),
             );
             self.hand.fancy_lantern = fp_body;
+            self.hand.book = self.book_view().map(|v| (self.book_read(), v));
             self.hand.build(
                 &mut scene.viewmodel,
                 cam_to_world,
@@ -668,10 +676,13 @@ impl Game {
             self.guns.muzzle = self.hand.muzzle_tip.map(to_world_view);
             self.guns.eject = self.hand.eject_tip.map(to_world_view);
             self.guns.laser_from = self.hand.laser_tip.map(to_world_view);
+            let hit = self.hand.book_hit;
+            self.set_book_hit(hit);
         } else {
             self.guns.muzzle = None;
             self.guns.eject = None;
             self.guns.laser_from = None;
+            self.set_book_hit(None);
         }
         // The player model (shadow only in first person).
         if in_world && self.player.spawned && self.screen != Screen::Dead {
@@ -703,6 +714,7 @@ impl Game {
                 hide_right_arm: false,
                 lantern: None,
                 gun_mods: self.held_gun_mods(),
+                book: self.book_view(),
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {
@@ -754,8 +766,8 @@ impl Game {
                     pos: pose.pos - body_fwd * back,
                     first_person: true,
                     // A gun is always shown by the first-person view (with its left hand).
-                    hide_arms: pistol || (!torch && !lantern && down <= 30.0),
-                    hide_right_arm: lantern || pistol,
+                    hide_arms: pistol || book || (!torch && !lantern && down <= 30.0),
+                    hide_right_arm: lantern || pistol || book,
                     ..pose
                 };
                 build_player(&mut scene.particles, &fp, &limbs, player_sky, player_blk);

@@ -166,6 +166,11 @@ pub struct Renderer {
     /// `Gpu::pass_version` the main-pass pipelines were made for.
     pass_version: u64,
     block_tex: Texture,
+    /// Mip levels of the block texture.
+    block_mips: usize,
+    /// Layers of the block texture replaced while the game runs (the guide book's pages): the
+    /// first layer, how many, and each mip level of them (layer after layer).
+    layer_uploads: VecDeque<(u32, u32, Vec<Vec<u8>>)>,
     font_tex: Texture,
     shadow_image: Image,
     shadow_sampler: vk::Sampler,
@@ -432,6 +437,108 @@ fn create_shadow_pass(device: &ash::Device) -> vk::RenderPass {
 
 impl Renderer {
     /// Rebuild the shared texture array after a player uploads or receives a skin.
+    /// Replaces `count` layers of the block texture from `first` on, next frame. `levels`
+    /// holds every mip level of them, as `Texture::new` takes them.
+    pub fn queue_layers(&mut self, first: u32, count: u32, levels: Vec<Vec<u8>>) {
+        if levels.len() == self.block_mips {
+            self.layer_uploads.push_back((first, count, levels));
+        }
+    }
+
+    /// Records the queued layer replacements (before the frame's passes).
+    unsafe fn flush_layer_uploads(&mut self, gpu: &mut Gpu, cmd: vk::CommandBuffer) {
+        while let Some((first, count, levels)) = self.layer_uploads.pop_front() {
+            let total: usize = levels.iter().map(|l| l.len()).sum();
+            let staging = Buffer::new(
+                gpu,
+                total as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            );
+            let mut regions = Vec::new();
+            let mut offset = 0usize;
+            for (i, level) in levels.iter().enumerate() {
+                staging.write(offset, level.as_slice());
+                let size = (TILE as u32 >> i).max(1);
+                regions.push(vk::BufferImageCopy {
+                    buffer_offset: offset as u64,
+                    buffer_row_length: 0,
+                    buffer_image_height: 0,
+                    image_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: i as u32,
+                        base_array_layer: first,
+                        layer_count: count,
+                    },
+                    image_offset: vk::Offset3D::default(),
+                    image_extent: vk::Extent3D {
+                        width: size,
+                        height: size,
+                        depth: 1,
+                    },
+                });
+                offset += level.len();
+            }
+            let range = vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: levels.len() as u32,
+                base_array_layer: first,
+                layer_count: count,
+            };
+            let image = self.block_tex.image.handle;
+            let barrier = |old, new, src, dst| {
+                vk::ImageMemoryBarrier::default()
+                    .old_layout(old)
+                    .new_layout(new)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .image(image)
+                    .subresource_range(range)
+                    .src_access_mask(src)
+                    .dst_access_mask(dst)
+            };
+            let d = gpu.device.clone();
+            // Earlier frames may still be sampling these layers.
+            d.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier(
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::AccessFlags::SHADER_READ,
+                    vk::AccessFlags::TRANSFER_WRITE,
+                )],
+            );
+            d.cmd_copy_buffer_to_image(
+                cmd,
+                staging.handle,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &regions,
+            );
+            d.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::VERTEX_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier(
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::AccessFlags::TRANSFER_WRITE,
+                    vk::AccessFlags::SHADER_READ,
+                )],
+            );
+            gpu.defer_destroy(staging);
+        }
+    }
+
     pub fn replace_block_textures(&mut self, gpu: &Gpu, levels: &[Vec<u8>]) {
         unsafe {
             gpu.device
@@ -472,6 +579,10 @@ impl Renderer {
                 &[],
             );
         }
+        self.block_mips = levels.len();
+        // Replaced layers queued before this are in the new levels already, or will be
+        // queued again.
+        self.layer_uploads.clear();
         let old = std::mem::replace(&mut self.block_tex, replacement);
         old.destroy(&gpu.device);
     }
@@ -769,6 +880,8 @@ impl Renderer {
                 ui_pipe,
                 pass_version: gpu.pass_version,
                 block_tex,
+                block_mips: block_levels.len(),
+                layer_uploads: VecDeque::new(),
                 font_tex,
                 shadow_image,
                 shadow_sampler,
@@ -999,6 +1112,7 @@ impl Renderer {
             };
             let clock_start = std::time::Instant::now();
             self.flush_uploads(gpu, cmd);
+            self.flush_layer_uploads(gpu, cmd);
             let clock_uploaded = std::time::Instant::now();
             let mut marks = [clock_uploaded; 4];
 

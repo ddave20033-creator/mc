@@ -57,6 +57,9 @@ pub const HALF_BURNT_MUTTON: ItemId = 294;
 pub const RAW_BURNT_PORKCHOP: ItemId = 295;
 pub const RAW_BURNT_MUTTON: ItemId = 296;
 pub const COPPER_INGOT: ItemId = 297;
+/// The guide book: opened with a right click, it explains crafting, the furnaces and the
+/// guns (see `game::book`).
+pub const GUIDE_BOOK: ItemId = 298;
 /// Pistol ammunition (9 mm): one is used up per shot.
 pub const BULLET: ItemId = 282;
 /// The five pistol parts, in the order they go together at the gun station: frame (with the
@@ -272,7 +275,7 @@ pub type Slot = Option<Stack>;
 pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
-        WATER_BUCKET | LAVA_BUCKET | SHEARS => 1,
+        WATER_BUCKET | LAVA_BUCKET | SHEARS | GUIDE_BOOK => 1,
         _ if GunKind::of(id).is_some() => 1,
         _ if id == BED as ItemId => 1,
         BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
@@ -514,6 +517,13 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
 /// English and Hungarian names, and the icon's texture layer.
 const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
     (STICK, "stick", "Stick", "Bot", tex::STICK),
+    (
+        GUIDE_BOOK,
+        "guide_book",
+        "Guide Book",
+        "Kézikönyv",
+        tex::BOOK,
+    ),
     (COAL, "coal", "Coal", "Szén", tex::COAL),
     (CHARCOAL, "charcoal", "Charcoal", "Faszén", tex::CHARCOAL),
     (

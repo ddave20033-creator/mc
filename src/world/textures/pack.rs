@@ -80,6 +80,7 @@ const PACK_TEXTURES: &[(u32, &str)] = &[
     (tex::COAL_BLOCK, "block/coal_block"),
     (tex::STONE_BRICKS, "block/stone_bricks"),
     (tex::STICK, "item/stick"),
+    (tex::BOOK, "item/written_book"),
     (tex::COAL, "item/coal"),
     (tex::CHARCOAL, "item/charcoal"),
     (tex::IRON_INGOT, "item/iron_ingot"),

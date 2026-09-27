@@ -407,6 +407,8 @@ impl Game {
             }
             None => {
                 self.spawn_player();
+                // A new player starts with the guide book.
+                self.give(crate::item::Stack::one(crate::item::GUIDE_BOOK));
                 self.say(t("chat.welcome"), chat::YELLOW);
             }
         }

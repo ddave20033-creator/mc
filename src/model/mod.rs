@@ -3,6 +3,7 @@
 //! models made of them.
 
 pub mod ballistics;
+pub mod book;
 pub mod gun;
 pub mod hand;
 pub mod lantern;

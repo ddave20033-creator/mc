@@ -417,6 +417,7 @@ fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut Preview
         crouch: 0.0,
         held: crate::item::NONE,
         skin,
+        book: None,
         time: ui.time,
         hurt: false,
         first_person: false,

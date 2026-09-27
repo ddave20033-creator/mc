@@ -236,7 +236,19 @@ pub mod tex {
     /// Muzzle flash: the star seen from the front, and a flame tongue seen from the side.
     pub const MUZZLE_FLASH: u32 = ADV_VENT_TOP + 1;
     pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
-    pub const LAYERS: usize = (MUZZLE_FLASH_SIDE + 1) as usize;
+    /// The guide book: its icon, and the leather, the page edges and a written page of the
+    /// open book in a player's hands.
+    pub const BOOK: u32 = MUZZLE_FLASH_SIDE + 1;
+    pub const BOOK_COVER: u32 = BOOK + 1;
+    pub const BOOK_EDGE: u32 = BOOK + 2;
+    pub const BOOK_PAGE: u32 = BOOK + 3;
+    /// Pages of the guide book open in players' hands, drawn while the game runs
+    /// (`game::book`): `BOOK_SHEET_COUNT` pages of `model::book::SHEET_LAYERS` layers each.
+    pub const BOOK_SHEETS: u32 = BOOK_PAGE + 1;
+    pub const BOOK_SHEET_COUNT: u32 = 12;
+    /// The chapter tabs along the top of this player's guide book (`model::book::TAB_LAYERS`).
+    pub const BOOK_TABS: u32 = BOOK_SHEETS + BOOK_SHEET_COUNT * 6;
+    pub const LAYERS: usize = (BOOK_TABS + 4) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -327,6 +339,7 @@ fn is_item_icon(l: u32) -> bool {
         || (tex::PISTOL..tex::GUN_GLASS).contains(&l)
         || (tex::GUN_ICONS..tex::AMMO_ICONS + 4).contains(&l)
         || l == tex::COPPER_INGOT
+        || l == tex::BOOK
         || (tex::MORE_TOOLS..tex::MORE_TOOLS + 4).contains(&l)
 }
 
