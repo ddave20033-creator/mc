@@ -366,7 +366,15 @@ fn ingot_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
         return [0, 0, 0, 0];
     }
     let gold = l == tex::GOLD_INGOT;
-    let (rim, top, highlight, side, end) = if l == tex::COPPER_INGOT {
+    let (rim, top, highlight, side, end) = if l == tex::STEEL_INGOT {
+        (
+            [34.0, 38.0, 46.0],
+            [138.0, 146.0, 160.0],
+            [200.0, 208.0, 222.0],
+            [96.0, 104.0, 118.0],
+            [70.0, 76.0, 88.0],
+        )
+    } else if l == tex::COPPER_INGOT {
         (
             [92.0, 38.0, 20.0],
             [228.0, 132.0, 84.0],
@@ -674,7 +682,20 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
                 }
             })
         }
-        tex::IRON_INGOT | tex::GOLD_INGOT | tex::COPPER_INGOT => Some(ingot_icon(l, x, y)),
+        tex::IRON_INGOT | tex::GOLD_INGOT | tex::COPPER_INGOT | tex::STEEL_INGOT => {
+            Some(ingot_icon(l, x, y))
+        }
+        tex::CERAMIC_PLATE => {
+            // A cream plate with rounded corners, slightly curved (lighter at the top).
+            let inside = |fx: f32, fy: f32| {
+                let (dx, dy) = ((fx - 16.0).abs() - 7.0, (fy - 16.0).abs() - 10.0);
+                dx.max(0.0).hypot(dy.max(0.0)) < 3.0
+            };
+            let c = [226.0, 214.0, 190.0].map(|c| c * (0.93 + 0.1 * n));
+            shape(x, y, c, inside)
+        }
+        tex::FRAG_GRENADE | tex::SMOKE_GRENADE => grenade_icon(l == tex::SMOKE_GRENADE, x, y),
+        _ if (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l) => armor_icon(l, x, y),
         tex::BOOK => book_icon(x, y),
         tex::DIAMOND => Some(diamond_icon(x, y)),
         tex::CLAY_BALL => shape(x, y, [160.0, 166.0, 182.0], |fx, fy| {
@@ -1687,6 +1708,129 @@ fn muzzle_flash(l: u32, x: i32, y: i32) -> [u8; 4] {
     col(c, 0.92 + 0.08 * grain(l, x, y, 704), 255)
 }
 
+/// Armor icons: a helmet, chestplate, leggings or boots in its material's color (wool
+/// quilted, the metals with a shine), or the olive bulletproof vest with its pouches.
+fn armor_icon(l: u32, x: i32, y: i32) -> Option<[u8; 4]> {
+    let i = l - tex::ARMOR_ICONS;
+    let (fx, fy) = (d(x), d(y));
+    if i == 16 {
+        let vest = |fx: f32, fy: f32| {
+            in_polygon(fx, fy, &[(8.0, 5.0), (13.0, 5.0), (16.0, 9.0), (19.0, 5.0), (24.0, 5.0), (26.5, 10.0), (26.5, 27.0), (5.5, 27.0), (5.5, 10.0)])
+        };
+        let pouch = (fy > 17.0 && fy < 23.0) && ((7.5..11.5).contains(&fx) || (12.5..19.5).contains(&fx) || (20.5..24.5).contains(&fx));
+        let strap = (fy - 13.0).abs() < 0.6;
+        let c = if pouch {
+            [84.0, 90.0, 60.0]
+        } else if strap {
+            [60.0, 64.0, 44.0]
+        } else {
+            [110.0, 118.0, 80.0]
+        };
+        return shape(x, y, c, vest);
+    }
+    let (piece, material) = ((i % 4) as usize, (i / 4) as usize);
+    let color = [[200.0, 188.0, 160.0], [226.0, 140.0, 88.0], [178.0, 186.0, 200.0], [110.0, 226.0, 230.0]][material];
+    let inside = |fx: f32, fy: f32| match piece {
+        0 => {
+            // A dome over the head, cheek guards down the sides, the face open between.
+            let dome = ((fx - 16.0) / 11.5).powi(2) + ((fy - 17.0) / 11.0).powi(2) < 1.0 && fy < 17.5;
+            let cheeks = (fy >= 17.5 && fy < 25.0) && ((4.5..9.5).contains(&fx) || (22.5..27.5).contains(&fx));
+            dome || cheeks
+        }
+        1 => in_polygon(
+            fx,
+            fy,
+            &[(5.0, 6.0), (12.0, 6.0), (16.0, 9.5), (20.0, 6.0), (27.0, 6.0), (28.5, 13.0), (24.0, 14.0), (24.0, 27.0), (8.0, 27.0), (8.0, 14.0), (3.5, 13.0)],
+        ),
+        2 => in_polygon(fx, fy, &[(8.0, 5.0), (24.0, 5.0), (25.5, 27.5), (19.0, 27.5), (16.0, 13.0), (13.0, 27.5), (6.5, 27.5)]),
+        _ => {
+            let leg = |x0: f32| (x0..x0 + 6.0).contains(&fx) && (12.0..28.0).contains(&fy);
+            let toe = |x0: f32| (x0..x0 + 9.0).contains(&fx) && (23.5..28.0).contains(&fy);
+            leg(4.0) || toe(4.0) || leg(18.0) || toe(18.0)
+        }
+    };
+    let quilt = material == 0 && ((fx + fy) % 5.0 < 0.8 || (fx - fy).rem_euclid(5.0) < 0.8);
+    let shine = material > 0 && (fx - fy + 4.0).abs() < 1.2;
+    let c = color.map(|c| {
+        c * if quilt {
+            0.8
+        } else if shine {
+            1.25
+        } else {
+            1.0
+        }
+    });
+    shape(x, y, c.map(|c: f32| c.min(255.0)), inside)
+}
+
+/// What armor looks like worn (tinted by its material): quilted cloth, riveted metal
+/// plates, or the vest's woven fabric with straps of webbing across.
+fn armor_surface(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let (fx, fy) = (x as f32, y as f32);
+    match l {
+        tex::ARMOR_WOOL => {
+            let q = 32.0;
+            let seam = (fx + fy).rem_euclid(q) < 3.0 || (fx - fy).rem_euclid(q) < 3.0;
+            let v = if seam { 0.72 } else { 0.95 + 0.08 * fbm(l, x, y, 740) };
+            col([232.0; 3], v * (0.94 + 0.06 * grain(l, x, y, 741)), 255)
+        }
+        tex::ARMOR_METAL => {
+            // Two plates with a seam between them, a rivet in each corner, a bevel.
+            let (u, v) = (fx % 64.0, fy);
+            let edge = u < 3.0 || u > 61.0 || v < 3.0 || v > 125.0;
+            let rivet = [(8.0, 8.0), (56.0, 8.0), (8.0, 120.0), (56.0, 120.0)]
+                .iter()
+                .any(|&(cx, cy)| (u - cx).hypot(v - cy) < 3.2);
+            let k = if rivet {
+                1.25
+            } else if edge {
+                0.7
+            } else {
+                brushed(l, x, y, 742) * (1.0 - (v - 64.0).abs() / 64.0 * 0.12)
+            };
+            col([225.0; 3], k, 255)
+        }
+        _ => {
+            // Webbing straps every 24 texels, stitched down.
+            let band = (fy % 24.0) < 9.0;
+            let stitch = band && (fx % 16.0) < 2.0;
+            let weave = 0.92 + 0.08 * (((x + y) % 4 < 2) as i32 as f32) + 0.05 * grain(l, x, y, 743);
+            let v = if stitch { 0.6 } else if band { 0.82 * weave } else { weave };
+            col([215.0; 3], v, 255)
+        }
+    }
+}
+
+/// A grenade: an olive, segmented egg with the fuse, lever and pin ring on top; or a smoke
+/// grenade, a gray can with a colored band.
+fn grenade_icon(smoke: bool, x: i32, y: i32) -> Option<[u8; 4]> {
+    let (fx, fy) = (d(x), d(y));
+    // The fuse head and lever (steel), and the pin's ring beside it.
+    let head = (13.0..19.0).contains(&fx) && (5.5..10.0).contains(&fy);
+    let lever = (18.5..21.0).contains(&fx) && (7.0..19.0).contains(&fy);
+    let ring = ((fx - 10.5).hypot(fy - 7.0) - 2.6).abs() < 0.8;
+    if ring {
+        return shape(x, y, [190.0, 194.0, 200.0], |fx, fy| ((fx - 10.5).hypot(fy - 7.0) - 2.6).abs() < 0.8);
+    }
+    if head || lever {
+        return shape(x, y, [150.0, 156.0, 166.0], |fx, fy| {
+            ((13.0..19.0).contains(&fx) && (5.5..10.0).contains(&fy))
+                || ((18.5..21.0).contains(&fx) && (7.0..19.0).contains(&fy))
+        });
+    }
+    if smoke {
+        let can = |fx: f32, fy: f32| (10.0..22.0).contains(&fx) && (9.5..28.0).contains(&fy);
+        let band = (17.0..20.5).contains(&fy);
+        let c = if band { [210.0, 60.0, 50.0] } else { [118.0, 124.0, 128.0] };
+        return shape(x, y, c, can);
+    }
+    let egg = |fx: f32, fy: f32| ((fx - 16.0) / 7.2).powi(2) + ((fy - 18.5) / 9.0).powi(2) < 1.0;
+    // Grooves into segments.
+    let groove = egg(fx, fy) && ((fx - 16.0).abs() % 4.0 < 0.7 || (fy - 18.5).abs() % 4.5 < 0.7);
+    let c = if groove { [58.0, 66.0, 40.0] } else { [98.0, 110.0, 64.0] };
+    shape(x, y, c, egg)
+}
+
 /// A bullet hole, multiplied onto a block (mid-gray leaves it as it is): a black hole with
 /// a ragged edge, a dark ring of crushed material around it, cracks running out and a faint
 /// scorch fading away; clear beyond.
@@ -2414,6 +2558,7 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         }
         tex::MUZZLE_FLASH | tex::MUZZLE_FLASH_SIDE => muzzle_flash(l, x, y),
         tex::BULLET_HOLE => bullet_hole(l, x, y),
+        tex::ARMOR_WOOL | tex::ARMOR_METAL | tex::VEST => armor_surface(l, x, y),
         tex::BOOK_COVER | tex::BOOK_EDGE | tex::BOOK_PAGE => book_surface(l, x, y),
         // Blank until a page is drawn onto them.
         _ if l >= tex::BOOK_SHEETS => col(BOOK_PAPER, 1.0, 255),

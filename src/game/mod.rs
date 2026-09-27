@@ -5,6 +5,7 @@ mod camera;
 mod commands;
 mod frame;
 mod furnace;
+mod grenades;
 mod gui;
 mod guns;
 mod health;
@@ -252,6 +253,11 @@ pub struct Game {
     block_entities: BlockEntities,
     /// Shooting and the gun station.
     guns: guns::Guns,
+    /// Sound effects, and how much each furnace near by had made when last heard (it dings
+    /// when that grows).
+    audio: crate::audio::Audio,
+    furnace_heard: std::collections::HashMap<IVec3, u32>,
+    grenades: grenades::Grenades,
     /// The guide book in the hands: its open page, and its pages' textures.
     book: book::Book,
     items: Vec<ItemEntity>,
@@ -486,6 +492,9 @@ impl Game {
             slot_click: (-1.0, None),
             block_entities: BlockEntities::default(),
             guns: Default::default(),
+            audio: crate::audio::Audio::new(),
+            furnace_heard: Default::default(),
+            grenades: Default::default(),
             book: Default::default(),
             items: Vec::new(),
             falling: Vec::new(),

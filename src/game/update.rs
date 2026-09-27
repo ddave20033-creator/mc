@@ -133,6 +133,7 @@ impl Game {
         }
         self.action_cooldown -= dt;
         self.update_guns(dt, control);
+        self.update_grenades(dt);
         let mut breaking = None;
         // A sword does not break blocks at all (it only fights); with a pistol the left mouse
         // button shoots instead (one shot per click, no hitting).
@@ -274,6 +275,9 @@ impl Game {
         });
 
         self.furnace_fx(dt);
+        let mut loops = self.furnace_sounds();
+        loops.extend(self.grenade_sounds());
+        self.audio.set_loops(&loops);
         if self.is_client() {
             // A LAN player's world is run by the host: only follow what it sends.
             self.client_world(dt);

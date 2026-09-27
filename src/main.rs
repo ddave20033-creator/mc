@@ -10,6 +10,7 @@
 // No console window next to the game in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio;
 mod devtools;
 mod engine;
 mod entity;

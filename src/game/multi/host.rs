@@ -482,13 +482,29 @@ impl Game {
                 id: target,
                 dmg,
                 knock,
+                kind,
             } => {
                 if target == HOST_ID {
-                    self.hit_by_player(dmg, from, knock);
+                    self.hit_by_player(dmg, from, knock, kind);
                 } else {
-                    self.send_to(target, &Msg::Hurt { dmg, from, knock });
+                    self.send_to(
+                        target,
+                        &Msg::Hurt {
+                            dmg,
+                            from,
+                            knock,
+                            kind,
+                        },
+                    );
                 }
             }
+            Msg::Grenade {
+                kind,
+                pos,
+                vel,
+                seed,
+                ..
+            } => self.remote_grenade(id, kind, pos, vel, seed),
             Msg::SpawnMob { kind, pos } => {
                 if let Some(kind) = MobKind::from_u8(kind) {
                     self.spawn_mob(kind, pos);

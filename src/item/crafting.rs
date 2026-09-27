@@ -41,6 +41,13 @@ pub fn fuel_time(id: ItemId) -> Option<f32> {
 /// The furnace tier `smelt(id)` needs: 1 the furnace (food, charcoal, bricks, copper,
 /// stone), 2 the blast furnace (iron, glass), 3 the advanced furnace (gold, diamond).
 pub fn smelt_tier(id: ItemId) -> u8 {
+    // Steel needs the blast furnace's heat, ceramic the advanced furnace's.
+    if id == IRON_INGOT {
+        return 2;
+    }
+    if id == BRICK {
+        return 3;
+    }
     match id as u8 {
         _ if id >= 256 => 1,
         IRON_ORE | SAND => 2,
@@ -53,6 +60,8 @@ pub fn smelt_tier(id: ItemId) -> u8 {
 pub fn smelt(id: ItemId) -> Option<ItemId> {
     Some(match id {
         CLAY_BALL => BRICK,
+        IRON_INGOT => STEEL_INGOT,
+        BRICK => CERAMIC_PLATE,
         PORKCHOP => COOKED_PORKCHOP,
         MUTTON => COOKED_MUTTON,
         WATER_BOTTLE => PURIFIED_WATER,
@@ -287,6 +296,25 @@ fn recipes() -> &'static Vec<Recipe> {
                 keys: vec![('N', vec![IRON_NUGGET]), ('C', vec![COAL, CHARCOAL])],
                 result: Stack::new(BULLET, 4),
             },
+            // Grenades: a steel body (from the blast furnace), the filling and the fuse.
+            Recipe {
+                pattern: &[" N ", "SCS", " S "],
+                keys: vec![
+                    ('N', vec![IRON_NUGGET]),
+                    ('S', vec![STEEL_INGOT]),
+                    ('C', vec![COAL, CHARCOAL]),
+                ],
+                result: Stack::new(FRAG_GRENADE, 2),
+            },
+            Recipe {
+                pattern: &[" N ", "CSC", " C "],
+                keys: vec![
+                    ('N', vec![IRON_NUGGET]),
+                    ('S', vec![STEEL_INGOT]),
+                    ('C', vec![COAL, CHARCOAL]),
+                ],
+                result: Stack::new(SMOKE_GRENADE, 2),
+            },
         ];
         // Storage blocks and back.
         for (block, item) in [
@@ -307,6 +335,35 @@ fn recipes() -> &'static Vec<Recipe> {
                 result: Stack::new(item, 9),
             });
         }
+        // Armor (steel from the blast furnace), and the bulletproof vest: steel, ceramic plates
+        // from the advanced furnace, and wool.
+        for m in 0..MATERIALS {
+            let keys = || vec![('X', vec![material_item(m)])];
+            for (piece, pattern) in [
+                &["XXX", "X X"][..],
+                &["X X", "XXX", "XXX"][..],
+                &["XXX", "X X", "X X"][..],
+                &["X X", "X X"][..],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                v.push(Recipe {
+                    pattern,
+                    keys: keys(),
+                    result: Stack::one(armor_id(m, piece)),
+                });
+            }
+        }
+        v.push(Recipe {
+            pattern: &["S S", "PWP", "PSP"],
+            keys: vec![
+                ('S', vec![STEEL_INGOT]),
+                ('P', vec![CERAMIC_PLATE]),
+                ('W', b(WOOL)),
+            ],
+            result: Stack::one(BULLETPROOF_VEST),
+        });
         // Tools.
         for tier in TIERS {
             let m = tier.material();

@@ -238,9 +238,19 @@ pub mod tex {
     pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
     /// A bullet hole, multiplied onto the block it is in.
     pub const BULLET_HOLE: u32 = MUZZLE_FLASH_SIDE + 1;
+    /// Steel and ceramic from the blast and advanced furnaces, and the grenades.
+    pub const STEEL_INGOT: u32 = BULLET_HOLE + 1;
+    pub const CERAMIC_PLATE: u32 = STEEL_INGOT + 1;
+    pub const FRAG_GRENADE: u32 = CERAMIC_PLATE + 1;
+    pub const SMOKE_GRENADE: u32 = FRAG_GRENADE + 1;
+    /// Armor: the icons (sixteen pieces, then the vest) and what the pieces look like worn.
+    pub const ARMOR_ICONS: u32 = SMOKE_GRENADE + 1;
+    pub const ARMOR_WOOL: u32 = ARMOR_ICONS + 17;
+    pub const ARMOR_METAL: u32 = ARMOR_WOOL + 1;
+    pub const VEST: u32 = ARMOR_METAL + 1;
     /// The guide book: its icon, and the leather, the page edges and a written page of the
     /// open book in a player's hands.
-    pub const BOOK: u32 = BULLET_HOLE + 1;
+    pub const BOOK: u32 = VEST + 1;
     pub const BOOK_COVER: u32 = BOOK + 1;
     pub const BOOK_EDGE: u32 = BOOK + 2;
     pub const BOOK_PAGE: u32 = BOOK + 3;
@@ -341,6 +351,8 @@ fn is_item_icon(l: u32) -> bool {
         || (tex::PISTOL..tex::GUN_GLASS).contains(&l)
         || (tex::GUN_ICONS..tex::AMMO_ICONS + 4).contains(&l)
         || l == tex::COPPER_INGOT
+        || (tex::STEEL_INGOT..=tex::SMOKE_GRENADE).contains(&l)
+        || (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l)
         || l == tex::BOOK
         || (tex::MORE_TOOLS..tex::MORE_TOOLS + 4).contains(&l)
 }

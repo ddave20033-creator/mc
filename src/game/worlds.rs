@@ -313,7 +313,12 @@ impl Game {
         self.asleep_for = 0.0;
         self.pano = Self::panorama_pos(&self.terrain, self.spawn);
         self.inventory = Inventory::new();
-        save::load_inventory(&meta.folder, &mut self.inventory.slots);
+        // The inventory, then what is worn.
+        let mut all = [None; crate::item::inventory::SIZE + crate::item::ARMOR_SLOTS];
+        save::load_inventory(&meta.folder, &mut all);
+        let (carried, worn) = all.split_at(crate::item::inventory::SIZE);
+        self.inventory.slots.copy_from_slice(carried);
+        self.inventory.armor.copy_from_slice(worn);
         self.block_entities = BlockEntities::default();
         self.saplings.clear();
         self.items.clear();
@@ -515,7 +520,8 @@ impl Game {
         // An open crafting table keeps its grid; items in the 2x2 grid or on the cursor count
         // as inventory.
         self.stash_table(false);
-        let slots = self.carried_slots();
+        let mut slots = self.carried_slots().to_vec();
+        slots.extend(self.inventory.armor);
         let meta = self.world_meta.as_mut().unwrap();
         meta.last_played = save::now_secs();
         meta.time_of_day = self.time_of_day;

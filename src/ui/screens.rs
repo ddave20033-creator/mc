@@ -427,6 +427,7 @@ fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut Preview
         hide_right_arm: false,
         lantern: None,
         gun_mods: 0,
+        armor: 0,
     };
     let mut model = Vec::new();
     build_player(&mut model, &pose, &limb_targets(&pose), 15, 15);

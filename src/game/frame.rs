@@ -166,6 +166,7 @@ impl Game {
         let t_update = Instant::now();
 
         let view = self.camera_view(dt, w, h);
+        self.audio.set_listener(view.cam, view.right);
         let medium = self.medium(&view);
         let lighting = self.lighting(&view, medium);
         let scene = self.build_scene(&view, dt);
@@ -301,7 +302,8 @@ impl Game {
                 self.update_player(dt, false);
                 self.update_world(dt);
             }
-            _ => {}
+            // Paused (or out of the world): burning furnaces and the like go quiet.
+            _ => self.audio.set_loops(&[]),
         }
         self.particles.update(dt, &self.terrain.world);
         self.update_craft_fx(dt);
@@ -396,6 +398,12 @@ impl Game {
         if in_world && self.hurt_time > 0.0 {
             let f = self.hurt_time / 0.4;
             cam_fx = Mat4::from_rotation_z(-(f * f * PI).sin() * 10f32.to_radians());
+        }
+        if in_world && self.grenades.shake > 0.0 {
+            // A blast near by shakes the view.
+            let (k, t) = (self.grenades.shake * self.grenades.shake, self.time);
+            cam_fx *= Mat4::from_rotation_x((t * 53.0).sin() * 2.2f32.to_radians() * k)
+                * Mat4::from_rotation_z((t * 41.0).sin() * 1.6f32.to_radians() * k);
         }
         if in_world && self.needs.nausea > 0.0 && !self.creative() && !self.spectator() {
             // Nausea: the view slowly rolls and sways, fading out over the last 3 seconds.
@@ -601,6 +609,7 @@ impl Game {
         if in_world {
             self.build_gun_effects(&mut scene.particles, cam, view.right, view.up);
             self.build_bullet_holes(&mut scene.overlay, cam);
+            self.build_grenades(&mut scene.particles);
         }
         if let (Some((p, prog)), Screen::Playing) = (self.mining, self.screen) {
             if prog > 0.02 && !self.creative() {
@@ -721,6 +730,7 @@ impl Game {
                 hide_right_arm: false,
                 lantern: None,
                 gun_mods: self.held_gun_mods(),
+                armor: crate::item::armor_code(&self.inventory.armor),
                 book: self.book_view(),
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).

@@ -30,6 +30,34 @@ impl Game {
         }
     }
 
+    /// Armor takes its share of a hit (`kind` as in `net::hurt`) and wears; returns what
+    /// gets through.
+    pub(super) fn armor_hit(&mut self, dmg: f32, kind: u8) -> f32 {
+        use crate::net::hurt;
+        if self.creative() || self.inventory.armor.iter().all(|s| s.is_none()) {
+            return dmg;
+        }
+        let (bullet, blast) = (kind == hurt::BULLET, kind == hurt::BLAST);
+        let k = armor_factor(&self.inventory.armor, bullet, blast);
+        let wear = (dmg / 4.0).max(1.0) as u16;
+        for (i, slot) in self.inventory.armor.iter_mut().enumerate() {
+            let Some(s) = slot else { continue };
+            let w = match i {
+                VEST_SLOT if bullet || blast => (dmg / 2.0).max(1.0) as u16,
+                VEST_SLOT => 0,
+                _ => wear,
+            };
+            s.damage = s.damage.saturating_add(w);
+            if s.damage >= armor_durability(s.item) {
+                *slot = None;
+            }
+        }
+        if !blast {
+            self.audio.play(crate::audio::Sound::ArmorHit, None, 0.8);
+        }
+        dmg * k
+    }
+
     pub(super) fn die(&mut self, cause: &'static str) {
         self.death_message = t(cause).to_string();
         let msg = self.death_message.clone();
@@ -39,6 +67,9 @@ impl Game {
         self.stash_table(true);
         let mut loose: Vec<Stack> = self.craft.iter_mut().filter_map(|s| s.take()).collect();
         loose.extend(self.cursor.take());
+        if !self.creative() {
+            loose.extend(self.inventory.armor.iter_mut().filter_map(|s| s.take()));
+        }
         loose.extend(self.craft_out.take());
         self.craft_fx = None;
         loose.extend(self.guns.bench.items());

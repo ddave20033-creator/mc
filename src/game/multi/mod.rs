@@ -12,7 +12,7 @@ mod lan_ui;
 
 use super::*;
 
-use crate::item::GunKind;
+use crate::item::{armor_code, GunKind};
 use crate::lang::tf;
 use crate::model::player::{hand_pivot, limb_targets};
 use crate::net::{
@@ -215,6 +215,15 @@ impl Game {
         (alive.count(), asleep)
     }
 
+    /// The other players who are alive, and where they are.
+    pub(super) fn remote_positions(&self) -> Vec<(u8, Vec3)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.alive())
+            .map(|r| (r.id, r.target.pos))
+            .collect()
+    }
+
     pub(super) fn remote_pos(&self, id: u8) -> Option<Vec3> {
         self.remotes.iter().find(|r| r.id == id).map(|r| r.pose.pos)
     }
@@ -269,6 +278,7 @@ impl Game {
             },
             status: self.my_status(),
             gun_mods: self.held_gun_mods(),
+            armor: armor_code(&self.inventory.armor),
             book: self.book_pose().0,
             book_page: self.book_pose().1,
             spectator: self.spectator(),
@@ -358,8 +368,13 @@ impl Game {
         matches!(self.net, Some(Net::Host(_)))
     }
 
-    /// Hit by another player: damage and knockback.
-    fn hit_by_player(&mut self, dmg: f32, from: Vec3, knock: f32) {
+    /// Hit by another player (or blown about by a grenade they threw): damage and knockback.
+    fn hit_by_player(&mut self, dmg: f32, from: Vec3, knock: f32, kind: u8) {
+        if kind == crate::net::hurt::BLAST {
+            self.blast_hit(dmg, from, knock);
+            return;
+        }
+        let dmg = self.armor_hit(dmg, kind);
         let before = self.health;
         self.damage(dmg, "death.player");
         if self.health < before {
@@ -400,6 +415,7 @@ impl Game {
             p.flags = t.flags;
             p.status = t.status;
             p.gun_mods = t.gun_mods;
+            p.armor = t.armor;
             p.book = t.book;
             p.spectator = t.spectator;
         }
@@ -461,6 +477,7 @@ fn standing_pose(p: &Pose, time: f32) -> PlayerPose {
         hide_right_arm: false,
         lantern: None,
         gun_mods: p.gun_mods,
+        armor: p.armor,
         book: None,
     }
 }

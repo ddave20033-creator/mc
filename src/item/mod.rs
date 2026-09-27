@@ -3,11 +3,13 @@
 //!
 //! Block items share the block's id (0..=255); other items start at 256.
 
+pub mod armor;
 pub mod crafting;
 pub mod firearm;
 pub mod inventory;
 pub mod mining;
 
+pub use armor::*;
 pub use crafting::*;
 pub use firearm::*;
 pub use mining::*;
@@ -57,6 +59,13 @@ pub const HALF_BURNT_MUTTON: ItemId = 294;
 pub const RAW_BURNT_PORKCHOP: ItemId = 295;
 pub const RAW_BURNT_MUTTON: ItemId = 296;
 pub const COPPER_INGOT: ItemId = 297;
+/// Steel, from iron in a blast furnace; ceramic plates, from bricks fired again in an
+/// advanced furnace.
+pub const STEEL_INGOT: ItemId = 340;
+pub const CERAMIC_PLATE: ItemId = 341;
+/// Grenades: thrown with the right mouse button.
+pub const FRAG_GRENADE: ItemId = 342;
+pub const SMOKE_GRENADE: ItemId = 343;
 /// The guide book: opened with a right click, it explains crafting, the furnaces and the
 /// guns (see `game::book`).
 pub const GUIDE_BOOK: ItemId = 298;
@@ -276,6 +285,8 @@ pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
         WATER_BUCKET | LAVA_BUCKET | SHEARS | GUIDE_BOOK => 1,
+        FRAG_GRENADE | SMOKE_GRENADE => 16,
+        _ if armor_of(id).is_some() => 1,
         _ if GunKind::of(id).is_some() => 1,
         _ if id == BED as ItemId => 1,
         BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
@@ -416,6 +427,9 @@ pub fn max_damage(id: ItemId) -> u16 {
     if let Some(k) = GunKind::of(id) {
         return k.stats().dirt_max;
     }
+    if armor_of(id).is_some() {
+        return armor_durability(id);
+    }
     tool_of(id).map(|(_, t)| t.durability()).unwrap_or(0)
 }
 
@@ -546,6 +560,153 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Copper Ingot",
         "Rézrúd",
         tex::COPPER_INGOT,
+    ),
+    (
+        STEEL_INGOT,
+        "steel_ingot",
+        "Steel Ingot",
+        "Acélrúd",
+        tex::STEEL_INGOT,
+    ),
+    (
+        CERAMIC_PLATE,
+        "ceramic_plate",
+        "Ceramic Plate",
+        "Kerámialap",
+        tex::CERAMIC_PLATE,
+    ),
+    (
+        FRAG_GRENADE,
+        "frag_grenade",
+        "Frag Grenade",
+        "Repeszgránát",
+        tex::FRAG_GRENADE,
+    ),
+    (
+        SMOKE_GRENADE,
+        "smoke_grenade",
+        "Smoke Grenade",
+        "Füstgránát",
+        tex::SMOKE_GRENADE,
+    ),
+    (
+        ARMOR_BASE + 0,
+        "wool_helmet",
+        "Wool Helmet",
+        "Posztó sisak",
+        tex::ARMOR_ICONS + 0,
+    ),
+    (
+        ARMOR_BASE + 1,
+        "wool_chestplate",
+        "Wool Chestplate",
+        "Posztó mellvért",
+        tex::ARMOR_ICONS + 1,
+    ),
+    (
+        ARMOR_BASE + 2,
+        "wool_leggings",
+        "Wool Leggings",
+        "Posztó lábvért",
+        tex::ARMOR_ICONS + 2,
+    ),
+    (
+        ARMOR_BASE + 3,
+        "wool_boots",
+        "Wool Boots",
+        "Posztó csizma",
+        tex::ARMOR_ICONS + 3,
+    ),
+    (
+        ARMOR_BASE + 4,
+        "copper_helmet",
+        "Copper Helmet",
+        "Réz sisak",
+        tex::ARMOR_ICONS + 4,
+    ),
+    (
+        ARMOR_BASE + 5,
+        "copper_chestplate",
+        "Copper Chestplate",
+        "Réz mellvért",
+        tex::ARMOR_ICONS + 5,
+    ),
+    (
+        ARMOR_BASE + 6,
+        "copper_leggings",
+        "Copper Leggings",
+        "Réz lábvért",
+        tex::ARMOR_ICONS + 6,
+    ),
+    (
+        ARMOR_BASE + 7,
+        "copper_boots",
+        "Copper Boots",
+        "Réz csizma",
+        tex::ARMOR_ICONS + 7,
+    ),
+    (
+        ARMOR_BASE + 8,
+        "steel_helmet",
+        "Steel Helmet",
+        "Acél sisak",
+        tex::ARMOR_ICONS + 8,
+    ),
+    (
+        ARMOR_BASE + 9,
+        "steel_chestplate",
+        "Steel Chestplate",
+        "Acél mellvért",
+        tex::ARMOR_ICONS + 9,
+    ),
+    (
+        ARMOR_BASE + 10,
+        "steel_leggings",
+        "Steel Leggings",
+        "Acél lábvért",
+        tex::ARMOR_ICONS + 10,
+    ),
+    (
+        ARMOR_BASE + 11,
+        "steel_boots",
+        "Steel Boots",
+        "Acél csizma",
+        tex::ARMOR_ICONS + 11,
+    ),
+    (
+        ARMOR_BASE + 12,
+        "diamond_helmet",
+        "Diamond Helmet",
+        "Gyémánt sisak",
+        tex::ARMOR_ICONS + 12,
+    ),
+    (
+        ARMOR_BASE + 13,
+        "diamond_chestplate",
+        "Diamond Chestplate",
+        "Gyémánt mellvért",
+        tex::ARMOR_ICONS + 13,
+    ),
+    (
+        ARMOR_BASE + 14,
+        "diamond_leggings",
+        "Diamond Leggings",
+        "Gyémánt lábvért",
+        tex::ARMOR_ICONS + 14,
+    ),
+    (
+        ARMOR_BASE + 15,
+        "diamond_boots",
+        "Diamond Boots",
+        "Gyémánt csizma",
+        tex::ARMOR_ICONS + 15,
+    ),
+    (
+        BULLETPROOF_VEST,
+        "bulletproof_vest",
+        "Bulletproof Vest",
+        "Golyóálló mellény",
+        tex::ARMOR_ICONS + 16,
     ),
     (
         GOLD_INGOT,

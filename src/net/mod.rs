@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 19;
+pub const PROTOCOL: u16 = 21;
 
 // ---------------------------------------------------------------------------- data
 
@@ -49,6 +49,8 @@ pub struct Pose {
     pub status: u8,
     /// The attachments on the held gun (`gun_mod` bits).
     pub gun_mods: u8,
+    /// What they wear (`item::armor_code`).
+    pub armor: u16,
     /// Holding the guide book open (`book` bits): open, and the page turns so far.
     pub book: u8,
     /// The spread it is open at (its left page / 2), and `book::HUNGARIAN`.
@@ -141,6 +143,13 @@ pub mod mode {
     pub const SPECTATOR: u8 = 2;
 }
 
+/// What hurt a player (`Msg::Hurt`, `Msg::AttackPlayer`): armor takes some kinds better.
+pub mod hurt {
+    pub const MELEE: u8 = 0;
+    pub const BULLET: u8 = 1;
+    pub const BLAST: u8 = 2;
+}
+
 /// Block entity kinds in `Msg::Container`.
 pub mod container {
     pub const CHEST: u8 = 0;
@@ -176,6 +185,7 @@ pub enum Msg {
         id: u8,
         dmg: f32,
         knock: f32,
+        kind: u8,
     },
     SpawnMob {
         kind: u8,
@@ -191,6 +201,19 @@ pub enum Msg {
         eye: Vec3,
         seed: f32,
         bullets: Vec<Vec3>,
+    },
+    /// A grenade thrown (`kind`: 0 frag, 1 smoke), the same way as `Shot`; `seed` names it.
+    Grenade {
+        id: u8,
+        kind: u8,
+        pos: Vec3,
+        vel: Vec3,
+        seed: u32,
+    },
+    /// Host -> players: that grenade went off here.
+    Blast {
+        pos: Vec3,
+        seed: u32,
     },
     /// Used shears on a mob (the host drops its wool).
     Shear {
@@ -257,11 +280,12 @@ pub enum Msg {
         p: IVec3,
         block: u8,
     },
-    /// Hit by another player.
+    /// Hit by another player (or their grenade).
     Hurt {
         dmg: f32,
         from: Vec3,
         knock: f32,
+        kind: u8,
     },
 
     // Both ways
@@ -377,6 +401,7 @@ impl W {
         self.ivec3(p.open);
         self.u8(p.status);
         self.u8(p.gun_mods);
+        self.u16(p.armor);
         self.u8(p.book);
         self.u8(p.book_page);
         self.bool(p.spectator);
@@ -494,6 +519,7 @@ impl R<'_> {
             open: self.ivec3()?,
             status: self.u8()?,
             gun_mods: self.u8()?,
+            armor: self.u16()?,
             book: self.u8()?,
             book_page: self.u8()?,
             spectator: self.bool()?,
@@ -553,11 +579,12 @@ impl Msg {
                 w.f32(*dmg);
                 w.f32(*knock);
             }
-            Msg::AttackPlayer { id, dmg, knock } => {
+            Msg::AttackPlayer { id, dmg, knock, kind } => {
                 w.u8(5);
                 w.u8(*id);
                 w.f32(*dmg);
                 w.f32(*knock);
+                w.u8(*kind);
             }
             Msg::SpawnMob { kind, pos } => {
                 w.u8(6);
@@ -711,11 +738,17 @@ impl Msg {
                 w.ivec3(*p);
                 w.u8(*block);
             }
-            Msg::Hurt { dmg, from, knock } => {
+            Msg::Hurt {
+                dmg,
+                from,
+                knock,
+                kind,
+            } => {
                 w.u8(31);
                 w.f32(*dmg);
                 w.vec3(*from);
                 w.f32(*knock);
+                w.u8(*kind);
             }
             Msg::Container { p, kind, slots } => {
                 w.u8(40);
@@ -758,6 +791,25 @@ impl Msg {
                 w.u8(42);
                 w.u8(*id);
                 w.bytes(png);
+            }
+            Msg::Grenade {
+                id,
+                kind,
+                pos,
+                vel,
+                seed,
+            } => {
+                w.u8(45);
+                w.u8(*id);
+                w.u8(*kind);
+                w.vec3(*pos);
+                w.vec3(*vel);
+                w.u32(*seed);
+            }
+            Msg::Blast { pos, seed } => {
+                w.u8(46);
+                w.vec3(*pos);
+                w.u32(*seed);
             }
             Msg::Shot {
                 id,
@@ -808,6 +860,7 @@ impl Msg {
                 id: r.u8()?,
                 dmg: r.f32()?,
                 knock: r.f32()?,
+                kind: r.u8()?,
             },
             6 => Msg::SpawnMob {
                 kind: r.u8()?,
@@ -888,6 +941,7 @@ impl Msg {
                 dmg: r.f32()?,
                 from: r.vec3()?,
                 knock: r.f32()?,
+                kind: r.u8()?,
             },
             40 => Msg::Container {
                 p: r.ivec3()?,
@@ -924,6 +978,17 @@ impl Msg {
                 }
                 Msg::Skin { id, png }
             }
+            45 => Msg::Grenade {
+                id: r.u8()?,
+                kind: r.u8()?,
+                pos: r.vec3()?,
+                vel: r.vec3()?,
+                seed: r.u32()?,
+            },
+            46 => Msg::Blast {
+                pos: r.vec3()?,
+                seed: r.u32()?,
+            },
             44 => Msg::Shot {
                 id: r.u8()?,
                 kind: r.u8()?,
@@ -989,11 +1054,29 @@ mod tests {
             flags: pose_flags::HURT,
             status: status::TYPING,
             gun_mods: 0b1001,
+            armor: 0x1234,
             book: book::OPEN | 5,
             book_page: book::HUNGARIAN | 7,
             spectator: true,
             ..Default::default()
         }));
+        roundtrip(Msg::Grenade {
+            id: 1,
+            kind: 1,
+            pos: Vec3::new(3.0, 64.0, 1.0),
+            vel: Vec3::new(10.0, 2.0, -4.0),
+            seed: 0xdead_beef,
+        });
+        roundtrip(Msg::Blast {
+            pos: Vec3::new(3.0, 64.0, 1.0),
+            seed: 7,
+        });
+        roundtrip(Msg::Hurt {
+            dmg: 4.5,
+            from: Vec3::ONE,
+            knock: 0.4,
+            kind: hurt::BULLET,
+        });
         roundtrip(Msg::Shot {
             id: 3,
             kind: 4,
