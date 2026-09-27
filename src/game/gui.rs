@@ -959,7 +959,8 @@ impl Game {
     pub(super) fn container_screen(&mut self, c: Container) {
         if matches!(c, Container::Chest(_) | Container::Crafting(_)) {
             let hovered = self.station_screen(c);
-            self.slot_input(c, hovered, None, None);
+            let inside = self.station_inside;
+            self.slot_input(c, hovered, None, inside);
             return;
         }
         let s = self.ui.s;
@@ -1116,18 +1117,19 @@ impl Game {
         }
 
         let panel = (px, py, panel_w * s, panel_h * s);
-        self.slot_input(c, hovered, hovered_stack, Some(panel));
+        let inside = self.ui.hit(panel.0, panel.1, panel.2, panel.3);
+        self.slot_input(c, hovered, hovered_stack, inside);
     }
 
     /// Tooltips, clicks, drags and number keys on the slot under the mouse (`hovered`;
-    /// `hovered_stack` for creative items), and the stack on the cursor. A click outside
-    /// `panel` (x, y, w, h) throws the held stack.
+    /// `hovered_stack` for creative items), and the stack on the cursor. A click that is not
+    /// `inside` (the window, or the chest or table and the inventory) throws the held stack.
     fn slot_input(
         &mut self,
         c: Container,
         hovered: Option<SlotRef>,
         hovered_stack: Option<Stack>,
-        panel: Option<(f32, f32, f32, f32)>,
+        inside: bool,
     ) {
         let s = self.ui.s;
         // A stack dragged out of a slot and let go over another slot goes there.
@@ -1242,12 +1244,16 @@ impl Game {
                     self.inventory.slots[d] = hot;
                 }
             }
-        } else if self.ui.pressed && matches!(c, Container::Crafting(_)) && self.in_station() {
-            // At a table: a click anywhere but on a slot crafts.
+        } else if self.ui.pressed
+            && self.cursor.is_none()
+            && matches!(c, Container::Crafting(_))
+            && self.in_station()
+        {
+            // At a table with nothing in hand: a click anywhere but on a slot crafts.
             self.craft_batch(c);
         } else if self.ui.pressed || self.ui.right_pressed {
-            // Clicking outside the window throws the held stack.
-            let inside = panel.is_none_or(|(x, y, w, h)| self.ui.hit(x, y, w, h));
+            // Clicking outside the window (or away from the chest or table and the inventory)
+            // throws the held stack: all of it with the left button, one with the right.
             if !inside {
                 if let Some(st) = self.cursor {
                     if self.ui.right_pressed {

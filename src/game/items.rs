@@ -218,11 +218,16 @@ impl Game {
         if c.drink {
             self.put_in_hand(Stack::one(GLASS_BOTTLE));
         }
-        if c.dirty && self.random() < 0.7 {
-            // Lake water: a stomach bug (poison for a few seconds, the view sways for longer).
+        if let Some(s) = c.sick.filter(|s| self.random() < s.chance) {
+            // Lake water, raw or burnt meat: a stomach bug (poison for a few seconds, the
+            // view sways for longer).
             use crate::entity::survival::EffectKind;
-            self.needs.add_effect(EffectKind::Poison, 5.0);
-            self.needs.add_effect(EffectKind::Nausea, 12.0);
+            if s.poison > 0.0 {
+                self.needs.add_effect(EffectKind::Poison, s.poison);
+            }
+            if s.nausea > 0.0 {
+                self.needs.add_effect(EffectKind::Nausea, s.nausea);
+            }
         }
         self.slot_name_timer = 0.0;
     }
