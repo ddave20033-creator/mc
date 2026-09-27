@@ -1,6 +1,5 @@
 //! Mobs from the game's side: attacking mobs and other players, spawn eggs, natural
-//! spawning (animals on grass, creepers in the dark), despawning, and updating them (with
-//! their loot and creeper explosions).
+//! spawning, and updating them (with their loot).
 
 use super::*;
 use crate::item::inventory::{self, take};
@@ -89,6 +88,38 @@ impl Game {
         self.action_cooldown = 0.25;
     }
 
+    /// Right click on a sheep with shears: 1-3 wool pops off (the host drops it).
+    pub(super) fn shear(&mut self, i: usize) {
+        if !self.mobs[i].can_shear() {
+            return;
+        }
+        if self.is_client() {
+            let id = self.mobs[i].id;
+            self.mobs[i].sheared = true;
+            self.send(crate::net::Msg::Shear { id });
+        } else {
+            self.shear_mob(i);
+        }
+        if !self.creative() {
+            let slot = self.hotbar_slot;
+            inventory::damage(&mut self.inventory.slots[slot], 1);
+        }
+        self.hand.swing();
+        self.action_cooldown = 0.25;
+    }
+
+    /// Host: shears a sheep and drops its wool.
+    pub(super) fn shear_mob(&mut self, i: usize) {
+        let m = &mut self.mobs[i];
+        if !m.can_shear() {
+            return;
+        }
+        m.sheared = true;
+        let at = m.pos + Vec3::Y * 1.0;
+        let n = 1 + (self.random() * 3.0) as u8;
+        self.spawn_drop(at, Stack::new(WOOL as ItemId, n.min(3)));
+    }
+
     pub(super) fn spawn_mob(&mut self, kind: MobKind, pos: Vec3) {
         if self.is_client() {
             self.send(crate::net::Msg::SpawnMob {
@@ -104,9 +135,9 @@ impl Game {
         self.mobs.push(m);
     }
 
-    /// Minecraft-like animal spawning: now and then a group of pigs appears on grass under the
-    /// open sky, 24-64 blocks from the player and out of sight, while fewer than 10 animals
-    /// are around.
+    /// Minecraft-like animal spawning: now and then a group of sheep or pigs (Minecraft's
+    /// weights: 12 to 10) appears on grass under the open sky, 24-64 blocks from the player
+    /// and out of sight, while fewer than 10 animals are around.
     pub(super) fn spawn_animals(&mut self, dt: f32) {
         self.mob_spawn_timer -= dt;
         if self.mob_spawn_timer > 0.0 {
@@ -124,7 +155,6 @@ impl Game {
         let near = self
             .mobs
             .iter()
-            .filter(|m| !m.kind.hostile())
             .filter(|m| Vec2::new(m.pos.x - me.x, m.pos.z - me.z).length() < 96.0)
             .count();
         if near >= 10 {
@@ -161,101 +191,20 @@ impl Game {
                 spots.push(p);
             }
         }
+        let kind = if self.random() < 12.0 / 22.0 {
+            MobKind::Sheep
+        } else {
+            MobKind::Pig
+        };
         for p in spots {
-            self.spawn_mob(MobKind::Pig, p);
+            self.spawn_mob(kind, p);
         }
-    }
-
-    /// Minecraft's monster spawning (1.18+): now and then a creeper appears on a solid block
-    /// 24-64 blocks from a player where it is dark enough: no block light at all, and sky
-    /// light (dimmed at night) at most a random 0..7, so on the surface only at night but
-    /// in caves any time. At most 20 monsters around.
-    pub(super) fn spawn_monsters(&mut self, dt: f32) {
-        self.monster_spawn_timer -= dt;
-        if self.monster_spawn_timer > 0.0 {
-            return;
-        }
-        self.monster_spawn_timer = 0.5;
-        let players = self.player_positions();
-        if players.is_empty() {
-            return;
-        }
-        let near = |p: Vec3, r: f32| players.iter().any(|q| q.distance(p) < r);
-        let monsters = self
-            .mobs
-            .iter()
-            .filter(|m| m.kind.hostile() && near(m.pos, 96.0))
-            .count();
-        if monsters >= 20 {
-            return;
-        }
-        // Minecraft's sky darkening: 0 by day, 11 at night.
-        let sun = (self.time_of_day * TAU).sin();
-        let darken = ((1.0 - (sun * 2.0 + 0.5).clamp(0.0, 1.0)) * 11.0).round() as i32;
-        // Most tries miss (a spot inside rock, in the light); a few land.
-        for _ in 0..16 {
-            let pick = (self.random() * players.len() as f32) as usize;
-            let me = players[pick.min(players.len() - 1)];
-            let ang = self.random() * TAU;
-            let dist = 24.0 + self.random() * 40.0;
-            let c = me + Vec3::new(ang.cos(), 0.0, ang.sin()) * dist;
-            let (x, z) = (c.x.floor() as i32, c.z.floor() as i32);
-            let (ry, limit) = (self.random(), (self.random() * 8.0) as i32);
-            let w = &self.terrain.world;
-            let Some(top) = w.height_at(x, z) else {
-                continue;
-            };
-            let y = 1 + (ry * (top + 1) as f32) as i32;
-            let Some((p, ground)) = crate::entity::mob::standable(w, x, z, y, 0) else {
-                continue;
-            };
-            let head = w.get(x, p.y as i32 + 1, z);
-            if !sturdy_top(ground) || is_fluid(ground) || is_fluid(head) || near(p, 24.0) {
-                continue;
-            }
-            // Sky light: full under the open sky, none a few blocks under cover.
-            let depth = top - p.y as i32;
-            let sky = if depth < 0 {
-                15
-            } else if depth < 2 {
-                8
-            } else {
-                0
-            };
-            if sky - darken > limit || Self::block_lit(w, p.floor().as_ivec3()) {
-                continue;
-            }
-            self.spawn_mob(MobKind::Creeper, p);
-        }
-    }
-
-    /// Any block light at `p`: a light source close enough for its light to reach
-    /// (Minecraft's light drops by one per block).
-    fn block_lit(w: &World, p: IVec3) -> bool {
-        const R: i32 = 14;
-        for dy in -R..=R {
-            for dz in -R..=R {
-                let left = R - dy.abs() - dz.abs();
-                if left < 0 {
-                    continue;
-                }
-                for dx in -left..=left {
-                    let e = emission(w.geti(p + IVec3::new(dx, dy, dz)));
-                    if e as i32 > dx.abs() + dy.abs() + dz.abs() {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
     }
 
     pub(super) fn update_mobs(&mut self, dt: f32) {
         let ctx = MobCtx {
             players: self.player_positions(),
-            prey: self.prey_positions(),
         };
-        let mut explosions = Vec::new();
         let mut i = 0;
         while i < self.mobs.len() {
             let p = self.mobs[i].pos;
@@ -273,24 +222,14 @@ impl Game {
                 self.mobs.swap_remove(i);
                 continue;
             }
-            // Monsters despawn: at once far from every player, now and then when not close
-            // (Minecraft: past 128 blocks, and 1 in 800 per tick past 32).
-            if self.mobs[i].kind.hostile() {
-                let d = ctx
-                    .players
-                    .iter()
-                    .map(|q| q.distance(p))
-                    .fold(f32::INFINITY, f32::min);
-                let chance = 1.0 - (1.0 - 1.0 / 800.0f32).powf(dt * 20.0);
-                if d > 128.0 || (d > 32.0 && self.random() < chance) {
-                    self.mobs.swap_remove(i);
-                    continue;
-                }
-            }
-            if let MobEvent::Explode = event {
-                let m = self.mobs.swap_remove(i);
-                explosions.push(m.center());
-                continue;
+            if let MobEvent::EatGrass(q) = event {
+                let b = if self.terrain.world.geti(q) == GRASS {
+                    DIRT
+                } else {
+                    AIR
+                };
+                self.set_block(q, b);
+                self.block_updated(q);
             }
             if let MobEvent::Remove = event {
                 let m = self.mobs.swap_remove(i);
@@ -300,31 +239,23 @@ impl Game {
                     self.terrain.world.block_light_estimate(c),
                 );
                 self.particles.poof(c, sky, blk);
-                match m.kind {
-                    MobKind::Pig => {
-                        // 1-3 porkchops, cooked if it died burning.
-                        let meat = if m.fire > 0.0 {
-                            COOKED_PORKCHOP
-                        } else {
-                            PORKCHOP
-                        };
-                        let n = 1 + (self.random() * 3.0) as u8;
-                        self.spawn_drop(c, Stack::new(meat, n.min(3)));
-                    }
-                    MobKind::Creeper => {
-                        // 0-2 gunpowder.
-                        let n = (self.random() * 3.0) as u8;
-                        if n > 0 {
-                            self.spawn_drop(c, Stack::new(GUNPOWDER, n.min(2)));
-                        }
-                    }
+                // Pigs drop 1-3 porkchops, sheep 1-2 mutton and their wool; the meat is
+                // cooked if they died burning.
+                let burnt = m.fire > 0.0;
+                let (meat, most) = match (m.kind, burnt) {
+                    (MobKind::Pig, false) => (PORKCHOP, 3.0),
+                    (MobKind::Pig, true) => (COOKED_PORKCHOP, 3.0),
+                    (MobKind::Sheep, false) => (MUTTON, 2.0),
+                    (MobKind::Sheep, true) => (COOKED_MUTTON, 2.0),
+                };
+                let n = 1 + (self.random() * most) as u8;
+                self.spawn_drop(c, Stack::new(meat, n.min(most as u8)));
+                if m.kind == MobKind::Sheep && !m.sheared {
+                    self.spawn_drop(c, Stack::one(WOOL as ItemId));
                 }
                 continue;
             }
             i += 1;
-        }
-        for c in explosions {
-            self.explode(c, crate::entity::mob::CREEPER_POWER);
         }
         // Mobs push each other apart, and the player pushes them.
         let n = self.mobs.len();
@@ -334,8 +265,8 @@ impl Game {
                 if (pa - pb).length_squared() > 4.0 {
                     continue;
                 }
-                let (hw, tall) = self.mobs[b].kind.size();
-                if let Some(away) = self.mobs[a].overlaps(pb, hw, tall) {
+                let (w, tall) = self.mobs[b].size();
+                if let Some(away) = self.mobs[a].overlaps(pb, w, tall) {
                     let push = away.normalize_or_zero() * (dt * 12.0).min(1.0);
                     self.mobs[a].push(push);
                     self.mobs[b].push(-push);

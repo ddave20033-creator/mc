@@ -314,31 +314,35 @@ impl Game {
             if in_lava {
                 ui.solid(0.0, 0.0, w, h, rgba(255, 90, 10, 150));
             }
-            if self.fire > 0.0 && !creative && self.camera.mode == 0 {
-                // Minecraft's burning overlay (first person only; the other views show the
-                // flames on the model): the animated fire texture rising from both
-                // bottom corners (the right one mirrored).
-                use crate::world::textures::tex;
-                let frame = (self.time * 20.0) as u32 % tex::FIRE_FRAMES;
-                let layer = tex::FIRE_1 + frame;
-                let (fw, fh) = (w * 0.56, h * 0.62);
-                let (top, bottom) = (h - fh, h + fh * 0.12);
-                for (x0, x1) in [(-w * 0.06, fw - w * 0.06), (w * 1.06, w * 1.06 - fw)] {
-                    ui.tex_quad(
-                        [
-                            Vec2::new(x0, top),
-                            Vec2::new(x1, top),
-                            Vec2::new(x1, bottom),
-                            Vec2::new(x0, bottom),
-                        ],
-                        layer,
-                        1.0,
-                    );
-                }
+            if self.fire > 0.0 && !creative {
+                let flicker = 0.8 + 0.2 * (self.time * 17.0).sin();
+                ui.gradient(
+                    0.0,
+                    h * 0.55,
+                    w,
+                    h * 0.45,
+                    rgba(255, 120, 20, 0),
+                    rgba(255, 90, 10, (150.0 * flicker) as u8),
+                );
             }
             if self.hurt_time > 0.0 {
                 ui.vignette(rgba(200, 0, 0, (self.hurt_time / 0.4 * 200.0) as u8));
             }
+            // In bed the view slowly darkens (Minecraft fades it over the 5 seconds).
+            if let Some(sl) = self.sleep {
+                let k = (sl.time / 5.0).min(1.0);
+                ui.solid(0.0, 0.0, w, h, rgba(8, 10, 24, (k * 190.0) as u8));
+            }
+        }
+        if self.sleep.is_some() && matches!(self.screen, Screen::Playing | Screen::Chat) {
+            let status = self.sleep_status();
+            let ui = &mut self.ui;
+            let mut y = h * 0.62;
+            if let Some(line) = status {
+                ui.text_centered(&line, w * 0.5, y, s, WHITE, true);
+                y += 12.0 * s;
+            }
+            ui.text_centered(t("bed.leave"), w * 0.5, y, s, rgba(200, 200, 200, 255), true);
         }
         // F1 hides the rest while playing (menus and the open chat still show).
         if self.hide_hud && self.screen == Screen::Playing {
@@ -361,7 +365,7 @@ impl Game {
             self.draw_name_tags();
         }
         // Tab held in a LAN game: who is playing.
-        if self.net.is_some() && self.screen == Screen::Playing && self.keys.contains(&KeyCode::Tab)
+        if self.net.is_some() && self.screen == Screen::Playing && self.bind_down(Bind::PlayerList)
         {
             self.draw_player_list();
         }

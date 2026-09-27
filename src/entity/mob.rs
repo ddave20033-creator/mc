@@ -1,11 +1,9 @@
-//! Mobs (the pig and the creeper): physics, a Minecraft-style passive animal AI, the
-//! creeper's hunting and swelling, and the models.
+//! Mobs (the pig and the sheep): physics, a Minecraft-style passive animal AI and the models.
 //!
 //! The AI follows Minecraft's goals for animals: panic after being hurt (run to random spots,
 //! away from whoever hit it), wander to random nearby spots (preferring grass, avoiding
 //! water, lava and drops of more than 3 blocks), look at a nearby player, look around, and
-//! float in water. Creepers instead walk up to a player they can see and swell up when
-//! close (Minecraft's SwellGoal), exploding if the player stays near. Mobs jump up single blocks, take fall, lava, cactus and suffocation
+//! float in water. Mobs jump up single blocks, take fall, lava, cactus and suffocation
 //! damage, get knocked back, flash red when hurt and tip over when they die.
 //!
 //! Models use Minecraft's entity model format: cubes with box UVs into a 64x64 texel atlas
@@ -21,21 +19,30 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MobKind {
     Pig,
-    Creeper,
+    Sheep,
 }
 
 impl MobKind {
     pub fn key(self) -> &'static str {
         match self {
             MobKind::Pig => "pig",
-            MobKind::Creeper => "creeper",
+            MobKind::Sheep => "sheep",
         }
     }
 
     pub fn from_key(k: &str) -> Option<MobKind> {
         match k.strip_prefix("minecraft:").unwrap_or(k) {
             "pig" => Some(MobKind::Pig),
-            "creeper" => Some(MobKind::Creeper),
+            "sheep" => Some(MobKind::Sheep),
+            _ => None,
+        }
+    }
+
+    /// The kind with this `kind as u8` (LAN messages).
+    pub fn from_u8(v: u8) -> Option<MobKind> {
+        match v {
+            0 => Some(MobKind::Pig),
+            1 => Some(MobKind::Sheep),
             _ => None,
         }
     }
@@ -43,55 +50,24 @@ impl MobKind {
     pub fn max_health(self) -> f32 {
         match self {
             MobKind::Pig => 10.0,
-            MobKind::Creeper => 20.0,
+            MobKind::Sheep => 8.0,
         }
     }
 
-    /// Half the width and the height of its bounding box (Minecraft: pig 0.9 x 0.9, creeper
-    /// 0.6 x 1.7).
+    /// Half width and height of the bounding box (Minecraft: pig 0.9 x 0.9, sheep 0.9 x 1.3).
     pub fn size(self) -> (f32, f32) {
         match self {
             MobKind::Pig => (0.45, 0.9),
-            MobKind::Creeper => (0.3, 1.7),
-        }
-    }
-
-    /// Never catches fire (fire does not hurt it; lava still does).
-    pub fn fireproof(self) -> bool {
-        self == MobKind::Creeper
-    }
-
-    /// Monsters spawn in the dark and despawn far from players; animals stay.
-    pub fn hostile(self) -> bool {
-        self == MobKind::Creeper
-    }
-
-    pub fn from_id(id: u8) -> Option<MobKind> {
-        match id {
-            0 => Some(MobKind::Pig),
-            1 => Some(MobKind::Creeper),
-            _ => None,
+            MobKind::Sheep => (0.45, 1.3),
         }
     }
 }
-
-/// Creeper: seconds of swelling before it explodes (Minecraft: 30 ticks), how close a
-/// player must be to start and how far to stop, and its explosion's strength.
-pub const CREEPER_FUSE: f32 = 1.5;
-const SWELL_START: f32 = 3.0;
-const SWELL_STOP: f32 = 7.0;
-pub const CREEPER_POWER: f32 = 3.0;
-/// Creepers follow players they can see this close (Minecraft's follow range).
-const CREEPER_RANGE: f32 = 16.0;
-
 const GRAVITY: f32 = 32.0;
 /// Jump speed: clears one block (Minecraft: 0.42 blocks per tick).
 const JUMP: f32 = 8.6;
 const WALK_SPEED: f32 = 1.7;
 /// Minecraft's PanicGoal runs at 1.25x the walking speed.
 const PANIC_SPEED: f32 = WALK_SPEED * 1.25;
-/// A creeper walking up to a player (a bit quicker than a strolling pig).
-const CHASE_SPEED: f32 = 2.2;
 /// Knockback speeds (horizontal, up) in blocks per second, tuned so a normal hit moves a
 /// mob about 1.5 blocks like in Minecraft (the wiki measures 1.552 blocks).
 const KNOCKBACK: f32 = 5.0;
@@ -107,8 +83,6 @@ const HEAD_LIMIT: f32 = 75.0 * PI / 180.0;
 pub struct MobCtx {
     /// Feet of every living player (the host and LAN players).
     pub players: Vec<Vec3>,
-    /// The players monsters go after (not the ones in creative).
-    pub prey: Vec<Vec3>,
 }
 
 /// Something that happened to a mob during an update.
@@ -116,8 +90,8 @@ pub enum MobEvent {
     None,
     /// The death animation is over: remove it and drop its loot.
     Remove,
-    /// A creeper went off: remove it (no loot) and explode.
-    Explode,
+    /// A sheep ate the grass here (a grass block turns to dirt, tall grass goes).
+    EatGrass(glam::IVec3),
 }
 
 pub struct Mob {
@@ -141,6 +115,8 @@ pub struct Mob {
     pub death: Option<f32>,
     /// Seconds on fire left (from lava); a pig that dies burning drops cooked meat.
     pub fire: f32,
+    /// A sheep without its wool (it grows back when the sheep eats grass).
+    pub sheared: bool,
     on_ground: bool,
     in_water: bool,
     /// Highest point since leaving the ground, for fall damage.
@@ -164,10 +140,6 @@ pub struct Mob {
     still: f32,
     jump_cooldown: f32,
     damage_tick: f32,
-    /// Creeper: seconds of swelling so far (0 = calm, `CREEPER_FUSE` = explodes).
-    pub swell: f32,
-    /// Creeper: walking toward a player.
-    chasing: bool,
     rng: Rng,
 }
 
@@ -264,6 +236,7 @@ impl Mob {
             hurt_time: 0.0,
             death: None,
             fire: 0.0,
+            sheared: false,
             on_ground: false,
             in_water: false,
             fall_peak: pos.y,
@@ -280,8 +253,6 @@ impl Mob {
             still: 0.0,
             jump_cooldown: 0.0,
             damage_tick: 0.0,
-            swell: 0.0,
-            chasing: false,
             rng: Rng::new(seed),
         }
     }
@@ -299,14 +270,13 @@ impl Mob {
             limb_amount: self.limb_amount,
             hurt: self.hurt_time > 0.0,
             death: self.death.unwrap_or(-1.0),
-            swell: self.swell,
-            burning: self.fire > 0.0,
+            sheared: self.sheared,
         }
     }
 
     /// A LAN player's copy of a host mob.
     pub fn from_net(s: &crate::net::MobNet) -> Option<Mob> {
-        let kind = MobKind::from_id(s.kind)?;
+        let kind = MobKind::from_u8(s.kind)?;
         let mut m = Mob::new(kind, s.pos, s.body_yaw, 1);
         m.id = s.id;
         m.apply_net(s);
@@ -318,8 +288,17 @@ impl Mob {
         self.net_target = Some(*s);
         self.hurt_time = if s.hurt { HURT_TIME } else { 0.0 };
         self.death = (s.death >= 0.0).then_some(s.death);
-        self.swell = s.swell;
-        self.fire = if s.burning { 1.0 } else { 0.0 };
+        self.sheared = s.sheared;
+    }
+
+    /// Half width and height of its bounding box.
+    pub fn size(&self) -> (f32, f32) {
+        self.kind.size()
+    }
+
+    /// A sheep that still has its wool.
+    pub fn can_shear(&self) -> bool {
+        self.kind == MobKind::Sheep && !self.sheared && self.alive()
     }
 
     /// LAN player: glides toward the host's latest state (sent 20 times a second).
@@ -352,7 +331,7 @@ impl Mob {
     }
 
     pub fn center(&self) -> Vec3 {
-        self.pos + Vec3::Y * (self.kind.size().1 * 0.5)
+        self.pos + Vec3::Y * (self.size().1 * 0.5)
     }
 
     /// Distance along the ray to the mob's bounding box, if it is hit.
@@ -361,9 +340,9 @@ impl Mob {
             return None;
         }
         // Minecraft picks entities with their box grown by 0.1.
-        let (hw, tall) = self.kind.size();
-        let grow = Vec3::new(hw + 0.1, 0.1, hw + 0.1);
-        let top = Vec3::new(hw + 0.1, tall + 0.1, hw + 0.1);
+        let (half_w, tall) = self.size();
+        let grow = Vec3::new(half_w + 0.1, 0.1, half_w + 0.1);
+        let top = Vec3::new(half_w + 0.1, tall + 0.1, half_w + 0.1);
         ray_box(origin, dir, self.pos - grow, self.pos + top, max)
     }
 
@@ -374,9 +353,7 @@ impl Mob {
         }
         self.health -= amount;
         self.hurt_time = HURT_TIME;
-        if !self.kind.hostile() {
-            self.panic = 4.0 + self.rand() * 2.0;
-        }
+        self.panic = 4.0 + self.rand() * 2.0;
         self.target = None;
         if let Some(src) = from {
             self.flee_from = Some(src);
@@ -409,8 +386,8 @@ impl Mob {
 
     pub fn overlaps(&self, p: Vec3, half_w: f32, tall: f32) -> Option<Vec3> {
         let d = self.pos - p;
-        let (hw, own_tall) = self.kind.size();
-        let reach = hw + half_w;
+        let (own_w, own_tall) = self.size();
+        let reach = own_w + half_w;
         if d.x.abs() < reach
             && d.z.abs() < reach
             && self.pos.y < p.y + tall
@@ -512,15 +489,8 @@ impl Mob {
             }
         }
 
-        // Creepers hunt players they can see and swell up next to them.
-        if self.kind == MobKind::Creeper && !self.creeper_think(dt, w, ctx) {
-            return None;
-        }
-
         // Moving.
-        if self.chasing {
-            // Walking toward the player (the target is refreshed every frame).
-        } else if self.panic > 0.0 {
+        if self.panic > 0.0 {
             self.panic -= dt;
             if self.target.is_none() || self.target_time <= 0.0 {
                 self.target = self.pick_target(w, 6.0, self.flee_from);
@@ -547,9 +517,7 @@ impl Mob {
             self.idle = 1.0 + self.rand() * 4.0;
             return None;
         }
-        let speed = if self.chasing {
-            CHASE_SPEED
-        } else if self.panic > 0.0 {
+        let speed = if self.panic > 0.0 {
             PANIC_SPEED
         } else {
             WALK_SPEED
@@ -557,7 +525,7 @@ impl Mob {
         let dir = to.normalize();
         let dir3 = Vec3::new(dir.x, 0.0, dir.y);
         // Look before stepping: stop at cliffs, lava and (unless already swimming) water.
-        let ahead = self.pos + dir3 * (self.kind.size().0 + 0.35) + Vec3::Y * 0.5;
+        let ahead = self.pos + dir3 * (self.size().0 + 0.35) + Vec3::Y * 0.5;
         let feet = w.get(
             ahead.x.floor() as i32,
             self.pos.y.floor() as i32,
@@ -594,51 +562,15 @@ impl Mob {
         Some((dir3, speed))
     }
 
-    /// The creeper's goals: follow a visible player within 16 blocks, and swell while one is
-    /// within 3 blocks (keeping it up until they get 7 blocks away or out of sight), shrinking
-    /// back otherwise. Returns false while it stands still to swell.
-    fn creeper_think(&mut self, dt: f32, w: &World, ctx: &MobCtx) -> bool {
-        let eye = self.pos + Vec3::Y * 1.45;
-        let seen = ctx
-            .prey
-            .iter()
-            .copied()
-            .filter(|p| p.distance(self.pos) < CREEPER_RANGE && sees(w, eye, *p + Vec3::Y * 1.5))
-            .min_by(|a, b| a.distance(self.pos).total_cmp(&b.distance(self.pos)));
-        let Some(p) = seen else {
-            self.chasing = false;
-            self.swell = (self.swell - dt).max(0.0);
-            return true;
-        };
-        self.look = Look::Player;
-        self.look_time = 1.0;
-        let d = p.distance(self.pos);
-        let swelling = d < SWELL_START || (self.swell > 0.0 && d < SWELL_STOP);
-        if swelling {
-            self.swell += dt;
-            self.chasing = false;
-            self.target = None;
-            return false;
-        }
-        self.swell = (self.swell - dt).max(0.0);
-        if !self.chasing || self.target.is_none() {
-            self.stuck = 0.0;
-        }
-        self.chasing = true;
-        self.target = Some(p);
-        self.target_time = 1.0;
-        true
-    }
-
     // ------------------------------------------------------------------------ physics
 
     fn move_axis(&mut self, w: &World, axis: usize, d: f32) -> bool {
         if d == 0.0 {
             return false;
         }
+        let size = self.size();
         let mut p = self.pos;
         p[axis] += d;
-        let size = self.kind.size();
         if !collides(w, p, size) {
             self.pos = p;
             return false;
@@ -679,16 +611,13 @@ impl Mob {
                 return MobEvent::Remove;
             }
         }
-        if self.alive() && self.swell >= CREEPER_FUSE {
-            return MobEvent::Explode;
-        }
 
         self.in_water = is_water(w.get(
             self.pos.x.floor() as i32,
             (self.pos.y + 0.4).floor() as i32,
             self.pos.z.floor() as i32,
         ));
-        let size = self.kind.size();
+        let size = self.size();
         let in_lava = touching(w, self.pos, size, -0.05, is_lava);
 
         // Knocked back: no steering for a moment, so the hit carries it.
@@ -758,25 +687,8 @@ impl Mob {
         }
 
         // Burning, cactus, being stuck inside blocks.
-        let fireproof = self.kind.fireproof();
-        if !fireproof
-            && touching(w, self.pos, size, 0.0, |b| b == FIRE)
-            && !in_lava
-            && !self.in_water
-        {
-            self.fire = 8.0;
-            if self.damage_tick <= 0.0 {
-                self.damage_tick = 0.5;
-                self.hurt_env(1.0);
-            }
-            if self.alive() {
-                self.panic = self.panic.max(1.0);
-            }
-        }
         if in_lava {
-            if !fireproof {
-                self.fire = 8.0;
-            }
+            self.fire = 8.0;
             if self.damage_tick <= 0.0 {
                 self.damage_tick = 0.5;
                 self.hurt_env(4.0);
@@ -821,9 +733,9 @@ impl Mob {
             self.still += dt;
         }
         let (want_yaw, want_pitch) = match self.look {
-            Look::Player => match self.nearest_player(ctx, CREEPER_RANGE) {
+            Look::Player => match self.nearest_player(ctx, 8.0) {
                 Some(p) => {
-                    let eye = self.pos + Vec3::Y * (self.kind.size().1 * 0.85);
+                    let eye = self.pos + Vec3::Y * 0.75;
                     let d = p + Vec3::Y * 1.62 - eye;
                     (d.z.atan2(d.x), d.y.atan2(Vec2::new(d.x, d.z).length()))
                 }
@@ -857,6 +769,27 @@ impl Mob {
         let target = (speed * 0.25).min(1.0);
         self.limb_amount += (target - self.limb_amount) * (1.0 - (-10.0 * dt).exp());
         self.limb_swing += speed * dt * 4.0;
+
+        // Sheep graze now and then (Minecraft's EatBlockGoal: 1 in 1000 per tick) on tall
+        // grass they stand in or the grass block under them, and their wool grows back.
+        if self.kind == MobKind::Sheep
+            && self.alive()
+            && self.on_ground
+            && steer.is_none()
+            && self.panic <= 0.0
+            && self.rand() < per_tick(1.0 / 1000.0, dt)
+        {
+            let feet = self.pos.floor().as_ivec3();
+            let eat = if w.geti(feet) == TALL_GRASS {
+                Some(feet)
+            } else {
+                (w.geti(feet - glam::IVec3::Y) == GRASS).then(|| feet - glam::IVec3::Y)
+            };
+            if let Some(p) = eat {
+                self.sheared = false;
+                return MobEvent::EatGrass(p);
+            }
+        }
         MobEvent::None
     }
 
@@ -864,14 +797,6 @@ impl Mob {
 
     pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8) {
         let light = vertex_light(sky, blk);
-        // Minecraft's CreeperRenderer: it puffs up and jitters as it swells, flashing white
-        // (world.frag) every other tenth of the fuse.
-        let f = (self.swell / CREEPER_FUSE).clamp(0.0, 1.0);
-        let jitter = 1.0 + (f * 100.0).sin() * f * 0.01;
-        let f4 = f * f * f * f;
-        let (wide, high) = ((1.0 + f4 * 0.4) * jitter, (1.0 + f4 * 0.1) / jitter);
-        let flash = self.kind == MobKind::Creeper && f > 0.0 && (f * 10.0) as i32 % 2 == 1;
-        let fl = flags::ENTITY | if flash { flags::EMISSIVE } else { 0 };
         let tint = if self.hurt_time > 0.0 || self.death.is_some() {
             [255, 110, 110]
         } else {
@@ -885,15 +810,58 @@ impl Mob {
         let root = Mat4::from_translation(self.pos)
             * Mat4::from_rotation_y(-self.body_yaw - FRAC_PI_2)
             * Mat4::from_rotation_z(flip)
-            * Mat4::from_scale(Vec3::new(wide, high, wide) / 16.0);
+            * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
         match self.kind {
-            MobKind::Pig => self.build_pig(out, root, tint, light, fl),
-            MobKind::Creeper => self.build_creeper(out, root, tint, light, fl),
+            MobKind::Pig => self.build_pig(out, root, tint, light),
+            MobKind::Sheep => self.build_sheep(out, root, tint, light),
+        }
+    }
+
+    /// Minecraft's `SheepModel` (a `QuadrupedModel` with leg height 12) and, unless sheared,
+    /// `SheepFurModel` over it: the same parts grown a little, with the wool texture.
+    fn build_sheep(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
+        let part = |px: f32, py: f32, pz: f32, rot: Mat4| {
+            root * Mat4::from_translation(Vec3::new(-px, 24.0 - py, pz))
+                * rot
+                * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
+        };
+        let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
+        let head = part(
+            0.0,
+            6.0,
+            -8.0,
+            Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(self.pitch),
+        );
+        let body = part(0.0, 5.0, 2.0, Mat4::from_rotation_x(-FRAC_PI_2));
+        let ls = self.limb_swing * 0.6662;
+        let la = self.limb_amount;
+        let legs = [
+            (-3.0, 7.0, ls.cos()),
+            (3.0, 7.0, (ls + PI).cos()),
+            (-3.0, -5.0, (ls + PI).cos()),
+            (3.0, -5.0, ls.cos()),
+        ]
+        .map(|(x, z, swing)| part(x, 12.0, z, Mat4::from_rotation_x(-swing * 1.4 * la)));
+
+        let skin = tex::SHEEP;
+        emit_cube(out, head, [-3.0, -4.0, -6.0], [6.0, 6.0, 8.0], [0.0, 0.0], 0.0, skin, tint, light);
+        emit_cube(out, body, [-4.0, -10.0, -7.0], [8.0, 16.0, 6.0], [28.0, 8.0], 0.0, skin, tint, light);
+        for leg in legs {
+            emit_cube(out, leg, [-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], [0.0, 16.0], 0.0, skin, tint, light);
+        }
+        if self.sheared {
+            return;
+        }
+        let wool = tex::SHEEP_WOOL;
+        emit_cube(out, head, [-3.0, -4.0, -4.0], [6.0, 6.0, 6.0], [0.0, 0.0], 0.6, wool, tint, light);
+        emit_cube(out, body, [-4.0, -10.0, -7.0], [8.0, 16.0, 6.0], [28.0, 8.0], 1.75, wool, tint, light);
+        for leg in legs {
+            emit_cube(out, leg, [-2.0, 0.0, -2.0], [4.0, 6.0, 4.0], [0.0, 16.0], 0.5, wool, tint, light);
         }
     }
 
     /// Minecraft's `PigModel` (a `QuadrupedModel` with leg height 6), in model pixels.
-    fn build_pig(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4], fl: u8) {
+    fn build_pig(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
         let layer = tex::PIG;
         // A part's pivot, given in Minecraft's model coordinates (Y down from 24 = the ground,
         // X mirrored), then its rotation in ours.
@@ -903,7 +871,7 @@ impl Mob {
                 * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
         };
         let cube = |out: &mut Vec<Vertex>, m: Mat4, o: [f32; 3], s: [f32; 3], uv: [f32; 2]| {
-            emit_cube(out, m, o, s, uv, layer, tint, light, fl);
+            emit_cube(out, m, o, s, uv, 0.0, layer, tint, light);
         };
 
         let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
@@ -938,63 +906,11 @@ impl Mob {
             cube(out, leg, [-2.0, 0.0, -2.0], [4.0, 6.0, 4.0], [0.0, 16.0]);
         }
     }
-
-    /// Minecraft's `CreeperModel`, in model pixels: an 8x8x8 head on an 8x12x4 body standing
-    /// on four 6 tall legs.
-    fn build_creeper(
-        &self,
-        out: &mut Vec<Vertex>,
-        root: Mat4,
-        tint: [u8; 3],
-        light: [u8; 4],
-        fl: u8,
-    ) {
-        let layer = tex::CREEPER;
-        let part = |px: f32, py: f32, pz: f32, rot: Mat4| {
-            root * Mat4::from_translation(Vec3::new(-px, 24.0 - py, pz))
-                * rot
-                * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
-        };
-        let cube = |out: &mut Vec<Vertex>, m: Mat4, o: [f32; 3], s: [f32; 3], uv: [f32; 2]| {
-            emit_cube(out, m, o, s, uv, layer, tint, light, fl);
-        };
-        let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
-        let head = part(
-            0.0,
-            6.0,
-            0.0,
-            Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(self.pitch),
-        );
-        cube(out, head, [-4.0, -8.0, -4.0], [8.0, 8.0, 8.0], [0.0, 0.0]);
-        let body = part(0.0, 6.0, 0.0, Mat4::IDENTITY);
-        cube(out, body, [-4.0, 0.0, -2.0], [8.0, 12.0, 4.0], [16.0, 16.0]);
-        let ls = self.limb_swing * 0.6662;
-        let la = self.limb_amount;
-        let legs = [
-            (-2.0, 4.0, ls.cos()),
-            (2.0, 4.0, (ls + PI).cos()),
-            (-2.0, -4.0, (ls + PI).cos()),
-            (2.0, -4.0, ls.cos()),
-        ];
-        for (x, z, swing) in legs {
-            let leg = part(x, 18.0, z, Mat4::from_rotation_x(-swing * 1.4 * la));
-            cube(out, leg, [-2.0, 0.0, -2.0], [4.0, 6.0, 4.0], [0.0, 16.0]);
-        }
-    }
-}
-
-/// Can a mob's eye at `from` see `to`? (No opaque block on the straight line.)
-fn sees(w: &World, from: Vec3, to: Vec3) -> bool {
-    let d = to - from;
-    let n = (d.length() / 0.25).ceil() as i32;
-    (1..n).all(|i| {
-        let p = from + d * (i as f32 / n as f32);
-        !is_opaque(w.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32))
-    })
 }
 
 /// One cube of a Minecraft entity model: origin and size in model pixels, `uv` the texture
-/// offset of its box UV layout in a 64x64 atlas (Minecraft's `ModelPart.Cube`).
+/// offset of its box UV layout in a 64x64 atlas (Minecraft's `ModelPart.Cube`). `grow` makes
+/// it bigger on every side without changing its texture (Minecraft's `CubeDeformation`).
 #[allow(clippy::too_many_arguments)]
 fn emit_cube(
     out: &mut Vec<Vertex>,
@@ -1002,13 +918,17 @@ fn emit_cube(
     o: [f32; 3],
     s: [f32; 3],
     uv: [f32; 2],
+    grow: f32,
     layer: u32,
     tint: [u8; 3],
     light: [u8; 4],
-    fl: u8,
 ) {
-    let (x0, y0, z0) = (o[0], o[1], o[2]);
-    let (x1, y1, z1) = (x0 + s[0], y0 + s[1], z0 + s[2]);
+    let (x0, y0, z0) = (o[0] - grow, o[1] - grow, o[2] - grow);
+    let (x1, y1, z1) = (
+        o[0] + s[0] + grow,
+        o[1] + s[1] + grow,
+        o[2] + s[2] + grow,
+    );
     let (dx, dy, dz) = (s[0], s[1], s[2]);
     let v = [
         Vec3::new(x0, y0, z0),
@@ -1049,7 +969,7 @@ fn emit_cube(
             uv: [uvs[i][0] * k, uvs[i][1] * k],
             layer: layer as f32,
             light,
-            tint: [tint[0], tint[1], tint[2], fl],
+            tint: [tint[0], tint[1], tint[2], flags::ENTITY],
         });
         // Counter-clockwise seen from outside, like the rest of the game's geometry.
         let n = (p[1] - p[0]).cross(p[2] - p[0]);
@@ -1084,28 +1004,22 @@ mod tests {
     }
 
     #[test]
-    fn creeper_model_and_swelling() {
-        let mut c = Mob::new(MobKind::Creeper, Vec3::ZERO, 0.0, 7);
+    fn sheep_wears_its_wool_until_sheared() {
+        let mut sheep = Mob::new(MobKind::Sheep, Vec3::ZERO, 0.0, 7);
         let mut out = Vec::new();
-        c.build(&mut out, 15, 0);
-        // Head, body and four legs.
+        sheep.build(&mut out, 15, 0);
+        // Head, body and four legs, each with a wool cube over it.
+        assert_eq!(out.len(), 12 * 6 * 6);
+        let max_y = out.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
+        assert!(max_y > 1.3 && max_y < 1.5, "top at {max_y}");
+        assert!(sheep.can_shear());
+        sheep.sheared = true;
+        out.clear();
+        sheep.build(&mut out, 15, 0);
         assert_eq!(out.len(), 6 * 6 * 6);
-        let top = |v: &[Vertex]| v.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
-        let width = |v: &[Vertex]| v.iter().map(|v| v.pos[2]).fold(f32::MIN, f32::max);
-        // 26 model pixels tall (the box is 1.7).
-        assert!((top(&out) - 26.0 / 16.0).abs() < 1e-4);
-        assert!(out.iter().all(|v| v.tint[3] & flags::EMISSIVE == 0));
-        // Near the end of the fuse it is puffed up.
-        c.swell = CREEPER_FUSE * 0.95;
-        let mut big = Vec::new();
-        c.build(&mut big, 15, 0);
-        assert!(width(&big) > width(&out) * 1.2);
-        assert_eq!(MobKind::from_key("creeper"), Some(MobKind::Creeper));
-        assert_eq!(
-            MobKind::from_id(MobKind::Creeper as u8),
-            Some(MobKind::Creeper)
-        );
-        assert!(MobKind::Creeper.hostile() && !MobKind::Pig.hostile());
+        assert!(!sheep.can_shear());
+        let net = sheep.to_net();
+        assert!(Mob::from_net(&net).is_some_and(|m| m.sheared && m.kind == MobKind::Sheep));
     }
 
     #[test]

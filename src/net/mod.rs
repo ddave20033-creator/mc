@@ -16,7 +16,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 10;
+pub const PROTOCOL: u16 = 11;
 
 // ---------------------------------------------------------------------------- data
 
@@ -52,6 +52,8 @@ pub mod pose_flags {
     pub const HURT: u8 = 4;
     pub const DEAD: u8 = 8;
     pub const CREATIVE: u8 = 16;
+    /// Lying in a bed (the pose's position is on top of the bed's head half).
+    pub const SLEEPING: u8 = 32;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,9 +69,8 @@ pub struct MobNet {
     pub hurt: bool,
     /// Seconds since dying, or negative while alive.
     pub death: f32,
-    /// Creeper: seconds of swelling.
-    pub swell: f32,
-    pub burning: bool,
+    /// A sheep without its wool.
+    pub sheared: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -92,6 +93,8 @@ pub struct PlayerState {
     pub flying: bool,
     pub slot: u8,
     pub inventory: Vec<Slot>,
+    /// The head of the bed the player last used (where they come back to life).
+    pub bed: Option<IVec3>,
 }
 
 /// Block entity kinds in `Msg::Container`.
@@ -135,15 +138,15 @@ pub enum Msg {
         kind: u8,
         pos: Vec3,
     },
+    /// Used shears on a mob (the host drops its wool).
+    Shear {
+        id: u32,
+    },
     DropItem {
         pos: Vec3,
         vel: Vec3,
         stack: Stack,
         delay: f32,
-    },
-    /// Lit the TNT at `p` with flint and steel.
-    Ignite {
-        p: IVec3,
     },
     /// Opened the block entity at `p` (the host answers with its contents).
     Open {
@@ -184,20 +187,12 @@ pub enum Msg {
         mobs: Vec<MobNet>,
         items: Vec<ItemNet>,
         falling: Vec<(Vec3, u8)>,
-        /// Primed TNT: position and fuse left.
-        tnt: Vec<(Vec3, f32)>,
     },
     Give(Stack),
     /// Someone broke a block here: debris flies (the block change comes separately).
     BreakFx {
         p: IVec3,
         block: u8,
-    },
-    /// Something exploded here: smoke, and damage and knockback for whoever is close (the
-    /// block changes come separately).
-    Explosion {
-        pos: Vec3,
-        power: f32,
     },
     /// Hit by another player.
     Hurt {
@@ -319,6 +314,13 @@ impl W {
         self.bool(s.flying);
         self.u8(s.slot);
         self.slots(&s.inventory);
+        match s.bed {
+            Some(b) => {
+                self.bool(true);
+                self.ivec3(b);
+            }
+            None => self.bool(false),
+        }
     }
 }
 
@@ -431,6 +433,7 @@ impl R<'_> {
             flying: self.bool()?,
             slot: self.u8()?,
             inventory: self.slots()?,
+            bed: if self.bool()? { Some(self.ivec3()?) } else { None },
         })
     }
 }
@@ -476,6 +479,10 @@ impl Msg {
                 w.u8(*kind);
                 w.vec3(*pos);
             }
+            Msg::Shear { id } => {
+                w.u8(11);
+                w.u32(*id);
+            }
             Msg::DropItem {
                 pos,
                 vel,
@@ -487,10 +494,6 @@ impl Msg {
                 w.vec3(*vel);
                 w.stack(*stack);
                 w.f32(*delay);
-            }
-            Msg::Ignite { p } => {
-                w.u8(11);
-                w.ivec3(*p);
             }
             Msg::Open { p } => {
                 w.u8(8);
@@ -575,7 +578,6 @@ impl Msg {
                 mobs,
                 items,
                 falling,
-                tnt,
             } => {
                 w.u8(29);
                 w.u32(mobs.len() as u32);
@@ -588,8 +590,7 @@ impl Msg {
                     }
                     w.bool(m.hurt);
                     w.f32(m.death);
-                    w.f32(m.swell);
-                    w.bool(m.burning);
+                    w.bool(m.sheared);
                 }
                 w.u32(items.len() as u32);
                 for it in items {
@@ -603,16 +604,6 @@ impl Msg {
                     w.vec3(*p);
                     w.u8(*b);
                 }
-                w.u32(tnt.len() as u32);
-                for (p, fuse) in tnt {
-                    w.vec3(*p);
-                    w.f32(*fuse);
-                }
-            }
-            Msg::Explosion { pos, power } => {
-                w.u8(33);
-                w.vec3(*pos);
-                w.f32(*power);
             }
             Msg::Give(s) => {
                 w.u8(30);
@@ -697,9 +688,9 @@ impl Msg {
                 delay: r.f32()?,
             },
             8 => Msg::Open { p: r.ivec3()? },
-            11 => Msg::Ignite { p: r.ivec3()? },
             9 => Msg::Command(r.str()?),
             10 => Msg::Save(r.state()?),
+            11 => Msg::Shear { id: r.u32()? },
             20 => Msg::Welcome {
                 id: r.u8()?,
                 seed: r.u32()?,
@@ -737,8 +728,7 @@ impl Msg {
                         limb_amount: r.f32()?,
                         hurt: r.bool()?,
                         death: r.f32()?,
-                        swell: r.f32()?,
-                        burning: r.bool()?,
+                        sheared: r.bool()?,
                     })
                 })?,
                 items: r.list(|r| {
@@ -750,11 +740,6 @@ impl Msg {
                     })
                 })?,
                 falling: r.list(|r| Some((r.vec3()?, r.u8()?)))?,
-                tnt: r.list(|r| Some((r.vec3()?, r.f32()?)))?,
-            },
-            33 => Msg::Explosion {
-                pos: r.vec3()?,
-                power: r.f32()?,
             },
             30 => Msg::Give(r.stack()?),
             32 => Msg::BreakFx {
@@ -823,6 +808,7 @@ mod tests {
             flying: false,
             slot: 3,
             inventory: vec![Some(stack), None, Some(Stack::new(3, 64))],
+            bed: Some(IVec3::new(4, 70, -12)),
         };
         roundtrip(Msg::Hello {
             proto: PROTOCOL,
@@ -850,6 +836,7 @@ mod tests {
             state: Some(state.clone()),
         });
         roundtrip(Msg::Save(state));
+        roundtrip(Msg::Shear { id: 77 });
         roundtrip(Msg::Blocks(vec![
             (IVec3::new(1, 2, 3), 7),
             (IVec3::new(-9, 0, 4), 0),
@@ -866,8 +853,7 @@ mod tests {
                 limb_amount: 0.4,
                 hurt: true,
                 death: -1.0,
-                swell: 0.5,
-                burning: true,
+                sheared: true,
             }],
             items: vec![ItemNet {
                 id: 9,
@@ -876,14 +862,6 @@ mod tests {
                 age: 2.0,
             }],
             falling: vec![(Vec3::Z, 4)],
-            tnt: vec![(Vec3::X, 2.5)],
-        });
-        roundtrip(Msg::Ignite {
-            p: IVec3::new(-4, 60, 9),
-        });
-        roundtrip(Msg::Explosion {
-            pos: Vec3::new(1.5, 64.49, -2.5),
-            power: 4.0,
         });
         roundtrip(Msg::Container {
             p: IVec3::new(3, 4, 5),

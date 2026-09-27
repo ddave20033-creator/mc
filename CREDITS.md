@@ -2,16 +2,11 @@
 
 ## Textures
 
-RustCraft has **Faithful 64x** built in, by the Faithful Resource Pack team
-(HARYA_ and many others): <https://faithfulpack.net>
-(<https://github.com/Faithful-Resource-Pack/Faithful-64x-Java>, `java-latest` branch).
-Used under the Faithful License: <https://faithfulpack.net/license>
-(a copy is included as `builtin/faithful/LICENSE.txt` and embedded in the game).
-The textures used are the block, item, destroy-stage, particle, chest, pig, creeper and
-player skin textures from `assets/minecraft/textures/`, unmodified except for cropping and scaling to the
-game's layout. Anything the pack has no texture for is drawn procedurally.
+RustCraft's built-in textures (128x128) are its own: they are drawn by the generator in
+`tools/texgen/` (`python tools/texgen/build.py` writes the `builtin/rustcraft` pack that the
+game embeds).
 
-Minecraft Java resource packs put in the `resourcepacks/` folder can be layered over it
+Minecraft Java resource packs put in the `resourcepacks/` folder can be layered over them
 (Options → Graphics → Resource Packs).
 
 ## Animations

@@ -11,7 +11,7 @@ use crate::world::mesh::{MeshData, Vertex};
 use crate::world::textures::{tex, TILE};
 use crate::world::{ChunkPos, FastMap};
 use ash::vk;
-use glam::{IVec3, Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 use std::collections::VecDeque;
 use std::mem::size_of;
 
@@ -29,6 +29,8 @@ const SHADOW_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 const UI_MAX_VERTS: usize = 150_000;
 const DYN_MAX_VERTS: usize = 60_000;
 const MAX_UPLOADS_PER_FRAME: usize = 24;
+/// Indirect draw commands per frame (chunks' opaque parts, a few each).
+const MAX_INDIRECT: usize = 65536;
 /// Per-frame staging memory for chunk uploads (reused instead of allocating per chunk).
 const STAGING_SIZE: usize = 16 << 20;
 
@@ -55,6 +57,9 @@ pub struct FrameUbo {
     pub misc: [f32; 4],
     /// Held torches and lanterns (this player's and the other LAN players'): position, intensity.
     pub held_lights: [[f32; 4]; MAX_HELD_LIGHTS],
+    /// x: how many pixels a block at distance 1 covers (detail too small for the screen is
+    /// simplified by it).
+    pub detail: [f32; 4],
 }
 
 #[repr(C)]
@@ -69,6 +74,12 @@ struct ChunkGpu {
     mesh: Option<arena::Range>,
     index_offset: u64,
     opaque: u32,
+    /// Opaque indices without the faces between leaves and the plants, and the former's count
+    /// (see `MeshData`).
+    solid: u32,
+    /// Whole-block faces by direction, at the end of the solid indices.
+    dirs: [u32; 6],
+    leaf_inner: u32,
     water: u32,
     min: Vec3,
     max: Vec3,
@@ -83,10 +94,13 @@ pub struct FrameInfo<'a> {
     pub view_distance: f32,
     pub shadows: bool,
     pub shadow_distance: f32,
+    /// How many pixels a block at distance 1 covers: far chunks leave out what is too small.
+    pub detail_px: f32,
     pub ui: &'a [UiVertex],
     /// Scissor regions of the UI vertices: (first vertex, clip rectangle or None).
     pub ui_clips: &'a [(u32, Option<[f32; 4]>)],
-    pub outline: Option<IVec3>,
+    /// Box around the targeted block (world corners).
+    pub outline: Option<(Vec3, Vec3)>,
     pub particles: &'a [Vertex],
     pub overlay: &'a [Vertex],
     pub viewmodel: &'a [Vertex],
@@ -101,9 +115,13 @@ pub struct FrameInfo<'a> {
 
 /// A chunk drawn this frame: where its mesh is and how far away it is.
 struct VisibleChunk {
+    /// Index ranges (first, count) of its opaque part to draw: the faces turned toward the
+    /// camera, without the small detail far chunks leave out.
+    parts: [(u32, u32); 4],
     buffer: vk::Buffer,
     vertices: u64,
     indices: u64,
+    /// Opaque indices (where the water's start).
     opaque: u32,
     water: u32,
     dist2: f32,
@@ -145,6 +163,8 @@ pub struct Renderer {
     line_pipe: vk::Pipeline,
     shadow_pipe: vk::Pipeline,
     ui_pipe: vk::Pipeline,
+    /// `Gpu::pass_version` the main-pass pipelines were made for.
+    pass_version: u64,
     block_tex: Texture,
     font_tex: Texture,
     shadow_image: Image,
@@ -154,6 +174,8 @@ pub struct Renderer {
     ubos: Vec<Buffer>,
     ui_bufs: Vec<Buffer>,
     dyn_bufs: Vec<Buffer>,
+    /// Per frame slot: the chunks' opaque draws as indirect commands.
+    indirect: Vec<Buffer>,
     staging: Vec<Buffer>,
     chunks: FastMap<ChunkPos, ChunkGpu>,
     arena: arena::Arena,
@@ -168,6 +190,192 @@ pub struct Renderer {
     pub gpu_ms: Option<[f32; 3]>,
     /// Last frame's CPU time in ms: chunk uploads, command recording, submit + present.
     pub cpu_detail: [f32; 3],
+    /// Last frame's recording split in ms: buffers written, shadow pass, visible chunks
+    /// picked, world draws, the rest (for --bench).
+    pub rec_detail: [f32; 5],
+}
+
+type IndirectDraw = (vk::Buffer, vk::DrawIndexedIndirectCommand);
+
+/// One indirect draw of `count` indices from `first` of a chunk's mesh.
+fn chunk_draw(buffer: vk::Buffer, vertices: u64, indices: u64, first: u32, count: u32) -> IndirectDraw {
+    (
+        buffer,
+        vk::DrawIndexedIndirectCommand {
+            index_count: count,
+            instance_count: 1,
+            first_index: (indices / 4) as u32 + first,
+            vertex_offset: (vertices / size_of::<Vertex>() as u64) as i32,
+            first_instance: 0,
+        },
+    )
+}
+
+/// Records `draws` as indirect draws from `ind`, from command `base` on: one command per mesh
+/// buffer (the meshes share a few big ones), in order within each. Returns the next free
+/// command, or None (nothing recorded) when they do not fit.
+unsafe fn record_indirect(
+    d: &ash::Device,
+    cmd: vk::CommandBuffer,
+    ind: &Buffer,
+    base: usize,
+    draws: &mut [IndirectDraw],
+    multi: bool,
+) -> Option<usize> {
+    if base + draws.len() > MAX_INDIRECT {
+        return None;
+    }
+    draws.sort_by_key(|(b, _)| vk::Handle::as_raw(*b));
+    let flat: Vec<vk::DrawIndexedIndirectCommand> = draws.iter().map(|(_, c)| *c).collect();
+    let stride = size_of::<vk::DrawIndexedIndirectCommand>();
+    ind.write(base * stride, &flat);
+    let mut i = 0;
+    while i < draws.len() {
+        let b = draws[i].0;
+        let n = draws[i..].iter().take_while(|(x, _)| *x == b).count();
+        d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[0]);
+        d.cmd_bind_index_buffer(cmd, b, 0, vk::IndexType::UINT32);
+        let offset = ((base + i) * stride) as u64;
+        if multi {
+            d.cmd_draw_indexed_indirect(cmd, ind.handle, offset, n as u32, stride as u32);
+        } else {
+            for k in 0..n {
+                let at = offset + (k * stride) as u64;
+                d.cmd_draw_indexed_indirect(cmd, ind.handle, at, 1, stride as u32);
+            }
+        }
+        i += n;
+    }
+    Some(base + draws.len())
+}
+
+const WORLD_ATTRS: [(vk::Format, u32); 5] = [
+    (vk::Format::R32G32B32_SFLOAT, 0),
+    (vk::Format::R32G32_SFLOAT, 12),
+    (vk::Format::R32_SFLOAT, 20),
+    (vk::Format::R8G8B8A8_UNORM, 24),
+    (vk::Format::R8G8B8A8_UNORM, 28),
+];
+
+/// The pipelines of the main pass: sky, world, water, player fade, overlay, lines and UI.
+fn create_main_pipes(
+    d: &ash::Device,
+    render_pass: vk::RenderPass,
+    samples: vk::SampleCountFlags,
+    world_layout: vk::PipelineLayout,
+    ui_layout: vk::PipelineLayout,
+) -> [vk::Pipeline; 7] {
+    let world_desc = PipelineDesc {
+        vert: WORLD_VERT,
+        frag: WORLD_FRAG,
+        stride: size_of::<Vertex>() as u32,
+        attributes: &WORLD_ATTRS,
+        layout: world_layout,
+        render_pass,
+        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        cull: true,
+        depth_test: true,
+        depth_write: true,
+        blend: false,
+        multiply: false,
+        color: true,
+        depth_bias: None,
+        samples,
+        alpha_to_coverage: false,
+    };
+    // Only the opaque world pass smooths cut-out edges (with anti-aliasing on).
+    let world_pipe = create_pipeline(
+        d,
+        &PipelineDesc {
+            alpha_to_coverage: samples != vk::SampleCountFlags::TYPE_1,
+            ..world_desc
+        },
+    );
+    let water_pipe = create_pipeline(
+        d,
+        &PipelineDesc {
+            cull: false,
+            depth_write: false,
+            blend: true,
+            ..world_desc
+        },
+    );
+    let player_fade_pipe = create_pipeline(
+        d,
+        &PipelineDesc {
+            depth_write: false,
+            blend: true,
+            ..world_desc
+        },
+    );
+    let overlay_pipe = create_pipeline(
+        d,
+        &PipelineDesc {
+            depth_write: false,
+            blend: true,
+            multiply: true,
+            ..world_desc
+        },
+    );
+    let line_pipe = create_pipeline(
+        d,
+        &PipelineDesc {
+            topology: vk::PrimitiveTopology::LINE_LIST,
+            cull: false,
+            depth_write: false,
+            blend: true,
+            ..world_desc
+        },
+    );
+    let sky_pipe = create_pipeline(
+        d,
+        &PipelineDesc {
+            vert: SKY_VERT,
+            frag: SKY_FRAG,
+            attributes: &[],
+            cull: false,
+            depth_test: false,
+            depth_write: false,
+            ..world_desc
+        },
+    );
+    let ui_attrs = [
+        (vk::Format::R32G32_SFLOAT, 0),
+        (vk::Format::R32G32_SFLOAT, 8),
+        (vk::Format::R32G32B32A32_SFLOAT, 16),
+        (vk::Format::R32G32B32A32_SFLOAT, 32),
+        (vk::Format::R32_SFLOAT, 48),
+    ];
+    let ui_pipe = create_pipeline(
+        d,
+        &PipelineDesc {
+            vert: UI_VERT,
+            frag: UI_FRAG,
+            stride: size_of::<UiVertex>() as u32,
+            attributes: &ui_attrs,
+            layout: ui_layout,
+            render_pass,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            cull: false,
+            depth_test: false,
+            depth_write: false,
+            blend: true,
+            multiply: false,
+            color: true,
+            depth_bias: None,
+            samples,
+            alpha_to_coverage: false,
+        },
+    );
+    [
+        sky_pipe,
+        world_pipe,
+        water_pipe,
+        player_fade_pipe,
+        overlay_pipe,
+        line_pipe,
+        ui_pipe,
+    ]
 }
 
 fn create_shadow_pass(device: &ash::Device) -> vk::RenderPass {
@@ -271,7 +479,7 @@ impl Renderer {
     pub fn new(gpu: &Gpu, block_levels: &[Vec<u8>], font_atlas: &[u8]) -> Self {
         assert_eq!(size_of::<Vertex>(), 32);
         assert_eq!(size_of::<UiVertex>(), 52);
-        assert_eq!(size_of::<FrameUbo>(), 304 + 16 * MAX_HELD_LIGHTS);
+        assert_eq!(size_of::<FrameUbo>(), 304 + 16 * MAX_HELD_LIGHTS + 16);
 
         let block_tex = Texture::new(
             gpu,
@@ -478,114 +686,27 @@ impl Renderer {
             // Pipelines
             let world_layout = create_layout(d, &[world_dsl], size_of::<DrawPush>() as u32);
             let ui_layout = create_layout(d, &[ui_dsl], 16);
-            let world_attrs = [
-                (vk::Format::R32G32B32_SFLOAT, 0),
-                (vk::Format::R32G32_SFLOAT, 12),
-                (vk::Format::R32_SFLOAT, 20),
-                (vk::Format::R8G8B8A8_UNORM, 24),
-                (vk::Format::R8G8B8A8_UNORM, 28),
-            ];
-            let world_desc = PipelineDesc {
-                vert: WORLD_VERT,
-                frag: WORLD_FRAG,
-                stride: size_of::<Vertex>() as u32,
-                attributes: &world_attrs,
-                layout: world_layout,
-                render_pass: gpu.render_pass,
-                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-                cull: true,
-                depth_test: true,
-                depth_write: true,
-                blend: false,
-                multiply: false,
-                color: true,
-                depth_bias: None,
-            };
-            let world_pipe = create_pipeline(d, &world_desc);
-            let water_pipe = create_pipeline(
-                d,
-                &PipelineDesc {
-                    cull: false,
-                    depth_write: false,
-                    blend: true,
-                    ..world_desc
-                },
-            );
-            let player_fade_pipe = create_pipeline(
-                d,
-                &PipelineDesc {
-                    depth_write: false,
-                    blend: true,
-                    ..world_desc
-                },
-            );
-            let overlay_pipe = create_pipeline(
-                d,
-                &PipelineDesc {
-                    depth_write: false,
-                    blend: true,
-                    multiply: true,
-                    ..world_desc
-                },
-            );
-            let line_pipe = create_pipeline(
-                d,
-                &PipelineDesc {
-                    topology: vk::PrimitiveTopology::LINE_LIST,
-                    cull: false,
-                    depth_write: false,
-                    blend: true,
-                    ..world_desc
-                },
-            );
+            let [sky_pipe, world_pipe, water_pipe, player_fade_pipe, overlay_pipe, line_pipe, ui_pipe] =
+                create_main_pipes(d, gpu.render_pass, gpu.samples, world_layout, ui_layout);
             let shadow_pipe = create_pipeline(
                 d,
                 &PipelineDesc {
                     vert: SHADOW_VERT,
                     frag: SHADOW_FRAG,
+                    stride: size_of::<Vertex>() as u32,
+                    attributes: &WORLD_ATTRS,
+                    layout: world_layout,
                     render_pass: shadow_pass,
-                    cull: false,
-                    color: false,
-                    depth_bias: Some((1.5, 2.0)),
-                    ..world_desc
-                },
-            );
-            let sky_pipe = create_pipeline(
-                d,
-                &PipelineDesc {
-                    vert: SKY_VERT,
-                    frag: SKY_FRAG,
-                    attributes: &[],
-                    cull: false,
-                    depth_test: false,
-                    depth_write: false,
-                    ..world_desc
-                },
-            );
-            let ui_attrs = [
-                (vk::Format::R32G32_SFLOAT, 0),
-                (vk::Format::R32G32_SFLOAT, 8),
-                (vk::Format::R32G32B32A32_SFLOAT, 16),
-                (vk::Format::R32G32B32A32_SFLOAT, 32),
-                (vk::Format::R32_SFLOAT, 48),
-            ];
-            let ui_pipe = create_pipeline(
-                d,
-                &PipelineDesc {
-                    vert: UI_VERT,
-                    frag: UI_FRAG,
-                    stride: size_of::<UiVertex>() as u32,
-                    attributes: &ui_attrs,
-                    layout: ui_layout,
-                    render_pass: gpu.render_pass,
                     topology: vk::PrimitiveTopology::TRIANGLE_LIST,
                     cull: false,
-                    depth_test: false,
-                    depth_write: false,
-                    blend: true,
+                    depth_test: true,
+                    depth_write: true,
+                    blend: false,
                     multiply: false,
-                    color: true,
-                    depth_bias: None,
+                    color: false,
+                    depth_bias: Some((1.5, 2.0)),
+                    samples: vk::SampleCountFlags::TYPE_1,
+                    alpha_to_coverage: false,
                 },
             );
 
@@ -605,6 +726,16 @@ impl Renderer {
                         gpu,
                         (DYN_MAX_VERTS * size_of::<Vertex>()) as u64,
                         vk::BufferUsageFlags::VERTEX_BUFFER,
+                        host,
+                    )
+                })
+                .collect();
+            let indirect = (0..FRAMES_IN_FLIGHT)
+                .map(|_| {
+                    Buffer::new(
+                        gpu,
+                        (MAX_INDIRECT * size_of::<vk::DrawIndexedIndirectCommand>()) as u64,
+                        vk::BufferUsageFlags::INDIRECT_BUFFER,
                         host,
                     )
                 })
@@ -636,6 +767,7 @@ impl Renderer {
                 line_pipe,
                 shadow_pipe,
                 ui_pipe,
+                pass_version: gpu.pass_version,
                 block_tex,
                 font_tex,
                 shadow_image,
@@ -645,6 +777,7 @@ impl Renderer {
                 ubos,
                 ui_bufs,
                 dyn_bufs,
+                indirect,
                 staging,
                 chunks: FastMap::default(),
                 arena: arena::Arena::default(),
@@ -665,6 +798,7 @@ impl Renderer {
                 queries_written: [false; FRAMES_IN_FLIGHT],
                 gpu_ms: None,
                 cpu_detail: [0.0; 3],
+                rec_detail: [0.0; 5],
             }
         }
     }
@@ -720,6 +854,9 @@ impl Renderer {
                 mesh: None,
                 index_offset: 0,
                 opaque: m.opaque_count,
+                solid: m.solid_count,
+                dirs: m.dir_counts,
+                leaf_inner: m.leaf_inner_count,
                 water: m.indices.len() as u32 - m.opaque_count,
                 min: Vec3::new(x0 - 1.0, m.min_y - 1.0, z0 - 1.0),
                 max: Vec3::new(x0 + 17.0, m.max_y + 1.0, z0 + 17.0),
@@ -788,6 +925,37 @@ impl Renderer {
             let Some((cmd, image)) = gpu.begin_frame() else {
                 return;
             };
+            if self.pass_version != gpu.pass_version {
+                // The main pass changed (anti-aliasing): its pipelines are made again.
+                let d = &gpu.device;
+                for p in [
+                    self.sky_pipe,
+                    self.world_pipe,
+                    self.water_pipe,
+                    self.player_fade_pipe,
+                    self.overlay_pipe,
+                    self.line_pipe,
+                    self.ui_pipe,
+                ] {
+                    d.destroy_pipeline(p, None);
+                }
+                [
+                    self.sky_pipe,
+                    self.world_pipe,
+                    self.water_pipe,
+                    self.player_fade_pipe,
+                    self.overlay_pipe,
+                    self.line_pipe,
+                    self.ui_pipe,
+                ] = create_main_pipes(
+                    d,
+                    gpu.render_pass,
+                    gpu.samples,
+                    self.world_layout,
+                    self.ui_layout,
+                );
+                self.pass_version = gpu.pass_version;
+            }
             // begin_frame waited for the frame recorded FRAMES_IN_FLIGHT frames ago, so chunk
             // memory retired before that frame was recorded is no longer read.
             let this_frame = self.frame;
@@ -796,6 +964,8 @@ impl Renderer {
                 self.arena.collect(gpu, done);
             }
             let slot = gpu.frame_slot;
+            // Indirect draw commands of this frame used so far (shadow pass, then world).
+            let mut indirect_used = 0usize;
             // This slot's previous frame has finished (begin_frame waited for it): read its
             // timestamps, then reuse them for this frame.
             let q0 = 4 * slot as u32;
@@ -830,6 +1000,7 @@ impl Renderer {
             let clock_start = std::time::Instant::now();
             self.flush_uploads(gpu, cmd);
             let clock_uploaded = std::time::Instant::now();
+            let mut marks = [clock_uploaded; 4];
 
             self.ubos[slot].write(0, std::slice::from_ref(&f.ubo));
             let n_ui = f.ui.len().min(UI_MAX_VERTS);
@@ -839,10 +1010,10 @@ impl Renderer {
 
             // Dynamic geometry: particles | overlay | viewmodel | outline lines | entities | flames
             let mut lines: Vec<Vertex> = Vec::new();
-            if let Some(p) = f.outline {
+            if let Some((lo, hi)) = f.outline {
                 let e = 0.004;
-                let lo = p.as_vec3() - Vec3::splat(e);
-                let hi = p.as_vec3() + Vec3::splat(1.0 + e);
+                let lo = lo - Vec3::splat(e);
+                let hi = hi + Vec3::splat(e);
                 let c = |x: bool, y: bool, z: bool| {
                     [
                         if x { hi.x } else { lo.x },
@@ -898,6 +1069,7 @@ impl Renderer {
                 params: [pass, 0.0, 0.0, 0.0],
             };
 
+            marks[0] = std::time::Instant::now();
             // ---- Shadow pass
             let area = vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
@@ -953,7 +1125,25 @@ impl Renderer {
                 );
                 let lf = Frustum::new(f.light_view_proj);
                 let sd = f.shadow_distance + 24.0;
-                for c in self.chunks.values() {
+                // Only the faces turned toward the light make the shadow map (the others lie
+                // behind them), and not the faces between leaves.
+                let l = Vec3::from_slice(&f.ubo.light_dir[..3]);
+                let lit: [bool; 6] = std::array::from_fn(|k| {
+                    let n = crate::world::mesh::FACE_N[k];
+                    Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).dot(l) > 0.0
+                });
+                let mut draws: Vec<IndirectDraw> = Vec::new();
+                let mut shadow_chunks = Vec::new();
+                // Only the chunks around the camera can be in range (not all loaded ones).
+                let reach = (sd / 16.0).ceil() as i32 + 1;
+                let (ccx, ccz) = (
+                    (f.cam_pos.x / 16.0).floor() as i32,
+                    (f.cam_pos.z / 16.0).floor() as i32,
+                );
+                let around = (-reach..=reach)
+                    .flat_map(|dz| (-reach..=reach).map(move |dx| (ccx + dx, ccz + dz)))
+                    .filter_map(|p| self.chunks.get(&p));
+                for c in around {
                     let Some(r) = c.mesh else { continue };
                     if c.opaque == 0 {
                         continue;
@@ -965,12 +1155,31 @@ impl Renderer {
                     {
                         continue;
                     }
-                    let b = self.arena.buffer(r);
-                    d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[r.offset]);
-                    let indices = r.offset + c.index_offset;
-                    d.cmd_bind_index_buffer(cmd, b, indices, vk::IndexType::UINT32);
-                    d.cmd_draw_indexed(cmd, c.opaque, 1, 0, 0, 0);
+                    let (b, v, i) = (self.arena.buffer(r), r.offset, r.offset + c.index_offset);
+                    shadow_chunks.push((b, v, i, c.opaque));
+                    let dirs_total: u32 = c.dirs.iter().sum();
+                    let mut at = c.solid - dirs_total;
+                    draws.push(chunk_draw(b, v, i, 0, at));
+                    for (k, &count) in c.dirs.iter().enumerate() {
+                        if lit[k] && count > 0 {
+                            draws.push(chunk_draw(b, v, i, at, count));
+                        }
+                        at += count;
+                    }
+                    let plants = c.solid + c.leaf_inner;
+                    draws.push(chunk_draw(b, v, i, plants, c.opaque - plants));
                 }
+                draws.retain(|(_, c)| c.index_count > 0);
+                let ind = &self.indirect[slot];
+                let multi = gpu.multi_draw_indirect;
+                indirect_used = record_indirect(d, cmd, ind, 0, &mut draws, multi).unwrap_or_else(|| {
+                    for &(b, v, i, n) in &shadow_chunks {
+                        d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[v]);
+                        d.cmd_bind_index_buffer(cmd, b, i, vk::IndexType::UINT32);
+                        d.cmd_draw_indexed(cmd, n, 1, 0, 0, 0);
+                    }
+                    0
+                });
                 let (e0, en) = range(4);
                 if en > 0 {
                     d.cmd_bind_vertex_buffers(cmd, 0, &[self.dyn_bufs[slot].handle], &[0]);
@@ -1004,10 +1213,11 @@ impl Renderer {
             );
             d.cmd_draw(cmd, 3, 1, 0, 0);
 
+            marks[1] = std::time::Instant::now();
             // Visible chunks
             let frustum = Frustum::new(f.view_proj);
             let max_d = f.view_distance + 24.0;
-            let mut visible: Vec<VisibleChunk> = Vec::new();
+            let mut visible: Vec<VisibleChunk> = Vec::with_capacity(self.drawn_chunks + 64);
             for c in self.chunks.values() {
                 let Some(r) = c.mesh else { continue };
                 let center = (c.min + c.max) * 0.5;
@@ -1016,7 +1226,56 @@ impl Renderer {
                 if dist2 > max_d * max_d || !frustum.visible(c.min, c.max) {
                     continue;
                 }
+                // Far chunks leave out what the shaders would drop anyway: grass and flowers
+                // (world.vert, under ~5 pixels a block) and the faces between leaves (closed
+                // crowns, under ~1.5).
+                let near = f.cam_pos.clamp(c.min, c.max);
+                let block_px = f.detail_px / near.distance(f.cam_pos).max(1e-3);
+                let drawn = if block_px >= 5.0 {
+                    c.opaque
+                } else if block_px >= 1.5 {
+                    c.solid + c.leaf_inner
+                } else {
+                    c.solid
+                };
+                // Whole-block faces turned away from the camera are left out by direction:
+                // +X faces only show from the +X side of the chunk's west edge, and so on.
+                let facing = [
+                    f.cam_pos.x > c.min.x,
+                    f.cam_pos.x < c.max.x,
+                    f.cam_pos.y > c.min.y,
+                    f.cam_pos.y < c.max.y,
+                    f.cam_pos.z > c.min.z,
+                    f.cam_pos.z < c.max.z,
+                ];
+                let dirs_total: u32 = c.dirs.iter().sum();
+                let mut parts = [(0u32, 0u32); 4];
+                let mut n = 0;
+                let mut push = |first: u32, count: u32| {
+                    if count == 0 {
+                        return;
+                    }
+                    if n > 0 && parts[n - 1].0 + parts[n - 1].1 == first {
+                        parts[n - 1].1 += count;
+                    } else if n < parts.len() {
+                        parts[n] = (first, count);
+                        n += 1;
+                    } else {
+                        // Out of slots: draw on to the end of this one.
+                        parts[n - 1].1 = first + count - parts[n - 1].0;
+                    }
+                };
+                let mut at = c.solid - dirs_total;
+                push(0, at);
+                for (d, &count) in c.dirs.iter().enumerate() {
+                    if facing[d] {
+                        push(at, count);
+                    }
+                    at += count;
+                }
+                push(c.solid, drawn - c.solid);
                 visible.push(VisibleChunk {
+                    parts,
                     buffer: self.arena.buffer(r),
                     vertices: r.offset,
                     indices: r.offset + c.index_offset,
@@ -1025,8 +1284,15 @@ impl Renderer {
                     dist2,
                 });
             }
+            marks[2] = std::time::Instant::now();
             self.drawn_chunks = visible.len();
-            visible.sort_by(|a, b| a.dist2.total_cmp(&b.dist2));
+            // By mesh buffer, then front to back: the world's indirect draws come out grouped
+            // per buffer already (the sort in `record_indirect` then only confirms it).
+            visible.sort_unstable_by(|a, b| {
+                vk::Handle::as_raw(a.buffer)
+                    .cmp(&vk::Handle::as_raw(b.buffer))
+                    .then(a.dist2.total_cmp(&b.dist2))
+            });
             let bind = |c: &VisibleChunk| {
                 d.cmd_bind_vertex_buffers(cmd, 0, &[c.buffer], &[c.vertices]);
                 d.cmd_bind_index_buffer(cmd, c.buffer, c.indices, vk::IndexType::UINT32);
@@ -1041,9 +1307,26 @@ impl Renderer {
                 0,
                 as_bytes(&push(f.view_proj, 0.0)),
             );
-            for c in visible.iter().filter(|c| c.opaque > 0) {
-                bind(c);
-                d.cmd_draw_indexed(cmd, c.opaque, 1, 0, 0, 0);
+            // All chunks' opaque parts as indirect draws, one command per mesh buffer (the
+            // meshes share a few big buffers).
+            let mut draws: Vec<IndirectDraw> = Vec::with_capacity(visible.len() * 3);
+            for c in &visible {
+                for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
+                    draws.push(chunk_draw(c.buffer, c.vertices, c.indices, first, count));
+                }
+            }
+            let ind = &self.indirect[slot];
+            let multi = gpu.multi_draw_indirect;
+            // Sorted by buffer, front to back within each (the sort is stable).
+            let recorded = record_indirect(d, cmd, ind, indirect_used, &mut draws, multi);
+            marks[3] = std::time::Instant::now();
+            if recorded.is_none() {
+                for c in &visible {
+                    bind(c);
+                    for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
+                        d.cmd_draw_indexed(cmd, count, 1, first, 0, 0);
+                    }
+                }
             }
             let dynb = self.dyn_bufs[slot].handle;
             let (p0, pn) = range(0);
@@ -1080,7 +1363,10 @@ impl Renderer {
                 0,
                 as_bytes(&push(f.view_proj, 1.0)),
             );
-            for c in visible.iter().rev().filter(|c| c.water > 0) {
+            // Water back to front.
+            let mut water: Vec<&VisibleChunk> = visible.iter().filter(|c| c.water > 0).collect();
+            water.sort_unstable_by(|a, b| b.dist2.total_cmp(&a.dist2));
+            for c in water {
                 bind(c);
                 d.cmd_draw_indexed(cmd, c.water, 1, c.opaque, 0, 0);
             }
@@ -1213,6 +1499,13 @@ impl Renderer {
             let clock_recorded = std::time::Instant::now();
             gpu.end_frame(cmd, image);
             let el = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f32() * 1000.0;
+            self.rec_detail = [
+                el(clock_uploaded, marks[0]),
+                el(marks[0], marks[1]),
+                el(marks[1], marks[2]),
+                el(marks[2], marks[3]),
+                el(marks[3], clock_recorded),
+            ];
             self.cpu_detail = [
                 el(clock_start, clock_uploaded),
                 el(clock_uploaded, clock_recorded),
@@ -1234,6 +1527,7 @@ impl Renderer {
                 .ui_bufs
                 .drain(..)
                 .chain(self.dyn_bufs.drain(..))
+                .chain(self.indirect.drain(..))
                 .chain(self.staging.drain(..))
                 .chain(self.ubos.drain(..))
             {

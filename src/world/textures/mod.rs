@@ -136,26 +136,36 @@ pub mod tex {
     /// `crate::world::mesh::chest_open_layer`), 4 edges each (right, left, top, bottom of the
     /// texture).
     pub const CHEST_OPEN: u32 = CUSTOM_SKIN_START + CUSTOM_SKIN_LAYERS * CUSTOM_SKIN_SLOTS as u32;
-    pub const TNT_SIDE: u32 = CHEST_OPEN + 16;
-    pub const TNT_TOP: u32 = TNT_SIDE + 1;
-    pub const TNT_BOTTOM: u32 = TNT_SIDE + 2;
-    pub const FLINT: u32 = TNT_SIDE + 3;
-    pub const GUNPOWDER: u32 = TNT_SIDE + 4;
-    pub const FLINT_AND_STEEL: u32 = TNT_SIDE + 5;
-    /// Fire animations (Minecraft's fire_0 and fire_1, 32 frames each, 20 per second); the
-    /// mesh uses the first frame of each and world.frag plays the rest. Must match world.frag
-    /// and shadow.frag.
-    pub const FIRE_0: u32 = FLINT_AND_STEEL + 1;
-    pub const FIRE_1: u32 = FIRE_0 + FIRE_FRAMES;
-    pub const FIRE_FRAMES: u32 = 32;
-    /// Explosion particle sprites (Minecraft's explosion_0..15).
-    pub const EXPLOSION: u32 = FIRE_1 + FIRE_FRAMES;
-    pub const EXPLOSION_FRAMES: u32 = 16;
-    /// Creeper skin: a whole Minecraft entity atlas (64x32 texels, in the top half of the
-    /// layer) like the pig's; must match world.frag (it flashes white before exploding).
-    pub const CREEPER: u32 = EXPLOSION + EXPLOSION_FRAMES;
-    pub const CREEPER_SPAWN_EGG: u32 = CREEPER + 1;
-    pub const LAYERS: usize = (CREEPER_SPAWN_EGG + 1) as usize;
+    pub const DOOR_TOP: u32 = CHEST_OPEN + 16;
+    pub const DOOR_BOTTOM: u32 = DOOR_TOP + 1;
+    pub const DOOR_ITEM: u32 = DOOR_TOP + 2;
+    /// Red bed faces as seen on a bed whose head points north (the pack's layout): the tops,
+    /// the long sides (the legs cut out below), the head and foot ends, the bottom.
+    pub const BED_HEAD_TOP: u32 = DOOR_ITEM + 1;
+    pub const BED_FOOT_TOP: u32 = BED_HEAD_TOP + 1;
+    pub const BED_HEAD_EAST: u32 = BED_HEAD_TOP + 2;
+    pub const BED_HEAD_WEST: u32 = BED_HEAD_TOP + 3;
+    pub const BED_FOOT_EAST: u32 = BED_HEAD_TOP + 4;
+    pub const BED_FOOT_WEST: u32 = BED_HEAD_TOP + 5;
+    pub const BED_HEAD_END: u32 = BED_HEAD_TOP + 6;
+    pub const BED_FOOT_END: u32 = BED_HEAD_TOP + 7;
+    pub const BED_BOTTOM: u32 = BED_HEAD_TOP + 8;
+    pub const BED_ITEM: u32 = BED_HEAD_TOP + 9;
+    /// Sheep skin and its wool coat: whole Minecraft entity atlases (64 texels wide) like
+    /// `PIG`.
+    pub const SHEEP: u32 = BED_ITEM + 1;
+    pub const SHEEP_WOOL: u32 = SHEEP + 1;
+    pub const WOOL: u32 = SHEEP + 2;
+    pub const MUTTON: u32 = SHEEP + 3;
+    pub const COOKED_MUTTON: u32 = SHEEP + 4;
+    pub const SHEARS: u32 = SHEEP + 5;
+    pub const SHEEP_SPAWN_EGG: u32 = SHEEP + 6;
+    /// Water and lava animation frames (from the packs' animated strips; must match
+    /// world.frag).
+    pub const WATER_ANIM: u32 = SHEEP_SPAWN_EGG + 1;
+    pub const LAVA_ANIM: u32 = WATER_ANIM + FLUID_FRAMES;
+    pub const FLUID_FRAMES: u32 = 32;
+    pub const LAYERS: usize = (LAVA_ANIM + FLUID_FRAMES) as usize;
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -228,8 +238,9 @@ pub const SMOKE_FRAMES: u32 = 8;
 fn is_item_icon(l: u32) -> bool {
     (tex::STICK..tex::CHEST_INSIDE).contains(&l)
         || (tex::PIG_SPAWN_EGG..=tex::IRON_NUGGET).contains(&l)
-        || (tex::FLINT..=tex::FLINT_AND_STEEL).contains(&l)
-        || l == tex::CREEPER_SPAWN_EGG
+        || l == tex::DOOR_ITEM
+        || l == tex::BED_ITEM
+        || (tex::MUTTON..=tex::SHEEP_SPAWN_EGG).contains(&l)
 }
 
 fn is_crack(l: u32) -> bool {
@@ -287,33 +298,30 @@ fn is_cutout(l: u32) -> bool {
         || is_item_icon(l)
         || l == tex::LANTERN
         || l == tex::CHAIN
+        || l == tex::DOOR_TOP
+        || l == tex::DOOR_BOTTOM
+        || (tex::BED_HEAD_EAST..=tex::BED_FOOT_END).contains(&l)
         || l == tex::FLAME_PARTICLE
         || (tex::SMOKE..tex::SMOKE + SMOKE_FRAMES).contains(&l)
-        || is_fire(l)
-        || (tex::EXPLOSION..tex::EXPLOSION + tex::EXPLOSION_FRAMES).contains(&l)
 }
 
-/// A fire animation frame.
-pub fn is_fire(l: u32) -> bool {
-    (tex::FIRE_0..tex::FIRE_1 + tex::FIRE_FRAMES).contains(&l)
-}
+/// Resolution of the opaque-pixel masks used to extrude flat item sprites into 3D models: the
+/// texture's own, so every side wall samples the middle of exactly one texel.
+pub const MASK: usize = TILE;
 
-/// Resolution of the opaque-pixel masks used to extrude flat item sprites into 3D models.
-pub const MASK: usize = 64;
-
-/// Opaque pixels of every layer at MASK x MASK (one row per u64, bit x = column x, row 0 at the
+/// Opaque pixels of every layer at MASK x MASK (one row per u128, bit x = column x, row 0 at the
 /// top of the texture). Filled by `generate`, so it follows the active resource pack.
-pub static ITEM_MASKS: std::sync::RwLock<Vec<[u64; MASK]>> = std::sync::RwLock::new(Vec::new());
+pub static ITEM_MASKS: std::sync::RwLock<Vec<[u128; MASK]>> = std::sync::RwLock::new(Vec::new());
 
-fn opaque_masks(base: &[u8]) -> Vec<[u64; MASK]> {
+fn opaque_masks(base: &[u8]) -> Vec<[u128; MASK]> {
     let step = TILE / MASK;
     base.chunks_exact(TILE * TILE * 4)
         .map(|layer| {
             std::array::from_fn(|y| {
-                (0..MASK).fold(0u64, |row, x| {
+                (0..MASK).fold(0u128, |row, x| {
                     let (px, py) = (x * step + step / 2, y * step + step / 2);
                     let a = layer[(py * TILE + px) * 4 + 3];
-                    row | (u64::from(a > 127) << x)
+                    row | (u128::from(a > 127) << x)
                 })
             })
         })
@@ -348,8 +356,8 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
             let batch: Vec<(usize, &mut [u8])> = chunks.drain(..per.min(chunks.len())).collect();
             scope.spawn(move || {
                 for (l, out) in batch {
-                    // Uploaded skins and double chest faces are filled in afterwards.
-                    if (tex::CUSTOM_SKIN_START..tex::TNT_SIDE).contains(&(l as u32)) {
+                    // Uploaded skins and the double chest faces are filled in later.
+                    if (tex::CUSTOM_SKIN_START..tex::DOOR_TOP).contains(&(l as u32)) {
                         continue;
                     }
                     for y in 0..TILE {
@@ -364,6 +372,17 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
         }
     });
     apply_pack(packs, &mut base);
+    synth_doors(&mut base);
+    // Fluids without animation frames: every frame is the still texture (it still scrolls).
+    for (still, anim) in [(tex::WATER, tex::WATER_ANIM), (tex::LAVA, tex::LAVA_ANIM)] {
+        let src = still as usize * layer_bytes;
+        for f in 0..tex::FLUID_FRAMES {
+            let dst = (anim + f) as usize * layer_bytes;
+            if base[dst..dst + layer_bytes].iter().all(|&v| v == 0) {
+                base.copy_within(src..src + layer_bytes, dst);
+            }
+        }
+    }
     // Make the extra outfits from the final texture set, including resource packs. Keep
     // luminance/detail while changing cloth colour; face and exposed hands remain intact.
     const SOURCE: [u32; 5] = [
@@ -458,6 +477,110 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
         }
     }
     base
+}
+
+/// Oak door textures (both halves and the item) made from the final oak planks when no pack
+/// has them: vertical boards in a darker frame, a recessed panel with a handle below and a
+/// four-pane window above.
+fn synth_doors(base: &mut [u8]) {
+    let layer_bytes = TILE * TILE * 4;
+    let layer = |l: u32| l as usize * layer_bytes;
+    let empty = |base: &[u8], l: u32| base[layer(l)..layer(l) + layer_bytes].iter().all(|&v| v == 0);
+    let planks = base[layer(tex::PLANKS)..layer(tex::PLANKS) + layer_bytes].to_vec();
+    // Boards run up and down: the planks texture turned a quarter.
+    let wood = |x: usize, y: usize, k: f32| -> [u8; 4] {
+        let i = (x * TILE + (TILE - 1 - y)) * 4;
+        let c = |v: u8| (v as f32 * k).clamp(0.0, 255.0) as u8;
+        [c(planks[i]), c(planks[i + 1]), c(planks[i + 2]), 255]
+    };
+    // One Minecraft pixel is 8 texels.
+    const P: usize = TILE / 16;
+    let door_pixel = |x: usize, y: usize, upper: bool| -> [u8; 4] {
+        let (mx, my) = (x / P, y / P);
+        let frame = mx < 2 || mx >= 14 || (upper && my < 2) || (!upper && my >= 14);
+        if frame {
+            // Bevel: light on the outer top/left edge, dark at the bottom/right.
+            let k = if x < 2 || (upper && y < 2) {
+                0.95
+            } else if x >= TILE - 2 || (!upper && y >= TILE - 2) {
+                0.55
+            } else {
+                0.78
+            };
+            return wood(x, y, k);
+        }
+        if upper {
+            // Window: 2x2 panes between 3..13 across and 3..11 down.
+            if (3..13).contains(&mx) && (3..11).contains(&my) {
+                let mullion = mx == 7 || mx == 8 || my == 6 || my == 7;
+                if mullion {
+                    return wood(x, y, 0.72);
+                }
+                let shine = if (x % (5 * P)) + (y % (4 * P)) < 3 * P { 1.25 } else { 1.0 };
+                let v = |c: f32| (c * shine).min(255.0) as u8;
+                return [v(58.0), v(66.0), v(78.0), 255];
+            }
+            let rim = (2..14).contains(&mx) && (2..12).contains(&my);
+            return wood(x, y, if rim { 0.82 } else { 1.0 });
+        }
+        // Lower half: a recessed panel, and the handle near the top on the free side (the
+        // hinges are on the left, as in Minecraft's texture).
+        if (12..14).contains(&mx) && (1..4).contains(&my) {
+            let (hx, hy) = (x - 12 * P, y - P);
+            let rim = hx < 2 || hy < 2 || hx >= 2 * P - 2 || hy >= 3 * P - 2;
+            return if rim {
+                [38, 38, 42, 255]
+            } else if hx < 5 && hy < 5 {
+                [150, 150, 158, 255]
+            } else {
+                [92, 92, 100, 255]
+            };
+        }
+        let panel = (5..11).contains(&mx) && (4..12).contains(&my);
+        let k = if panel {
+            if x == 5 * P || y == 4 * P {
+                0.6
+            } else if x == 11 * P - 1 || y == 12 * P - 1 {
+                1.1
+            } else {
+                0.88
+            }
+        } else {
+            1.0
+        };
+        wood(x, y, k)
+    };
+    for (l, upper) in [(tex::DOOR_TOP, true), (tex::DOOR_BOTTOM, false)] {
+        if !empty(base, l) {
+            continue;
+        }
+        let o = layer(l);
+        for y in 0..TILE {
+            for x in 0..TILE {
+                let i = o + (y * TILE + x) * 4;
+                base[i..i + 4].copy_from_slice(&door_pixel(x, y, upper));
+            }
+        }
+    }
+    if empty(base, tex::DOOR_ITEM) {
+        // The whole door squeezed into the middle of the sprite, with a dark outline.
+        let (top, bottom) = (layer(tex::DOOR_TOP), layer(tex::DOOR_BOTTOM));
+        let (x0, x1) = (4 * P, 12 * P);
+        let o = layer(tex::DOOR_ITEM);
+        for y in 0..TILE {
+            for x in x0..x1 {
+                let sx = (x - x0) * TILE / (x1 - x0);
+                let (src, sy) = if y < TILE / 2 { (top, y * 2) } else { (bottom, y * 2 - TILE) };
+                let s = src + (sy * TILE + sx) * 4;
+                let mut px = [base[s], base[s + 1], base[s + 2], base[s + 3]];
+                if x < x0 + 4 || x >= x1 - 4 || y < 4 || y >= TILE - 4 {
+                    px = [px[0] / 3, px[1] / 3, px[2] / 3, 255];
+                }
+                let i = o + (y * TILE + x) * 4;
+                base[i..i + 4].copy_from_slice(&px);
+            }
+        }
+    }
 }
 
 /// The full mip chain (each level holds all layers back to back): `generate_base` with the
@@ -609,28 +732,6 @@ mod tests {
         }
     }
 
-    /// The shaders hard-code some layer numbers.
-    #[test]
-    fn shader_layer_constants_match() {
-        let world = include_str!("../../../shaders/world.frag");
-        let shadow = include_str!("../../../shaders/shadow.frag");
-        let has = |src: &str, name: &str, v: u32| {
-            assert!(
-                src.contains(&format!("const float {name} = {v}.0;")),
-                "{name} should be {v}"
-            );
-        };
-        has(world, "TNT_SIDE_LAYER", tex::TNT_SIDE);
-        has(world, "TNT_BOTTOM_LAYER", tex::TNT_BOTTOM);
-        has(world, "FIRE_0_LAYER", tex::FIRE_0);
-        has(world, "FIRE_1_LAYER", tex::FIRE_1);
-        has(world, "FIRE_FRAMES", tex::FIRE_FRAMES);
-        has(world, "FURNACE_ANIM_LAYER", tex::FURNACE_ANIM);
-        has(world, "CREEPER_LAYER", tex::CREEPER);
-        has(shadow, "FIRE_0_LAYER", tex::FIRE_0);
-        has(shadow, "FIRE_END_LAYER", tex::FIRE_1 + tex::FIRE_FRAMES);
-    }
-
     #[test]
     fn flame_placeholder_and_furnace_stone_stays_stable() {
         let levels = generate(&Packs::none());
@@ -676,6 +777,29 @@ mod tests {
     }
 
     /// Generates every layer; with TEX_DUMP=<file.bmp> also writes a contact sheet to look at.
+    #[test]
+    fn shader_layer_numbers_match() {
+        let src = include_str!("../../../shaders/world.frag");
+        let value = |name: &str| -> u32 {
+            let line = src
+                .lines()
+                .find(|l| l.starts_with(&format!("const float {name} = ")))
+                .unwrap_or_else(|| panic!("{name} missing"));
+            let v = line.split('=').nth(1).unwrap().trim().trim_end_matches(';');
+            v.parse::<f32>().unwrap() as u32
+        };
+        assert_eq!(value("GRASS_SIDE_LAYER"), tex::GRASS_SIDE);
+        assert_eq!(value("GRASS_TOP_LAYER"), tex::GRASS_TOP);
+        assert_eq!(value("SNOW_LAYER"), tex::SNOW);
+        assert_eq!(value("SNOWY_GRASS_SIDE_LAYER"), tex::SNOWY_GRASS_SIDE);
+        assert_eq!(value("GLASS_LAYER"), tex::GLASS);
+        assert_eq!(value("FURNACE_LIT_LAYER"), tex::FURNACE_FRONT_LIT);
+        assert_eq!(value("TORCH_FLAME_LAYER"), tex::TORCH_FLAME);
+        assert_eq!(value("WATER_ANIM_LAYER"), tex::WATER_ANIM);
+        assert_eq!(value("LAVA_ANIM_LAYER"), tex::LAVA_ANIM);
+        assert_eq!(value("FLUID_FRAMES"), tex::FLUID_FRAMES);
+    }
+
     #[test]
     fn generate_all_layers() {
         // TEX_PACK=<name in resourcepacks/> dumps a resource pack's version instead (over the

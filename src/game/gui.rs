@@ -146,6 +146,29 @@ fn creative_items(query: &str) -> Vec<ItemId> {
 pub fn draw_stack(ui: &mut Ui, x: f32, y: f32, size: f32, st: &Stack) {
     let c = Vec2::new(x + size * 0.5, y + size * 0.5);
     match icon(st.item) {
+        Icon::Block(b) if is_stairs(b) => {
+            // Two boxes seen from the same corner as the cube icons: the step in front,
+            // the tall part behind it.
+            let r = size * 0.47;
+            let k = 0.866 * r;
+            let at = |x: f32, y: f32, z: f32| {
+                Vec2::new(
+                    c.x + k * (x + z - 1.0),
+                    c.y + r * (1.0 - y) - r * 0.5 * (1.0 + z - x),
+                )
+            };
+            let layer = face_texture(b, 2);
+            for (lo, hi) in [([0.0, 0.0, 0.0], [1.0, 0.5, 1.0]), ([0.0, 0.5, 0.5], [1.0, 1.0, 1.0])] {
+                let [x0, y0, z0] = lo;
+                let [x1, y1, z1] = hi;
+                let top = [at(x0, y1, z1), at(x1, y1, z1), at(x1, y1, z0), at(x0, y1, z0)];
+                let front = [at(x0, y1, z0), at(x1, y1, z0), at(x1, y0, z0), at(x0, y0, z0)];
+                let side = [at(x1, y1, z0), at(x1, y1, z1), at(x1, y0, z1), at(x1, y0, z0)];
+                ui.tex_quad(top, layer, 1.0);
+                ui.tex_quad(front, layer, 0.8);
+                ui.tex_quad(side, layer, 0.62);
+            }
+        }
         Icon::Block(b) => {
             let tint = icon_tint(b);
             let top = if tint_kind(b, 2) != TintKind::None {

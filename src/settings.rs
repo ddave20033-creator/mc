@@ -1,3 +1,5 @@
+use crate::keys::{KeyMap, BINDS};
+
 const PATH: &str = "options.txt";
 
 #[derive(Clone)]
@@ -10,7 +12,10 @@ pub struct Settings {
     /// 0 = auto.
     pub gui_scale: u32,
     pub fullscreen: bool,
-    pub vsync: bool,
+    /// Frames per second at most (0 = no limit).
+    pub fps_limit: u32,
+    /// Anti-aliasing: samples per pixel (2, 4, 8; lowered to what the GPU supports).
+    pub msaa: u32,
     pub show_fps: bool,
     pub shadows: bool,
     pub clouds: bool,
@@ -26,6 +31,7 @@ pub struct Settings {
     /// Player name shown to others in LAN games.
     pub name: String,
     pub skin: u8,
+    pub keys: KeyMap,
 }
 
 impl Default for Settings {
@@ -36,7 +42,8 @@ impl Default for Settings {
             render_distance: 12.0,
             gui_scale: 0,
             fullscreen: false,
-            vsync: true,
+            fps_limit: 144,
+            msaa: 2,
             show_fps: false,
             shadows: true,
             clouds: true,
@@ -47,6 +54,7 @@ impl Default for Settings {
             resource_packs: Vec::new(),
             name: default_name(),
             skin: 0,
+            keys: KeyMap::default(),
         }
     }
 }
@@ -67,7 +75,8 @@ impl Settings {
                     "render_distance" => s.render_distance = v.parse().unwrap_or(s.render_distance),
                     "gui_scale" => s.gui_scale = v.parse().unwrap_or(s.gui_scale),
                     "fullscreen" => s.fullscreen = b,
-                    "vsync" => s.vsync = b,
+                    "fps_limit" => s.fps_limit = v.parse().unwrap_or(s.fps_limit),
+                    "antialiasing" => s.msaa = v.parse().unwrap_or(s.msaa),
                     "show_fps" => s.show_fps = b,
                     "shadows" => s.shadows = b,
                     "clouds" => s.clouds = b,
@@ -85,7 +94,14 @@ impl Settings {
                             .map(String::from)
                             .collect()
                     }
-                    _ => {}
+                    k => {
+                        let bind = k.strip_prefix("key_").and_then(|n| {
+                            BINDS.iter().position(|(_, name, _)| *name == n)
+                        });
+                        if let (Some(i), Some(code)) = (bind, crate::keys::parse(v)) {
+                            s.keys.0[i] = code;
+                        }
+                    }
                 }
             }
         }
@@ -94,23 +110,29 @@ impl Settings {
         s.resource_packs.retain(|n| available.contains(n));
         s.fov = s.fov.clamp(30.0, 110.0);
         s.sensitivity = s.sensitivity.clamp(10.0, 200.0);
-        s.render_distance = s.render_distance.clamp(4.0, 32.0);
+        s.render_distance = s.render_distance.clamp(4.0, 64.0);
         s.gui_scale = s.gui_scale.min(6);
+        if s.fps_limit != 0 {
+            s.fps_limit = s.fps_limit.clamp(30, 250);
+        }
+        // Always on: 2x at least.
+        s.msaa = [2, 4, 8].into_iter().rfind(|&n| n <= s.msaa).unwrap_or(2);
         s.skin = s.skin.min(crate::world::textures::tex::SKIN_COUNT - 1);
         crate::lang::set_hungarian(s.hungarian);
         s
     }
 
     pub fn save(&self) {
-        let text = format!(
-            "fov:{}\nsensitivity:{}\nrender_distance:{}\ngui_scale:{}\nfullscreen:{}\nvsync:{}\nshow_fps:{}\n\
+        let mut text = format!(
+            "fov:{}\nsensitivity:{}\nrender_distance:{}\ngui_scale:{}\nfullscreen:{}\nfps_limit:{}\nantialiasing:{}\nshow_fps:{}\n\
              shadows:{}\nclouds:{}\nview_bobbing:{}\nfirst_person_body:{}\nlanguage:{}\ndark_ui:{}\nresource_packs:{}\nname:{}\nskin:{}\n",
             self.fov,
             self.sensitivity,
             self.render_distance,
             self.gui_scale,
             self.fullscreen,
-            self.vsync,
+            self.fps_limit,
+            self.msaa,
             self.show_fps,
             self.shadows,
             self.clouds,
@@ -122,6 +144,9 @@ impl Settings {
             self.name,
             self.skin
         );
+        for (i, (_, name, _)) in BINDS.iter().enumerate() {
+            text += &format!("key_{name}:{}\n", crate::keys::code_name(self.keys.0[i]));
+        }
         let _ = std::fs::write(PATH, text);
     }
 

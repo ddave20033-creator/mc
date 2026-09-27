@@ -47,7 +47,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("save", "/save"),
     ("seed", "/seed"),
     ("spawn", "/spawn"),
-    ("summon", "/summon pig [x y z]   (~ = your current position)"),
+    ("summon", "/summon <pig|sheep> [x y z]   (~ = your current position)"),
     (
         "time",
         "/time set <day|noon|sunset|night|midnight|sunrise|ticks>  |  /time add <ticks>  |  /time query",
@@ -94,7 +94,7 @@ fn suggest(input: &str) -> Option<Suggest> {
         ["time", "set"] => (TIMES.to_vec(), Some("<time>")),
         ["time", "add"] => (vec![], Some("<ticks>")),
         ["gamemode" | "gm"] => (vec!["creative", "survival"], None),
-        ["summon"] => (vec!["pig"], None),
+        ["summon"] => (vec!["pig", "sheep"], None),
         ["summon", _] => (vec!["~"], Some("[x]")),
         ["summon", _, _] => (vec!["~"], Some("[y]")),
         ["summon", _, _, _] => (vec!["~"], Some("[z]")),

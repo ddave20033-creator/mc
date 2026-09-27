@@ -27,6 +27,16 @@ pub struct World {
     pub log: Option<Vec<(IVec3, u8)>>,
     /// LAN player: changes from the host for chunks that are not here yet.
     pub pending: FastMap<ChunkPos, Vec<(IVec3, u8)>>,
+    /// The light of each meshed chunk, as the mesher flood-filled it.
+    pub light: FastMap<ChunkPos, ChunkLight>,
+}
+
+/// A chunk's sky and block light per block (sky in the high nibble), up to height `h`
+/// (above it: full sky, no block light).
+#[derive(Clone, Default)]
+pub struct ChunkLight {
+    pub h: usize,
+    pub data: Arc<[u8]>,
 }
 
 /// How long a fluid surface takes to move to its new height (one flow step).
@@ -42,6 +52,7 @@ impl World {
             fluid_changes: FastMap::default(),
             log: None,
             pending: FastMap::default(),
+            light: FastMap::default(),
         }
     }
 
@@ -138,22 +149,54 @@ impl World {
             .map(|c| c.heightmap[(z.rem_euclid(16) * 16 + x.rem_euclid(16)) as usize] as i32)
     }
 
-    /// Rough light estimate (sky 0..15) for things rendered outside chunk meshes.
+    /// Sky light (0..15) at `p` for things rendered outside chunk meshes.
     pub fn sky_estimate(&self, p: glam::Vec3) -> u8 {
-        let (x, y, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
-        match self.height_at(x, z) {
-            Some(h) if y <= h => (15 - ((h - y) * 2).min(12)).max(3) as u8,
-            _ => 15,
-        }
+        self.light_estimate(p).0
     }
 
-    /// Rough (sky, block) light at `p` for things drawn outside chunk meshes.
+    /// (sky, block) light at `p` for things drawn outside chunk meshes: the same light the
+    /// blocks around it are drawn with. Inside a solid block, the brightest open side.
     pub fn light_estimate(&self, p: glam::Vec3) -> (u8, u8) {
-        (self.sky_estimate(p), self.block_light_estimate(p))
+        let c = p.floor().as_ivec3();
+        if let Some(l) = self.cell_light(c) {
+            if !is_opaque(self.geti(c)) {
+                return l;
+            }
+            let mut best = (0, 0);
+            for d in [IVec3::Y, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z, IVec3::NEG_Y] {
+                if let Some(l) = self.cell_light(c + d).filter(|_| !is_opaque(self.geti(c + d))) {
+                    best = (best.0.max(l.0), best.1.max(l.1));
+                }
+            }
+            return best;
+        }
+        // Not meshed yet: guess from the height map and the light sources nearby.
+        let sky = match self.height_at(c.x, c.z) {
+            Some(h) if c.y <= h => (15 - ((h - c.y) * 2).min(12)).max(3) as u8,
+            _ => 15,
+        };
+        (sky, self.block_light_guess(p))
     }
 
-    /// Nearby emissive blocks -> block light estimate 0..15.
+    /// Block light (0..15) at `p`.
     pub fn block_light_estimate(&self, p: glam::Vec3) -> u8 {
+        self.light_estimate(p).1
+    }
+
+    fn cell_light(&self, c: IVec3) -> Option<(u8, u8)> {
+        let l = self.light.get(&Self::chunk_pos(c.x, c.z))?;
+        if c.y < 0 {
+            return Some((0, 0));
+        }
+        if c.y as usize >= l.h {
+            return Some((15, 0));
+        }
+        let v = l.data[(c.y as usize * 16 + c.z.rem_euclid(16) as usize) * 16 + c.x.rem_euclid(16) as usize];
+        Some((v >> 4, v & 15))
+    }
+
+    /// Nearby emissive blocks -> block light guess 0..15.
+    fn block_light_guess(&self, p: glam::Vec3) -> u8 {
         let c = p.floor().as_ivec3();
         let mut best = 0i32;
         for dy in -3..=3 {

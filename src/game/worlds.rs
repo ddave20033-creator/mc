@@ -306,6 +306,9 @@ impl Game {
         }
         self.fluids = Fluids::new();
         self.spawn = meta.spawn.unwrap_or_else(|| self.terrain.gen.find_spawn());
+        self.bed_spawn = meta.bed;
+        self.sleep = None;
+        self.asleep_for = 0.0;
         self.pano = Self::panorama_pos(&self.terrain, self.spawn);
         self.inventory = Inventory::new();
         save::load_inventory(&meta.folder, &mut self.inventory.slots);
@@ -322,8 +325,6 @@ impl Game {
             &mut self.mobs,
         );
         self.falling.clear();
-        self.tnt.clear();
-        self.fires.clear();
         self.cursor = None;
         self.craft = [None; 9];
         self.drag = None;
@@ -416,7 +417,7 @@ impl Game {
     /// Feet position on top of the highest block at the world spawn column.
     /// Works even when the spawn chunk is not loaded (e.g. after dying far away): then the
     /// edited copy or a freshly generated copy of the chunk is used.
-    fn spawn_pos(&self) -> Vec3 {
+    pub(super) fn spawn_pos(&self) -> Vec3 {
         let (x, z) = self.spawn;
         let w = &self.terrain.world;
         let cp = World::chunk_pos(x, z);
@@ -442,6 +443,7 @@ impl Game {
 
     pub(super) fn spawn_player(&mut self) {
         let pos = self.spawn_pos();
+        self.sleep = None;
         self.player = Player {
             pos,
             spawned: true,
@@ -461,7 +463,7 @@ impl Game {
         self.fire = 0.0;
         self.invuln = 0.0;
         self.hurt_time = 0.0;
-        self.spawn_player();
+        self.spawn_at_home(true);
         self.resume();
     }
 
@@ -480,12 +482,12 @@ impl Game {
         }
         self.save_peers();
 
-        // A dead player is saved as respawned at the world spawn, so closing the game on the
-        // death screen does not bring them back where they died.
+        // A dead player is saved as respawned at home, so closing the game on the death
+        // screen does not bring them back where they died.
         let dead = self.screen == Screen::Dead;
         let player = self.player.spawned.then(|| PlayerSave {
             pos: if dead {
-                self.spawn_pos().to_array()
+                self.home_pos().to_array()
             } else {
                 self.player.pos.to_array()
             },
@@ -508,6 +510,7 @@ impl Game {
         meta.last_played = save::now_secs();
         meta.time_of_day = self.time_of_day;
         meta.spawn = Some(self.spawn);
+        meta.bed = self.bed_spawn;
         meta.creative = self.game_mode == GameMode::Creative;
         if player.is_some() {
             meta.player = player;
@@ -545,8 +548,9 @@ impl Game {
         if self.screen == Screen::Dead {
             self.health = MAX_HEALTH;
             self.fire = 0.0;
-            self.spawn_player();
+            self.spawn_at_home(false);
         }
+        self.wake_up();
         self.save_world();
         self.close_lan();
         self.world_meta = None;

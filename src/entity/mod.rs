@@ -8,4 +8,4 @@ pub mod player;
 pub mod survival;
 
 pub use block_entity::{BlockEntities, Furnace, SMELT_TIME};
-pub use dropped::{FallingBlock, ItemEntity, PrimedTnt, TNT_FUSE};
+pub use dropped::{FallingBlock, ItemEntity};

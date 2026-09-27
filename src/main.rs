@@ -15,6 +15,7 @@ mod engine;
 mod entity;
 mod game;
 mod item;
+mod keys;
 mod lang;
 mod model;
 mod net;
@@ -38,6 +39,8 @@ use winit::window::{Window, WindowId};
 struct App {
     game: Option<game::Game>,
     bench: bool,
+    /// `--aa-shots <folder>`: anti-aliasing comparison pictures.
+    shots: Option<std::path::PathBuf>,
 }
 
 impl App {
@@ -71,7 +74,7 @@ impl ApplicationHandler for App {
                 .create_window(attrs)
                 .expect("failed to create window"),
         );
-        self.game = Some(game::Game::new(window, self.bench));
+        self.game = Some(game::Game::new(window, self.bench, self.shots.clone()));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -170,7 +173,9 @@ fn main() {
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App {
         bench: args.get(1).map(String::as_str) == Some("--bench"),
-        ..Default::default()
+        shots: (args.get(1).map(String::as_str) == Some("--aa-shots"))
+            .then(|| args.get(2).map(Into::into).unwrap_or_else(|| "aa-shots".into())),
+        game: None,
     };
     event_loop.run_app(&mut app).expect("event loop error");
 }

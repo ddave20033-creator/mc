@@ -47,8 +47,8 @@ pub struct HandAnim {
     pub blocking: bool,
     /// Seconds spent eating or drinking the held item (None when not).
     pub eating: Option<f32>,
-    /// Hold a lantern by its handle in the fist (with the first-person body option); otherwise
-    /// it is held like any other item, as in plain Minecraft.
+    /// With the first-person body: a held lantern hangs from the fist by its chain and swings;
+    /// otherwise it is held still by its handle.
     pub fancy_lantern: bool,
     lantern_swing: crate::model::lantern::SmoothSwing,
     /// Blend 0..1 from the normal hold to the blocking pose.
@@ -266,14 +266,10 @@ impl HandAnim {
             * rx(f1 * -80.0)
             * ry(-45.0);
         let flat = matches!(icon(self.held), Icon::Flat(_));
-        if self.held == crate::world::LANTERN as ItemId {
-            // Hold the lantern by its chain in both first-person hand styles. Its body
-            // follows the hand with the same gravity-driven swing as the player model.
-            let grip = if self.fancy_lantern {
-                base * t(-0.025, 0.125, 0.0) * rz(10.0)
-            } else {
-                base
-            };
+        if self.held == crate::world::LANTERN as ItemId && self.fancy_lantern {
+            // Hanging by its chain from the fist. Its body follows the hand with the same
+            // gravity-driven swing as the player model.
+            let grip = base * t(-0.025, 0.125, 0.0) * rz(10.0);
             let pose = Self::arm_pose(grip, s, sq, eq);
             emit_box(
                 out,
@@ -301,7 +297,9 @@ impl HandAnim {
             crate::model::lantern::emit_held_lantern(out, style, pivot, dir, yaw, light, fl);
             return;
         }
-        let item = if self.held == TORCH as ItemId {
+        let lantern = self.held == crate::world::LANTERN as ItemId;
+        let item = if self.held == TORCH as ItemId || lantern {
+            // Upright in the fist (a lantern without the first-person body too).
             m * t(0.08, 0.2, 0.06) * rz(-12.0) * Mat4::from_scale(Vec3::splat(0.82))
         } else if flat {
             m * t(1.13 / 16.0, 3.2 / 16.0, 1.13 / 16.0)
@@ -331,6 +329,14 @@ impl HandAnim {
         } else {
             item
         };
+        if lantern {
+            // Half-size lantern model (pixels) held still by the top of its handle.
+            let k = 0.5 / 16.0;
+            let m = item * t(0.0, 0.12 - 11.0 * k, 0.0) * Mat4::from_scale(Vec3::splat(k));
+            use crate::model::lantern::{emit_lantern, LanternKind};
+            emit_lantern(out, m, light, fl, LanternKind::Standing);
+            return;
+        }
         emit_held(out, item, self.held, light, fl);
     }
 }
@@ -349,38 +355,35 @@ mod lantern_view_tests {
 
     #[test]
     fn first_person_lantern_trails_a_moving_hand() {
-        for fancy in [false, true] {
-            let mut hand = HandAnim::new();
-            hand.equip(crate::world::LANTERN as ItemId);
-            hand.fancy_lantern = fancy;
-            let dt = 1.0 / 60.0;
-            let mut verts = Vec::new();
-            for _ in 0..60 {
-                hand.update(dt, false, 0.0, true, Vec2::ZERO);
-                verts.clear();
-                hand.build(&mut verts, Mat4::IDENTITY, 15, 15, dt, 0);
-            }
-            let center_x = |v: &[Vertex]| {
-                v.iter().skip(36).map(|p| p.pos[0]).sum::<f32>() / (v.len() - 36) as f32
-            };
-            let rest_x = center_x(&verts);
-            for step in 1..=10 {
-                verts.clear();
-                hand.build(
-                    &mut verts,
-                    Mat4::from_translation(Vec3::X * (step as f32 * 0.08)),
-                    15,
-                    15,
-                    dt,
-                    0,
-                );
-            }
-            assert!(
-                center_x(&verts) - 0.8 < rest_x - 0.008,
-                "lantern did not trail the hand (fancy={fancy}, rest={}, moving={})",
-                rest_x,
-                center_x(&verts) - 0.8
+        let mut hand = HandAnim::new();
+        hand.equip(crate::world::LANTERN as ItemId);
+        hand.fancy_lantern = true;
+        let dt = 1.0 / 60.0;
+        let mut verts = Vec::new();
+        for _ in 0..60 {
+            hand.update(dt, false, 0.0, true, Vec2::ZERO);
+            verts.clear();
+            hand.build(&mut verts, Mat4::IDENTITY, 15, 15, dt, 0);
+        }
+        let center_x =
+            |v: &[Vertex]| v.iter().skip(36).map(|p| p.pos[0]).sum::<f32>() / (v.len() - 36) as f32;
+        let rest_x = center_x(&verts);
+        for step in 1..=10 {
+            verts.clear();
+            hand.build(
+                &mut verts,
+                Mat4::from_translation(Vec3::X * (step as f32 * 0.08)),
+                15,
+                15,
+                dt,
+                0,
             );
         }
+        assert!(
+            center_x(&verts) - 0.8 < rest_x - 0.008,
+            "lantern did not trail the hand (rest={}, moving={})",
+            rest_x,
+            center_x(&verts) - 0.8
+        );
     }
 }

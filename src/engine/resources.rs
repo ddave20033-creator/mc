@@ -87,6 +87,12 @@ impl Buffer {
         }
     }
 
+    /// The contents of a host-visible buffer.
+    pub fn read(&self) -> &[u8] {
+        assert!(!self.mapped.is_null(), "buffer is not host visible");
+        unsafe { std::slice::from_raw_parts(self.mapped, self.size as usize) }
+    }
+
     pub fn destroy(&self, device: &Device) {
         unsafe {
             device.destroy_buffer(self.handle, None);
@@ -115,6 +121,36 @@ impl Image {
         aspect: vk::ImageAspectFlags,
         view_type: vk::ImageViewType,
     ) -> Self {
+        Self::with_samples(
+            device,
+            mem_props,
+            width,
+            height,
+            mips,
+            layers,
+            format,
+            usage,
+            aspect,
+            view_type,
+            vk::SampleCountFlags::TYPE_1,
+        )
+    }
+
+    /// Like `new`, with several samples per pixel (multisampled render targets).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_samples(
+        device: &Device,
+        mem_props: &vk::PhysicalDeviceMemoryProperties,
+        width: u32,
+        height: u32,
+        mips: u32,
+        layers: u32,
+        format: vk::Format,
+        usage: vk::ImageUsageFlags,
+        aspect: vk::ImageAspectFlags,
+        view_type: vk::ImageViewType,
+        samples: vk::SampleCountFlags,
+    ) -> Self {
         unsafe {
             let handle = device
                 .create_image(
@@ -128,7 +164,7 @@ impl Image {
                         })
                         .mip_levels(mips)
                         .array_layers(layers)
-                        .samples(vk::SampleCountFlags::TYPE_1)
+                        .samples(samples)
                         .tiling(vk::ImageTiling::OPTIMAL)
                         .usage(usage)
                         .sharing_mode(vk::SharingMode::EXCLUSIVE)

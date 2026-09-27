@@ -82,13 +82,25 @@ const PACK_TEXTURES: &[(u32, &str)] = &[
     (tex::IRON_NUGGET, "item/iron_nugget"),
     (tex::LANTERN, "block/lantern"),
     (tex::CHAIN, "block/iron_chain|block/chain"),
-    (tex::TNT_SIDE, "block/tnt_side"),
-    (tex::TNT_TOP, "block/tnt_top"),
-    (tex::TNT_BOTTOM, "block/tnt_bottom"),
-    (tex::FLINT, "item/flint"),
-    (tex::GUNPOWDER, "item/gunpowder"),
-    (tex::FLINT_AND_STEEL, "item/flint_and_steel"),
-    (tex::CREEPER_SPAWN_EGG, "item/creeper_spawn_egg"),
+    (tex::DOOR_TOP, "block/oak_door_top"),
+    (tex::DOOR_BOTTOM, "block/oak_door_bottom"),
+    (tex::DOOR_ITEM, "item/oak_door"),
+    // Faithful's per-face bed textures (Minecraft itself draws beds from an entity atlas).
+    (tex::BED_HEAD_TOP, "block/red_bed_head_up"),
+    (tex::BED_FOOT_TOP, "block/red_bed_foot_up"),
+    (tex::BED_HEAD_EAST, "block/red_bed_head_east"),
+    (tex::BED_HEAD_WEST, "block/red_bed_head_west"),
+    (tex::BED_FOOT_EAST, "block/red_bed_foot_east"),
+    (tex::BED_FOOT_WEST, "block/red_bed_foot_west"),
+    (tex::BED_HEAD_END, "block/bed_head_north"),
+    (tex::BED_FOOT_END, "block/red_bed_foot_south"),
+    (tex::BED_BOTTOM, "block/bed_down"),
+    (tex::BED_ITEM, "item/red_bed|item/bed"),
+    (tex::WOOL, "block/white_wool|block/wool_colored_white"),
+    (tex::MUTTON, "item/mutton|item/mutton_raw"),
+    (tex::COOKED_MUTTON, "item/cooked_mutton|item/mutton_cooked"),
+    (tex::SHEARS, "item/shears"),
+    (tex::SHEEP_SPAWN_EGG, "item/sheep_spawn_egg"),
 ];
 
 /// Deterministic value noise in 0..1 along one axis (period of about 1 unit).
@@ -251,6 +263,18 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
             put(layer, &img);
         }
     }
+    // Water and lava animations: the frames of the packs' strips, spread over our frames.
+    for (anim, paths) in [
+        (tex::WATER_ANIM, "block/water_still"),
+        (tex::LAVA_ANIM, "block/lava_still"),
+    ] {
+        if let Some(frames) = pack.frames(paths).filter(|f| f.len() > 1) {
+            let n = tex::FLUID_FRAMES as usize;
+            for i in 0..n {
+                put(anim + i as u32, &frames[i * frames.len() / n]);
+            }
+        }
+    }
     for stage in 0..10 {
         if let Some(img) = pack.texture(&format!("block/destroy_stage_{stage}")) {
             put(tex::CRACK + stage, &img);
@@ -305,26 +329,6 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
     if let Some(flame) = pack.texture("particle/flame") {
         put(tex::FLAME_PARTICLE, &flame);
         put(tex::TORCH_FLAME, &Image::blank(1, 1));
-    }
-    // Fire and explosions: every frame of the animation strips, spread over the layers (a
-    // pack with fewer frames repeats them, one with more skips some).
-    for (base, count, path) in [
-        (tex::FIRE_0, tex::FIRE_FRAMES, "block/fire_0"),
-        (tex::FIRE_1, tex::FIRE_FRAMES, "block/fire_1"),
-    ] {
-        if let Some(frames) = pack.frames(path) {
-            for k in 0..count {
-                put(
-                    base + k,
-                    &frames[k as usize * frames.len() / count as usize],
-                );
-            }
-        }
-    }
-    for k in 0..tex::EXPLOSION_FRAMES {
-        if let Some(img) = pack.texture(&format!("particle/explosion_{k}")) {
-            put(tex::EXPLOSION + k, &img);
-        }
     }
     for i in 0..SMOKE_FRAMES {
         if let Some(img) = pack.texture(&format!("particle/generic_{i}")) {
@@ -408,22 +412,22 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
         }
     }
 
-    // Pig skin: the whole atlas, kept square (older packs have a 64x32 one: top half).
-    if let Some(pig) = pack.texture("entity/pig/pig_temperate|entity/pig/pig") {
-        let mut atlas = Image::blank(pig.w, pig.w);
-        atlas.blit(&pig, 0, 0, pig.w, pig.h.min(pig.w));
-        put(tex::PIG, &atlas);
-    }
-
-    // Creeper skin (a 64x32 atlas): kept at the top of a square layer, like the pig's.
-    if let Some(creeper) = pack.texture("entity/creeper/creeper") {
-        let mut atlas = Image::blank(creeper.w, creeper.w);
-        atlas.blit(&creeper, 0, 0, creeper.w, creeper.h.min(creeper.w));
-        put(tex::CREEPER, &atlas);
+    // Pig and sheep skins: the whole atlas, kept square (64x32 ones fill the top half).
+    for (layer, paths) in [
+        (tex::PIG, "entity/pig/pig_temperate|entity/pig/pig"),
+        (tex::SHEEP, "entity/sheep/sheep"),
+        (tex::SHEEP_WOOL, "entity/sheep/sheep_wool|entity/sheep/sheep_fur"),
+    ] {
+        if let Some(skin) = pack.texture(paths) {
+            let mut atlas = Image::blank(skin.w, skin.w);
+            atlas.blit(&skin, 0, 0, skin.w, skin.h.min(skin.w));
+            put(layer, &atlas);
+        }
     }
 
     // Player skin (64 unit atlas): each layer is one face of a body part.
-    if let Some(skin) = pack.texture("entity/player/wide/steve|entity/steve") {
+    if let Some(skin) = pack.texture("entity/player/wide/steve|entity/steve")
+    {
         let parts: [(u32, [u32; 4]); 11] = [
             (tex::FACE, [8, 8, 8, 8]),
             (tex::HEAD_SIDE, [0, 8, 8, 8]),

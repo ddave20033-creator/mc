@@ -21,6 +21,10 @@ pub struct PipelineDesc<'a> {
     pub color: bool,
     /// (constant, slope) depth bias.
     pub depth_bias: Option<(f32, f32)>,
+    /// Samples per pixel of the render pass (anti-aliasing).
+    pub samples: vk::SampleCountFlags,
+    /// The fragment's alpha decides how many of the pixel's samples it covers.
+    pub alpha_to_coverage: bool,
 }
 
 pub fn create_layout(
@@ -111,7 +115,8 @@ pub fn create_pipeline(device: &Device, d: &PipelineDesc) -> vk::Pipeline {
             .depth_bias_slope_factor(bias_s)
             .line_width(1.0);
         let ms = vk::PipelineMultisampleStateCreateInfo::default()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+            .rasterization_samples(d.samples)
+            .alpha_to_coverage_enable(d.alpha_to_coverage);
         let ds = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(d.depth_test)
             .depth_write_enable(d.depth_write)

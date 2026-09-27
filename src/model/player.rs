@@ -302,6 +302,34 @@ pub fn held_up(item: ItemId) -> bool {
     item == crate::world::TORCH as ItemId || item == crate::world::LANTERN as ItemId
 }
 
+/// A player lying on their back in a bed. `bed_top` is the middle of the top of the bed's
+/// head half and `head` the way the bed points (foot to head). Returns where the standing
+/// model's feet go, its body yaw (facing the foot end) and the turn that lays it down: the
+/// head reaches into the pillow and the feet stay on the foot half.
+pub fn lying(bed_top: Vec3, head: Vec3) -> (Vec3, f32, glam::Quat) {
+    let feet = bed_top - head * 1.35 + Vec3::Y * 2.0 * PX;
+    let yaw = (-head.z).atan2(-head.x);
+    (feet, yaw, glam::Quat::from_rotation_arc(Vec3::Y, head))
+}
+
+/// Turns model vertices (built standing with their feet at `feet`) by `turn` around the feet.
+pub fn lay_down(verts: &mut [Vertex], feet: Vec3, turn: glam::Quat) {
+    use crate::world::mesh::FACE_N;
+    for v in verts {
+        v.pos = (feet + turn * (Vec3::from(v.pos) - feet)).to_array();
+        // The face direction used for shading turns too.
+        if let Some(n) = FACE_N.get(v.light[3] as usize) {
+            let n = turn * Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32);
+            if let Some(i) = FACE_N
+                .iter()
+                .position(|m| Vec3::new(m[0] as f32, m[1] as f32, m[2] as f32).dot(n) > 0.9)
+            {
+                v.light[3] = i as u8;
+            }
+        }
+    }
+}
+
 /// The right arm's transform (model pixels to the world), as `build_player` draws it.
 fn right_arm(p: &PlayerPose, limbs: &Limbs) -> Mat4 {
     let root = Mat4::from_translation(p.pos)

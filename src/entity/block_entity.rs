@@ -5,7 +5,7 @@ use crate::item::inventory::take;
 use crate::item::{fuel_time, icon, smelt, Icon, Slot, Stack, BUCKET, LAVA_BUCKET};
 use crate::model::emit_held;
 use crate::util::vertex_light;
-use crate::world::mesh::{box_uv, corner_pos, flags, Vertex, CORNERS};
+use crate::world::mesh::{box_uv, corner_pos, flags, Vertex, CORNERS, FACE_N};
 use crate::world::textures::tex;
 use crate::world::*;
 use glam::{IVec3, Mat4, Vec3};
@@ -187,6 +187,80 @@ pub fn build_chest_lid(
         [tex::CHEST_LATCH; 6],
         light,
     );
+}
+
+/// One door half at `p`, swung `open` (0 closed .. 1 open) around its hinge edge.
+pub fn build_door(out: &mut Vec<Vertex>, p: IVec3, b: u8, open: f32, sky: u8, blk: u8) {
+    let light = vertex_light(sky, blk);
+    let f = door_facing(b);
+    let hinge_right = door_hinge_right(b);
+    // Closed, the panel lies against side `c`; open, against side `o` (the hinge side).
+    let c = facing_dir(door_side_facing(f, false, hinge_right));
+    let o_facing = door_side_facing(f, true, hinge_right);
+    let o = facing_dir(o_facing);
+    let (cv, ov) = (c.as_vec3(), o.as_vec3());
+    // Panel x runs along `bx`; flipped where that would make a left-handed frame.
+    let flip = ov.cross(Vec3::Y).dot(cv) < 0.0;
+    let bx = if flip { -ov } else { ov };
+    let t = 3.0 / 16.0;
+    // Turning about the vertical edge shared by both positions: +90 degrees takes a facing
+    // to the previous one (east to north).
+    let c_facing = door_side_facing(f, false, hinge_right);
+    let mut sign = if c_facing == (o_facing + 3) & 3 { 1.0 } else { -1.0 };
+    // Swinging out turns the other way, into the block on the closed side.
+    if door_out(b) {
+        sign = -sign;
+    }
+    let eased = {
+        let k = open.clamp(0.0, 1.0);
+        k * k * (3.0 - 2.0 * k)
+    };
+    let center = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+    let pivot = center + (cv + ov) * (0.5 - t * 0.5);
+    let m = Mat4::from_translation(pivot)
+        * Mat4::from_rotation_y(sign * eased * FRAC_PI_2)
+        * Mat4::from_translation(-pivot);
+    // Panel space: x along the width (0 at the free edge, 1 at the hinge, unless flipped),
+    // y up, z across the thickness (1 at the block side).
+    let to_world = |l: Vec3| {
+        let w = center + bx * (l.x - 0.5) + Vec3::Y * l.y + cv * (0.5 - t + (l.z - (1.0 - t)));
+        m.transform_point3(w)
+    };
+    let layer = face_texture(b, 4);
+    let lo = Vec3::new(0.0, 0.0, 1.0 - t);
+    let hi = Vec3::ONE;
+    for face in 0..6 {
+        let n_world = {
+            let n = Vec3::from(FACE_N[face].map(|v| v as f32));
+            let w = bx * n.x + Vec3::Y * n.y + cv * n.z;
+            m.transform_vector3(w)
+        };
+        // Face index nearest the turned normal (for the shading by direction).
+        let shade_face = (0..6)
+            .max_by(|&a, &b| {
+                let d = |i: usize| Vec3::from(FACE_N[i].map(|v| v as f32)).dot(n_world);
+                d(a).total_cmp(&d(b))
+            })
+            .unwrap();
+        let mut quad = [Vertex::default(); 4];
+        for (i, &(su, sv)) in CORNERS.iter().enumerate() {
+            let k = Vec3::from(corner_pos(face, su, sv));
+            let local = lo + (hi - lo) * k;
+            let mut uv = box_uv(face, local.to_array());
+            if face >= 4 {
+                // Both sides show the hinges (the texture's left edge) at the hinge.
+                uv[0] = if flip { local.x } else { 1.0 - local.x };
+            }
+            quad[i] = Vertex {
+                pos: to_world(local).to_array(),
+                uv,
+                layer: layer as f32,
+                light: [light[0], light[1], light[2], shade_face as u8],
+                tint: [255, 255, 255, flags::ENTITY],
+            };
+        }
+        out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
+    }
 }
 
 /// Items left in a crafting table grid, lying on its top in a 3x3 layout.

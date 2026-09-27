@@ -28,6 +28,8 @@ pub struct Gpu {
     pub queue: vk::Queue,
     pub mem_props: vk::PhysicalDeviceMemoryProperties,
     pub max_anisotropy: Option<f32>,
+    /// Several indirect draws in one command (multiDrawIndirect).
+    pub multi_draw_indirect: bool,
     pub device_name: String,
     /// VK_EXT_memory_budget is enabled (video memory use can be read).
     memory_budget: bool,
@@ -41,10 +43,23 @@ pub struct Gpu {
     pub surface_format: vk::SurfaceFormatKHR,
     pub extent: vk::Extent2D,
     swap_views: Vec<vk::ImageView>,
+    swap_images: Vec<vk::Image>,
+    /// The swapchain images can be copied out (screenshots).
+    can_capture: bool,
+    /// Save the next presented frame to this PNG file.
+    pub capture: Option<std::path::PathBuf>,
     framebuffers: Vec<vk::Framebuffer>,
     render_finished: Vec<vk::Semaphore>,
     depth: Option<Image>,
+    /// The multisampled color target (with anti-aliasing), resolved into the swapchain image.
+    msaa_color: Option<Image>,
     pub render_pass: vk::RenderPass,
+    /// Samples per pixel of the main pass (anti-aliasing), and the most the GPU supports.
+    pub samples: vk::SampleCountFlags,
+    pub max_samples: u32,
+    /// Changes when the main render pass is rebuilt (pipelines made for it must be too).
+    pub pass_version: u64,
+    pass_dirty: bool,
 
     command_pool: vk::CommandPool,
     frames: Vec<Frame>,
@@ -71,7 +86,8 @@ unsafe extern "system" fn debug_callback(
 }
 
 impl Gpu {
-    pub fn new(window: &Window, vsync: bool) -> Self {
+    /// `msaa`: samples per pixel for anti-aliasing (1 = off; lowered to what the GPU supports).
+    pub fn new(window: &Window, vsync: bool, msaa: u32) -> Self {
         unsafe {
             let entry =
                 Entry::load().expect("failed to load Vulkan - is a Vulkan driver installed?");
@@ -189,7 +205,10 @@ impl Gpu {
             let queue_infos = [vk::DeviceQueueCreateInfo::default()
                 .queue_family_index(queue_family)
                 .queue_priorities(&priorities)];
-            let enabled = vk::PhysicalDeviceFeatures::default().sampler_anisotropy(anisotropy);
+            let multi_draw_indirect = features.multi_draw_indirect == vk::TRUE;
+            let enabled = vk::PhysicalDeviceFeatures::default()
+                .sampler_anisotropy(anisotropy)
+                .multi_draw_indirect(multi_draw_indirect);
             let memory_budget = instance
                 .enumerate_device_extension_properties(physical)
                 .unwrap_or_default()
@@ -224,7 +243,14 @@ impl Gpu {
                         && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
                 })
                 .unwrap_or(formats[0]);
-            let render_pass = create_render_pass(&device, surface_format.format);
+            let counts = props.limits.framebuffer_color_sample_counts
+                & props.limits.framebuffer_depth_sample_counts;
+            let max_samples = [8, 4, 2]
+                .into_iter()
+                .find(|&n| counts.contains(vk::SampleCountFlags::from_raw(n)))
+                .unwrap_or(1);
+            let samples = sample_flags(msaa.min(max_samples));
+            let render_pass = create_render_pass(&device, surface_format.format, samples);
 
             let command_pool = device
                 .create_command_pool(
@@ -270,6 +296,7 @@ impl Gpu {
                 queue,
                 mem_props,
                 max_anisotropy,
+                multi_draw_indirect,
                 device_name,
                 memory_budget,
                 timestamp_period,
@@ -282,10 +309,18 @@ impl Gpu {
                     height: size.height,
                 },
                 swap_views: Vec::new(),
+                swap_images: Vec::new(),
+                can_capture: false,
+                capture: None,
                 framebuffers: Vec::new(),
                 render_finished: Vec::new(),
                 depth: None,
+                msaa_color: None,
                 render_pass,
+                samples,
+                max_samples,
+                pass_version: 0,
+                pass_dirty: false,
                 command_pool,
                 frames,
                 frame_slot: 0,
@@ -308,6 +343,17 @@ impl Gpu {
         self.needs_recreate = true;
     }
 
+    /// Anti-aliasing: samples per pixel (1, 2, 4 or 8; at most what the GPU supports).
+    pub fn set_msaa(&mut self, msaa: u32) {
+        let samples = sample_flags(msaa.min(self.max_samples));
+        if samples != self.samples {
+            self.samples = samples;
+            self.pass_dirty = true;
+            self.needs_recreate = true;
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn set_vsync(&mut self, vsync: bool) {
         if self.vsync != vsync {
             self.vsync = vsync;
@@ -390,6 +436,9 @@ impl Gpu {
         if let Some(depth) = self.depth.take() {
             depth.destroy(&self.device);
         }
+        if let Some(color) = self.msaa_color.take() {
+            color.destroy(&self.device);
+        }
     }
 
     unsafe fn build_swapchain(&mut self) {
@@ -422,16 +471,27 @@ impl Gpu {
             .surface_loader
             .get_physical_device_surface_present_modes(self.physical, self.surface)
             .unwrap_or_default();
-        let present_mode = if self.vsync {
+        // Without vsync: mailbox (no tearing, no cap) if there is one, else immediate.
+        // RUSTCRAFT_PRESENT=immediate|mailbox|fifo: to compare (e.g. with --bench).
+        let forced = std::env::var("RUSTCRAFT_PRESENT").ok().and_then(|m| match m.as_str() {
+            "immediate" => Some(vk::PresentModeKHR::IMMEDIATE),
+            "mailbox" => Some(vk::PresentModeKHR::MAILBOX),
+            "fifo" => Some(vk::PresentModeKHR::FIFO),
+            _ => None,
+        });
+        let present_mode = if let Some(m) = forced.filter(|m| modes.contains(m)) {
+            m
+        } else if self.vsync {
             vk::PresentModeKHR::FIFO
-        } else if modes.contains(&vk::PresentModeKHR::IMMEDIATE) {
-            vk::PresentModeKHR::IMMEDIATE
         } else if modes.contains(&vk::PresentModeKHR::MAILBOX) {
             vk::PresentModeKHR::MAILBOX
+        } else if modes.contains(&vk::PresentModeKHR::IMMEDIATE) {
+            vk::PresentModeKHR::IMMEDIATE
         } else {
             vk::PresentModeKHR::FIFO
         };
-        let mut image_count = caps.min_image_count + 1;
+        let extra = std::env::var("RUSTCRAFT_IMAGES").ok().and_then(|v| v.parse::<u32>().ok());
+        let mut image_count = extra.unwrap_or(caps.min_image_count + 1).max(caps.min_image_count);
         if caps.max_image_count > 0 {
             image_count = image_count.min(caps.max_image_count);
         }
@@ -444,6 +504,14 @@ impl Gpu {
             vk::CompositeAlphaFlagsKHR::INHERIT
         };
 
+        self.can_capture = caps
+            .supported_usage_flags
+            .contains(vk::ImageUsageFlags::TRANSFER_SRC);
+        let usage = if self.can_capture {
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC
+        } else {
+            vk::ImageUsageFlags::COLOR_ATTACHMENT
+        };
         let old = self.swapchain;
         let info = vk::SwapchainCreateInfoKHR::default()
             .surface(self.surface)
@@ -452,7 +520,7 @@ impl Gpu {
             .image_color_space(self.surface_format.color_space)
             .image_extent(extent)
             .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .image_usage(usage)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(caps.current_transform)
             .composite_alpha(composite)
@@ -471,7 +539,8 @@ impl Gpu {
             .swapchain_loader
             .get_swapchain_images(self.swapchain)
             .unwrap();
-        let depth = Image::new(
+        self.swap_images = images.clone();
+        let depth = Image::with_samples(
             &self.device,
             &self.mem_props,
             extent.width,
@@ -482,7 +551,23 @@ impl Gpu {
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             vk::ImageAspectFlags::DEPTH,
             vk::ImageViewType::TYPE_2D,
+            self.samples,
         );
+        let msaa_color = (self.samples != vk::SampleCountFlags::TYPE_1).then(|| {
+            Image::with_samples(
+                &self.device,
+                &self.mem_props,
+                extent.width,
+                extent.height,
+                1,
+                1,
+                self.surface_format.format,
+                vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+                vk::ImageAspectFlags::COLOR,
+                vk::ImageViewType::TYPE_2D,
+                self.samples,
+            )
+        });
         for &image in &images {
             let view = self
                 .device
@@ -501,7 +586,11 @@ impl Gpu {
                     None,
                 )
                 .unwrap();
-            let attachments = [view, depth.view];
+            // With anti-aliasing: draw into the multisampled image, resolve into the swapchain's.
+            let attachments: Vec<vk::ImageView> = match &msaa_color {
+                Some(c) => vec![c.view, depth.view, view],
+                None => vec![view, depth.view],
+            };
             let fb = self
                 .device
                 .create_framebuffer(
@@ -523,6 +612,7 @@ impl Gpu {
             );
         }
         self.depth = Some(depth);
+        self.msaa_color = msaa_color;
     }
 
     fn recreate(&mut self) {
@@ -530,6 +620,13 @@ impl Gpu {
             self.device.device_wait_idle().ok();
             self.needs_recreate = false;
             self.destroy_swapchain_resources();
+            if self.pass_dirty {
+                self.pass_dirty = false;
+                self.device.destroy_render_pass(self.render_pass, None);
+                self.render_pass =
+                    create_render_pass(&self.device, self.surface_format.format, self.samples);
+                self.pass_version += 1;
+            }
             self.build_swapchain();
         }
     }
@@ -650,6 +747,18 @@ impl Gpu {
                 (f.image_available, f.fence)
             };
             self.device.cmd_end_render_pass(cmd);
+            let shot = if self.can_capture { self.capture.take() } else { None };
+            let shot = shot.map(|path| {
+                let (w, h) = (self.extent.width, self.extent.height);
+                let buf = crate::engine::Buffer::new(
+                    self,
+                    w as u64 * h as u64 * 4,
+                    vk::BufferUsageFlags::TRANSFER_DST,
+                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                );
+                self.record_copy(cmd, self.swap_images[image as usize], &buf);
+                (path, buf)
+            });
             self.device.end_command_buffer(cmd).unwrap();
 
             let wait = [sem];
@@ -677,26 +786,148 @@ impl Gpu {
                 Err(e) => panic!("queue_present failed: {e:?}"),
             }
 
+            if let Some((path, buf)) = shot {
+                self.device.wait_for_fences(&[fence], true, u64::MAX).unwrap();
+                self.save_png(&path, buf.read());
+                buf.destroy(&self.device);
+            }
+
             self.frame_slot = (self.frame_slot + 1) % FRAMES_IN_FLIGHT;
             self.frame_counter += 1;
         }
     }
+
+    /// Copies a presented swapchain image into `buf` (and gives it back for presenting).
+    unsafe fn record_copy(&self, cmd: vk::CommandBuffer, image: vk::Image, buf: &crate::engine::Buffer) {
+        let range = vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+        let barrier = |from, to, src: vk::AccessFlags, dst: vk::AccessFlags| {
+            vk::ImageMemoryBarrier::default()
+                .old_layout(from)
+                .new_layout(to)
+                .src_access_mask(src)
+                .dst_access_mask(dst)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(image)
+                .subresource_range(range)
+        };
+        self.device.cmd_pipeline_barrier(
+            cmd,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[barrier(
+                vk::ImageLayout::PRESENT_SRC_KHR,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags::TRANSFER_READ,
+            )],
+        );
+        self.device.cmd_copy_image_to_buffer(
+            cmd,
+            image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            buf.handle,
+            &[vk::BufferImageCopy::default()
+                .image_subresource(vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .image_extent(vk::Extent3D {
+                    width: self.extent.width,
+                    height: self.extent.height,
+                    depth: 1,
+                })],
+        );
+        self.device.cmd_pipeline_barrier(
+            cmd,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[barrier(
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+                vk::AccessFlags::TRANSFER_READ,
+                vk::AccessFlags::empty(),
+            )],
+        );
+    }
+
+    fn save_png(&self, path: &std::path::Path, bgra: &[u8]) {
+        let (w, h) = (self.extent.width, self.extent.height);
+        let mut rgba = bgra.to_vec();
+        let bgr = matches!(
+            self.surface_format.format,
+            vk::Format::B8G8R8A8_SRGB | vk::Format::B8G8R8A8_UNORM
+        );
+        for p in rgba.chunks_exact_mut(4) {
+            if bgr {
+                p.swap(0, 2);
+            }
+            p[3] = 255;
+        }
+        let Ok(file) = std::fs::File::create(path) else {
+            return;
+        };
+        let mut e = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+        e.set_color(png::ColorType::Rgba);
+        e.set_depth(png::BitDepth::Eight);
+        if let Ok(mut wr) = e.write_header() {
+            let _ = wr.write_image_data(&rgba);
+        }
+    }
 }
 
-fn create_render_pass(device: &Device, color_format: vk::Format) -> vk::RenderPass {
-    let attachments = [
+fn sample_flags(n: u32) -> vk::SampleCountFlags {
+    match n {
+        8.. => vk::SampleCountFlags::TYPE_8,
+        4..=7 => vk::SampleCountFlags::TYPE_4,
+        2 | 3 => vk::SampleCountFlags::TYPE_2,
+        _ => vk::SampleCountFlags::TYPE_1,
+    }
+}
+
+/// The main pass: color and depth; with `samples` > 1 the color is multisampled and resolved
+/// into a third attachment, the swapchain image.
+fn create_render_pass(
+    device: &Device,
+    color_format: vk::Format,
+    samples: vk::SampleCountFlags,
+) -> vk::RenderPass {
+    let msaa = samples != vk::SampleCountFlags::TYPE_1;
+    let mut attachments = vec![
         vk::AttachmentDescription::default()
             .format(color_format)
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .samples(samples)
             .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
+            .store_op(if msaa {
+                vk::AttachmentStoreOp::DONT_CARE
+            } else {
+                vk::AttachmentStoreOp::STORE
+            })
             .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
             .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
             .initial_layout(vk::ImageLayout::UNDEFINED)
-            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR),
+            .final_layout(if msaa {
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+            } else {
+                vk::ImageLayout::PRESENT_SRC_KHR
+            }),
         vk::AttachmentDescription::default()
             .format(DEPTH_FORMAT)
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .samples(samples)
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::DONT_CARE)
             .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
@@ -704,18 +935,39 @@ fn create_render_pass(device: &Device, color_format: vk::Format) -> vk::RenderPa
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
     ];
+    if msaa {
+        attachments.push(
+            vk::AttachmentDescription::default()
+                .format(color_format)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .final_layout(vk::ImageLayout::PRESENT_SRC_KHR),
+        );
+    }
     let color_ref = [vk::AttachmentReference {
         attachment: 0,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+    }];
+    let resolve_ref = [vk::AttachmentReference {
+        attachment: 2,
         layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
     }];
     let depth_ref = vk::AttachmentReference {
         attachment: 1,
         layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     };
-    let subpasses = [vk::SubpassDescription::default()
+    let mut subpass = vk::SubpassDescription::default()
         .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
         .color_attachments(&color_ref)
-        .depth_stencil_attachment(&depth_ref)];
+        .depth_stencil_attachment(&depth_ref);
+    if msaa {
+        subpass = subpass.resolve_attachments(&resolve_ref);
+    }
+    let subpasses = [subpass];
     let deps = [vk::SubpassDependency::default()
         .src_subpass(vk::SUBPASS_EXTERNAL)
         .dst_subpass(0)

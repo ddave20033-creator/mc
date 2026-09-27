@@ -173,19 +173,23 @@ impl Game {
         v
     }
 
-    /// Players monsters hunt: alive and not in creative.
-    pub(super) fn prey_positions(&self) -> Vec<Vec3> {
-        let mut v = Vec::new();
-        if self.player.spawned && self.screen != Screen::Dead && !self.creative() {
-            v.push(self.player.pos);
-        }
-        v.extend(
-            self.remotes
-                .iter()
-                .filter(|r| r.alive() && r.target.flags & pose_flags::CREATIVE == 0)
-                .map(|r| r.target.pos),
-        );
-        v
+    /// Another player is lying in the bed whose head is at `head`.
+    pub(super) fn remote_in_bed(&self, head: IVec3) -> bool {
+        self.remotes.iter().any(|r| {
+            r.alive()
+                && r.target.flags & pose_flags::SLEEPING != 0
+                && r.target.pos.floor().as_ivec3() == head
+        })
+    }
+
+    /// Living players on the LAN other than this one: (how many, how many are asleep).
+    pub(super) fn remotes_asleep(&self) -> (usize, usize) {
+        let alive = self.remotes.iter().filter(|r| r.alive());
+        let asleep = alive
+            .clone()
+            .filter(|r| r.target.flags & pose_flags::SLEEPING != 0)
+            .count();
+        (alive.count(), asleep)
     }
 
     pub(super) fn remote_pos(&self, id: u8) -> Option<Vec3> {
@@ -209,6 +213,9 @@ impl Game {
         }
         if self.creative() {
             flags |= pose_flags::CREATIVE;
+        }
+        if self.sleep.is_some() {
+            flags |= pose_flags::SLEEPING;
         }
         Pose {
             pos: self.player.pos,
@@ -367,7 +374,6 @@ pub(super) fn build_remote_players(
     world: &World,
     time: f32,
     out: &mut Vec<Vertex>,
-    cam: Vec3,
     dt: f32,
 ) {
     {
@@ -376,13 +382,24 @@ pub(super) fn build_remote_players(
             if !r.shown() {
                 continue;
             }
+            // In a bed: the pose's position is on top of the head half, and the body faces
+            // the foot end.
+            let bed = (p.flags & pose_flags::SLEEPING != 0).then(|| {
+                let d = -look_dir(p.body_yaw, 0.0);
+                let head = facing_dir(facing_of(d.x, d.z)).as_vec3();
+                crate::model::player::lying(p.pos, head)
+            });
+            let (pos, body_yaw, head_yaw, pitch) = match bed {
+                Some((feet, yaw, _)) => (feet, yaw, yaw, 0.0),
+                None => (p.pos, p.body_yaw, p.yaw, p.pitch),
+            };
             let pose = PlayerPose {
-                pos: p.pos,
-                body_yaw: p.body_yaw,
-                head_yaw: p.yaw,
-                pitch: p.pitch,
+                pos,
+                body_yaw,
+                head_yaw,
+                pitch,
                 limb_swing: p.limb_swing,
-                limb_amount: p.limb_amount,
+                limb_amount: if bed.is_some() { 0.0 } else { p.limb_amount },
                 attack: p.attack,
                 crouch: p.crouch,
                 held: p.held,
@@ -409,6 +426,7 @@ pub(super) fn build_remote_players(
             };
             let pose = PlayerPose { lantern, ..pose };
             let c = p.pos + Vec3::Y;
+            let start = out.len();
             build_player(
                 out,
                 &pose,
@@ -416,8 +434,8 @@ pub(super) fn build_remote_players(
                 world.sky_estimate(c),
                 world.block_light_estimate(c),
             );
-            if pose.burning {
-                crate::model::emit_entity_fire(out, pose.pos, 0.6, 1.8, cam);
+            if let Some((feet, _, turn)) = bed {
+                crate::model::player::lay_down(&mut out[start..], feet, turn);
             }
         }
     }

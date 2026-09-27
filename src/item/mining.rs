@@ -22,9 +22,9 @@ fn mining(b: u8) -> Option<Mining> {
         })
     };
     match b {
-        AIR | BEDROCK | FIRE => None,
+        AIR | BEDROCK => None,
         _ if is_fluid(b) => None,
-        _ if is_plant(b) || is_torch(b) || b == TNT => m(0.0, None, None),
+        _ if is_plant(b) || is_torch(b) => m(0.0, None, None),
         _ if is_lantern(b) => m(3.5, Some(Pickaxe), Some(0)),
         _ if is_leaves(b) => m(0.2, Some(Sword), None),
         GRASS | SNOWY_GRASS | GRAVEL | CLAY => m(0.6, Some(Shovel), None),
@@ -33,7 +33,10 @@ fn mining(b: u8) -> Option<Mining> {
         ICE => m(0.5, Some(Pickaxe), None),
         GLASS | GLOWSTONE => m(0.3, None, None),
         CACTUS => m(0.4, None, None),
-        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | PLANKS => m(2.0, Some(Axe), None),
+        _ if is_log(b) || b == PLANKS || is_stairs(b) => m(2.0, Some(Axe), None),
+        _ if is_door(b) => m(3.0, Some(Axe), None),
+        _ if is_bed(b) => m(0.2, None, None),
+        WOOL => m(0.8, None, None),
         CRAFTING_TABLE => m(2.5, Some(Axe), None),
         _ if is_chest(b) => m(2.5, Some(Axe), None),
         STONE | STONE_BRICKS => m(1.5, Some(Pickaxe), Some(0)),
@@ -77,6 +80,14 @@ pub fn break_time(b: u8, held: ItemId) -> Option<f32> {
             };
         }
     }
+    if held == SHEARS {
+        // Minecraft's shears: fast on leaves and wool.
+        speed = match b {
+            _ if is_leaves(b) => 15.0,
+            WOOL => 5.0,
+            _ => speed,
+        };
+    }
     let mult = if can_harvest(b, held) { 1.5 } else { 5.0 };
     Some(m.hardness * mult / speed)
 }
@@ -86,12 +97,11 @@ pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
     if !can_harvest(b, held) {
         return Vec::new();
     }
-    harvest_drops(b, r)
-}
-
-/// Items dropped by `b` when it drops at all (mined with the right tool, or blown up).
-pub fn harvest_drops(b: u8, r: f32) -> Vec<Stack> {
     let one = |id: ItemId| vec![Stack::one(id)];
+    // Sheared leaves and plants drop themselves, like in Minecraft.
+    if held == SHEARS && (is_leaves(b) || matches!(b, TALL_GRASS | DEAD_BUSH)) {
+        return one(b as ItemId);
+    }
     match b {
         GRASS | SNOWY_GRASS => one(DIRT as ItemId),
         STONE => one(COBBLE as ItemId),
@@ -99,7 +109,6 @@ pub fn harvest_drops(b: u8, r: f32) -> Vec<Stack> {
         DIAMOND_ORE => one(DIAMOND),
         CLAY => vec![Stack::new(CLAY_BALL, 4)],
         GLASS | ICE | TALL_GRASS => Vec::new(),
-        GRAVEL if r < 0.1 => one(FLINT),
         DEAD_BUSH => {
             let n = (r * 3.0) as u8;
             if n > 0 {
@@ -129,21 +138,12 @@ pub fn harvest_drops(b: u8, r: f32) -> Vec<Stack> {
     }
 }
 
-/// Minecraft's blast resistance: how much of an explosion's strength a block soaks up.
-pub fn blast_resistance(b: u8) -> f32 {
-    match b {
-        AIR => 0.0,
-        BEDROCK => 3_600_000.0,
-        OBSIDIAN => 1200.0,
-        _ if is_fluid(b) => 100.0,
-        STONE | COBBLE | BRICKS | STONE_BRICKS | IRON_BLOCK | GOLD_BLOCK | DIAMOND_BLOCK
-        | COAL_BLOCK => 6.0,
-        _ => mining(b).map_or(0.0, |m| m.hardness),
-    }
-}
-
 /// Durability cost of breaking a block with a tool (swords wear twice as fast).
 pub fn wear(held: ItemId, b: u8) -> u16 {
+    if held == SHEARS {
+        // Shears wear on every block they break.
+        return mining(b).is_some() as u16;
+    }
     match tool_of(held) {
         Some((ToolKind::Sword, _)) => 2,
         Some(_) if mining(b).is_some_and(|m| m.hardness > 0.0) => 1,

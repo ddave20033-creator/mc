@@ -8,9 +8,8 @@ mod health;
 mod hud;
 mod items;
 mod mobs;
-mod fire;
 mod multi;
-mod tnt;
+mod sleep;
 mod update;
 mod worlds;
 
@@ -18,9 +17,10 @@ use crate::engine::Gpu;
 use crate::entity::mob::{Mob, MobCtx, MobEvent, MobKind};
 use crate::entity::player::{look_dir, Player};
 use crate::entity::survival::{EffectKind, Needs};
-use crate::entity::{BlockEntities, FallingBlock, ItemEntity, PrimedTnt};
+use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
 use crate::item::inventory::Inventory;
 use crate::item::{self, ItemId, Slot, NONE};
+use crate::keys::{Bind, HOTBAR};
 use crate::lang::t;
 use crate::model::crack_overlay;
 use crate::model::hand::HandAnim;
@@ -57,8 +57,6 @@ const MAX_HEALTH: f32 = 20.0;
 const AUTOSAVE_SECONDS: f32 = 60.0;
 /// Seconds of breath underwater (Minecraft: 300 ticks).
 const MAX_AIR: f32 = 15.0;
-/// Sneak (and fly down).
-const SNEAK_KEY: KeyCode = KeyCode::ShiftLeft;
 
 /// Open item screen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -81,6 +79,10 @@ pub enum Screen {
     },
     /// The resource pack screen (from the options).
     ResourcePacks {
+        in_game: bool,
+    },
+    /// The key binds screen (from the options).
+    KeyBinds {
         in_game: bool,
     },
     Credits,
@@ -129,6 +131,12 @@ pub struct Game {
     terrain: Terrain,
     fluids: Fluids,
     spawn: (i32, i32),
+    /// The head of the bed this player last used: where they come back to life.
+    bed_spawn: Option<IVec3>,
+    /// Lying in a bed.
+    sleep: Option<sleep::Sleep>,
+    /// Seconds everyone has been asleep (host and single player).
+    asleep_for: f32,
     pano: Vec3,
     chat: Chat,
 
@@ -177,6 +185,8 @@ pub struct Game {
     /// F5 view mode and the third-person camera's state.
     camera: camera::Rig,
     target: Option<(IVec3, IVec3)>,
+    /// Where the look ray meets the targeted block.
+    target_point: Vec3,
 
     // Items
     inventory: Inventory,
@@ -195,6 +205,8 @@ pub struct Game {
     search_focused: bool,
     /// Chest lid animation 0..1 per chest position.
     chest_open: crate::world::FastMap<IVec3, f32>,
+    /// How far each door half is swung open (0..1), easing toward its state.
+    door_swing: crate::world::FastMap<IVec3, f32>,
     /// Slot drag in progress (Minecraft-style stack spreading).
     drag: Option<gui::Drag>,
     /// Time and slot of the last left click, for double-click collecting.
@@ -202,16 +214,9 @@ pub struct Game {
     block_entities: BlockEntities,
     items: Vec<ItemEntity>,
     falling: Vec<FallingBlock>,
-    tnt: Vec<PrimedTnt>,
-    /// Burning fire blocks (host and single player).
-    fires: crate::world::FastMap<IVec3, fire::Fire>,
-    /// Random ticks owed to the world (fractions carry over between frames).
-    random_tick_budget: f32,
     mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
     mob_spawn_timer: f32,
-    /// Seconds until the next tries to spawn monsters.
-    monster_spawn_timer: f32,
     /// The mob the crosshair is on (index into `mobs`), when it is closer than any block.
     mob_target: Option<usize>,
     saplings: Vec<(IVec3, f32)>,
@@ -225,6 +230,8 @@ pub struct Game {
     particles: Particles,
     time_of_day: f32,
     fov_current: f32,
+    /// Field of view for simplifying detail too small for the screen (setting and zoom only).
+    detail_fov: f32,
     last_space: f32,
     last_w: f32,
     w_sprint: bool,
@@ -261,6 +268,10 @@ pub struct Game {
     show_debug: bool,
     /// `--bench` mode state.
     bench: Option<bench::Bench>,
+    /// `--aa-shots`: anti-aliasing comparison pictures (runs in bench mode).
+    shots: Option<bench::Shots>,
+    /// Max FPS: when the next frame may start.
+    next_frame: Option<Instant>,
     /// Last frame's CPU time in ms: update, build, submit (without waiting), waiting for the GPU.
     cpu_ms: [f32; 4],
     /// When the previous frame finished, and the time from then until this frame started.
@@ -289,7 +300,7 @@ pub struct Game {
     /// Swing of the lantern in this player's hand (third person and body model).
     lantern_swing: crate::model::lantern::SmoothSwing,
     /// Open tab of the options screen.
-    options_tab: usize,
+    options: screens::OptionsState,
     pack_screen: screens::PackScreen,
     menu_preview: screens::PreviewRotation,
     /// All texture layers but the uploaded skins (see `textures::generate_base`).
@@ -302,7 +313,8 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn new(window: Arc<Window>, bench: bool) -> Self {
+    pub fn new(window: Arc<Window>, bench: bool, shots: Option<std::path::PathBuf>) -> Self {
+        let bench = bench || shots.is_some();
         let mut settings = Settings::load();
         let mut custom_skins = std::collections::HashMap::new();
         let mut skin_pngs = std::collections::HashMap::new();
@@ -316,10 +328,10 @@ impl Game {
             settings.skin = 0;
         }
         let local_skin_png = skin_pngs.get(&0).cloned();
-        if settings.fullscreen {
+        if settings.fullscreen && !bench {
             window.set_fullscreen(Some(Fullscreen::Borderless(None)));
         }
-        let gpu = Gpu::new(&window, settings.vsync && !bench);
+        let gpu = Gpu::new(&window, false, settings.msaa);
         println!("RustCraft running on: {}", gpu.device_name);
         let ui = Ui::new();
         let packs = crate::pack::Packs::load(&settings.resource_packs);
@@ -350,11 +362,15 @@ impl Game {
             window,
             ui,
             fov_current: settings.fov,
+            detail_fov: settings.fov,
             settings,
             screen: Screen::MainMenu,
             terrain,
             fluids: Fluids::new(),
             spawn,
+            bed_spawn: None,
+            sleep: None,
+            asleep_for: 0.0,
             pano,
             chat: Chat::new(),
             world_meta: None,
@@ -393,6 +409,7 @@ impl Game {
             limbs: LimbSmoother::default(),
             camera: camera::Rig::default(),
             target: None,
+            target_point: Vec3::ZERO,
             inventory: Inventory::new(),
             hotbar_slot: 0,
             hotbar_anim: 0.0,
@@ -404,17 +421,14 @@ impl Game {
             creative_search: String::new(),
             search_focused: false,
             chest_open: Default::default(),
+            door_swing: Default::default(),
             drag: None,
             slot_click: (-1.0, None),
             block_entities: BlockEntities::default(),
             items: Vec::new(),
             falling: Vec::new(),
-            tnt: Vec::new(),
-            fires: Default::default(),
-            random_tick_budget: 0.0,
             mobs: Vec::new(),
             mob_spawn_timer: 5.0,
-            monster_spawn_timer: 0.0,
             mob_target: None,
             saplings: Vec::new(),
             slot_name_timer: 0.0,
@@ -454,6 +468,8 @@ impl Game {
             torch_scan: 0.0,
             show_debug: false,
             bench: bench.then(Default::default),
+            shots: shots.map(bench::Shots::new),
+            next_frame: None,
             cpu_ms: [0.0; 4],
             frame_end: Instant::now(),
             between_ms: 0.0,
@@ -472,7 +488,7 @@ impl Game {
             player_target: None,
             view_proj: Mat4::IDENTITY,
             lantern_swing: Default::default(),
-            options_tab: 0,
+            options: Default::default(),
             pack_screen: Default::default(),
             menu_preview: Default::default(),
             texture_base,
@@ -513,7 +529,9 @@ impl Game {
             self.close_lan();
         }
         self.saver.wait();
-        self.settings.save();
+        if self.bench.is_none() {
+            self.settings.save();
+        }
         if lan {
             // Let the last messages (the player's state, the goodbye) go out.
             std::thread::sleep(std::time::Duration::from_millis(150));
@@ -531,6 +549,7 @@ impl Game {
                     | Screen::Dead
                     | Screen::Options { in_game: true }
                     | Screen::ResourcePacks { in_game: true }
+                    | Screen::KeyBinds { in_game: true }
             )
     }
 
@@ -588,7 +607,12 @@ impl Game {
 
     /// Holding the sneak key (it also flies down and places chests unjoined).
     fn sneaking(&self) -> bool {
-        self.keys.contains(&SNEAK_KEY)
+        self.bind_down(Bind::Sneak)
+    }
+
+    /// The key of this action is held.
+    fn bind_down(&self, b: Bind) -> bool {
+        self.keys.contains(&self.settings.keys.get(b))
     }
 
     /// Item in the selected hotbar slot.
@@ -632,6 +656,18 @@ impl Game {
                     return;
                 };
                 if event.state == ElementState::Pressed {
+                    // Options: the next key goes to the action waiting for one.
+                    if let (Screen::KeyBinds { .. }, Some(i)) =
+                        (self.screen, self.options.listening)
+                    {
+                        if code == KeyCode::Escape {
+                            self.options.listening = None;
+                        } else if crate::keys::bindable(code) {
+                            self.settings.keys.0[i] = code;
+                            self.options.listening = None;
+                        }
+                        return;
+                    }
                     if self.screen == Screen::Chat {
                         match self.chat.key(code, event.text.as_ref().map(|t| t.as_str())) {
                             ChatInput::None => {}
@@ -689,7 +725,7 @@ impl Game {
                     self.keys.insert(code);
                 } else {
                     self.keys.remove(&code);
-                    if code == KeyCode::KeyW {
+                    if self.settings.keys.is(Bind::Forward, code) {
                         self.w_sprint = false;
                     }
                 }
@@ -700,7 +736,8 @@ impl Game {
                 self.last_w = -1.0;
                 self.left_down = false;
                 self.right_down = false;
-                if self.screen == Screen::Playing {
+                // Bench and shot runs keep going in the background.
+                if self.screen == Screen::Playing && self.bench.is_none() {
                     self.pause();
                 }
             }
@@ -715,20 +752,22 @@ impl Game {
     }
 
     fn key_pressed(&mut self, code: KeyCode) {
-        const DIGITS: [KeyCode; 9] = [
-            KeyCode::Digit1,
-            KeyCode::Digit2,
-            KeyCode::Digit3,
-            KeyCode::Digit4,
-            KeyCode::Digit5,
-            KeyCode::Digit6,
-            KeyCode::Digit7,
-            KeyCode::Digit8,
-            KeyCode::Digit9,
-        ];
-        let digit = DIGITS.iter().position(|&k| k == code);
-        match code {
-            KeyCode::Escape => match self.screen {
+        let is = |b: Bind| self.settings.keys.is(b, code);
+        let digit = HOTBAR.iter().position(|&b| is(b));
+        let forward = is(Bind::Forward);
+        let stop_sprint = is(Bind::Back) || is(Bind::Sneak);
+        let chat = is(Bind::Chat);
+        let command = is(Bind::Command) || code == KeyCode::NumpadDivide;
+        let drop = is(Bind::Drop);
+        let fly = is(Bind::Fly);
+        let jump = is(Bind::Jump);
+        let fullscreen = is(Bind::Fullscreen);
+        let hide_hud = is(Bind::HideHud);
+        let debug = is(Bind::Debug);
+        let perspective = is(Bind::Perspective);
+        let inventory = is(Bind::Inventory);
+        if code == KeyCode::Escape {
+            match self.screen {
                 Screen::Playing => self.pause(),
                 Screen::Paused => self.resume(),
                 Screen::Container(_) => self.close_container(),
@@ -741,12 +780,22 @@ impl Game {
                 }
                 Screen::Disconnected => self.screen = Screen::MainMenu,
                 _ => self.go_back(),
-            },
-            KeyCode::F11 => self.toggle_fullscreen(),
-            KeyCode::F1 => self.hide_hud = !self.hide_hud,
-            KeyCode::F3 => self.show_debug = !self.show_debug,
-            KeyCode::F5 => self.camera.cycle(),
-            KeyCode::KeyE => match self.screen {
+            }
+        }
+        if fullscreen {
+            self.toggle_fullscreen();
+        }
+        if hide_hud {
+            self.hide_hud = !self.hide_hud;
+        }
+        if debug {
+            self.show_debug = !self.show_debug;
+        }
+        if perspective {
+            self.camera.cycle();
+        }
+        if inventory {
+            match self.screen {
                 Screen::Playing => self.open_container(if self.creative() {
                     Container::Creative
                 } else {
@@ -754,8 +803,7 @@ impl Game {
                 }),
                 Screen::Container(_) => self.close_container(),
                 _ => {}
-            },
-            _ => {}
+            }
         }
         if let Screen::Container(_) = self.screen {
             self.digit = digit;
@@ -768,33 +816,39 @@ impl Game {
             self.hotbar_slot = i;
             self.slot_name_timer = 2.0;
         }
-        match code {
-            KeyCode::KeyW if !self.keys.contains(&KeyCode::KeyW) => {
-                if self.time - self.last_w < 0.3 {
-                    self.w_sprint = true;
-                    self.last_w = -1.0;
-                } else {
-                    self.last_w = self.time;
-                }
+        // Double tap forward to sprint.
+        if forward && !self.keys.contains(&code) {
+            if self.time - self.last_w < 0.3 {
+                self.w_sprint = true;
+                self.last_w = -1.0;
+            } else {
+                self.last_w = self.time;
             }
-            KeyCode::KeyS | KeyCode::ShiftLeft => self.w_sprint = false,
-            KeyCode::KeyT => self.open_chat(""),
-            KeyCode::Slash | KeyCode::NumpadDivide => self.open_chat("/"),
-            KeyCode::KeyQ => {
-                let all = self.keys.contains(&KeyCode::ControlLeft)
-                    || self.keys.contains(&KeyCode::ControlRight);
-                self.drop_held(all);
+        }
+        if stop_sprint {
+            self.w_sprint = false;
+        }
+        if drop {
+            let all = self.keys.contains(&KeyCode::ControlLeft)
+                || self.keys.contains(&KeyCode::ControlRight);
+            self.drop_held(all);
+        }
+        if fly && self.creative() {
+            self.player.flying = !self.player.flying;
+        }
+        if jump && self.creative() {
+            if self.time - self.last_space < 0.3 {
+                self.player.flying = !self.player.flying;
+                self.last_space = -1.0;
+            } else {
+                self.last_space = self.time;
             }
-            KeyCode::KeyF if self.creative() => self.player.flying = !self.player.flying,
-            KeyCode::Space if self.creative() => {
-                if self.time - self.last_space < 0.3 {
-                    self.player.flying = !self.player.flying;
-                    self.last_space = -1.0;
-                } else {
-                    self.last_space = self.time;
-                }
-            }
-            _ => {}
+        }
+        // Last: these leave the game screen.
+        if chat {
+            self.open_chat("");
+        } else if command {
+            self.open_chat("/");
         }
     }
 
@@ -874,6 +928,11 @@ impl Game {
 
     fn go_back(&mut self) {
         match self.screen {
+            Screen::KeyBinds { in_game } => {
+                self.options.listening = None;
+                self.settings.save();
+                self.screen = Screen::Options { in_game };
+            }
             Screen::Options { in_game } => {
                 self.settings.save();
                 self.screen = if in_game {
@@ -949,7 +1008,7 @@ impl Game {
             Action::ToTitle => self.quit_to_title(),
             Action::Back => self.go_back(),
             Action::ToggleFullscreen => self.toggle_fullscreen(),
-            Action::VsyncChanged => self.gpu.set_vsync(self.settings.vsync),
+            Action::AntialiasingChanged => self.gpu.set_msaa(self.settings.msaa),
             Action::Respawn => self.respawn(),
             Action::Language => {
                 self.settings.hungarian = !self.settings.hungarian;
@@ -960,6 +1019,11 @@ impl Game {
                 if let Screen::Options { in_game } = self.screen {
                     self.pack_screen.open(&self.settings.resource_packs);
                     self.screen = Screen::ResourcePacks { in_game };
+                }
+            }
+            Action::KeyBinds => {
+                if let Screen::Options { in_game } = self.screen {
+                    self.screen = Screen::KeyBinds { in_game };
                 }
             }
             Action::OpenPackFolder => {

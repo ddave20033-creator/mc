@@ -58,6 +58,12 @@ impl Game {
     pub(super) fn use_item(&mut self) {
         let held = self.held();
         let sneaking = self.sneaking();
+        if let Some(i) = self.mob_target {
+            if held == SHEARS && self.mobs[i].can_shear() {
+                self.shear(i);
+                return;
+            }
+        }
         if let Some((hit, _)) = self.target {
             let hb = self.terrain.world.geti(hit);
             if !sneaking {
@@ -77,6 +83,14 @@ impl Game {
                     self.open_container(Container::Furnace(hit));
                     return;
                 }
+                if is_door(hb) {
+                    self.toggle_door(hit);
+                    return;
+                }
+                if is_bed(hb) {
+                    self.use_bed(hit);
+                    return;
+                }
                 if is_chest(hb) {
                     let (a, b) = self.chest_halves(hit);
                     for q in std::iter::once(a).chain(b) {
@@ -94,9 +108,8 @@ impl Game {
             BUCKET => self.fill_bucket(),
             WATER_BUCKET | LAVA_BUCKET => self.empty_bucket(held),
             PIG_SPAWN_EGG => self.use_spawn_egg(MobKind::Pig),
-            CREEPER_SPAWN_EGG => self.use_spawn_egg(MobKind::Creeper),
+            SHEEP_SPAWN_EGG => self.use_spawn_egg(MobKind::Sheep),
             GLASS_BOTTLE => self.fill_bottle(),
-            FLINT_AND_STEEL => self.use_flint_and_steel(),
             _ if block_of(held).is_some() => self.place_block(held),
             _ => {}
         }
@@ -130,7 +143,7 @@ impl Game {
         let at_container = !sneaking
             && self.target.is_some_and(|(hit, _)| {
                 let b = self.terrain.world.geti(hit);
-                b == CRAFTING_TABLE || is_furnace(b) || is_chest(b)
+                b == CRAFTING_TABLE || is_furnace(b) || is_chest(b) || is_door(b) || is_bed(b)
             });
         let ok = control
             && self.right_down
@@ -243,19 +256,20 @@ impl Game {
         if !is_replaceable(cur) || at.y < 0 || at.y >= HEIGHT as i32 {
             return;
         }
-        // Directional blocks face the player.
+        // Directional blocks face the player; stairs and doors take the look direction.
         let d = look_dir(self.yaw, 0.0);
-        let facing = if d.x.abs() > d.z.abs() {
-            if d.x > 0.0 {
-                3
-            } else {
-                1
-            }
-        } else if d.z > 0.0 {
-            0
-        } else {
-            2
-        };
+        let look = facing_of(d.x, d.z);
+        let facing = (look + 2) & 3;
+        // The face of the clicked block the new one goes against (outward).
+        let normal = if at == hit { IVec3::Y } else { at - hit };
+        if base == OAK_DOOR {
+            self.place_door(at, look);
+            return;
+        }
+        if base == BED {
+            self.place_bed(at, look);
+            return;
+        }
         let b = if base == TORCH {
             let support = hit - at;
             if at == hit || support == IVec3::NEG_Y {
@@ -282,6 +296,21 @@ impl Game {
             self.chest_to_place(at, hit, facing, sneaking)
         } else if base == FURNACE {
             base + facing
+        } else if base == OAK_STAIRS {
+            // Upside down against the underside of a block or the top half of a side.
+            let upper = self.target_point.y - at.y as f32 > 0.5;
+            let upside_down = normal == IVec3::NEG_Y || (normal.y == 0 && upper);
+            stairs_id(look, upside_down)
+        } else if is_log(base) {
+            // Lies along the clicked face's normal, like Minecraft.
+            let axis = if normal.x != 0 {
+                0
+            } else if normal.z != 0 {
+                2
+            } else {
+                1
+            };
+            log_with_axis(base, axis)
         } else {
             base
         };
@@ -298,5 +327,131 @@ impl Game {
         }
         self.hand.swing();
         self.action_cooldown = 0.2;
+    }
+
+    /// A door at `at` (lower half) and above it, for a player looking toward `facing`.
+    fn place_door(&mut self, at: IVec3, facing: u8) {
+        let w = &self.terrain.world;
+        let top = at + IVec3::Y;
+        let below = w.geti(at - IVec3::Y);
+        if top.y >= HEIGHT as i32
+            || !is_replaceable(w.geti(top))
+            || !is_solid(below)
+            || is_door(below)
+            || self.player.intersects(at)
+            || self.player.intersects(top)
+        {
+            return;
+        }
+        let hinge_right = self.door_hinge_right(at, facing);
+        self.edit_block(at, door_id(facing, false, false, hinge_right));
+        self.edit_block(top, door_id(facing, false, true, hinge_right));
+        if !self.creative() {
+            let slot = self.hotbar_slot;
+            take(&mut self.inventory.slots[slot], 1);
+        }
+        self.hand.swing();
+        self.action_cooldown = 0.2;
+    }
+
+    /// A bed: the foot half at `at` and the head half one block further the way the player
+    /// looks (`facing`), like Minecraft.
+    fn place_bed(&mut self, at: IVec3, facing: u8) {
+        let w = &self.terrain.world;
+        let head = at + facing_dir(facing);
+        if !is_replaceable(w.geti(head))
+            || !is_solid(w.geti(at - IVec3::Y))
+            || !is_solid(w.geti(head - IVec3::Y))
+            || self.player.intersects(at)
+            || self.player.intersects(head)
+        {
+            return;
+        }
+        self.edit_block(at, bed_id(facing, false));
+        self.edit_block(head, bed_id(facing, true));
+        if !self.creative() {
+            let slot = self.hotbar_slot;
+            take(&mut self.inventory.slots[slot], 1);
+        }
+        self.hand.swing();
+        self.action_cooldown = 0.2;
+    }
+
+    /// Minecraft's door hinge: next to another door it makes a double door, otherwise the
+    /// hinge goes toward the wall, or to the side of the block that was clicked.
+    fn door_hinge_right(&self, at: IVec3, facing: u8) -> bool {
+        let w = &self.terrain.world;
+        let (left, right) = (facing_dir(facing + 3), facing_dir(facing + 1));
+        let full = |q: IVec3| {
+            let b = w.geti(q);
+            is_solid(b) && !is_door(b) && !is_stairs(b)
+        };
+        let lower_door = |q: IVec3| {
+            let b = w.geti(q);
+            is_door(b) && !door_upper(b)
+        };
+        let up = IVec3::Y;
+        let walls = full(at + right) as i32 + full(at + right + up) as i32
+            - full(at + left) as i32
+            - full(at + left + up) as i32;
+        let (l, r) = (lower_door(at + left), lower_door(at + right));
+        if (l && !r) || walls > 0 {
+            return true;
+        }
+        if (r && !l) || walls < 0 {
+            return false;
+        }
+        let d = facing_dir(facing);
+        let (dx, dz) = (
+            self.target_point.x - at.x as f32,
+            self.target_point.z - at.z as f32,
+        );
+        let left_hinge = (d.x >= 0 || dz >= 0.5)
+            && (d.x <= 0 || dz <= 0.5)
+            && (d.z >= 0 || dx <= 0.5)
+            && (d.z <= 0 || dx >= 0.5);
+        !left_hinge
+    }
+
+    /// Opens or closes a door (both halves). It always swings away from the player: out
+    /// into the next block when opened from the side it closes on (if there is room).
+    /// The other door of a double door goes with it.
+    pub(super) fn toggle_door(&mut self, p: IVec3) {
+        let w = &self.terrain.world;
+        let b = w.geti(p);
+        let mut cells = vec![p, p + door_other_half(b)];
+        // A double door: the door beside the free edge, hinged on the other side.
+        let f = door_facing(b);
+        let hinge_right = door_hinge_right(b);
+        let q = p + facing_dir(if hinge_right { f + 3 } else { f + 1 });
+        let qb = w.geti(q);
+        if is_door(qb)
+            && door_facing(qb) == f
+            && door_hinge_right(qb) != hinge_right
+            && door_upper(qb) == door_upper(b)
+            && door_open(qb) == door_open(b)
+        {
+            cells.extend([q, q + door_other_half(qb)]);
+        }
+        let open = !door_open(b);
+        let c = door_closed_side(b);
+        let center = p.as_vec3() + Vec3::splat(0.5);
+        let from_closed_side = (self.player.pos - center).dot(c.as_vec3()) > 0.0;
+        let room = cells.iter().all(|&q| {
+            let n = w.geti(q + c);
+            !is_solid(n) || is_door(n)
+        });
+        let out = !from_closed_side && room;
+        let changes: Vec<(IVec3, u8)> = cells
+            .iter()
+            .map(|&q| (q, w.geti(q)))
+            .filter(|&(_, qb)| is_door(qb))
+            .map(|(q, qb)| (q, door_set_open(qb, open, out)))
+            .collect();
+        for (q, nb) in changes {
+            self.edit_block(q, nb);
+        }
+        self.hand.swing();
+        self.action_cooldown = 0.25;
     }
 }

@@ -1,5 +1,5 @@
 //! The per-frame simulation: the player (movement, targeting, mining, using) and the world
-//! (chest lids, fluids, furnaces, saplings, dropped items, mobs, falling blocks, TNT, torch fire,
+//! (chest lids, fluids, furnaces, saplings, dropped items, mobs, falling blocks, torch fire,
 //! time of day and autosave).
 
 use super::*;
@@ -9,7 +9,9 @@ impl Game {
     /// Player simulation. `control` is false while a screen is open (physics still runs).
     pub(super) fn update_player(&mut self, dt: f32, control: bool) {
         if control {
-            let sens = 0.0022 * self.settings.sensitivity / 100.0;
+            // Slower turning while zoomed in.
+            let zoom = (self.fov_current / self.settings.fov).min(1.0);
+            let sens = 0.0022 * self.settings.sensitivity / 100.0 * zoom;
             self.yaw += self.mouse_delta.x * sens;
             self.pitch = (self.pitch - self.mouse_delta.y * sens).clamp(-1.55, 1.55);
             if self.scroll != 0.0 {
@@ -19,6 +21,10 @@ impl Game {
             }
         }
         self.hand.equip(self.held());
+        if self.sleep.is_some() {
+            self.update_sleep(dt, control);
+            return;
+        }
         if !self.creative() {
             self.player.flying = false;
         }
@@ -27,16 +33,16 @@ impl Game {
         self.hand.blocking = self.blocking;
         self.update_using(dt, control);
 
-        let k = |c: KeyCode| control && self.keys.contains(&c);
+        let k = |b: Bind| control && self.bind_down(b);
         let axis = |a: bool, b: bool| (a as i32 - b as i32) as f32;
         let input = MoveInput {
-            forward: axis(k(KeyCode::KeyW), k(KeyCode::KeyS)),
-            strafe: axis(k(KeyCode::KeyD), k(KeyCode::KeyA)),
-            up: k(KeyCode::Space),
-            down: k(SNEAK_KEY),
-            sprint: (k(KeyCode::ControlLeft) || (self.w_sprint && k(KeyCode::KeyW)))
+            forward: axis(k(Bind::Forward), k(Bind::Back)),
+            strafe: axis(k(Bind::Right), k(Bind::Left)),
+            up: k(Bind::Jump),
+            down: k(Bind::Sneak),
+            sprint: (k(Bind::Sprint) || (self.w_sprint && k(Bind::Forward)))
                 && (self.creative() || self.needs.can_sprint()),
-            sneak: k(SNEAK_KEY),
+            sneak: k(Bind::Sneak),
             using: self.blocking || self.using.is_some(),
         };
         let was_on_ground = self.player.on_ground;
@@ -83,6 +89,12 @@ impl Game {
         } else {
             None
         };
+        if let Some((hit, _)) = self.target {
+            let dir = look_dir(self.yaw, self.pitch);
+            self.target_point = crate::entity::player::ray_boxes(&self.terrain.world, eye, dir, hit, 6.0)
+                .map(|(t, _)| eye + dir * t)
+                .unwrap_or(hit.as_vec3() + Vec3::splat(0.5));
+        }
         // A mob in front of the targeted block takes the crosshair (entity reach: 3 blocks).
         self.mob_target = None;
         self.player_target = None;
@@ -115,14 +127,7 @@ impl Game {
         }
         self.action_cooldown -= dt;
         let mut breaking = None;
-        // Blocking with a sword: no hitting or mining until the right button is let go.
-        let swing = control && !self.blocking;
-        if self.blocking {
-            self.mining = None;
-            self.dig_timer = 0.0;
-        } else if swing && self.left_pressed && self.punch_fire() {
-            self.mining = None;
-        } else if swing && self.left_down && self.action_cooldown <= 0.0 {
+        if control && self.left_down && self.action_cooldown <= 0.0 {
             if let Some((hit, _)) = self.target {
                 let b = self.terrain.world.geti(hit);
                 let time =
@@ -155,7 +160,7 @@ impl Game {
             self.mining = None;
             self.dig_timer = 0.0;
         }
-        if swing && self.left_pressed && self.target.is_none() {
+        if control && self.left_pressed && self.target.is_none() {
             if let Some(i) = self.mob_target {
                 self.attack(Some(i), None);
             }
@@ -342,7 +347,6 @@ impl Game {
         // Mobs
         self.update_mobs(dt);
         self.spawn_animals(dt);
-        self.spawn_monsters(dt);
 
         // Falling sand / gravel.
         let mut landed = Vec::new();
@@ -373,14 +377,12 @@ impl Game {
             }
         }
 
-        self.update_tnt(dt);
-        self.update_fire(dt);
-
         if self.torch_particles {
             self.torch_fire(dt);
         }
 
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH).fract();
+        self.update_sleepers(dt);
         self.autosave -= dt;
         if self.autosave <= 0.0 {
             self.autosave = AUTOSAVE_SECONDS;

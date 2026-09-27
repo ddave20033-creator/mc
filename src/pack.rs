@@ -130,10 +130,11 @@ pub fn decode_png(data: &[u8]) -> Option<Image> {
     Some(Image { w, h, rgba })
 }
 
-/// The built-in pack's files (`builtin/faithful`, embedded by build.rs).
+/// The built-in pack's files (`builtin/rustcraft`, made by `tools/texgen` and embedded by
+/// build.rs).
 static BUILTIN_FILES: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/builtin_pack.rs"));
 /// Name of the built-in pack: always active, below every pack from `resourcepacks/`.
-pub const BUILTIN: &str = "Faithful 64x";
+pub const BUILTIN: &str = "RustCraft";
 
 enum Source {
     Zip(zip::ZipArchive<fs::File>),
@@ -222,30 +223,21 @@ impl Pack {
     /// A texture by its path under `assets/minecraft/textures/`, without `.png`
     /// (e.g. `block/stone`). Animated strips are cut to their first frame.
     pub fn texture(&self, path: &str) -> Option<Image> {
+        self.strip(path).map(Image::first_frame)
+    }
+
+    /// A texture with all its animation frames (a vertical strip of squares).
+    pub fn strip(&self, path: &str) -> Option<Image> {
         if let Some(img) = self.cache.borrow().get(path) {
             return img.clone();
         }
         let img = self
             .read(&format!("{TEXTURES}{path}.png"))
-            .and_then(|d| decode_png(&d))
-            .map(Image::first_frame);
+            .and_then(|d| decode_png(&d));
         self.cache
             .borrow_mut()
             .insert(path.to_string(), img.clone());
         img
-    }
-
-    /// Every frame of an animated texture (a vertical strip of squares), top first.
-    pub fn frames(&self, path: &str) -> Option<Vec<Image>> {
-        let img = self
-            .read(&format!("{TEXTURES}{path}.png"))
-            .and_then(|d| decode_png(&d))?;
-        let n = (img.h / img.w.max(1)).max(1);
-        Some(
-            (0..n)
-                .map(|i| img.crop(0, i * img.w, img.w, img.w))
-                .collect(),
-        )
     }
 }
 
@@ -276,9 +268,18 @@ impl Packs {
             .find_map(|pack| paths.split('|').find_map(|p| pack.texture(p)))
     }
 
-    /// The frames of an animated texture (see `Pack::frames`) from the highest pack that has it.
-    pub fn frames(&self, path: &str) -> Option<Vec<Image>> {
-        self.0.iter().find_map(|pack| pack.frames(path))
+    /// The animation frames of a texture (see `texture`): one image per square of its strip.
+    pub fn frames(&self, paths: &str) -> Option<Vec<Image>> {
+        let strip = self
+            .0
+            .iter()
+            .find_map(|pack| paths.split('|').find_map(|p| pack.strip(p)))?;
+        let n = (strip.h / strip.w.max(1)).max(1);
+        Some(
+            (0..n)
+                .map(|i| strip.crop(0, i * strip.w, strip.w, strip.w.min(strip.h)))
+                .collect(),
+        )
     }
 }
 

@@ -11,7 +11,7 @@ impl Game {
         }
         // Blocking with a sword takes about half of blockable damage, like Minecraft 1.8:
         // (1 + amount) / 2. Falling, burning, drowning, suffocating and the void go through.
-        let blockable = matches!(cause, "death.lava" | "death.cactus" | "death.explosion");
+        let blockable = matches!(cause, "death.lava" | "death.cactus");
         let amount = if self.blocking && blockable {
             (1.0 + amount) * 0.5
         } else {
@@ -56,6 +56,7 @@ impl Game {
             }
         }
         self.screen = Screen::Dead;
+        self.sleep = None;
         self.set_grab(false);
         self.fire = 0.0;
         self.player.vel = Vec3::ZERO;
@@ -106,13 +107,6 @@ impl Game {
                 self.fire = 8.0;
             }
         }
-        if self.touching(0.0, |b| b == FIRE) {
-            // Standing in fire: hurts (every half second at most) and sets you alight.
-            self.damage(1.0, "death.in_fire");
-            if !creative {
-                self.fire = self.fire.max(8.0);
-            }
-        }
         if self.touching(0.0, is_water) {
             self.fire = 0.0;
         }
@@ -127,7 +121,7 @@ impl Game {
         if self.touching(0.05, |b| b == CACTUS) {
             self.damage(1.0, "death.cactus");
         }
-        let eye = self.player.eye();
+        let eye = self.sleep_eye().unwrap_or(self.player.eye());
         let eye_block = self.terrain.world.get(
             eye.x.floor() as i32,
             eye.y.floor() as i32,

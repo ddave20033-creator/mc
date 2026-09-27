@@ -41,7 +41,7 @@ pub const ON_MODEL: HeldStyle = HeldStyle {
     damping: HELD_DAMPING,
 };
 
-/// Full-size lantern hanging from the hand in first-person view.
+/// Full-size lantern hanging from the hand in first-person view (with the body shown).
 pub const FIRST_PERSON: HeldStyle = HeldStyle {
     scale: 1.0,
     chain: 1.5,

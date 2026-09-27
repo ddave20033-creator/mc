@@ -1,13 +1,12 @@
 //! Compiles the GLSL shaders to SPIR-V (with glslc from the Vulkan SDK) into OUT_DIR, where
-//! `render` includes them - without glslc it falls back to the precompiled copies in
-//! `shaders/spv` (refresh those with glslc after editing a shader), and lists the built-in resource pack's files (`builtin/faithful`)
-//! for `pack` to embed.
+//! `render` includes them, and lists the built-in resource pack's files (`builtin/rustcraft`)
+//! for `pack` to embed (made by `tools/texgen/build.py`).
 
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const BUILTIN_PACK: &str = "builtin/faithful";
+const BUILTIN_PACK: &str = "builtin/rustcraft";
 
 /// Every file under `dir`, as paths relative to `root` with `/` separators.
 fn pack_files(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
@@ -74,26 +73,15 @@ fn main() {
     for inc in INCLUDES {
         println!("cargo:rerun-if-changed=shaders/{inc}");
     }
-    let mut missing_glslc = false;
     for name in SHADERS {
         println!("cargo:rerun-if-changed=shaders/{name}");
-        let spv = out.join(format!("{name}.spv"));
-        if !missing_glslc {
-            match Command::new(&glslc)
-                .arg(format!("shaders/{name}"))
-                .arg("-O")
-                .arg("-o")
-                .arg(&spv)
-                .status()
-            {
-                Ok(status) => {
-                    assert!(status.success(), "shader compilation failed: {name}");
-                    continue;
-                }
-                Err(_) => missing_glslc = true,
-            }
-        }
-        std::fs::copy(format!("shaders/spv/{name}.spv"), &spv)
-            .unwrap_or_else(|e| panic!("no glslc and no precompiled shaders/spv/{name}.spv: {e}"));
+        let status = Command::new(&glslc)
+            .arg(format!("shaders/{name}"))
+            .arg("-O")
+            .arg("-o")
+            .arg(out.join(format!("{name}.spv")))
+            .status()
+            .expect("failed to run glslc - install the Vulkan SDK");
+        assert!(status.success(), "shader compilation failed: {name}");
     }
 }

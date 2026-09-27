@@ -1,4 +1,7 @@
-use crate::world::{is_fluid, is_lava, is_solid, World, AIR, FIRE};
+use crate::world::{
+    block_boxes, door_closed_side, door_open, door_out, is_door, is_fluid, is_lava, is_solid,
+    Boxes, World, AIR,
+};
 use glam::{IVec3, Vec3};
 
 pub const EYE_HEIGHT: f32 = 1.62;
@@ -6,6 +9,8 @@ pub const EYE_HEIGHT: f32 = 1.62;
 const SNEAK_DROP: f32 = 0.35;
 const HALF_W: f32 = 0.3;
 const TALL: f32 = 1.8;
+/// Walking up onto something this high happens by itself (stairs, like Minecraft's 0.6).
+const STEP: f32 = 0.6;
 
 pub struct MoveInput {
     pub forward: f32,
@@ -41,50 +46,94 @@ pub fn look_dir(yaw: f32, pitch: f32) -> Vec3 {
     )
 }
 
-fn solid_at(world: &World, x: i32, y: i32, z: i32) -> bool {
+/// The boxes (world coordinates) of the solid block at a cell; a full cube where the world
+/// is not loaded yet.
+pub fn cell_boxes(world: &World, x: i32, y: i32, z: i32) -> Option<Boxes> {
     if !world.is_loaded(x, z) {
-        return true;
+        return Some(Boxes::one([0.0; 3], [1.0; 3]));
     }
-    is_solid(world.get(x, y, z))
+    let b = world.get(x, y, z);
+    if !is_solid(b) {
+        return None;
+    }
+    let p = IVec3::new(x, y, z);
+    Some(block_boxes(b, |d| world.geti(p + d)))
+}
+
+/// Every solid box (world coordinates) touching the region `min`..`max`, including doors
+/// next to it that swing out into it.
+fn boxes_in(world: &World, min: Vec3, max: Vec3, mut f: impl FnMut(Vec3, Vec3)) {
+    let (x0, x1) = (min.x.floor() as i32, (max.x - 1e-4).floor() as i32);
+    let (z0, z1) = (min.z.floor() as i32, (max.z - 1e-4).floor() as i32);
+    for x in x0 - 1..=x1 + 1 {
+        for y in min.y.floor() as i32..=(max.y - 1e-4).floor() as i32 {
+            for z in z0 - 1..=z1 + 1 {
+                let ring = x < x0 || x > x1 || z < z0 || z > z1;
+                if ring && !(world.is_loaded(x, z) && swung_out(world.get(x, y, z))) {
+                    continue;
+                }
+                if let Some(bx) = cell_boxes(world, x, y, z) {
+                    let o = Vec3::new(x as f32, y as f32, z as f32);
+                    for (lo, hi) in bx.iter() {
+                        f(o + Vec3::from(*lo), o + Vec3::from(*hi));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn swung_out(b: u8) -> bool {
+    is_door(b) && door_open(b) && door_out(b)
 }
 
 /// Area of solid ground directly under the feet. Keeping some overlap prevents
 /// a crouching player from balancing on a sub-pixel corner and then falling.
 fn support_area(world: &World, p: Vec3) -> f32 {
-    let y = (p.y - 0.1).floor() as i32;
-    if (p.y - (y + 1) as f32).abs() > 0.05 {
-        return 0.0;
-    }
     let (min, max) = (
-        p - Vec3::new(HALF_W, 0.0, HALF_W),
+        p - Vec3::new(HALF_W, 0.1, HALF_W),
         p + Vec3::new(HALF_W, 0.0, HALF_W),
     );
     let mut area = 0.0;
-    for x in min.x.floor() as i32..=(max.x - 1e-4).floor() as i32 {
-        for z in min.z.floor() as i32..=(max.z - 1e-4).floor() as i32 {
-            if solid_at(world, x, y, z) {
-                let dx = (max.x.min(x as f32 + 1.0) - min.x.max(x as f32)).max(0.0);
-                let dz = (max.z.min(z as f32 + 1.0) - min.z.max(z as f32)).max(0.0);
-                area += dx * dz;
-            }
+    boxes_in(world, min, max + Vec3::Y * 1e-3, |lo, hi| {
+        if (hi.y - p.y).abs() <= 0.05 {
+            let dx = (max.x.min(hi.x) - min.x.max(lo.x)).max(0.0);
+            let dz = (max.z.min(hi.z) - min.z.max(lo.z)).max(0.0);
+            area += dx * dz;
         }
-    }
+    });
     area
 }
 
-fn collides(world: &World, p: Vec3) -> bool {
+/// How far the player at `p` can move along `axis` (up to `delta`) before touching a block.
+fn clip_move(world: &World, p: Vec3, axis: usize, delta: f32) -> f32 {
+    if delta == 0.0 {
+        return 0.0;
+    }
     let min = p - Vec3::new(HALF_W, 0.0, HALF_W);
     let max = p + Vec3::new(HALF_W, TALL, HALF_W);
-    for x in min.x.floor() as i32..=(max.x - 1e-4).floor() as i32 {
-        for y in min.y.floor() as i32..=(max.y - 1e-4).floor() as i32 {
-            for z in min.z.floor() as i32..=(max.z - 1e-4).floor() as i32 {
-                if solid_at(world, x, y, z) {
-                    return true;
-                }
-            }
-        }
+    let (mut smin, mut smax) = (min, max);
+    if delta > 0.0 {
+        smax[axis] += delta;
+    } else {
+        smin[axis] += delta;
     }
-    false
+    let mut d = delta;
+    boxes_in(world, smin, smax, |lo, hi| {
+        // Only boxes beside the player on the other two axes can be hit.
+        if !(0..3)
+            .filter(|&k| k != axis)
+            .all(|k| min[k] < hi[k] - 1e-4 && max[k] > lo[k] + 1e-4)
+        {
+            return;
+        }
+        if d > 0.0 && lo[axis] >= max[axis] - 1e-3 {
+            d = d.min(lo[axis] - max[axis]);
+        } else if d < 0.0 && hi[axis] <= min[axis] + 1e-3 {
+            d = d.max(hi[axis] - min[axis]);
+        }
+    });
+    d
 }
 
 impl Player {
@@ -119,30 +168,14 @@ impl Player {
         Vec3::new(self.vel.x, 0.0, self.vel.z).length()
     }
 
+    /// Moves along one axis as far as the blocks allow; true if something was in the way.
     fn move_axis(&mut self, world: &World, axis: usize, delta: f32) -> bool {
         if delta == 0.0 {
             return false;
         }
-        let mut p = self.pos;
-        p[axis] += delta;
-        if !collides(world, p) {
-            self.pos = p;
-            return false;
-        }
-        let (lo, hi) = if axis == 1 {
-            (0.0, TALL)
-        } else {
-            (-HALF_W, HALF_W)
-        };
-        if delta > 0.0 {
-            p[axis] = (p[axis] + hi).floor() - hi - 0.001;
-        } else {
-            p[axis] = (p[axis] + lo).floor() + 1.0 - lo + 0.001;
-        }
-        if !collides(world, p) {
-            self.pos = p;
-        }
-        true
+        let d = clip_move(world, self.pos, axis, delta);
+        self.pos[axis] += d;
+        (d - delta).abs() > 1e-5
     }
 
     pub fn update(&mut self, dt: f32, world: &World, yaw: f32, input: &MoveInput) {
@@ -236,11 +269,30 @@ impl Player {
                     self.vel.z = 0.0;
                 }
             }
-            if self.move_axis(world, 0, d.x) {
+            let start = self.pos;
+            let mut bx = self.move_axis(world, 0, d.x);
+            let mut bz = self.move_axis(world, 2, d.z);
+            // Blocked on the ground: try stepping up onto it (a stair, a slab).
+            if (bx || bz) && self.on_ground {
+                let flat = self.pos;
+                self.pos = start;
+                let up = clip_move(world, self.pos, 1, STEP);
+                self.pos.y += up;
+                let sx = self.move_axis(world, 0, d.x);
+                let sz = self.move_axis(world, 2, d.z);
+                self.pos.y += clip_move(world, self.pos, 1, -up);
+                let gain = |p: Vec3| (p.x - start.x).powi(2) + (p.z - start.z).powi(2);
+                if gain(self.pos) > gain(flat) + 1e-6 {
+                    (bx, bz) = (sx, sz);
+                } else {
+                    self.pos = flat;
+                }
+            }
+            if bx {
                 self.vel.x = 0.0;
                 self.hit_wall = true;
             }
-            if self.move_axis(world, 2, d.z) {
+            if bz {
                 self.vel.z = 0.0;
                 self.hit_wall = true;
             }
@@ -262,9 +314,7 @@ impl Player {
 
 /// Voxel DDA raycast. Returns (hit block, the empty block in front of it).
 pub fn raycast(world: &World, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<(IVec3, IVec3)> {
-    raycast_by(world, origin, dir, max_dist, |b| {
-        b != AIR && !is_fluid(b) && b != FIRE
-    })
+    raycast_by(world, origin, dir, max_dist, |b| b != AIR && !is_fluid(b))
 }
 
 /// Like `raycast`, but also stops at fluid source blocks (for buckets).
@@ -275,7 +325,7 @@ pub fn raycast_fluid(
     max_dist: f32,
 ) -> Option<(IVec3, IVec3)> {
     raycast_by(world, origin, dir, max_dist, |b| {
-        b != AIR && b != FIRE && (!is_fluid(b) || crate::world::fluid_level(b) == 0)
+        b != AIR && (!is_fluid(b) || crate::world::fluid_level(b) == 0)
     })
 }
 
@@ -317,8 +367,27 @@ fn raycast_by(
     let mut prev = pos;
     loop {
         let b = world.get(pos.x, pos.y, pos.z);
+        // A door beside this cell swung out into it.
+        for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+            let q = pos + d;
+            let qb = world.geti(q);
+            if swung_out(qb) && door_closed_side(qb) == -d && hit(qb) {
+                if let Some((_, normal)) = ray_boxes(world, origin, dir, q, max_dist) {
+                    let front = if normal == IVec3::ZERO { prev } else { pos + normal };
+                    return Some((q, if front == q { prev } else { front }));
+                }
+            }
+        }
         if hit(b) {
-            return Some((pos, prev));
+            if !is_solid(b) {
+                return Some((pos, prev));
+            }
+            // Blocks smaller than the cell (doors, stairs): only their boxes count, and the
+            // block goes in front of the face that was hit.
+            if let Some((_, normal)) = ray_boxes(world, origin, dir, pos, max_dist) {
+                let front = if normal == IVec3::ZERO { prev } else { pos + normal };
+                return Some((pos, front));
+            }
         }
         prev = pos;
         let t;
@@ -341,11 +410,140 @@ fn raycast_by(
     }
 }
 
+/// Where a ray first hits the boxes of the block at `p`: the distance and the outward normal
+/// of the face hit (zero when the ray starts inside).
+pub fn ray_boxes(
+    world: &World,
+    origin: Vec3,
+    dir: Vec3,
+    p: IVec3,
+    max_dist: f32,
+) -> Option<(f32, IVec3)> {
+    let b = world.geti(p);
+    let bx = block_boxes(b, |d| world.geti(p + d));
+    let o = p.as_vec3();
+    let mut best: Option<(f32, IVec3)> = None;
+    for (lo, hi) in bx.iter() {
+        let (lo, hi) = (o + Vec3::from(*lo), o + Vec3::from(*hi));
+        let Some(t) = crate::util::ray_box(origin, dir, lo, hi, max_dist) else {
+            continue;
+        };
+        if best.is_some_and(|(bt, _)| bt <= t) {
+            continue;
+        }
+        let at = origin + dir * t;
+        let mut normal = IVec3::ZERO;
+        if t > 0.0 {
+            for k in 0..3 {
+                if dir[k] > 0.0 && (at[k] - lo[k]).abs() < 1e-3 {
+                    normal[k] = -1;
+                    break;
+                }
+                if dir[k] < 0.0 && (at[k] - hi[k]).abs() < 1e-3 {
+                    normal[k] = 1;
+                    break;
+                }
+            }
+        }
+        best = Some((t, normal));
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::world::{ChunkData, STONE};
     use std::sync::Arc;
+
+    /// A stone floor at y 0 with some blocks on it; returns the world.
+    fn floor(blocks: &[(IVec3, u8)]) -> World {
+        let mut world = World::new();
+        let mut chunk = ChunkData::new();
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set(x, 0, z, STONE);
+            }
+        }
+        for (p, b) in blocks {
+            chunk.set(p.x as usize, p.y as usize, p.z as usize, *b);
+        }
+        world.chunks.insert((0, 0), Arc::new(chunk));
+        world
+    }
+
+    fn walk_east(world: &World, from: Vec3, seconds: f32) -> Player {
+        let input = MoveInput {
+            forward: 1.0,
+            strafe: 0.0,
+            up: false,
+            down: false,
+            sprint: false,
+            sneak: false,
+            using: false,
+        };
+        let mut player = Player {
+            pos: from,
+            spawned: true,
+            ..Default::default()
+        };
+        for _ in 0..(seconds * 120.0) as i32 {
+            player.update(1.0 / 120.0, world, 0.0, &input);
+        }
+        player
+    }
+
+    #[test]
+    fn walks_up_stairs_without_jumping() {
+        use crate::world::{stairs_id, STONE};
+        // Stairs going up toward +X, then a block to step onto.
+        let world = floor(&[
+            (IVec3::new(8, 1, 8), stairs_id(1, false)),
+            (IVec3::new(9, 1, 8), STONE),
+            (IVec3::new(10, 1, 8), STONE),
+            (IVec3::new(11, 1, 8), STONE),
+            (IVec3::new(12, 1, 8), STONE),
+        ]);
+        let p = walk_east(&world, Vec3::new(5.5, 1.0, 8.5), 1.2);
+        assert!(p.pos.x > 9.5 && (p.pos.y - 2.0).abs() < 1e-3, "{:?}", p.pos);
+        // A full block is too high to walk onto.
+        let world = floor(&[(IVec3::new(8, 1, 8), STONE)]);
+        let p = walk_east(&world, Vec3::new(5.5, 1.0, 8.5), 1.5);
+        assert!(p.pos.x < 8.0 && p.pos.y < 1.01, "{:?}", p.pos);
+    }
+
+    #[test]
+    fn closed_doors_block_and_open_ones_let_through() {
+        use crate::world::door_id;
+        // Placed looking east: the closed panel is on the west side of the block.
+        let door = |open| {
+            floor(&[
+                (IVec3::new(8, 1, 8), door_id(1, open, false, false)),
+                (IVec3::new(8, 2, 8), door_id(1, open, true, false)),
+            ])
+        };
+        let p = walk_east(&door(false), Vec3::new(5.5, 1.0, 8.5), 1.5);
+        assert!((p.pos.x - (8.0 - HALF_W)).abs() < 0.01, "{:?}", p.pos);
+        let p = walk_east(&door(true), Vec3::new(5.5, 1.0, 8.5), 1.5);
+        assert!(p.pos.x > 9.0, "{:?}", p.pos);
+        // Swung out (west, toward the walker), the panel still lies along the north side.
+        let out = |upper| crate::world::door_set_open(door_id(1, false, upper, false), true, true);
+        let world = floor(&[(IVec3::new(8, 1, 8), out(false)), (IVec3::new(8, 2, 8), out(true))]);
+        let p = walk_east(&world, Vec3::new(5.5, 1.0, 8.5), 1.5);
+        assert!(p.pos.x > 9.0, "{:?}", p.pos);
+        let p = walk_east(&world, Vec3::new(5.5, 1.0, 7.9), 1.5);
+        assert!(p.pos.x < 7.5, "walked through the swung-out panel: {:?}", p.pos);
+        // ...and can be aimed at from the block it swung into.
+        let hit = raycast(&world, Vec3::new(7.5, 1.5, 8.9), Vec3::NEG_Z, 3.0);
+        assert_eq!(hit.map(|h| h.0), Some(IVec3::new(8, 1, 8)));
+        // Aiming through the open door's empty part reaches the block behind it.
+        let mut world = door(true);
+        world.seti(IVec3::new(10, 1, 8), STONE);
+        let hit = raycast(&world, Vec3::new(6.5, 1.5, 8.5), Vec3::X, 6.0);
+        assert_eq!(hit.map(|h| h.0), Some(IVec3::new(10, 1, 8)));
+        let hit = raycast(&door(false), Vec3::new(6.5, 1.5, 8.5), Vec3::X, 6.0);
+        assert_eq!(hit, Some((IVec3::new(8, 1, 8), IVec3::new(7, 1, 8))));
+    }
 
     #[test]
     fn sneaking_stays_on_a_single_block_at_high_fps() {

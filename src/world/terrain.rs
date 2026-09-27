@@ -16,6 +16,8 @@ pub struct Terrain {
     dirty: FastSet<ChunkPos>,
     meshed: FastSet<ChunkPos>,
     offsets: Vec<(i32, i32)>,
+    /// Door halves of each meshed chunk (see `MeshData::doors`).
+    pub doors: FastMap<ChunkPos, Vec<IVec3>>,
     /// LAN host: where the other players are. Chunks around them stay loaded (without
     /// meshes) so the world keeps running there.
     pub extra_centers: Vec<ChunkPos>,
@@ -35,7 +37,8 @@ impl Terrain {
     pub fn new(seed: u32) -> Self {
         let gen = Arc::new(Generator::new(seed));
         let workers = Workers::new(gen.clone());
-        let r = 40i32;
+        // Up to the largest render distance (64) and the unload margin around it.
+        let r = 68i32;
         let mut offsets: Vec<(i32, i32)> = (-r..=r)
             .flat_map(|x| (-r..=r).map(move |z| (x, z)))
             .filter(|(x, z)| x * x + z * z <= r * r)
@@ -51,6 +54,7 @@ impl Terrain {
             dirty: FastSet::default(),
             meshed: FastSet::default(),
             offsets,
+            doors: FastMap::default(),
             extra_centers: Vec::new(),
         }
     }
@@ -122,10 +126,16 @@ impl Terrain {
                         }
                     }
                 }
-                Done::Meshed(m) => {
+                Done::Meshed(mut m) => {
                     self.meshing.remove(&m.pos);
                     if self.world.chunks.contains_key(&m.pos) {
                         self.meshed.insert(m.pos);
+                        self.world.light.insert(m.pos, std::mem::take(&mut m.light));
+                        if m.doors.is_empty() {
+                            self.doors.remove(&m.pos);
+                        } else {
+                            self.doors.insert(m.pos, m.doors.clone());
+                        }
                         out.push(TerrainEvent::Mesh(m));
                     }
                 }
@@ -148,6 +158,8 @@ impl Terrain {
                 }
             }
             self.meshed.remove(&p);
+            self.doors.remove(&p);
+            self.world.light.remove(&p);
             self.dirty.remove(&p);
             out.push(TerrainEvent::Unload(p));
         }

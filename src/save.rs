@@ -4,7 +4,7 @@
 use crate::entity::mob::{Mob, MobKind};
 use crate::entity::{BlockEntities, Furnace, ItemEntity};
 use crate::item::{from_key, key, Slot, Stack};
-use crate::world::{ChunkData, ChunkPos, AIR, FIRE};
+use crate::world::{ChunkData, ChunkPos};
 use glam::{IVec3, Vec3};
 use std::fs;
 use std::path::PathBuf;
@@ -33,6 +33,8 @@ pub struct WorldMeta {
     pub last_played: u64,
     pub time_of_day: f32,
     pub spawn: Option<(i32, i32)>,
+    /// The head of the bed the player last used: they come back to life beside it.
+    pub bed: Option<IVec3>,
     pub player: Option<PlayerSave>,
 }
 
@@ -114,6 +116,7 @@ impl WorldMeta {
             last_played: now_secs(),
             time_of_day: 0.03,
             spawn: None,
+            bed: None,
             player: None,
         };
         meta.save();
@@ -136,6 +139,9 @@ impl WorldMeta {
         );
         if let Some((x, z)) = self.spawn {
             s += &format!("spawn:{x},{z}\n");
+        }
+        if let Some(b) = self.bed {
+            s += &format!("bed:{}\n", pos_str(b));
         }
         if let Some(p) = &self.player {
             s += &format!(
@@ -165,6 +171,7 @@ impl WorldMeta {
             last_played: 0,
             time_of_day: 0.03,
             spawn: None,
+            bed: None,
             player: None,
         };
         for line in text.lines() {
@@ -182,6 +189,12 @@ impl WorldMeta {
                     let p: Vec<i32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
                     if p.len() == 2 {
                         m.spawn = Some((p[0], p[1]));
+                    }
+                }
+                "bed" => {
+                    let p: Vec<i32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                    if p.len() == 3 {
+                        m.bed = Some(IVec3::new(p[0], p[1], p[2]));
                     }
                 }
                 "player" => {
@@ -299,13 +312,14 @@ pub fn save_entities(
     }
     for m in mobs.iter().filter(|m| m.alive()) {
         s += &format!(
-            "mob:{}:{},{},{}:{}:{}\n",
+            "mob:{}:{},{},{}:{}:{}:{}\n",
             m.kind.key(),
             m.pos.x,
             m.pos.y,
             m.pos.z,
             m.body_yaw,
-            m.health
+            m.health,
+            m.sheared as u8
         );
     }
     for (p, f) in &be.furnaces {
@@ -358,6 +372,7 @@ pub fn load_entities(
                 let yaw = parts[3].parse().unwrap_or(0.0);
                 let mut m = Mob::new(kind, Vec3::new(p[0], p[1], p[2]), yaw, seed);
                 m.health = parts[4].parse().unwrap_or(kind.max_health());
+                m.sheared = parts.get(5) == Some(&"1");
                 mobs.push(m);
             }
             continue;
@@ -452,13 +467,7 @@ fn save_chunks(folder: &str, chunks: &[(ChunkPos, Arc<ChunkData>)]) {
     let mut body = Vec::new();
     let mut count = 0u32;
     for (p, c) in chunks {
-        // Fire is not saved (its age and spreading are not either): it goes out.
-        let raw: Vec<u8> = c
-            .raw()
-            .iter()
-            .map(|&b| if b == FIRE { AIR } else { b })
-            .collect();
-        let enc = rle(&raw);
+        let enc = rle(c.raw());
         body.extend(p.0.to_le_bytes());
         body.extend(p.1.to_le_bytes());
         body.extend((enc.len() as u32).to_le_bytes());

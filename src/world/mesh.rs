@@ -35,11 +35,23 @@ pub mod flags {
 pub struct MeshData {
     pub pos: ChunkPos,
     pub vertices: Vec<Vertex>,
-    /// Opaque indices first, then translucent (water) indices.
+    /// Opaque indices first, then translucent (water) indices. The opaque ones end with what
+    /// far chunks leave out: faces between leaves, then grass and flowers.
     pub indices: Vec<u32>,
     pub opaque_count: u32,
+    /// Opaque indices without the faces between leaves and the plants.
+    pub solid_count: u32,
+    /// Where the solid indices are faces of whole blocks grouped by direction (see `FACE_N`):
+    /// the other solid ones (stairs, chests, torches...) come first, then these groups.
+    pub dir_counts: [u32; 6],
+    /// Indices of the faces between leaves (after the solid ones).
+    pub leaf_inner_count: u32,
     pub min_y: f32,
     pub max_y: f32,
+    /// Door halves in the chunk (world positions): drawn every frame so they can swing.
+    pub doors: Vec<glam::IVec3>,
+    /// The chunk's light (see `ChunkLight`), for things drawn outside chunk meshes.
+    pub light: ChunkLight,
 }
 
 // Faces: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z. u x v = n, so corners are CCW seen from outside.
@@ -113,6 +125,20 @@ pub fn chest_open_layer(layer: u32, face: usize, dir: [i32; 3]) -> u32 {
         _ => return layer,
     };
     tex::CHEST_OPEN + i * 4 + edge
+}
+
+/// A horizontal direction as on a bed facing north (turned back from facing `f`).
+pub fn bed_local(d: glam::IVec3, f: u8) -> glam::IVec3 {
+    let (x, z) = bed_local_f(d.x as f32, d.z as f32, f);
+    glam::IVec3::new(x.round() as i32, d.y, z.round() as i32)
+}
+
+/// `bed_local` for a point (x, z) relative to the block center.
+pub fn bed_local_f(mut x: f32, mut z: f32, f: u8) -> (f32, f32) {
+    for _ in 0..(f & 3) {
+        (x, z) = (z, -x);
+    }
+    (x, z)
 }
 
 const RW: usize = 48;
@@ -331,6 +357,13 @@ fn occludes(b: u8) -> bool {
 struct Builder {
     verts: Vec<Vertex>,
     opaque: Vec<u32>,
+    /// Faces between leaves, and grass and flowers: after the opaque ones, so far chunks can
+    /// leave them out.
+    leaf_inner: Vec<u32>,
+    plants: Vec<u32>,
+    /// Faces of whole blocks by direction: a chunk's faces turned away from the camera can be
+    /// left out as a group.
+    dirs: [Vec<u32>; 6],
     water: Vec<u32>,
     min_y: f32,
     max_y: f32,
@@ -357,6 +390,7 @@ impl Builder {
         layer: u32,
         tint: [u8; 3],
         fl: u8,
+        rotated: bool,
     ) {
         let (n, u, v) = (FACE_N[face], FACE_U[face], FACE_V[face]);
         let (fx, fy, fz) = (x + n[0], y + n[1], z + n[2]);
@@ -412,7 +446,12 @@ impl Builder {
                     y as f32 + p[1],
                     (z + self.oz) as f32 + p[2],
                 ],
-                uv: corner_uv(su, sv),
+                uv: if rotated {
+                    let uv = corner_uv(su, sv);
+                    [uv[1], 1.0 - uv[0]]
+                } else {
+                    corner_uv(su, sv)
+                },
                 layer: layer as f32,
                 light: [
                     ao[i] * 85,
@@ -531,90 +570,126 @@ impl Builder {
         }
     }
 
-    /// Fire, like Minecraft's models (units of 1/16 block, flames 22.4 tall): on the ground
-    /// four planes leaning across the block plus one along each side; otherwise a plane
-    /// against each flammable neighbour, and two hanging from a flammable block above.
-    /// Drawn from both sides and glowing; world.frag plays the animation.
-    fn fire(&mut self, r: &Region, x: i32, y: i32, z: i32) {
-        let (wx, wz) = (x + self.ox, z + self.oz);
-        let variant = (wx.wrapping_mul(31) ^ y.wrapping_mul(17) ^ wz.wrapping_mul(7)) & 1;
-        let layer = if variant == 0 {
-            tex::FIRE_0
-        } else {
-            tex::FIRE_1
+    /// Stairs: the filled eighths of the block, without the faces between them or against
+    /// solid neighbours.
+    fn stairs(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+        let octants = |x: i32, y: i32, z: i32, b: u8| {
+            stairs_octants(b, |d| r.get(x + d.x, y + d.y, z + d.z))
         };
-        let (s, b) = r.light(x, y, z);
-        let light = [255, (s * 17) as u8, (b * 17) as u8, 6];
-        let origin = Vec3::new(wx as f32, y as f32, wz as f32);
-        let flammable = |dx: i32, dy: i32, dz: i32| ignite_odds(r.get(x + dx, y + dy, z + dz)) > 0;
-        let below = r.get(x, y - 1, z);
-        let floor = sturdy_top(below) || ignite_odds(below) > 0;
-        const H: f32 = 22.4;
-        // A 16 x H plane standing at z = `at` (texture upright), turned by `m` (in 1/16 units).
-        let mut plane = |m: Mat4, at: f32, top: f32| {
-            let corners = [
-                (Vec3::new(0.0, 0.0, at), [0.0, 1.0]),
-                (Vec3::new(16.0, 0.0, at), [1.0, 1.0]),
-                (Vec3::new(16.0, top, at), [1.0, 0.0]),
-                (Vec3::new(0.0, top, at), [0.0, 0.0]),
-            ];
+        let bits = octants(x, y, z, b);
+        let filled = |bits: u8, o: [i32; 3]| bits & (1 << (o[0] + 2 * o[2] + 4 * o[1])) != 0;
+        for i in 0..8 {
+            let o = [i & 1, i >> 2, (i >> 1) & 1];
+            if !filled(bits, o) {
+                continue;
+            }
+            for (face, n) in FACE_N.iter().enumerate() {
+                let q: [i32; 3] = std::array::from_fn(|k| o[k] + n[k]);
+                let inside = q.iter().all(|&c| (0..2).contains(&c));
+                let (lx, ly, lz) = if inside {
+                    if filled(bits, q) {
+                        continue;
+                    }
+                    (x, y, z)
+                } else {
+                    let (nx, ny, nz) = (x + n[0], y + n[1], z + n[2]);
+                    let nb = r.get(nx, ny, nz);
+                    if is_opaque(nb) {
+                        continue;
+                    }
+                    if is_stairs(nb) {
+                        let wrapped = q.map(|c| c.rem_euclid(2));
+                        if filled(octants(nx, ny, nz, nb), wrapped) {
+                            continue;
+                        }
+                    }
+                    (nx, ny, nz)
+                };
+                let (s, bl) = r.light(lx, ly, lz);
+                let lo = o.map(|c| c as f32 * 0.5);
+                let base = self.verts.len() as u32;
+                for &(su, sv) in &CORNERS {
+                    let c = corner_pos(face, su, sv);
+                    let p: [f32; 3] = std::array::from_fn(|k| lo[k] + 0.5 * c[k]);
+                    self.push(Vertex {
+                        pos: [
+                            (x + self.ox) as f32 + p[0],
+                            y as f32 + p[1],
+                            (z + self.oz) as f32 + p[2],
+                        ],
+                        uv: box_uv(face, p),
+                        layer: face_texture(b, face) as f32,
+                        light: [255, (s * 17) as u8, (bl * 17) as u8, face as u8],
+                        tint: [255, 255, 255, 0],
+                    });
+                }
+                self.opaque
+                    .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            }
+        }
+    }
+
+    /// Bed half: a box 9/16 high with the pack's face textures (the legs are cut out of the
+    /// sides) and the bottom at 3/16, turned toward the bed's facing. The faces between the
+    /// halves are left out.
+    fn bed(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+        let (s, bl) = r.light(x, y, z);
+        let f = bed_facing(b);
+        let head = bed_head(b);
+        for (face, &n) in FACE_N.iter().enumerate() {
+            // The texture as on a bed whose head points north: turn the face's direction back.
+            let d = glam::IVec3::from(n);
+            let local = bed_local(d, f);
+            let layer = match (face, local.x, local.z) {
+                (2, ..) if head => tex::BED_HEAD_TOP,
+                (2, ..) => tex::BED_FOOT_TOP,
+                (3, ..) => tex::BED_BOTTOM,
+                (_, 1, _) if head => tex::BED_HEAD_EAST,
+                (_, 1, _) => tex::BED_FOOT_EAST,
+                (_, -1, _) if head => tex::BED_HEAD_WEST,
+                (_, -1, _) => tex::BED_FOOT_WEST,
+                (_, _, -1) if head => tex::BED_HEAD_END,
+                (_, _, 1) if !head => tex::BED_FOOT_END,
+                _ => continue, // toward the other half
+            };
+            // The top and bottom are inside the block: always drawn.
+            if face != 2 && face != 3 && is_opaque(r.get(x + n[0], y + n[1], z + n[2])) {
+                continue;
+            }
+            let (lo, hi) = ([0.0, 0.0, 0.0], [1.0, BED_HEIGHT, 1.0]);
+            let bottom_y = 3.0 / 16.0;
             let base = self.verts.len() as u32;
-            for (c, uv) in corners {
-                let p = origin + m.transform_point3(c) / 16.0;
+            for &(su, sv) in &CORNERS {
+                let c = corner_pos(face, su, sv);
+                let mut p: [f32; 3] = std::array::from_fn(|k| lo[k] + (hi[k] - lo[k]) * c[k]);
+                if face == 3 {
+                    p[1] = bottom_y;
+                }
+                let uv = if face == 2 || face == 3 {
+                    // Top and bottom: the texture's top edge toward the head.
+                    let l = bed_local_f(p[0] - 0.5, p[2] - 0.5, f);
+                    [l.0 + 0.5, l.1 + 0.5]
+                } else {
+                    box_uv(face, p)
+                };
+                // A texel in from the edges: the faces do not tile, so filtering must not
+                // wrap around to the opposite edge (the pillow's white would line the seam).
+                let inset = 1.0 / 128.0;
+                let uv = uv.map(|c| c.clamp(inset, 1.0 - inset));
                 self.push(Vertex {
-                    pos: p.to_array(),
+                    pos: [
+                        (x + self.ox) as f32 + p[0],
+                        y as f32 + p[1],
+                        (z + self.oz) as f32 + p[2],
+                    ],
                     uv,
                     layer: layer as f32,
-                    light,
-                    tint: [255, 255, 255, flags::EMISSIVE],
+                    light: [255, (s * 17) as u8, (bl * 17) as u8, face as u8],
+                    tint: [255, 255, 255, 0],
                 });
             }
             self.opaque
                 .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-            self.opaque
-                .extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
-        };
-        let center = Vec3::splat(8.0);
-        let about = |o: Vec3, rot: Quat, scale: Vec3| {
-            Mat4::from_translation(o)
-                * Mat4::from_scale(scale)
-                * Mat4::from_quat(rot)
-                * Mat4::from_translation(-o)
-        };
-        // Minecraft's `rescale`: a 22.5 degree turn is stretched back to the block's size.
-        let k = 1.0 / 22.5f32.to_radians().cos();
-        let yaw = |quarter: u32| {
-            about(
-                center,
-                Quat::from_rotation_y(-(quarter as f32) * std::f32::consts::FRAC_PI_2),
-                Vec3::ONE,
-            )
-        };
-        if floor {
-            let a = 22.5f32.to_radians();
-            let sx = Vec3::new(1.0, k, k);
-            plane(about(center, Quat::from_rotation_x(-a), sx), 8.8, H);
-            plane(about(center, Quat::from_rotation_x(a), sx), 7.2, H);
-            // The same pair across the other axis.
-            let turn = yaw(1);
-            plane(turn * about(center, Quat::from_rotation_x(-a), sx), 8.8, H);
-            plane(turn * about(center, Quat::from_rotation_x(a), sx), 7.2, H);
-        }
-        // Sides: north (-Z), east, south, west; all of them on the ground.
-        for (quarter, (dx, dz)) in [(0, (0, -1)), (1, (1, 0)), (2, (0, 1)), (3, (-1, 0))] {
-            if floor || flammable(dx, 0, dz) {
-                plane(yaw(quarter), 0.01, H);
-            }
-        }
-        if !floor && flammable(0, 1, 0) {
-            // Two planes hanging from the block above, sloping down toward the middle.
-            let a = 22.5f32.to_radians();
-            let flat = Mat4::from_translation(Vec3::new(0.0, 16.0, 0.0))
-                * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2);
-            let sz = Vec3::new(k, k, 1.0);
-            let hang = |o: Vec3, ang: f32| about(o, Quat::from_rotation_z(ang), sz) * flat;
-            plane(hang(Vec3::new(16.0, 16.0, 8.0), a), 0.0, 16.0);
-            plane(hang(Vec3::new(0.0, 16.0, 8.0), -a), 0.0, 16.0);
         }
     }
 
@@ -877,12 +952,16 @@ pub fn mesh_chunk(
     let mut m = Builder {
         verts: Vec::with_capacity(16_384),
         opaque: Vec::with_capacity(24_576),
+        leaf_inner: Vec::new(),
+        plants: Vec::new(),
+        dirs: Default::default(),
         water: Vec::new(),
         min_y: HEIGHT as f32,
         max_y: 0.0,
         ox: pos.0 * 16 - 16,
         oz: pos.1 * 16 - 16,
     };
+    let mut doors = Vec::new();
     let top = (nb[4].max_y as i32 + 1).min(r.h as i32 - 1);
     for y in 0..=top {
         for z in 16..32 {
@@ -898,15 +977,14 @@ pub fn mesh_chunk(
                     } else {
                         [255; 3]
                     };
+                    let from = m.opaque.len();
                     m.plant(&r, x, y, z, face_texture(b, 0), tint);
+                    let quads = m.opaque.split_off(from);
+                    m.plants.extend(quads);
                     continue;
                 }
                 if is_fluid(b) {
                     m.fluid(&r, x, y, z, b);
-                    continue;
-                }
-                if b == FIRE {
-                    m.fire(&r, x, y, z);
                     continue;
                 }
                 if is_lantern(b) {
@@ -919,6 +997,18 @@ pub fn mesh_chunk(
                 }
                 if is_chest(b) {
                     m.chest(&r, x, y, z, b);
+                    continue;
+                }
+                if is_door(b) {
+                    doors.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
+                    continue;
+                }
+                if is_stairs(b) {
+                    m.stairs(&r, x, y, z, b);
+                    continue;
+                }
+                if is_bed(b) {
+                    m.bed(&r, x, y, z, b);
                     continue;
                 }
                 let fl = if is_leaves(b) {
@@ -952,28 +1042,79 @@ pub fn mesh_chunk(
                         TintKind::Spruce => SPRUCE_TINT,
                         TintKind::Birch => BIRCH_TINT,
                     };
-                    m.cube_face(&r, x, y, z, face, face_texture(b, face), tint, fl);
+                    let rotated = face_rotated(b, face);
+                    let from = m.opaque.len();
+                    m.cube_face(&r, x, y, z, face, face_texture(b, face), tint, fl, rotated);
+                    let quad = m.opaque.split_off(from);
+                    if is_leaves(b) && is_leaves(nbk) {
+                        m.leaf_inner.extend(quad);
+                    } else {
+                        m.dirs[face].extend(quad);
+                    }
                 }
             }
         }
     }
 
-    let opaque_count = m.opaque.len() as u32;
+    // The center chunk's light, sky in the high nibble: (y * 16 + z) * 16 + x.
+    let mut light = vec![0u8; 256 * r.h];
+    for y in 0..r.h {
+        for z in 0..16 {
+            for x in 0..16 {
+                let i = r.idx(x + 16, y, z + 16);
+                light[(y * 16 + z) * 16 + x] = (r.sky[i] << 4) | r.blk[i];
+            }
+        }
+    }
+
+    let dir_counts = std::array::from_fn(|d| m.dirs[d].len() as u32);
     let mut indices = m.opaque;
+    for d in &m.dirs {
+        indices.extend_from_slice(d);
+    }
+    let solid_count = indices.len() as u32;
+    let leaf_inner_count = m.leaf_inner.len() as u32;
+    indices.extend_from_slice(&m.leaf_inner);
+    indices.extend_from_slice(&m.plants);
+    let opaque_count = indices.len() as u32;
     indices.extend_from_slice(&m.water);
     MeshData {
         pos,
         vertices: m.verts,
         indices,
         opaque_count,
+        solid_count,
+        dir_counts,
+        leaf_inner_count,
         min_y: m.min_y,
         max_y: m.max_y,
+        doors,
+        light: ChunkLight {
+            h: r.h,
+            data: light.into(),
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 3x3 neighbourhood of chunks with a stone floor at y 0, the center chunk from `edit`.
+    fn hood(edit: impl Fn(&mut ChunkData)) -> [Arc<ChunkData>; 9] {
+        let floor = || {
+            let mut c = ChunkData::new();
+            for z in 0..16 {
+                for x in 0..16 {
+                    c.set(x, 0, z, STONE);
+                }
+            }
+            c
+        };
+        let mut center = floor();
+        edit(&mut center);
+        std::array::from_fn(|i| Arc::new(if i == 4 { center.clone() } else { floor() }))
+    }
 
     /// Prints where meshing time goes (`cargo test --release mesh_speed -- --nocapture`).
     #[test]
@@ -988,81 +1129,66 @@ mod tests {
             .map(|(x, z)| std::array::from_fn(|i| at(x + i as i32 % 3 - 1, z + i as i32 / 3 - 1)))
             .collect();
         let t = std::time::Instant::now();
-        let mut regions: Vec<Region> = hoods.iter().map(Region::new).collect();
-        let region = t.elapsed();
-        let t = std::time::Instant::now();
-        for r in &mut regions {
-            r.compute_light();
-        }
-        let light = t.elapsed();
-        let t = std::time::Instant::now();
-        for i in 0..9 {
-            for z in 0..16 {
-                for x in 0..16 {
-                    std::hint::black_box(gen.tints(i * 16 + x, z));
-                }
-            }
-        }
-        let tints = t.elapsed();
-        let t = std::time::Instant::now();
-        let mut verts = 0;
+        let mut vertices = 0;
         for (i, nb) in hoods.iter().enumerate() {
-            let pos = (1 + i as i32 % 3, 1 + i as i32 / 3);
-            verts += mesh_chunk(pos, nb, &[], &gen).vertices.len();
+            let m = mesh_chunk(((i % 3) as i32 + 1, (i / 3) as i32 + 1), nb, &[], &gen);
+            vertices += m.vertices.len();
         }
-        let total = t.elapsed();
-        let per = |d: std::time::Duration| d.as_secs_f64() * 1000.0 / 9.0;
-        println!(
-            "per chunk: total {:.2} ms (region {:.2}, light {:.2}, tints {:.2}), {} vertices",
-            per(total),
-            per(region),
-            per(light),
-            per(tints),
-            verts / 9
-        );
+        println!("9 chunks meshed in {:?}, {vertices} vertices", t.elapsed());
+    }
+
+    #[test]
+    fn beds_turn_their_head_north_for_the_textures() {
+        for f in 0..4 {
+            let head = facing_dir(f);
+            assert_eq!(bed_local(head, f), glam::IVec3::NEG_Z);
+            // The bed's right (its east when facing north) stays on its right.
+            assert_eq!(bed_local(facing_dir(f + 1), f), glam::IVec3::X);
+        }
     }
 
     #[test]
     fn glass_wall_faces_join_their_neighbours() {
-        let mut c = ChunkData::new();
-        for y in 1..4 {
-            for x in 1..4 {
-                c.set(x, y, 8, GLASS);
-            }
-        }
-        let c = Arc::new(c);
-        let empty = Arc::new(ChunkData::new());
-        let nb: [Arc<ChunkData>; 9] =
-            std::array::from_fn(|i| if i == 4 { c.clone() } else { empty.clone() });
-        let r = Region::new(&nb);
-        // Region coordinates: the center chunk starts at 16. Face 4 is +Z (u = +X, v = +Y).
-        assert_eq!(
-            glass_mask(&r, 18, 2, 24, 4),
-            0xFF,
-            "middle pane joins all around"
-        );
-        assert_eq!(
-            glass_mask(&r, 17, 1, 24, 4),
-            0b0010_0110,
-            "bottom-left pane joins right, up and the up-right corner"
-        );
-        // A second layer in front hides the neighbour's face, so it does not join.
-        let mut c2 = (*c).clone();
-        c2.set(2, 1, 7, GLASS);
-        let nb: [Arc<ChunkData>; 9] = std::array::from_fn(|i| {
-            if i == 4 {
-                Arc::new(c2.clone())
-            } else {
-                empty.clone()
+        // A glass wall three blocks wide and one high along x, at z 8.
+        let nb = hood(|c| {
+            for x in 7..10 {
+                c.set(x, 1, 8, GLASS);
             }
         });
         let r = Region::new(&nb);
-        // Face 5 is -Z with u = -X: the pane at x+1 is the -u neighbour, now covered in front.
-        assert_eq!(glass_mask(&r, 17, 1, 24, 5) & 0b1, 0);
-        assert_eq!(
-            glass_mask(&r, 17, 1, 24, 4) & 0b10,
-            0b10,
-            "the +Z side still joins"
-        );
+        // Face -Z of the middle pane: joined left and right (u runs along -x), not up or down.
+        let mask = glass_mask(&r, 16 + 8, 1, 16 + 8, 5);
+        assert_eq!(mask & 0b11, 0b11, "{mask:08b}");
+        assert_eq!(mask & 0b1100, 0, "{mask:08b}");
+        // The end pane joins only toward the middle.
+        let end = glass_mask(&r, 16 + 7, 1, 16 + 8, 5);
+        assert_eq!((end & 0b11).count_ones(), 1, "{end:08b}");
+    }
+
+    #[test]
+    fn things_under_a_lintel_get_the_light_around_them() {
+        // A door in a wall with a beam over it: the door's cell is lit from the open sides,
+        // not dark as if it were under a roof.
+        let nb = hood(|c| {
+            for x in 6..11 {
+                for y in 1..4 {
+                    c.set(x, y, 8, PLANKS);
+                }
+            }
+            c.set(8, 1, 8, door_id(0, false, false, false));
+            c.set(8, 2, 8, door_id(0, false, true, false));
+        });
+        let gen = Generator::new(1);
+        let m = mesh_chunk((0, 0), &nb, &[], &gen);
+        let mut world = World::new();
+        world.chunks.insert((0, 0), nb[4].clone());
+        world.light.insert((0, 0), m.light.clone());
+        assert_eq!(m.doors.len(), 2);
+        for y in [1.5, 2.5] {
+            let (sky, _) = world.light_estimate(glam::Vec3::new(8.5, y, 8.5));
+            assert!(sky >= 14, "door at y {y}: sky {sky}");
+        }
+        // Inside the wall: the light of its open sides.
+        assert_eq!(world.light_estimate(glam::Vec3::new(6.5, 1.5, 8.5)).0, 15);
     }
 }

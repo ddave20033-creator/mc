@@ -17,6 +17,7 @@ layout(location = 6) flat in int vNormal;
 
 layout(location = 0) out vec4 outColor;
 
+const int F_LEAVES = 1;
 const int F_PLANT = 2;
 const int F_EMISSIVE = 4;
 const int F_WATER = 8;
@@ -26,18 +27,36 @@ const int F_ENTITY = 64;
 const int F_FLUID = 128;
 const float LAVA_LAYER = 38.0;
 const float GRASS_SIDE_LAYER = 1.0;
+const float GRASS_TOP_LAYER = 0.0;
+const float SNOW_LAYER = 9.0;
+const float SNOWY_GRASS_SIDE_LAYER = 16.0;
+
+// Where a block covers only a few pixels on this screen, its fine detail cannot show and just
+// flickers as the view moves. Measured in pixels per block (the screen's height, field of view
+// and zoom decide it, so a sharper screen keeps detail farther out): below FULL_DETAIL_PX the
+// textures melt into their average color, fully at AVERAGE_PX...
+const float FULL_DETAIL_PX = 4.0;
+const float AVERAGE_PX = 1.0;
+// ...and grass and flowers fade out between these (world.vert drops them below).
+const float PLANT_FULL_PX = 10.0;
+const float PLANT_GONE_PX = 5.0;
+
+// Ordered 4x4 dither threshold: fading without alpha blending.
+float bayer4(vec2 p) {
+    ivec2 i = ivec2(p) & 3;
+    const int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+    return (float(m[i.y * 4 + i.x]) + 0.5) / 16.0;
+}
 const float FURNACE_LIT_LAYER = 63.0;
+
 const float TORCH_FLAME_LAYER = 113.0;
 const float GLASS_LAYER = 13.0;
 const float FURNACE_ANIM_LAYER = 117.0;
 const float FURNACE_FRAMES = 12.0;
-// Must match tex::TNT_SIDE, tex::FIRE_0, tex::FIRE_1 and tex::FIRE_FRAMES.
-const float TNT_SIDE_LAYER = 356.0;
-const float TNT_BOTTOM_LAYER = 358.0;
-const float FIRE_0_LAYER = 362.0;
-const float FIRE_1_LAYER = 394.0;
-const float FIRE_FRAMES = 32.0;
-const float CREEPER_LAYER = 442.0;
+// Water and lava animation frames (tex::WATER_ANIM, tex::LAVA_ANIM).
+const float WATER_ANIM_LAYER = 376.0;
+const float LAVA_ANIM_LAYER = 408.0;
+const float FLUID_FRAMES = 32.0;
 
 const vec3 NORMALS[7] = vec3[7](
     vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0),
@@ -108,14 +127,50 @@ void main() {
         }
     }
     bool torchFire = abs(vLayer - TORCH_FLAME_LAYER) < 0.5;
-    vec4 tex = texture(blocks, vec3(uv, vLayer));
-    if (vLayer > FIRE_0_LAYER - 0.5 && vLayer < FIRE_1_LAYER + FIRE_FRAMES - 0.5) {
-        // Fire: Minecraft's animations at one frame per tick (fire_0's .mcmeta starts halfway
-        // through its strip).
-        bool first = vLayer < FIRE_1_LAYER - 0.5;
-        float frame = mod(floor(time * 20.0) + (first ? 16.0 : 0.0), FIRE_FRAMES);
-        tex = texture(blocks, vec3(uv, (first ? FIRE_0_LAYER : FIRE_1_LAYER) + frame));
+    vec4 tex;
+    if (abs(vLayer - GLASS_LAYER) < 0.5) {
+        // Joined glass: near a joined edge, read the texture from farther in. Far away the
+        // smaller mip levels would otherwise smear the frame into the pane and the panes
+        // would look apart again.
+        int joined = 255 - int(vTint.r * 255.0 + 0.5);
+        float lodLevel = max(textureQueryLod(blocks, uv).x, 0.0);
+        float edge = 7.0 / 128.0 + exp2(lodLevel) * 1.5 / 128.0;
+        vec2 suv = uv;
+        if ((joined & 1) != 0) suv.x = max(suv.x, edge);
+        if ((joined & 2) != 0) suv.x = min(suv.x, 1.0 - edge);
+        if ((joined & 4) != 0) suv.y = max(suv.y, edge);
+        if ((joined & 8) != 0) suv.y = min(suv.y, 1.0 - edge);
+        tex = textureGrad(blocks, vec3(suv, vLayer), dFdx(uv), dFdy(uv));
+    } else if (fluid) {
+        // Animated like Minecraft's still water (10 frames a second) and lava (slower).
+        bool lava = abs(vLayer - LAVA_LAYER) < 0.5;
+        float fps = lava ? 6.67 : 10.0;
+        float frame = mod(floor(time * fps), FLUID_FRAMES);
+        tex = texture(blocks, vec3(uv, (lava ? LAVA_ANIM_LAYER : WATER_ANIM_LAYER) + frame));
+    } else {
+        tex = texture(blocks, vec3(uv, vLayer));
     }
+
+    // Detail too small for the screen: the texture turns into its average color (its smallest
+    // mip level); a grass-block side into the grass top's, so the green and brown stripes of far
+    // hillsides stop flickering; leaf gaps close.
+    float camDist = distance(frame.camPos.xyz, vWorld);
+    float blockPx = frame.detail.x / max(camDist, 1e-3);
+    bool leaves = (vFlags & F_LEAVES) != 0;
+    bool entity = (vFlags & (F_ENTITY | F_VIEWMODEL)) != 0;
+    float far = (water || fluid || entity) ? 0.0 : 1.0 - smoothstep(AVERAGE_PX, FULL_DETAIL_PX, blockPx);
+    if (far > 0.0) {
+        float avgLayer = vLayer;
+        bool grassSide = abs(vLayer - GRASS_SIDE_LAYER) < 0.5;
+        if (grassSide) avgLayer = GRASS_TOP_LAYER;
+        if (abs(vLayer - SNOWY_GRASS_SIDE_LAYER) < 0.5) avgLayer = SNOW_LAYER;
+        float top = float(textureQueryLevels(blocks) - 1);
+        vec4 avg = textureLod(blocks, vec3(0.5, 0.5, avgLayer), top);
+        tex.rgb = mix(tex.rgb, avg.rgb, far);
+        if (grassSide || leaves) tex.a = mix(tex.a, 1.0, far);
+    }
+    float plantFade = plant && !entity ? smoothstep(PLANT_GONE_PX, PLANT_FULL_PX, blockPx) : 1.0;
+
     bool furnaceLit = abs(vLayer - FURNACE_LIT_LAYER) < 0.5;
     if (furnaceLit && tex.a > 0.9) {
         // A resource pack's lit furnace (full alpha; built-in opaque textures use 0.6) plays
@@ -135,7 +190,20 @@ void main() {
         outColor = vec4(factor * 0.5, 1.0);
         return;
     }
-    if (!water && tex.a < 0.5) discard;
+    // Grass and leaves with anti-aliasing on (alpha to coverage): the cut-out edge covers only
+    // some of a pixel's samples. Far away the filtered alpha is soft; sharpened to about a
+    // pixel it smooths the edges that would otherwise flicker as the view moves.
+    float coverage = 1.0;
+    bool cutout = (vFlags & (F_LEAVES | F_PLANT)) != 0;
+    if (cutout && frame.lightDir.w > 0.5) {
+        coverage = clamp((tex.a - 0.5) / max(fwidth(tex.a), 1e-4) + 0.5, 0.0, 1.0);
+        coverage *= plantFade;
+        if (coverage <= 0.0) discard;
+    } else if (!water && tex.a < 0.5) {
+        discard;
+    } else if (plantFade < bayer4(gl_FragCoord.xy)) {
+        discard;
+    }
     // Glass faces carry their connection mask inverted in the red tint channel.
     bool glass = abs(vLayer - GLASS_LAYER) < 0.5;
     if (glass && glassSeam(uv, 255 - int(vTint.r * 255.0 + 0.5))) discard;
@@ -167,11 +235,17 @@ void main() {
         if (dot(N, frame.camPos.xyz - vWorld) < 0.0) N = -N;
     }
 
-    float ao = mix(0.45, 1.0, vLight.x);
+    // Blocks only a few pixels big: their top and side faces lit much alike (and no corner
+    // shadows), so far terraced hillsides do not turn into flickering light and dark stripes.
+    // Only past the shadows' reach (about 96 blocks): a face turned away from the sun given
+    // sunlight would catch flickering specks of it from the shadow map.
+    float even = far * 0.45 * smoothstep(80.0, 100.0, camDist);
+    vec3 NL = normalize(mix(N, vec3(0.0, 1.0, 0.0), even));
+    float ao = mix(mix(0.45, 1.0, vLight.x), 1.0, far);
     float sky = lightCurve(vLight.y);
     float blk = lightCurve(vLight.z);
     vec3 L = frame.lightDir.xyz;
-    float ndl = plant ? 0.8 : dot(N, L);
+    float ndl = plant ? 0.8 : dot(NL, L);
     float exposure = smoothstep(0.45, 0.85, vLight.y);
     float vis = 0.0;
     if (ndl > 0.0 && exposure > 0.0) {
@@ -180,7 +254,7 @@ void main() {
 
     // Sky light with classic face shading, modulated by sun visibility:
     // shaded areas turn slightly cooler and darker, sunlit ones slightly warmer.
-    float shade = plant ? 0.9 : faceShade(N);
+    float shade = plant ? 0.9 : faceShade(NL);
     float strength = frame.sunColor.w;
     vec3 sunMod = mix(vec3(1.0), mix(vec3(0.7, 0.74, 0.84), frame.sunColor.rgb * 1.12, vis), strength);
     vec3 skyLight = frame.ambient.rgb * sky * shade * sunMod;
@@ -194,23 +268,13 @@ void main() {
     }
     vec3 col = albedo * (light * ao + vec3(0.02));
     if (emissive) col = albedo * 1.4;
-    // Flames on a burning entity: full bright like Minecraft, not blown out to white.
-    bool entityFire = emissive && (vFlags & F_ENTITY) != 0
-        && vLayer > FIRE_0_LAYER - 0.5 && vLayer < FIRE_1_LAYER + FIRE_FRAMES - 0.5;
-    if (entityFire) col = albedo * 0.85;
-    // Primed TNT and a swelling creeper flashing: lit normally, washed out to white
-    // (Minecraft's white overlay).
-    bool tntFlash = emissive && (vFlags & F_ENTITY) != 0
-        && ((vLayer > TNT_SIDE_LAYER - 0.5 && vLayer < TNT_BOTTOM_LAYER + 0.5)
-            || abs(vLayer - CREEPER_LAYER) < 0.5);
-    if (tntFlash) col = mix(albedo * (light * ao + vec3(0.02)), vec3(1.2), 0.6);
     if (torchFire) col = flame.rgb * 1.25;
     if (furnaceFire) col = mix(col, flame.rgb * 0.88, flame.a);
 
     vec3 toCam = frame.camPos.xyz - vWorld;
     float dist = length(toCam);
     vec3 V = toCam / max(dist, 1e-4);
-    float alpha = 1.0;
+    float alpha = coverage;
     if (torchFire) alpha = flame.a;
 
     if (water) {

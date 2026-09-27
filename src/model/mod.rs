@@ -10,7 +10,9 @@ pub mod player;
 use crate::item::{icon, Icon, ItemId};
 use crate::world::mesh::{corner_pos, corner_uv, flags, Vertex, CORNERS};
 use crate::world::textures::{tex, ITEM_MASKS, MASK};
-use crate::world::{face_texture, icon_tint, is_plant, is_water, tint_kind, TintKind, TORCH};
+use crate::world::{
+    face_texture, icon_tint, is_plant, is_stairs, is_water, tint_kind, TintKind, TORCH,
+};
 use glam::{Mat4, Vec3};
 /// Any item centered on the origin with unit size: a cube for blocks, a thin double-sided
 /// sprite for everything else.
@@ -197,6 +199,12 @@ pub fn emit_item(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8) 
     let tint = icon_tint(b);
     if is_plant(b) {
         emit_cross(out, m, face_texture(b, 0), tint, light, fl);
+    } else if is_stairs(b) {
+        let layers = [face_texture(b, 0); 6];
+        let tints = [[255; 3]; 6];
+        let h = 0.5;
+        emit_box(out, m, Vec3::splat(-h), Vec3::new(h, 0.0, h), layers, tints, light, fl);
+        emit_box(out, m, Vec3::new(-h, 0.0, 0.0), Vec3::splat(h), layers, tints, light, fl);
     } else {
         let layers = std::array::from_fn(|f| face_texture(b, f));
         let tints = std::array::from_fn(|f| {
@@ -285,51 +293,4 @@ pub fn crack_overlay(out: &mut Vec<Vertex>, p: glam::IVec3, progress: f32) {
         [255, 255, 0, 0],
         flags::OVERLAY,
     );
-}
-
-/// Flames on a burning entity, like Minecraft's `renderFlame`: layers of the fire animation
-/// (fire_0 and fire_1 by turns) turned toward the camera, stacked up the entity's height,
-/// each 0.15 higher, a bit narrower and further forward. `feet` is the bottom center of its box.
-pub fn emit_entity_fire(out: &mut Vec<Vertex>, feet: Vec3, width: f32, height: f32, cam: Vec3) {
-    use crate::world::textures::tex;
-    let f = width * 1.4;
-    let to_cam = Vec3::new(cam.x - feet.x, 0.0, cam.z - feet.z)
-        .try_normalize()
-        .unwrap_or(Vec3::Z);
-    let side = Vec3::Y.cross(to_cam);
-    let mut left = height / f;
-    let (mut half, mut drop, mut depth) = (0.5, 0.0, 0.0);
-    let forward = 0.3 - left.floor() * 0.02;
-    let light = crate::util::vertex_light(15, 15);
-    let mut l = 0;
-    while left > 0.0 {
-        let layer = if l % 2 == 0 { tex::FIRE_0 } else { tex::FIRE_1 };
-        let (u0, u1) = if (l / 2) % 2 == 0 {
-            (1.0, 0.0)
-        } else {
-            (0.0, 1.0)
-        };
-        let at = |x: f32, y: f32| feet + (side * x + Vec3::Y * y + to_cam * (forward + depth)) * f;
-        let corners = [
-            (at(half, -drop), [u1, 1.0]),
-            (at(-half, -drop), [u0, 1.0]),
-            (at(-half, 1.4 - drop), [u0, 0.0]),
-            (at(half, 1.4 - drop), [u1, 0.0]),
-        ];
-        let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-            pos: corners[i].0.to_array(),
-            uv: corners[i].1,
-            layer: layer as f32,
-            light: [light[0], light[1], light[2], 6],
-            tint: [255, 255, 255, flags::ENTITY | flags::EMISSIVE],
-        });
-        // Both sides, so it shows whichever way the quad ends up wound.
-        out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-        out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
-        left -= 0.45;
-        drop -= 0.15;
-        half *= 0.9;
-        depth += 0.03;
-        l += 1;
-    }
 }

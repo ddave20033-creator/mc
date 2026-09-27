@@ -54,10 +54,7 @@ pub const WALL_TORCH: u8 = 55;
 /// Lantern standing on a block, and hanging from the block above.
 pub const LANTERN: u8 = 59;
 pub const LANTERN_HANGING: u8 = 60;
-/// Lit with flint and steel (or by another explosion) it turns into primed TNT.
-pub const TNT: u8 = 61;
-/// Fire: spreads to and burns up flammable blocks (its age lives in `Game::fires`).
-pub const FIRE: u8 = 62;
+pub const WOOL: u8 = 61;
 
 /// Fluids: base id + level. Level 0 = source, 1..7 = flowing, 8 = falling.
 pub const WATER: u8 = 64;
@@ -68,6 +65,331 @@ pub const FALLING: u8 = 8;
 /// (the viewer's right, seen from the front) for `CHEST_LEFT`, local -X for `CHEST_RIGHT`.
 pub const CHEST_LEFT: u8 = 96;
 pub const CHEST_RIGHT: u8 = 100;
+
+/// Oak door halves: base id + facing (bits 0-1, the way the player looked when placing it)
+/// + open (bit 2) + upper half (bit 3) + hinge on the right (bit 4) + swings out (bit 5:
+/// toward the side it closes on, into the next block, instead of into its own block).
+pub const OAK_DOOR: u8 = 104;
+/// Oak stairs: base id + facing (bits 0-1, toward the tall back) + upside down (bit 2).
+pub const OAK_STAIRS: u8 = 168;
+/// Logs lying along X or Z (the plain ids stand upright).
+pub const OAK_LOG_X: u8 = 176;
+pub const OAK_LOG_Z: u8 = 177;
+pub const SPRUCE_LOG_X: u8 = 178;
+pub const SPRUCE_LOG_Z: u8 = 179;
+pub const BIRCH_LOG_X: u8 = 180;
+pub const BIRCH_LOG_Z: u8 = 181;
+/// Red bed halves: base id + facing (bits 0-1, from the foot toward the head: the way the
+/// player looked when placing it) + head half (bit 2).
+pub const BED: u8 = 184;
+/// Height of a bed's top (Minecraft: 9 pixels).
+pub const BED_HEIGHT: f32 = 9.0 / 16.0;
+
+/// Horizontal unit vectors of the facings (0 north/-Z, 1 east/+X, 2 south/+Z, 3 west/-X).
+pub fn facing_dir(f: u8) -> IVec3 {
+    [IVec3::NEG_Z, IVec3::X, IVec3::Z, IVec3::NEG_X][f as usize & 3]
+}
+
+/// Facing toward a horizontal direction (the larger of its x and z).
+pub fn facing_of(dx: f32, dz: f32) -> u8 {
+    if dx.abs() > dz.abs() {
+        if dx > 0.0 {
+            1
+        } else {
+            3
+        }
+    } else if dz > 0.0 {
+        2
+    } else {
+        0
+    }
+}
+
+#[inline]
+pub fn is_door(b: u8) -> bool {
+    (OAK_DOOR..OAK_DOOR + 64).contains(&b)
+}
+pub fn door_id(facing: u8, open: bool, upper: bool, hinge_right: bool) -> u8 {
+    OAK_DOOR
+        + (facing & 3)
+        + ((open as u8) << 2)
+        + ((upper as u8) << 3)
+        + ((hinge_right as u8) << 4)
+}
+pub fn door_facing(b: u8) -> u8 {
+    (b - OAK_DOOR) & 3
+}
+pub fn door_open(b: u8) -> bool {
+    (b - OAK_DOOR) & 4 != 0
+}
+pub fn door_upper(b: u8) -> bool {
+    (b - OAK_DOOR) & 8 != 0
+}
+pub fn door_hinge_right(b: u8) -> bool {
+    (b - OAK_DOOR) & 16 != 0
+}
+pub fn door_out(b: u8) -> bool {
+    (b - OAK_DOOR) & 32 != 0
+}
+/// The same door half opened (swinging out or in) or closed. A closed door keeps the way it
+/// last swung, so it swings back the same way.
+pub fn door_set_open(b: u8, open: bool, out: bool) -> u8 {
+    let keep = (b - OAK_DOOR) & !(4 | 32);
+    let out = if open { out } else { door_out(b) };
+    OAK_DOOR + keep + ((open as u8) << 2) + ((out as u8) << 5)
+}
+/// Offset from a door half to its other half.
+pub fn door_other_half(b: u8) -> IVec3 {
+    if door_upper(b) {
+        IVec3::NEG_Y
+    } else {
+        IVec3::Y
+    }
+}
+/// The block side the door panel lies against, like Minecraft's door shapes: closed on the
+/// side the player placed it from, open along the hinge side.
+pub fn door_side_facing(facing: u8, open: bool, hinge_right: bool) -> u8 {
+    (if !open {
+        facing + 2
+    } else if hinge_right {
+        facing + 1
+    } else {
+        facing + 3
+    }) & 3
+}
+pub fn door_side(b: u8) -> IVec3 {
+    facing_dir(door_side_facing(
+        door_facing(b),
+        door_open(b),
+        door_hinge_right(b),
+    ))
+}
+
+#[inline]
+pub fn is_stairs(b: u8) -> bool {
+    (OAK_STAIRS..OAK_STAIRS + 8).contains(&b)
+}
+pub fn stairs_id(facing: u8, upside_down: bool) -> u8 {
+    OAK_STAIRS + (facing & 3) + ((upside_down as u8) << 2)
+}
+pub fn stairs_facing(b: u8) -> u8 {
+    (b - OAK_STAIRS) & 3
+}
+pub fn stairs_upside_down(b: u8) -> bool {
+    (b - OAK_STAIRS) & 4 != 0
+}
+
+/// Which eighths of the block a stair fills: bit `x + 2 * z + 4 * y` for the half-block
+/// cube at (x, y, z) in 0..2. Straight, or an inner/outer corner when it meets another stair
+/// at its front or back (Minecraft's stair shapes). `get` reads a block at an offset.
+pub fn stairs_octants(b: u8, get: impl Fn(IVec3) -> u8) -> u8 {
+    let f = stairs_facing(b);
+    let up = stairs_upside_down(b);
+    let d = facing_dir(f);
+    let left = facing_dir(f + 3);
+    let same_half = |o: u8| is_stairs(o) && stairs_upside_down(o) == up;
+    // A neighbour at `dir` that would not let this one bend toward it.
+    let can_take = |dir: IVec3| {
+        let o = get(dir);
+        !(same_half(o) && stairs_facing(o) == f)
+    };
+    // 0 straight, 1 outer left, 2 outer right, 3 inner left, 4 inner right.
+    let mut shape = 0;
+    let front = get(d);
+    if same_half(front) {
+        let f2 = stairs_facing(front);
+        if (f2 & 1) != (f & 1) && can_take(-facing_dir(f2)) {
+            shape = if f2 == (f + 3) & 3 { 1 } else { 2 };
+        }
+    }
+    if shape == 0 {
+        let back = get(-d);
+        if same_half(back) {
+            let f3 = stairs_facing(back);
+            if (f3 & 1) != (f & 1) && can_take(facing_dir(f3)) {
+                shape = if f3 == (f + 3) & 3 { 3 } else { 4 };
+            }
+        }
+    }
+    let (low, high) = if up { (1, 0) } else { (0, 1) };
+    let mut bits = 0u8;
+    for z in 0..2 {
+        for x in 0..2 {
+            bits |= 1 << (x + 2 * z + 4 * low);
+            // Quarter center relative to the block center.
+            let c = IVec3::new(2 * x - 1, 0, 2 * z - 1);
+            let back = c.dot(d) > 0;
+            let on_left = c.dot(left) > 0;
+            let fill = match shape {
+                0 => back,
+                1 => back && on_left,
+                2 => back && !on_left,
+                3 => back || on_left,
+                _ => back || !on_left,
+            };
+            if fill {
+                bits |= 1 << (x + 2 * z + 4 * high);
+            }
+        }
+    }
+    bits
+}
+
+#[inline]
+pub fn is_bed(b: u8) -> bool {
+    (BED..BED + 8).contains(&b)
+}
+pub fn bed_id(facing: u8, head: bool) -> u8 {
+    BED + (facing & 3) + ((head as u8) << 2)
+}
+pub fn bed_facing(b: u8) -> u8 {
+    (b - BED) & 3
+}
+pub fn bed_head(b: u8) -> bool {
+    (b - BED) & 4 != 0
+}
+/// Offset from a bed half to its other half.
+pub fn bed_other_half(b: u8) -> IVec3 {
+    let d = facing_dir(bed_facing(b));
+    if bed_head(b) {
+        -d
+    } else {
+        d
+    }
+}
+
+#[inline]
+pub fn is_log(b: u8) -> bool {
+    matches!(b, OAK_LOG | SPRUCE_LOG | BIRCH_LOG) || (OAK_LOG_X..=BIRCH_LOG_Z).contains(&b)
+}
+/// The upright log of a log block.
+pub fn log_base(b: u8) -> u8 {
+    match b {
+        OAK_LOG_X | OAK_LOG_Z => OAK_LOG,
+        SPRUCE_LOG_X | SPRUCE_LOG_Z => SPRUCE_LOG,
+        BIRCH_LOG_X | BIRCH_LOG_Z => BIRCH_LOG,
+        _ => b,
+    }
+}
+/// Log lying along `axis` (0 x, 1 y, 2 z).
+pub fn log_with_axis(base: u8, axis: usize) -> u8 {
+    let (x, z) = match base {
+        SPRUCE_LOG => (SPRUCE_LOG_X, SPRUCE_LOG_Z),
+        BIRCH_LOG => (BIRCH_LOG_X, BIRCH_LOG_Z),
+        _ => (OAK_LOG_X, OAK_LOG_Z),
+    };
+    match axis {
+        0 => x,
+        2 => z,
+        _ => base,
+    }
+}
+/// Axis a log runs along (0 x, 1 y, 2 z).
+pub fn log_axis(b: u8) -> usize {
+    match b {
+        OAK_LOG_X | SPRUCE_LOG_X | BIRCH_LOG_X => 0,
+        OAK_LOG_Z | SPRUCE_LOG_Z | BIRCH_LOG_Z => 2,
+        _ => 1,
+    }
+}
+/// The face's texture is turned a quarter (the bark of a log lying on its side).
+pub fn face_rotated(b: u8, face: usize) -> bool {
+    match log_axis(b) {
+        0 => face >= 2,
+        2 => face < 2,
+        _ => false,
+    }
+}
+
+/// Up to 8 boxes (block-local corners in 0..1) a block is made of, for collisions and aiming.
+#[derive(Clone, Copy)]
+pub struct Boxes {
+    pub n: usize,
+    pub b: [([f32; 3], [f32; 3]); 8],
+}
+
+impl Boxes {
+    pub fn one(lo: [f32; 3], hi: [f32; 3]) -> Self {
+        let mut b = [([0.0; 3], [0.0; 3]); 8];
+        b[0] = (lo, hi);
+        Self { n: 1, b }
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &([f32; 3], [f32; 3])> {
+        self.b[..self.n].iter()
+    }
+    /// The smallest box around all of them.
+    pub fn bounds(&self) -> ([f32; 3], [f32; 3]) {
+        let mut lo = [1.0f32; 3];
+        let mut hi = [0.0f32; 3];
+        for (a, b) in self.iter() {
+            for k in 0..3 {
+                lo[k] = lo[k].min(a[k]);
+                hi[k] = hi[k].max(b[k]);
+            }
+        }
+        (lo, hi)
+    }
+}
+
+/// Box of a door panel against side `s` of the block.
+pub fn door_panel(s: IVec3) -> ([f32; 3], [f32; 3]) {
+    let t = 3.0 / 16.0;
+    let mut lo = [0.0; 3];
+    let mut hi = [1.0; 3];
+    for k in [0, 2] {
+        match s[k] {
+            1 => lo[k] = 1.0 - t,
+            -1 => hi[k] = t,
+            _ => {}
+        }
+    }
+    (lo, hi)
+}
+
+/// The side a door panel closes on (unit vector from the block center).
+pub fn door_closed_side(b: u8) -> IVec3 {
+    facing_dir(door_side_facing(door_facing(b), false, door_hinge_right(b)))
+}
+
+/// The shape of a solid block (a full cube for most). `get` reads a block at an offset.
+/// A door swung out reaches into the next block.
+pub fn block_boxes(b: u8, get: impl Fn(IVec3) -> u8) -> Boxes {
+    if is_door(b) {
+        let (mut lo, mut hi) = door_panel(door_side(b));
+        if door_open(b) && door_out(b) {
+            let c = door_closed_side(b);
+            let shift = 1.0 - 3.0 / 16.0;
+            for k in [0, 2] {
+                lo[k] += c[k] as f32 * shift;
+                hi[k] += c[k] as f32 * shift;
+            }
+        }
+        return Boxes::one(lo, hi);
+    }
+    if is_stairs(b) {
+        let bits = stairs_octants(b, get);
+        let mut out = Boxes {
+            n: 0,
+            b: [([0.0; 3], [0.0; 3]); 8],
+        };
+        for i in 0..8 {
+            if bits & (1 << i) != 0 {
+                let o = [
+                    (i & 1) as f32 * 0.5,
+                    (i >> 2) as f32 * 0.5,
+                    ((i >> 1) & 1) as f32 * 0.5,
+                ];
+                out.b[out.n] = (o, [o[0] + 0.5, o[1] + 0.5, o[2] + 0.5]);
+                out.n += 1;
+            }
+        }
+        return out;
+    }
+    if is_bed(b) {
+        return Boxes::one([0.0; 3], [1.0, BED_HEIGHT, 1.0]);
+    }
+    Boxes::one([0.0; 3], [1.0; 3])
+}
 
 #[inline]
 pub fn is_water(b: u8) -> bool {
@@ -100,38 +422,6 @@ pub fn is_sapling(b: u8) -> bool {
 #[inline]
 pub fn is_torch(b: u8) -> bool {
     b == TORCH || (WALL_TORCH..WALL_TORCH + 4).contains(&b)
-}
-
-/// Minecraft's fire encouragement: how readily fire spreads next to this block.
-pub fn ignite_odds(b: u8) -> u32 {
-    match b {
-        PLANKS | OAK_LOG | BIRCH_LOG | SPRUCE_LOG | COAL_BLOCK => 5,
-        TNT => 15,
-        _ if is_leaves(b) => 30,
-        TALL_GRASS | POPPY | DANDELION | DEAD_BUSH => 60,
-        _ => 0,
-    }
-}
-
-/// Minecraft's flammability: how quickly fire burns this block away.
-pub fn burn_odds(b: u8) -> u32 {
-    match b {
-        PLANKS => 20,
-        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | COAL_BLOCK => 5,
-        _ if is_leaves(b) => 60,
-        TNT | TALL_GRASS | POPPY | DANDELION | DEAD_BUSH => 100,
-        _ => 0,
-    }
-}
-
-/// Lava sets fire next to these (flammable blocks, and a few that do not burn away).
-pub fn lava_ignites(b: u8) -> bool {
-    ignite_odds(b) > 0 || b == CRAFTING_TABLE || is_chest(b)
-}
-
-/// A full top face that fire (and other things) can sit on.
-pub fn sturdy_top(b: u8) -> bool {
-    is_solid(b) && !is_chest(b) && b != CACTUS
 }
 
 #[inline]
@@ -222,7 +512,7 @@ pub fn front_face(facing: u8) -> usize {
 }
 /// Needs a solid block below it (breaks otherwise).
 pub fn needs_support(b: u8) -> bool {
-    is_plant(b) || is_torch(b) || is_lantern(b) || b == CACTUS
+    is_plant(b) || is_torch(b) || is_lantern(b) || b == CACTUS || is_door(b)
 }
 /// Falls like sand when unsupported.
 pub fn has_gravity(b: u8) -> bool {
@@ -239,17 +529,19 @@ pub fn is_opaque(b: u8) -> bool {
         || is_plant(b)
         || is_fluid(b)
         || is_chest(b)
-        || b == FIRE)
+        || is_door(b)
+        || is_stairs(b)
+        || is_bed(b))
 }
 /// Blocks player movement.
 #[inline]
 pub fn is_solid(b: u8) -> bool {
-    !(b == AIR || is_torch(b) || is_lantern(b) || is_plant(b) || is_fluid(b) || b == FIRE)
+    !(b == AIR || is_torch(b) || is_lantern(b) || is_plant(b) || is_fluid(b))
 }
 /// Can be overwritten by placing a block or by flowing fluid.
 #[inline]
 pub fn is_replaceable(b: u8) -> bool {
-    b == AIR || b == TALL_GRASS || is_fluid(b) || b == FIRE
+    b == AIR || b == TALL_GRASS || is_fluid(b)
 }
 /// Flowing fluid washes these away.
 #[inline]
@@ -259,13 +551,13 @@ pub fn fluid_breaks(b: u8) -> bool {
 /// Stops full-strength sunlight (used for the heightmap).
 #[inline]
 pub fn attenuates_sky(b: u8) -> bool {
-    !(b == AIR || b == GLASS || is_torch(b) || is_lantern(b) || is_plant(b) || b == FIRE)
+    !(b == AIR || b == GLASS || is_torch(b) || is_lantern(b) || is_plant(b) || is_door(b))
 }
 #[inline]
 pub fn emission(b: u8) -> u8 {
     match b {
         _ if is_lava(b) => 15,
-        GLOWSTONE | FIRE => 15,
+        GLOWSTONE => 15,
         _ if is_torch(b) => 14,
         _ if is_lantern(b) => 15,
         _ if (FURNACE_LIT..FURNACE_LIT + 4).contains(&b) => 13,
@@ -273,12 +565,37 @@ pub fn emission(b: u8) -> u8 {
     }
 }
 
+/// Axis (0 x, 1 y, 2 z) of each face's normal.
+const FACE_AXIS: [usize; 6] = [0, 0, 1, 1, 2, 2];
+
 /// Texture array layer for a block face. Faces: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z.
 pub fn face_texture(b: u8, face: usize) -> u32 {
     let top = face == 2;
     let bottom = face == 3;
     let ends = top || bottom;
+    if log_axis(b) != 1 {
+        let end = FACE_AXIS[face] == log_axis(b);
+        return face_texture(log_base(b), if end { 2 } else { 0 });
+    }
     match b {
+        _ if is_door(b) => {
+            if door_upper(b) {
+                tex::DOOR_TOP
+            } else {
+                tex::DOOR_BOTTOM
+            }
+        }
+        _ if is_stairs(b) => tex::PLANKS,
+        // The bed is meshed on its own; this is for particles.
+        _ if is_bed(b) => {
+            if bottom {
+                tex::BED_BOTTOM
+            } else if bed_head(b) {
+                tex::BED_HEAD_TOP
+            } else {
+                tex::BED_FOOT_TOP
+            }
+        }
         GRASS => {
             if top {
                 tex::GRASS_TOP
@@ -396,12 +713,7 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
         DIAMOND_BLOCK => tex::DIAMOND_BLOCK,
         COAL_BLOCK => tex::COAL_BLOCK,
         STONE_BRICKS => tex::STONE_BRICKS,
-        TNT => match face {
-            2 => tex::TNT_TOP,
-            3 => tex::TNT_BOTTOM,
-            _ => tex::TNT_SIDE,
-        },
-        FIRE => tex::FIRE_0,
+        WOOL => tex::WOOL,
         _ if is_water(b) => tex::WATER,
         _ if is_lava(b) => tex::LAVA,
         _ => tex::STONE,
@@ -462,6 +774,83 @@ mod tests {
         }
         assert_eq!(torch_support_offset(TORCH), Some(IVec3::NEG_Y));
         assert_eq!(wall_torch_for_support(IVec3::Y), None);
+    }
+
+    #[test]
+    fn door_shapes_match_minecraft() {
+        // Placed looking east: closed on the west side; open along the hinge side.
+        assert_eq!(door_side(door_id(1, false, false, false)), IVec3::NEG_X);
+        assert_eq!(door_side(door_id(1, true, false, false)), IVec3::NEG_Z);
+        assert_eq!(door_side(door_id(1, true, false, true)), IVec3::Z);
+        // Swung out, the panel lies in the block west of it.
+        let out = door_set_open(door_id(1, false, false, false), true, true);
+        let (lo, hi) = block_boxes(out, |_| AIR).b[0];
+        assert!(lo[0] < 0.0 && hi[0] <= 3.0 / 16.0 + 1e-6 && lo[0] > -1.0, "{lo:?} {hi:?}");
+        assert!(lo[2] == 0.0 && hi[2] == 3.0 / 16.0);
+        for f in 0..4 {
+            for bits in 0..8u8 {
+                let b = door_id(f, bits & 1 != 0, bits & 2 != 0, bits & 4 != 0);
+                assert!(is_door(b) && !is_opaque(b) && is_solid(b));
+                assert_eq!(door_facing(b), f);
+                for out in [false, true] {
+                    let opened = door_set_open(b, true, out);
+                    assert!(door_open(opened) && door_out(opened) == out);
+                    assert_eq!(door_facing(opened), f);
+                    assert_eq!(door_upper(opened), door_upper(b));
+                    let closed = door_set_open(opened, false, false);
+                    assert!(!door_open(closed) && door_out(closed) == out);
+                }
+                assert_eq!(crate::item::item_of_block(b), Some(OAK_DOOR as crate::item::ItemId));
+            }
+        }
+    }
+
+    #[test]
+    fn stairs_bend_into_corners() {
+        let alone = |_: IVec3| AIR;
+        // Facing east: the upper half fills the east quarters (x = 1).
+        assert_eq!(stairs_octants(stairs_id(1, false), alone), 0b1010_1111);
+        assert_eq!(stairs_octants(stairs_id(1, true), alone), 0b1111_1010);
+        // An east-facing stair with a north-facing one in front (east of it): outer corner,
+        // only the north-east quarter stays up.
+        let front = |d: IVec3| if d == IVec3::X { stairs_id(0, false) } else { AIR };
+        assert_eq!(stairs_octants(stairs_id(1, false), front), 0b0010_1111);
+        // ...and with a north-facing one behind it: inner corner, three quarters up.
+        let back = |d: IVec3| if d == IVec3::NEG_X { stairs_id(0, false) } else { AIR };
+        assert_eq!(stairs_octants(stairs_id(1, false), back), 0b1011_1111);
+    }
+
+    #[test]
+    fn bed_halves_point_at_each_other() {
+        for f in 0..4 {
+            let (foot, head) = (bed_id(f, false), bed_id(f, true));
+            assert!(is_bed(foot) && is_bed(head) && !is_opaque(foot) && is_solid(foot));
+            assert_eq!((bed_facing(foot), bed_facing(head)), (f, f));
+            assert!(!bed_head(foot) && bed_head(head));
+            // The head is the way the bed faces.
+            assert_eq!(bed_other_half(foot), facing_dir(f));
+            assert_eq!(bed_other_half(head), -facing_dir(f));
+            assert_eq!(crate::item::item_of_block(head), Some(BED as crate::item::ItemId));
+        }
+        assert!(!is_bed(BED + 8) && !is_bed(BIRCH_LOG_Z));
+    }
+
+    #[test]
+    fn logs_lie_along_the_clicked_axis() {
+        for base in [OAK_LOG, SPRUCE_LOG, BIRCH_LOG] {
+            for axis in 0..3 {
+                let b = log_with_axis(base, axis);
+                assert!(is_log(b));
+                assert_eq!(log_axis(b), axis);
+                assert_eq!(log_base(b), base);
+                assert_eq!(crate::item::item_of_block(b), Some(base as crate::item::ItemId));
+            }
+            // The ends show the rings; the bark runs along the log.
+            let x = log_with_axis(base, 0);
+            assert_eq!(face_texture(x, 0), face_texture(base, 2));
+            assert_eq!(face_texture(x, 2), face_texture(base, 0));
+            assert!(face_rotated(x, 2) && !face_rotated(x, 0));
+        }
     }
 
     #[test]

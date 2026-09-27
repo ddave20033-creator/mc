@@ -2,7 +2,7 @@
 //! the geometry built on the CPU (entities, particles, the hand), the UI, and rendering.
 
 use super::*;
-use crate::entity::block_entity::{build_chest_lid, build_table_items};
+use crate::entity::block_entity::{build_chest_lid, build_door, build_table_items};
 use crate::render::MAX_HELD_LIGHTS;
 use crate::world::textures::tex;
 
@@ -113,7 +113,39 @@ struct Scene {
 }
 
 impl Game {
+    /// Max FPS: waits until this frame's turn (sleeping most of it, then spinning for the
+    /// last moment, which sleep is too coarse for).
+    fn limit_fps(&mut self) {
+        let limit = self.settings.fps_limit;
+        if limit == 0 || self.bench.is_some() {
+            self.next_frame = None;
+            return;
+        }
+        if let Some(t) = self.next_frame {
+            loop {
+                let now = Instant::now();
+                if now >= t {
+                    break;
+                }
+                let left = t - now;
+                if left > std::time::Duration::from_micros(1500) {
+                    std::thread::sleep(left - std::time::Duration::from_micros(1000));
+                } else {
+                    std::hint::spin_loop();
+                }
+            }
+        }
+        let now = Instant::now();
+        let period = std::time::Duration::from_secs_f64(1.0 / limit as f64);
+        // Keep an even pace; after a slow frame start over from now instead of catching up.
+        self.next_frame = Some(match self.next_frame {
+            Some(t) if t + period > now => t + period,
+            _ => now + period,
+        });
+    }
+
     pub fn frame(&mut self) {
+        self.limit_fps();
         let now = Instant::now();
         let dt = self.frame_clock(now);
         // LAN game: messages in and out.
@@ -138,7 +170,11 @@ impl Game {
         self.apply(action);
 
         let outline = if self.screen == Screen::Playing {
-            self.target.map(|t| t.0)
+            self.target.map(|(p, _)| {
+                let w = &self.terrain.world;
+                let (lo, hi) = block_boxes(w.geti(p), |d| w.geti(p + d)).bounds();
+                (p.as_vec3() + Vec3::from(lo), p.as_vec3() + Vec3::from(hi))
+            })
         } else {
             None
         };
@@ -151,6 +187,7 @@ impl Game {
             view_distance: lighting.view_distance,
             shadows: lighting.shadows,
             shadow_distance: SHADOW_DISTANCE,
+            detail_px: h * 0.5 / (self.detail_fov.to_radians() * 0.5).tan(),
             ui: &self.ui.verts,
             ui_clips: &self.ui.clips,
             outline,
@@ -220,8 +257,8 @@ impl Game {
         };
         let center = World::chunk_pos(focus.x.floor() as i32, focus.z.floor() as i32);
         let mut events = Vec::new();
-        self.terrain
-            .update(center, self.settings.render_distance as i32, &mut events);
+        let radius = self.settings.render_distance as i32;
+        self.terrain.update(center, radius, &mut events);
         for e in events {
             match e {
                 TerrainEvent::Mesh(m) => self.renderer.queue_mesh(m),
@@ -250,6 +287,7 @@ impl Game {
             Screen::Paused
             | Screen::Options { in_game: true }
             | Screen::ResourcePacks { in_game: true }
+            | Screen::KeyBinds { in_game: true }
                 if self.net.is_some() =>
             {
                 self.update_player(dt, false);
@@ -276,7 +314,7 @@ impl Game {
     /// slowly turning menu panorama.
     fn camera_view(&mut self, dt: f32, w: f32, h: f32) -> View {
         let in_world = self.in_world_view();
-        let eye = self.player.eye();
+        let eye = self.sleep_eye().unwrap_or(self.player.eye());
         let aim_dir = look_dir(self.yaw, self.pitch);
         let camera_offset = self
             .camera
@@ -300,22 +338,29 @@ impl Game {
             }
         }
         let player_opacity = if third_person {
-            let d = cam.distance(self.player.eye());
+            let d = cam.distance(eye);
             smoothstep(0.55, 1.8, d)
         } else {
             1.0
         };
         let right = fwd.cross(Vec3::Y).normalize();
         let up = right.cross(fwd);
+        // Zoom key held: a narrow view, like OptiFine's zoom.
+        let zooming = self.screen == Screen::Playing && self.bind_down(Bind::Zoom);
         let fov_target = self.settings.fov
-            * if self.player.sprinting
-                || (self.player.flying && self.keys.contains(&KeyCode::ControlLeft))
+            * if zooming {
+                0.25
+            } else if self.player.sprinting || (self.player.flying && self.bind_down(Bind::Sprint))
             {
                 1.12
             } else {
                 1.0
             };
         self.fov_current += (fov_target - self.fov_current) * (1.0 - (-10.0 * dt).exp());
+        // The field of view detail is measured with: the setting and the zoom, not the sprint
+        // widening (the simplified distance would slide back and forth).
+        let detail_target = self.settings.fov * if zooming { 0.25 } else { 1.0 };
+        self.detail_fov += (detail_target - self.detail_fov) * (1.0 - (-10.0 * dt).exp());
         let fov = if in_world {
             self.fov_current
         } else {
@@ -422,9 +467,16 @@ impl Game {
             view_proj: view.view_proj.to_cols_array(),
             inv_view_proj: view.view_proj.inverse().to_cols_array(),
             light_view_proj: light_view_proj.to_cols_array(),
-            cam_pos: [cam.x, cam.y, cam.z, self.time],
+            // Shot mode: wind and water stand still, so pictures differ only by the view.
+            cam_pos: [cam.x, cam.y, cam.z, if self.shots.is_some() { 100.0 } else { self.time }],
             sun_dir: [sky.sun.x, sky.sun.y, sky.sun.z, sky.day],
-            light_dir: [sky.light_dir.x, sky.light_dir.y, sky.light_dir.z, 0.0],
+            // w: anti-aliasing is on (the shader smooths grass and leaf edges).
+            light_dir: [
+                sky.light_dir.x,
+                sky.light_dir.y,
+                sky.light_dir.z,
+                if self.gpu.samples.as_raw() > 1 { 1.0 } else { 0.0 },
+            ],
             sun_color: [
                 sky.light_tint.x,
                 sky.light_tint.y,
@@ -449,6 +501,13 @@ impl Game {
                 self.time,
             ],
             held_lights: self.held_lights(in_world, cam),
+            detail: [
+                self.gpu.extent.height as f32 * 0.5
+                    / (self.detail_fov.to_radians() * 0.5).tan(),
+                0.0,
+                0.0,
+                0.0,
+            ],
         };
         Lighting {
             ubo,
@@ -514,9 +573,12 @@ impl Game {
         // shows the held item while looking ahead. Looking down past 15 degrees it sinks
         // (fully gone past 30), and past 30 degrees the body's own arms take over.
         // A torch is always held up by the body's arm instead (no switching between the two).
-        let fp_body = in_world && !third_person && self.settings.first_person_body;
+        let fp_body = in_world
+            && !third_person
+            && self.settings.first_person_body
+            && self.sleep.is_none();
         let torch = self.held() == TORCH as ItemId;
-        // A lantern is always held by the first-person hand (so it hangs in view).
+        // A lantern is always held by the first-person hand (hanging with the body shown).
         let lantern = self.held() == LANTERN as ItemId;
         let down = -self.pitch.to_degrees();
         let lower = &mut self.hand.lower;
@@ -532,6 +594,7 @@ impl Game {
             && !self.hide_hud
             && !(fp_body && (torch || (down > 35.0 && !lantern)))
             && self.screen != Screen::Dead
+            && self.sleep.is_none()
         {
             let f = look_dir(self.yaw, self.pitch);
             let r = f.cross(Vec3::Y).normalize();
@@ -554,11 +617,19 @@ impl Game {
         }
         // The player model (shadow only in first person).
         if in_world && self.player.spawned && self.screen != Screen::Dead {
+            // In bed: built standing, then laid down on it.
+            let bed = self.sleep.map(|s| {
+                crate::model::player::lying(self.player.pos, facing_dir(s.facing).as_vec3())
+            });
+            let (pos, head_yaw, pitch) = match bed {
+                Some((feet, yaw, _)) => (feet, yaw, 0.0),
+                None => (self.player.pos, self.visual_head_yaw(), self.pitch),
+            };
             let pose = PlayerPose {
-                pos: self.player.pos,
+                pos,
                 body_yaw: self.body_yaw,
-                head_yaw: self.visual_head_yaw(),
-                pitch: self.pitch,
+                head_yaw,
+                pitch,
                 limb_swing: self.limb_swing,
                 limb_amount: self.limb_amount,
                 attack: self.hand.attack(),
@@ -594,9 +665,10 @@ impl Game {
                 lantern: lantern_dir,
                 ..pose
             };
+            let start = scene.entity.len();
             build_player(&mut scene.entity, &pose, &limbs, player_sky, player_blk);
-            if pose.burning && third_person {
-                crate::model::emit_entity_fire(&mut scene.entity, pose.pos, 0.6, 1.8, cam);
+            if let Some((feet, _, turn)) = bed {
+                crate::model::player::lay_down(&mut scene.entity[start..], feet, turn);
             }
             scene.player_vertex_count = scene.entity.len();
             // First-person body: a headless copy drawn with the particles (which cast no shadow;
@@ -617,7 +689,7 @@ impl Game {
             }
         }
         if in_world {
-            self.build_world_entities(&mut scene, third_person, cam, dt);
+            self.build_world_entities(&mut scene, third_person, dt);
         }
         scene.entity_visible = third_person;
 
@@ -657,7 +729,7 @@ impl Game {
 
     /// Dropped items, falling blocks, mobs, the other LAN players, chest lids and items on
     /// crafting tables near the player.
-    fn build_world_entities(&mut self, scene: &mut Scene, third_person: bool, cam: Vec3, dt: f32) {
+    fn build_world_entities(&mut self, scene: &mut Scene, third_person: bool, dt: f32) {
         let world = &self.terrain.world;
         // Items and falling blocks must always be visible, so in first person they go into
         // the particle range (which is drawn normally) instead.
@@ -674,10 +746,6 @@ impl Game {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
             f.build(target, sky, blk);
         }
-        for t in &self.tnt {
-            let (sky, blk) = world.light_estimate(t.center());
-            t.build(target, sky, blk);
-        }
         // Mobs always go into the entity range so they cast shadows; in first person that
         // range only draws shadows, so they are copied into the particle range to be seen too.
         let mut mob_verts = Vec::new();
@@ -687,12 +755,8 @@ impl Game {
             }
             let (sky, blk) = world.light_estimate(m.center());
             m.build(&mut mob_verts, sky, blk);
-            if m.fire > 0.0 && m.alive() {
-                let (hw, tall) = m.kind.size();
-                crate::model::emit_entity_fire(&mut mob_verts, m.pos, hw * 2.0, tall, cam);
-            }
         }
-        multi::build_remote_players(&mut self.remotes, world, self.time, &mut mob_verts, cam, dt);
+        multi::build_remote_players(&mut self.remotes, world, self.time, &mut mob_verts, dt);
         let near = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < 48.0 * 48.0;
         let light = |p: IVec3| world.light_estimate(p.as_vec3() + Vec3::new(0.5, 1.2, 0.5));
         for p in self.block_entities.chests.keys().filter(|p| near(p)) {
@@ -707,6 +771,25 @@ impl Game {
                 build_chest_lid(target, *p, facing, side, open, sky, blk);
             }
         }
+        // Doors swing open and shut over a fifth of a second.
+        let world = &self.terrain.world;
+        let step = dt / 0.2;
+        for p in self.terrain.doors.values().flatten() {
+            let b = world.geti(*p);
+            if !is_door(b) {
+                continue;
+            }
+            let target_open = if door_open(b) { 1.0 } else { 0.0 };
+            let s = self.door_swing.entry(*p).or_insert(target_open);
+            *s = if *s < target_open {
+                (*s + step).min(target_open)
+            } else {
+                (*s - step).max(target_open)
+            };
+            let (sky, blk) = world.light_estimate(p.as_vec3() + Vec3::splat(0.5));
+            build_door(target, *p, b, *s, sky, blk);
+        }
+        self.door_swing.retain(|p, _| is_door(world.geti(*p)));
         let open_table = match self.screen {
             Screen::Container(Container::Crafting(p)) => Some(p),
             _ => None,
@@ -763,10 +846,14 @@ impl Game {
                 &mut self.ui,
                 &mut self.settings,
                 in_game,
-                &mut self.options_tab,
+                &mut self.options,
+                self.gpu.max_samples,
             ),
             Screen::ResourcePacks { in_game } => {
                 screens::resource_packs(&mut self.ui, &mut self.pack_screen, in_game)
+            }
+            Screen::KeyBinds { in_game } => {
+                screens::key_binds(&mut self.ui, &mut self.settings, in_game, &mut self.options)
             }
             Screen::Credits => screens::credits(
                 &mut self.ui,

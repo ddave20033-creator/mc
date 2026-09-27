@@ -17,13 +17,15 @@ pub fn fuel_time(id: ItemId) -> Option<f32> {
             PLANKS,
             CRAFTING_TABLE,
             CHEST,
+            OAK_STAIRS,
         ]
         .iter()
         .any(|&b| b as ItemId == id) =>
         {
             15.0
         }
-        _ if [OAK_SAPLING, BIRCH_SAPLING, SPRUCE_SAPLING]
+        _ if id == OAK_DOOR as ItemId => 10.0,
+        _ if [OAK_SAPLING, BIRCH_SAPLING, SPRUCE_SAPLING, WOOL]
             .iter()
             .any(|&b| b as ItemId == id) =>
         {
@@ -40,6 +42,7 @@ pub fn smelt(id: ItemId) -> Option<ItemId> {
     Some(match id {
         CLAY_BALL => BRICK,
         PORKCHOP => COOKED_PORKCHOP,
+        MUTTON => COOKED_MUTTON,
         WATER_BOTTLE => PURIFIED_WATER,
         _ => match id as u8 {
             _ if id >= 256 => return None,
@@ -48,7 +51,6 @@ pub fn smelt(id: ItemId) -> Option<ItemId> {
             SAND => GLASS as ItemId,
             COBBLE => STONE as ItemId,
             OAK_LOG | BIRCH_LOG | SPRUCE_LOG => CHARCOAL,
-            CLAY => BRICKS as ItemId,
             _ => return None,
         },
     })
@@ -99,6 +101,26 @@ fn recipes() -> &'static Vec<Recipe> {
                 result: Stack::one(CHEST as ItemId),
             },
             Recipe {
+                pattern: &["PP", "PP", "PP"],
+                keys: vec![('P', b(PLANKS))],
+                result: Stack::new(OAK_DOOR as ItemId, 3),
+            },
+            Recipe {
+                pattern: &["WWW", "PPP"],
+                keys: vec![('W', b(WOOL)), ('P', b(PLANKS))],
+                result: Stack::one(BED as ItemId),
+            },
+            Recipe {
+                pattern: &[" I", "I "],
+                keys: vec![('I', vec![IRON_INGOT])],
+                result: Stack::one(SHEARS),
+            },
+            Recipe {
+                pattern: &["P  ", "PP ", "PPP"],
+                keys: vec![('P', b(PLANKS))],
+                result: Stack::new(OAK_STAIRS as ItemId, 4),
+            },
+            Recipe {
                 pattern: &["C", "S"],
                 keys: vec![('C', vec![COAL, CHARCOAL]), ('S', vec![STICK])],
                 result: Stack::new(TORCH as ItemId, 4),
@@ -147,16 +169,6 @@ fn recipes() -> &'static Vec<Recipe> {
                 pattern: &["CC", "CC"],
                 keys: vec![('C', vec![CLAY_BALL])],
                 result: Stack::one(CLAY as ItemId),
-            },
-            Recipe {
-                pattern: &["I ", " F"],
-                keys: vec![('I', vec![IRON_INGOT]), ('F', vec![FLINT])],
-                result: Stack::one(FLINT_AND_STEEL),
-            },
-            Recipe {
-                pattern: &["GSG", "SGS", "GSG"],
-                keys: vec![('G', vec![GUNPOWDER]), ('S', b(SAND))],
-                result: Stack::one(TNT as ItemId),
             },
         ];
         // Storage blocks and back.
@@ -255,49 +267,4 @@ pub fn craft(grid: &[Slot], size: usize) -> Option<Stack> {
         continue 'recipes;
     }
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn grid(cells: &[Option<ItemId>]) -> Vec<Slot> {
-        cells.iter().map(|c| c.map(Stack::one)).collect()
-    }
-
-    #[test]
-    fn tnt_and_flint_and_steel() {
-        let (g, s) = (Some(GUNPOWDER), Some(SAND as ItemId));
-        let tnt = grid(&[g, s, g, s, g, s, g, s, g]);
-        assert_eq!(craft(&tnt, 3), Some(Stack::one(TNT as ItemId)));
-        // Iron and flint on a diagonal, either way round.
-        let (i, f) = (Some(IRON_INGOT), Some(FLINT));
-        for cells in [[i, None, None, f], [None, i, f, None]] {
-            assert_eq!(craft(&grid(&cells), 2), Some(Stack::one(FLINT_AND_STEEL)));
-        }
-        // Gunpowder only comes from creepers, like in Minecraft.
-        let cells = [Some(COAL), Some(FLINT), None, None];
-        assert_eq!(craft(&grid(&cells), 2), None);
-    }
-
-    #[test]
-    fn explosions_and_gravel() {
-        assert!(blast_resistance(BEDROCK) > 1000.0 && blast_resistance(OBSIDIAN) > 1000.0);
-        assert!(blast_resistance(WATER) >= 100.0);
-        assert_eq!(blast_resistance(TNT), 0.0);
-        assert!(blast_resistance(STONE) > blast_resistance(DIRT));
-        // Blown-up stone drops cobblestone even though a hand could not mine it.
-        assert!(drops(STONE, NONE, 0.5).is_empty());
-        assert_eq!(
-            harvest_drops(STONE, 0.5),
-            vec![Stack::one(COBBLE as ItemId)]
-        );
-        assert_eq!(drops(GRAVEL, NONE, 0.05), vec![Stack::one(FLINT)]);
-        assert_eq!(drops(GRAVEL, NONE, 0.5), vec![Stack::one(GRAVEL as ItemId)]);
-        assert_eq!(drops(TNT, NONE, 0.5), vec![Stack::one(TNT as ItemId)]);
-        assert_eq!(
-            (max_stack(FLINT_AND_STEEL), max_damage(FLINT_AND_STEEL)),
-            (1, 64)
-        );
-    }
 }

@@ -45,6 +45,7 @@ impl Game {
         let b = self.terrain.world.geti(p);
         let contents = self.block_entities.remove(p);
         self.split_chest(p, b);
+        self.remove_other_half(p, b);
         let replacement = self.left_after_mining(p, b, creative);
         self.set_block(p, replacement);
         let center = p.as_vec3() + Vec3::splat(0.5);
@@ -70,9 +71,7 @@ impl Game {
         }
         let b = self.join_chest(at, b);
         self.set_block(at, b);
-        if b == FIRE {
-            self.fire_placed(at, 0);
-        } else if is_furnace(b) {
+        if is_furnace(b) {
             self.block_entities.furnaces.insert(at, Default::default());
         } else if is_chest(b) {
             self.block_entities.chests.insert(at, Box::new([None; 27]));
@@ -183,6 +182,7 @@ impl Game {
         if self.is_client() {
             let replacement = self.left_after_mining(p, b, creative);
             self.split_chest(p, b);
+            self.remove_other_half(p, b);
             self.set_block(p, replacement);
             self.send(crate::net::Msg::Break { p, held, creative });
         } else {
@@ -206,9 +206,25 @@ impl Game {
         self.action_cooldown = if creative { 0.2 } else { 0.15 };
     }
 
+    /// A door or bed half is going away: the other half goes with it (without a second drop).
+    pub(super) fn remove_other_half(&mut self, p: IVec3, b: u8) {
+        let q = if is_door(b) {
+            p + door_other_half(b)
+        } else if is_bed(b) {
+            p + bed_other_half(b)
+        } else {
+            return;
+        };
+        let other = self.terrain.world.geti(q);
+        if (is_door(b) && is_door(other)) || (is_bed(b) && is_bed(other)) {
+            self.set_block(q, AIR);
+        }
+    }
+
     /// Broken by the world (lost support): always drops like a hand-mined block.
     pub(super) fn break_naturally(&mut self, p: IVec3) {
         let b = self.terrain.world.geti(p);
+        self.remove_other_half(p, b);
         self.set_block(p, AIR);
         let r = self.random();
         for s in drops(b, NONE, r) {
@@ -224,6 +240,13 @@ impl Game {
         }
         let below = w.geti(p - IVec3::Y);
         match b {
+            _ if is_door(b) => {
+                if door_upper(b) {
+                    is_door(below) && !door_upper(below)
+                } else {
+                    is_solid(below) && !is_door(below)
+                }
+            }
             CACTUS => matches!(below, SAND | CACTUS),
             DEAD_BUSH => matches!(below, SAND | DIRT | GRASS),
             _ if is_plant(b) => matches!(below, GRASS | DIRT | SNOWY_GRASS),
@@ -244,20 +267,6 @@ impl Game {
             let b = self.terrain.world.geti(q);
             if needs_support(b) && !Self::supported(&self.terrain.world, q, b) {
                 self.break_naturally(q);
-            }
-        }
-        // Fire goes out without anything to burn or stand on.
-        for d in [
-            IVec3::X,
-            IVec3::NEG_X,
-            IVec3::Y,
-            IVec3::NEG_Y,
-            IVec3::Z,
-            IVec3::NEG_Z,
-        ] {
-            let q = p + d;
-            if self.terrain.world.geti(q) == FIRE && !Self::fire_survives(&self.terrain.world, q) {
-                self.put_out(q);
             }
         }
         let w = &self.terrain.world;
@@ -346,32 +355,6 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fire_needs_a_sturdy_block_or_something_to_burn() {
-        let mut world = World::new();
-        let mut chunk = ChunkData::new();
-        chunk.set(8, 10, 8, STONE);
-        chunk.set(3, 20, 3, PLANKS);
-        world.chunks.insert((0, 0), Arc::new(chunk));
-        // On stone, and in the air beside planks (on any side), but not in empty air.
-        assert!(Game::fire_survives(&world, IVec3::new(8, 11, 8)));
-        for d in [
-            IVec3::X,
-            IVec3::NEG_X,
-            IVec3::Y,
-            IVec3::NEG_Y,
-            IVec3::Z,
-            IVec3::NEG_Z,
-        ] {
-            assert!(Game::fire_survives(&world, IVec3::new(3, 20, 3) + d));
-        }
-        assert!(!Game::fire_survives(&world, IVec3::new(12, 30, 12)));
-        assert!(!is_solid(FIRE) && !is_opaque(FIRE) && is_replaceable(FIRE));
-        assert_eq!(emission(FIRE), 15);
-        assert!(burn_odds(TNT) > 0 && burn_odds(STONE) == 0 && ignite_odds(OAK_LEAVES) == 30);
-        assert!(lava_ignites(CRAFTING_TABLE) && burn_odds(CRAFTING_TABLE) == 0);
-    }
 
     #[test]
     pub(super) fn wall_torch_needs_its_mounting_block() {

@@ -37,11 +37,13 @@ pub const WATER_BOTTLE: ItemId = 271;
 /// Water boiled in a furnace: safe to drink.
 pub const PURIFIED_WATER: ItemId = 272;
 pub const IRON_NUGGET: ItemId = 273;
-pub const FLINT: ItemId = 274;
-pub const GUNPOWDER: ItemId = 275;
-/// Lights TNT; wears out like a tool.
-pub const FLINT_AND_STEEL: ItemId = 276;
-pub const CREEPER_SPAWN_EGG: ItemId = 277;
+pub const MUTTON: ItemId = 274;
+pub const COOKED_MUTTON: ItemId = 275;
+/// Shear sheep, and mine leaves, grass and dead bushes so they drop themselves.
+pub const SHEARS: ItemId = 276;
+pub const SHEEP_SPAWN_EGG: ItemId = 277;
+/// Minecraft's shears durability.
+const SHEARS_DURABILITY: u16 = 238;
 const TOOL_BASE: ItemId = 300;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -163,8 +165,8 @@ pub type Slot = Option<Stack>;
 pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
-        FLINT_AND_STEEL => 1,
-        WATER_BUCKET | LAVA_BUCKET => 1,
+        WATER_BUCKET | LAVA_BUCKET | SHEARS => 1,
+        _ if id == BED as ItemId => 1,
         BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
         _ => 64,
     }
@@ -190,6 +192,8 @@ pub fn consumable(id: ItemId) -> Option<crate::entity::survival::Consumable> {
     Some(match id {
         PORKCHOP => food(3.0, 1.8),
         COOKED_PORKCHOP => food(8.0, 12.8),
+        MUTTON => food(2.0, 1.2),
+        COOKED_MUTTON => food(6.0, 9.6),
         WATER_BOTTLE => drink(6.0, true),
         PURIFIED_WATER => drink(10.0, false),
         _ => return None,
@@ -217,8 +221,8 @@ pub fn attack_damage(id: ItemId) -> f32 {
 }
 
 pub fn max_damage(id: ItemId) -> u16 {
-    if id == FLINT_AND_STEEL {
-        return 64;
+    if id == SHEARS {
+        return SHEARS_DURABILITY;
     }
     tool_of(id).map(|(_, t)| t.durability()).unwrap_or(0)
 }
@@ -247,6 +251,8 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
     (BIRCH_LOG, "birch_log", "Birch Log", "Nyírfarönk"),
     (SPRUCE_LOG, "spruce_log", "Spruce Log", "Lucfenyőrönk"),
     (PLANKS, "oak_planks", "Oak Planks", "Tölgyfa deszka"),
+    (OAK_STAIRS, "oak_stairs", "Oak Stairs", "Tölgyfa lépcső"),
+    (OAK_DOOR, "oak_door", "Oak Door", "Tölgyfa ajtó"),
     (BRICKS, "bricks", "Bricks", "Téglák"),
     (GLASS, "glass", "Glass", "Üveg"),
     (GLOWSTONE, "glowstone", "Glowstone", "Izzókő"),
@@ -306,7 +312,8 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
     (CHEST, "chest", "Chest", "Láda"),
     (TORCH, "torch", "Torch", "Fáklya"),
     (LANTERN, "lantern", "Lantern", "Lámpás"),
-    (TNT, "tnt", "TNT", "TNT"),
+    (WOOL, "white_wool", "White Wool", "Fehér gyapjú"),
+    (BED, "red_bed", "Red Bed", "Piros ágy"),
 ];
 
 /// The other items (ids from 256, tools aside), in creative inventory order: the id, key,
@@ -315,21 +322,6 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
     (STICK, "stick", "Stick", "Bot", tex::STICK),
     (COAL, "coal", "Coal", "Szén", tex::COAL),
     (CHARCOAL, "charcoal", "Charcoal", "Faszén", tex::CHARCOAL),
-    (FLINT, "flint", "Flint", "Kovakő", tex::FLINT),
-    (
-        GUNPOWDER,
-        "gunpowder",
-        "Gunpowder",
-        "Puskapor",
-        tex::GUNPOWDER,
-    ),
-    (
-        FLINT_AND_STEEL,
-        "flint_and_steel",
-        "Flint and Steel",
-        "Kovakő és acél",
-        tex::FLINT_AND_STEEL,
-    ),
     (
         IRON_INGOT,
         "iron_ingot",
@@ -389,6 +381,15 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Sült disznóhús",
         tex::COOKED_PORKCHOP,
     ),
+    (MUTTON, "mutton", "Raw Mutton", "Nyers ürühús", tex::MUTTON),
+    (
+        COOKED_MUTTON,
+        "cooked_mutton",
+        "Cooked Mutton",
+        "Sült ürühús",
+        tex::COOKED_MUTTON,
+    ),
+    (SHEARS, "shears", "Shears", "Olló", tex::SHEARS),
     (
         GLASS_BOTTLE,
         "glass_bottle",
@@ -418,11 +419,11 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         tex::PIG_SPAWN_EGG,
     ),
     (
-        CREEPER_SPAWN_EGG,
-        "creeper_spawn_egg",
-        "Creeper Spawn Egg",
-        "Creeper idéző tojás",
-        tex::CREEPER_SPAWN_EGG,
+        SHEEP_SPAWN_EGG,
+        "sheep_spawn_egg",
+        "Sheep Spawn Egg",
+        "Birka idéző tojás",
+        tex::SHEEP_SPAWN_EGG,
     ),
 ];
 
@@ -460,6 +461,10 @@ pub fn item_of_block(b: u8) -> Option<ItemId> {
         _ if is_chest(b) => CHEST,
         _ if is_torch(b) => TORCH,
         _ if is_lantern(b) => LANTERN,
+        _ if is_door(b) => OAK_DOOR,
+        _ if is_stairs(b) => OAK_STAIRS,
+        _ if is_bed(b) => BED,
+        _ if is_log(b) => log_base(b),
         _ if is_water(b) => return Some(WATER_BUCKET),
         _ if is_lava(b) => return Some(LAVA_BUCKET),
         _ => b,
@@ -478,6 +483,12 @@ pub fn icon(id: ItemId) -> Icon {
     if let Some(b) = block_of(id) {
         if b == LANTERN {
             return Icon::Flat(tex::LANTERN_ITEM);
+        }
+        if b == OAK_DOOR {
+            return Icon::Flat(tex::DOOR_ITEM);
+        }
+        if b == BED {
+            return Icon::Flat(tex::BED_ITEM);
         }
         if is_plant(b) || b == TORCH {
             return Icon::Flat(face_texture(b, 0));
@@ -538,7 +549,6 @@ pub fn block_name(b: u8) -> String {
         AIR => "-".into(),
         _ if is_water(b) => (if is_hungarian() { "Víz" } else { "Water" }).into(),
         _ if is_lava(b) => (if is_hungarian() { "Láva" } else { "Lava" }).into(),
-        FIRE => (if is_hungarian() { "Tűz" } else { "Fire" }).into(),
         _ => item_of_block(b).map(name).unwrap_or_else(|| "?".into()),
     }
 }
