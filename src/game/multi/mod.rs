@@ -251,6 +251,24 @@ impl Game {
                 Screen::Container(c) => Self::container_pos(c).unwrap_or(NO_BLOCK),
                 _ => NO_BLOCK,
             },
+            status: self.my_status(),
+        }
+    }
+
+    /// What this player is busy with, for the bubble above their head.
+    fn my_status(&self) -> u8 {
+        use crate::net::status;
+        if !self.focused {
+            return status::AFK;
+        }
+        match self.screen {
+            Screen::Chat => status::TYPING,
+            Screen::Container(_) => status::INVENTORY,
+            Screen::Paused
+            | Screen::Options { in_game: true }
+            | Screen::ResourcePacks { in_game: true }
+            | Screen::KeyBinds { in_game: true } => status::MENU,
+            _ => status::NONE,
         }
     }
 
@@ -356,6 +374,7 @@ impl Game {
             p.attack = t.attack;
             p.held = t.held;
             p.flags = t.flags;
+            p.status = t.status;
         }
     }
 

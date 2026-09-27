@@ -50,6 +50,8 @@ struct Theme {
     preview_bottom: Color,
     scroll_track: Color,
     scroll_thumb: Color,
+    /// Creative tabs that are not open.
+    tab_idle: Color,
 }
 
 const LIGHT: Theme = Theme {
@@ -71,6 +73,7 @@ const LIGHT: Theme = Theme {
     preview_bottom: rgba(12, 12, 16, 255),
     scroll_track: rgba(90, 90, 96, 255),
     scroll_thumb: rgba(220, 220, 226, 255),
+    tab_idle: rgba(160, 160, 167, 255),
 };
 
 const DARK: Theme = Theme {
@@ -92,6 +95,7 @@ const DARK: Theme = Theme {
     preview_bottom: rgba(6, 6, 9, 255),
     scroll_track: rgba(22, 23, 30, 255),
     scroll_thumb: rgba(112, 118, 140, 255),
+    tab_idle: rgba(26, 27, 36, 255),
 };
 
 /// Mouse drag with a held stack: left spreads it evenly, right drops one per slot.
@@ -132,17 +136,217 @@ fn search_fold(s: &str) -> String {
         .collect()
 }
 
-/// Creative items matching a search: by display name (current language) or by item key.
-fn creative_items(query: &str) -> Vec<ItemId> {
-    let q = search_fold(query.trim());
-    all_items()
-        .into_iter()
-        .filter(|&id| {
-            q.is_empty()
-                || search_fold(&name(id)).contains(&q)
-                || search_fold(&key(id)).contains(&q)
+/// Tabs along the top of the creative inventory, like Minecraft's: the item categories, and
+/// the player's own inventory at the right end.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Tab {
+    Blocks,
+    Functional,
+    Tools,
+    Weapons,
+    Food,
+    Mobs,
+    Materials,
+    Inventory,
+}
+
+pub(super) const TABS: [Tab; 8] = [
+    Tab::Blocks,
+    Tab::Functional,
+    Tab::Tools,
+    Tab::Weapons,
+    Tab::Food,
+    Tab::Mobs,
+    Tab::Materials,
+    Tab::Inventory,
+];
+
+/// Tab size in GUI pixels (the open one is taller and joins the window), and the distance
+/// between the category tabs.
+const TAB_W: f32 = 23.0;
+const TAB_H: f32 = 24.0;
+const TAB_STEP: f32 = 24.0;
+
+impl Tab {
+    fn name(self) -> &'static str {
+        t(match self {
+            Tab::Blocks => "gui.tab.blocks",
+            Tab::Functional => "gui.tab.functional",
+            Tab::Tools => "gui.tab.tools",
+            Tab::Weapons => "gui.tab.weapons",
+            Tab::Food => "gui.tab.food",
+            Tab::Mobs => "gui.tab.mobs",
+            Tab::Materials => "gui.tab.materials",
+            Tab::Inventory => "gui.inventory",
         })
-        .collect()
+    }
+
+    fn icon(self) -> ItemId {
+        match self {
+            Tab::Blocks => GRASS as ItemId,
+            Tab::Functional => CRAFTING_TABLE as ItemId,
+            Tab::Tools => tool_id(ToolKind::Pickaxe, Tier::Iron),
+            Tab::Weapons => PISTOL,
+            Tab::Food => COOKED_PORKCHOP,
+            Tab::Mobs => PIG_SPAWN_EGG,
+            Tab::Materials => IRON_INGOT,
+            Tab::Inventory => CHEST as ItemId,
+        }
+    }
+
+    fn of(id: ItemId) -> Tab {
+        if let Some(b) = block_of(id) {
+            // Blocks that do something: stations, storage, lights, beds and doors.
+            if matches!(
+                b,
+                CRAFTING_TABLE | FURNACE | CHEST | GUN_STATION | BED | OAK_DOOR | TORCH | LANTERN
+            ) {
+                Tab::Functional
+            } else {
+                Tab::Blocks
+            }
+        } else if tool_of(id).is_some()
+            || matches!(
+                id,
+                BUCKET | WATER_BUCKET | LAVA_BUCKET | SHEARS | GLASS_BOTTLE
+            )
+        {
+            Tab::Tools
+        } else if GunKind::of(id).is_some()
+            || matches!(
+                id,
+                BULLET
+                    | PISTOL_FRAME..=PISTOL_MAGAZINE
+                    | SCOPE..=LASER_SIGHT
+                    | RIFLE_ROUND..=SHOTGUN_SHELL
+            )
+        {
+            Tab::Weapons
+        } else if consumable(id).is_some() || meat(id).is_some() {
+            Tab::Food
+        } else if key(id).ends_with("_spawn_egg") {
+            Tab::Mobs
+        } else {
+            Tab::Materials
+        }
+    }
+
+    /// The items of the tab in the order they are shown, in groups; each group starts on a
+    /// new row.
+    fn groups(self) -> Vec<Vec<ItemId>> {
+        let b = |ids: &[u8]| ids.iter().map(|&b| b as ItemId).collect::<Vec<_>>();
+        let tools = |kind| {
+            [Tier::Wood, Tier::Stone, Tier::Iron, Tier::Gold, Tier::Diamond]
+                .map(|tier| tool_id(kind, tier))
+                .to_vec()
+        };
+        match self {
+            Tab::Blocks => vec![
+                b(&[GRASS, SNOWY_GRASS, DIRT, SAND, GRAVEL, CLAY, SNOW, ICE]),
+                b(&[STONE, COBBLE, STONE_BRICKS, SANDSTONE, BRICKS, OBSIDIAN, BEDROCK]),
+                b(&[OAK_LOG, BIRCH_LOG, SPRUCE_LOG, PLANKS, OAK_STAIRS, GLASS, GLOWSTONE, WOOL]),
+                b(&[
+                    OAK_LEAVES,
+                    BIRCH_LEAVES,
+                    SPRUCE_LEAVES,
+                    OAK_SAPLING,
+                    BIRCH_SAPLING,
+                    SPRUCE_SAPLING,
+                    TALL_GRASS,
+                    POPPY,
+                    DANDELION,
+                    DEAD_BUSH,
+                    CACTUS,
+                ]),
+                b(&[
+                    COAL_ORE,
+                    IRON_ORE,
+                    GOLD_ORE,
+                    DIAMOND_ORE,
+                    COAL_BLOCK,
+                    IRON_BLOCK,
+                    GOLD_BLOCK,
+                    DIAMOND_BLOCK,
+                ]),
+            ],
+            Tab::Functional => vec![b(&[
+                CRAFTING_TABLE,
+                FURNACE,
+                CHEST,
+                GUN_STATION,
+                BED,
+                OAK_DOOR,
+                TORCH,
+                LANTERN,
+            ])],
+            Tab::Tools => vec![
+                tools(ToolKind::Pickaxe),
+                tools(ToolKind::Axe),
+                tools(ToolKind::Shovel),
+                tools(ToolKind::Sword),
+                vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE],
+            ],
+            // The guns, then their ammunition in the same order, attachments and pistol parts.
+            Tab::Weapons => vec![
+                vec![PISTOL, DESERT_EAGLE, M16, SHOTGUN, SNIPER_RIFLE],
+                vec![BULLET, MAGNUM_ROUND, RIFLE_ROUND, SHOTGUN_SHELL, BMG_ROUND],
+                vec![SCOPE, SILENCER, EXTENDED_MAGAZINE, LASER_SIGHT],
+                vec![
+                    PISTOL_FRAME,
+                    PISTOL_BARREL,
+                    PISTOL_SPRING,
+                    PISTOL_SLIDE,
+                    PISTOL_MAGAZINE,
+                ],
+            ],
+            Tab::Food => vec![
+                meat(PORKCHOP).unwrap().to_vec(),
+                meat(MUTTON).unwrap().to_vec(),
+                vec![WATER_BOTTLE, PURIFIED_WATER],
+            ],
+            Tab::Mobs => vec![vec![PIG_SPAWN_EGG, SHEEP_SPAWN_EGG]],
+            Tab::Materials => vec![vec![
+                STICK,
+                COAL,
+                CHARCOAL,
+                IRON_NUGGET,
+                IRON_INGOT,
+                GOLD_INGOT,
+                DIAMOND,
+                CLAY_BALL,
+                BRICK,
+            ]],
+            Tab::Inventory => Vec::new(),
+        }
+    }
+}
+
+/// The creative grid: a tab's groups, each starting on a new row (the gaps are `None`), and
+/// at the end whatever item of the tab the groups do not list. A search looks through every
+/// item instead, by display name (current language) or by item key.
+fn creative_items(tab: Tab, query: &str) -> Vec<Option<ItemId>> {
+    let q = search_fold(query.trim());
+    if !q.is_empty() {
+        return all_items()
+            .into_iter()
+            .filter(|&id| search_fold(&name(id)).contains(&q) || search_fold(&key(id)).contains(&q))
+            .map(Some)
+            .collect();
+    }
+    let listed: Vec<ItemId> = TABS.iter().flat_map(|t| t.groups().concat()).collect();
+    let mut groups = tab.groups();
+    groups.push(
+        all_items()
+            .into_iter()
+            .filter(|id| !listed.contains(id) && Tab::of(*id) == tab)
+            .collect(),
+    );
+    let mut grid = Vec::new();
+    for g in groups.into_iter().filter(|g| !g.is_empty()) {
+        grid.resize(grid.len().next_multiple_of(9), None);
+        grid.extend(g.into_iter().map(Some));
+    }
+    grid
 }
 
 /// Draws an item icon with its stack count and durability bar. `size` is the icon size in pixels.
@@ -762,10 +966,18 @@ impl Game {
     }
 
     fn panel(&mut self, pw: f32, ph: f32) -> (f32, f32) {
+        self.panel_below(pw, ph, 0.0)
+    }
+
+    /// A window centered together with `top` GUI pixels above it (the creative tabs).
+    fn panel_below(&mut self, pw: f32, ph: f32, top: f32) -> (f32, f32) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         self.ui
             .gradient(0.0, 0.0, w, h, rgba(0, 0, 0, 150), rgba(0, 0, 0, 110));
-        let (px, py) = (((w - pw * s) * 0.5).round(), ((h - ph * s) * 0.5).round());
+        let (px, py) = (
+            ((w - pw * s) * 0.5).round(),
+            ((h - (ph + top) * s) * 0.5 + top * s).round(),
+        );
         let (bw, bh) = (pw * s, ph * s);
         self.ui.rect_full(
             px - s,
@@ -955,6 +1167,103 @@ impl Game {
         }
     }
 
+    /// The creative tabs above the window at (px, py): an icon for each category and one for
+    /// the player's own inventory. A click opens a tab (and clears the search). Returns
+    /// whether the mouse is over them.
+    fn creative_tabs(&mut self, px: f32, py: f32, panel_w: f32) -> bool {
+        let s = self.ui.s;
+        let th = self.theme();
+        let mut over = false;
+        for (i, &tab) in TABS.iter().enumerate() {
+            // The inventory tab sits apart at the right end, like in Minecraft.
+            let gx = if tab == Tab::Inventory {
+                panel_w - TAB_W
+            } else {
+                i as f32 * TAB_STEP
+            };
+            let x = px + (gx - 1.0) * s;
+            let open = i == self.creative_tab;
+            let y = py - (TAB_H + if open { 3.0 } else { 0.0 }) * s;
+            let w = TAB_W * s;
+            let hovered = self.ui.hit(x, y, w, py - y);
+            if open {
+                // Joins the window: its fill runs over the window's top edge.
+                self.ui.rect(x, y, w, (TAB_H + 5.0) * s, th.border, 3.0 * s);
+                self.ui.rect(
+                    x + s,
+                    y + s,
+                    w - 2.0 * s,
+                    (TAB_H + 3.0) * s,
+                    th.bevel_hi,
+                    2.0 * s,
+                );
+                self.ui.rect_full(
+                    x + 2.0 * s,
+                    y + 2.0 * s,
+                    w - 4.0 * s,
+                    (TAB_H + 3.0) * s,
+                    th.fill_top,
+                    th.fill_top,
+                    2.0 * s,
+                    0.0,
+                );
+            } else {
+                self.ui.rect(x, y, w, TAB_H * s, th.border, 3.0 * s);
+                let fill = if hovered { th.slot_light } else { th.tab_idle };
+                self.ui.rect_full(
+                    x + s,
+                    y + s,
+                    w - 2.0 * s,
+                    (TAB_H - 1.0) * s,
+                    fill,
+                    fill,
+                    2.0 * s,
+                    0.0,
+                );
+            }
+            let icon_y = y + (if open { 6.0 } else { 4.0 }) * s;
+            draw_stack(
+                &mut self.ui,
+                x + ((TAB_W - 16.0) * 0.5 * s).round(),
+                icon_y,
+                16.0 * s,
+                &Stack::one(tab.icon()),
+            );
+            if hovered {
+                over = true;
+                if self.cursor.is_none() {
+                    self.ui.set_tooltip(tab.name());
+                }
+                if self.ui.pressed && !open {
+                    self.creative_tab = i;
+                    self.creative_search.clear();
+                    self.search_focused = false;
+                    self.scroll_drag = false;
+                    self.scroll_creative_to_top();
+                }
+            }
+        }
+        over
+    }
+
+    /// The hotbar along the bottom of every creative tab, with the slot that destroys items.
+    fn creative_hotbar(&mut self, px: f32, py: f32, hovered: &mut Option<SlotRef>) {
+        let s = self.ui.s;
+        for i in 0..9 {
+            let (x, y) = (px + (9.0 + i as f32 * SLOT) * s, py + 134.0 * s);
+            if self.draw_slot(x, y, self.inventory.slots[i]) {
+                *hovered = Some(SlotRef::Inv(i));
+            }
+        }
+        let (x, y) = (px + 173.0 * s, py + 134.0 * s);
+        if self.draw_slot(x, y, None) {
+            *hovered = Some(SlotRef::Trash);
+            self.ui.set_tooltip(t("gui.trash"));
+        }
+        let (lx, ly) = (px + 178.0 * s, py + 138.0 * s);
+        self.ui.text("x", lx, ly, s, rgba(200, 60, 60, 255), false);
+    }
+
     /// Draws the open item screen and handles clicks.
     pub(super) fn container_screen(&mut self, c: Container) {
         if matches!(c, Container::Chest(_) | Container::Crafting(_)) {
@@ -971,7 +1280,12 @@ impl Game {
             Container::GunStation(_) => gun_station::PANEL,
             _ => (176.0, 166.0),
         };
-        let (px, py) = self.panel(panel_w, panel_h);
+        let (px, py) = if c == Container::Creative {
+            self.panel_below(panel_w, panel_h, TAB_H + 4.0)
+        } else {
+            self.panel(panel_w, panel_h)
+        };
+        let over_tabs = c == Container::Creative && self.creative_tabs(px, py, panel_w);
         if matches!(c, Container::Inventory | Container::Creative) {
             self.draw_effects_list(px, py, panel_w * s);
         }
@@ -1017,14 +1331,35 @@ impl Game {
                 self.inventory_slots(px, py, 84.0, &mut hovered);
             }
             Container::GunStation(_) => self.gun_station_panel(px, py, &mut hovered),
+            Container::Creative if TABS[self.creative_tab] == Tab::Inventory => {
+                // The player's own inventory: the figure, the main rows and the hotbar.
+                let (ax, ay) = at(9.0, 6.0);
+                self.player_preview(ax, ay, 51.0 * s, 66.0 * s);
+                let (lx, ly) = at(66.0, 6.0);
+                self.label(t("gui.inventory"), lx, ly);
+                for i in 9..36 {
+                    let (cx, cy) = ((i - 9) % 9, (i - 9) / 9);
+                    let (x, y) = at(9.0 + cx as f32 * SLOT, 76.0 + cy as f32 * SLOT);
+                    if self.draw_slot(x, y, self.inventory.slots[i]) {
+                        hovered = Some(SlotRef::Inv(i));
+                    }
+                }
+                self.creative_hotbar(px, py, &mut hovered);
+            }
             Container::Creative => {
+                let tab = TABS[self.creative_tab];
+                let title = if self.creative_search.trim().is_empty() {
+                    tab.name()
+                } else {
+                    t("gui.tab.search")
+                };
                 let (tx, ty) = at(8.0, 6.0);
-                self.label(t("gui.creative"), tx, ty);
+                self.label(title, tx, ty);
                 let fs = (s * 0.75).round().max(1.0);
-                let title_end = tx + self.ui.text_width(t("gui.creative"), fs);
+                let title_end = tx + self.ui.text_width(title, fs);
                 self.search_box(px, py, title_end);
-                let all = creative_items(&self.creative_search);
-                if all.is_empty() {
+                let all = creative_items(tab, &self.creative_search);
+                if all.iter().all(|i| i.is_none()) {
                     let (cx, cy) = at(9.0 + 4.5 * SLOT, 18.0 + 2.6 * SLOT);
                     self.ui.text_centered(
                         t("gui.no_results"),
@@ -1069,16 +1404,23 @@ impl Game {
                 // Partly scrolled rows are cut off at the edges of the grid.
                 let (gx, gy) = at(9.0, 18.0);
                 self.ui.set_clip(Some([gx, gy, 9.0 * SLOT * s, track_h]));
+                // Only the part of a cut-off row inside the grid can be clicked.
+                let in_grid = self.ui.hit(gx, gy, 9.0 * SLOT * s, track_h);
                 for r in 0..=visible {
                     for cidx in 0..9 {
                         let i = (first + r) * 9 + cidx;
                         let x = px + (9.0 + cidx as f32 * SLOT) * s;
                         let y = (py + (18.0 + (r as f32 - frac) * SLOT) * s).round();
-                        let content = all.get(i).map(|&id| Stack::new(id, 1));
-                        if self.draw_slot(x, y, content) {
-                            if let Some(&id) = all.get(i) {
+                        let id = all.get(i).copied().flatten();
+                        let content = id.map(|id| Stack::new(id, 1));
+                        if self.draw_slot(x, y, content) && in_grid {
+                            if let Some(id) = id {
                                 hovered = Some(SlotRef::Creative(id));
                                 hovered_stack = content;
+                            } else {
+                                // Like Minecraft: a held stack put into an empty spot of
+                                // the item grid is gone.
+                                hovered = Some(SlotRef::Trash);
                             }
                         }
                     }
@@ -1097,27 +1439,19 @@ impl Game {
                     (sy + k * (track_h - bar_h)).round(),
                     10.0 * s,
                     bar_h,
-                    th.scroll_thumb,
+                    // Greyed out when everything fits and there is nothing to scroll.
+                    if max_scroll > 0.0 {
+                        th.scroll_thumb
+                    } else {
+                        th.idle
+                    },
                 );
-                // Hotbar + trash
-                for i in 0..9 {
-                    let (x, y) = at(9.0 + i as f32 * SLOT, 134.0);
-                    if self.draw_slot(x, y, self.inventory.slots[i]) {
-                        hovered = Some(SlotRef::Inv(i));
-                    }
-                }
-                let (x, y) = at(173.0, 134.0);
-                if self.draw_slot(x, y, None) {
-                    hovered = Some(SlotRef::Trash);
-                    self.ui.set_tooltip(t("gui.trash"));
-                }
-                let (lx, ly) = at(174.0 + 4.0, 138.0);
-                self.ui.text("x", lx, ly, s, rgba(200, 60, 60, 255), false);
+                self.creative_hotbar(px, py, &mut hovered);
             }
         }
 
         let panel = (px, py, panel_w * s, panel_h * s);
-        let inside = self.ui.hit(panel.0, panel.1, panel.2, panel.3);
+        let inside = over_tabs || self.ui.hit(panel.0, panel.1, panel.2, panel.3);
         self.slot_input(c, hovered, hovered_stack, inside);
     }
 
@@ -1273,5 +1607,38 @@ impl Game {
             let m = self.ui.mouse;
             draw_stack(&mut self.ui, m.x - 8.0 * s, m.y - 8.0 * s, 16.0 * s, &st);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_category_tab_has_items() {
+        for tab in TABS.into_iter().filter(|&t| t != Tab::Inventory) {
+            assert!(!creative_items(tab, "").is_empty(), "{tab:?} is empty");
+        }
+        // Every item is in exactly one tab, and the listed ones are in the tab `of` gives.
+        let mut shown: Vec<ItemId> = TABS
+            .iter()
+            .flat_map(|&tab| creative_items(tab, "").into_iter().flatten())
+            .collect();
+        for tab in TABS {
+            for id in tab.groups().concat() {
+                assert_eq!(Tab::of(id), tab, "{}", key(id));
+            }
+        }
+        shown.sort();
+        let mut all = all_items();
+        all.sort();
+        assert_eq!(shown, all);
+        assert_eq!(Tab::of(PISTOL), Tab::Weapons);
+        assert_eq!(Tab::of(tool_id(ToolKind::Sword, Tier::Iron)), Tab::Tools);
+        assert_eq!(Tab::of(tool_id(ToolKind::Pickaxe, Tier::Iron)), Tab::Tools);
+        assert_eq!(Tab::of(BURNT_MUTTON), Tab::Food);
+        assert_eq!(Tab::of(SHEEP_SPAWN_EGG), Tab::Mobs);
+        assert_eq!(Tab::of(DIAMOND), Tab::Materials);
+        assert_eq!(Tab::of(FURNACE as ItemId), Tab::Functional);
     }
 }

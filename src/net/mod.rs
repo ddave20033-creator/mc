@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 14;
+pub const PROTOCOL: u16 = 15;
 
 // ---------------------------------------------------------------------------- data
 
@@ -45,6 +45,18 @@ pub struct Pose {
     pub mine_progress: f32,
     /// Block entity this player has open (chest lids open for everyone), `NO_BLOCK` if none.
     pub open: IVec3,
+    /// What the player is busy with (`status`), shown in a bubble above their head.
+    pub status: u8,
+}
+
+/// `Pose::status`: typing in the chat, in the pause menu, away (the game window is not in
+/// front) or looking at an item screen.
+pub mod status {
+    pub const NONE: u8 = 0;
+    pub const TYPING: u8 = 1;
+    pub const MENU: u8 = 2;
+    pub const AFK: u8 = 3;
+    pub const INVENTORY: u8 = 4;
 }
 
 pub mod pose_flags {
@@ -321,6 +333,7 @@ impl W {
         self.ivec3(p.mining);
         self.f32(p.mine_progress);
         self.ivec3(p.open);
+        self.u8(p.status);
     }
     fn state(&mut self, s: &PlayerState) {
         self.vec3(s.pos);
@@ -433,6 +446,7 @@ impl R<'_> {
             mining: self.ivec3()?,
             mine_progress: self.f32()?,
             open: self.ivec3()?,
+            status: self.u8()?,
         })
     }
     fn state(&mut self) -> Option<PlayerState> {
@@ -890,6 +904,7 @@ mod tests {
             held: 5,
             skin: 2,
             flags: pose_flags::HURT,
+            status: status::TYPING,
             ..Default::default()
         }));
         roundtrip(Msg::Skin {
