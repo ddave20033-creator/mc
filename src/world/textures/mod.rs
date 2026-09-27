@@ -236,9 +236,11 @@ pub mod tex {
     /// Muzzle flash: the star seen from the front, and a flame tongue seen from the side.
     pub const MUZZLE_FLASH: u32 = ADV_VENT_TOP + 1;
     pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
+    /// A bullet hole, multiplied onto the block it is in.
+    pub const BULLET_HOLE: u32 = MUZZLE_FLASH_SIDE + 1;
     /// The guide book: its icon, and the leather, the page edges and a written page of the
     /// open book in a player's hands.
-    pub const BOOK: u32 = MUZZLE_FLASH_SIDE + 1;
+    pub const BOOK: u32 = BULLET_HOLE + 1;
     pub const BOOK_COVER: u32 = BOOK + 1;
     pub const BOOK_EDGE: u32 = BOOK + 2;
     pub const BOOK_PAGE: u32 = BOOK + 3;
@@ -404,6 +406,7 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::FLAME_PARTICLE
         || l == tex::MUZZLE_FLASH
         || l == tex::MUZZLE_FLASH_SIDE
+        || l == tex::BULLET_HOLE
         || l == tex::SLOT_GLOW
         || l == tex::FURNACE_FRONT_CUT
         || l == tex::BLAST_FRONT_CUT

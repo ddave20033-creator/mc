@@ -1687,6 +1687,40 @@ fn muzzle_flash(l: u32, x: i32, y: i32) -> [u8; 4] {
     col(c, 0.92 + 0.08 * grain(l, x, y, 704), 255)
 }
 
+/// A bullet hole, multiplied onto a block (mid-gray leaves it as it is): a black hole with
+/// a ragged edge, a dark ring of crushed material around it, cracks running out and a faint
+/// scorch fading away; clear beyond.
+fn bullet_hole(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let (u, v) = ((x as f32 + 0.5) / TILE as f32 - 0.5, (y as f32 + 0.5) / TILE as f32 - 0.5);
+    let r = u.hypot(v) * 2.0;
+    let a = v.atan2(u);
+    let rough = 0.85 + 0.3 * vn(l, x, y, 8, 710);
+    let gray = |g: f32, alpha: f32| col([g, g, g], 1.0, (alpha.clamp(0.0, 1.0) * 255.0) as u8);
+    if r < 0.3 * rough {
+        return gray(12.0 + 20.0 * grain(l, x, y, 711), 1.0);
+    }
+    if r < 0.46 * rough {
+        return gray(60.0 + 30.0 * grain(l, x, y, 712), 1.0);
+    }
+    // Six cracks of different lengths.
+    let crack = (0..6).any(|i| {
+        let ang = i as f32 * std::f32::consts::TAU / 6.0 + hash(l, i, 0, 713) * 0.8;
+        let len = 0.7 + 0.28 * hash(l, i, 1, 714);
+        let d = ((a - ang + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI).abs();
+        let wiggle = 0.05 * (r * 20.0 + i as f32).sin();
+        r < len && (d + wiggle).abs() * r < 0.025 * (1.0 - r / len) + 0.006
+    });
+    if crack {
+        return gray(55.0, 1.0);
+    }
+    // The scorch: a little darker than the block, fading out.
+    let scorch = 1.0 - ((r - 0.46) / 0.45).clamp(0.0, 1.0);
+    if scorch > 0.0 {
+        return gray(95.0, scorch * scorch * 0.9);
+    }
+    [0, 0, 0, 0]
+}
+
 /// Ammunition icons: a .50 AE round (short and fat), a 5.56 mm round (long and slim), a
 /// .50 BMG round (very long, black tip) and a red 12 gauge shell with a brass head.
 fn ammo_icon(i: u32, x: i32, y: i32) -> Option<[u8; 4]> {
@@ -2379,6 +2413,7 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
             gun_surface(l, x, y)
         }
         tex::MUZZLE_FLASH | tex::MUZZLE_FLASH_SIDE => muzzle_flash(l, x, y),
+        tex::BULLET_HOLE => bullet_hole(l, x, y),
         tex::BOOK_COVER | tex::BOOK_EDGE | tex::BOOK_PAGE => book_surface(l, x, y),
         // Blank until a page is drawn onto them.
         _ if l >= tex::BOOK_SHEETS => col(BOOK_PAPER, 1.0, 255),

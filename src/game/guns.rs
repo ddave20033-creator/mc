@@ -40,6 +40,8 @@ struct Bullet {
     knockback: f32,
     /// Another player's, only to be seen: what it hits is up to them.
     visual: bool,
+    /// A shotgun pellet (it leaves a smaller hole).
+    small: bool,
 }
 
 #[derive(Default)]
@@ -85,7 +87,25 @@ pub(super) struct Guns {
     laser_dot: Option<Vec3>,
     /// Muzzle flashes of the other players' shots (as `flash`).
     remote_flashes: Vec<(f32, Vec3, Vec3, f32, f32)>,
+    /// Holes the bullets left in the blocks.
+    holes: Vec<Hole>,
 }
+
+/// A bullet hole: where on which face of which block (it goes when the block does), how it
+/// is turned, how big, and when it was made.
+struct Hole {
+    pos: Vec3,
+    normal: Vec3,
+    block: IVec3,
+    id: u8,
+    turn: f32,
+    size: f32,
+    born: f32,
+}
+
+/// Bullet holes kept at most, and for how long (they shrink away over the last seconds).
+const MAX_HOLES: usize = 300;
+const HOLE_LIFE: f32 = 120.0;
 
 pub(super) struct Bench {
     pub(super) mode: BenchMode,
@@ -223,6 +243,29 @@ impl Guns {
     }
 }
 
+/// How far the shots scatter (degrees; `aim` 0 from the hip .. 1 aimed). A single bullet
+/// from a steady gun goes exactly where the crosshair is; only shots in quick succession
+/// scatter. A shotgun's pellets always spread in a cone around it.
+fn shot_spread(stats: &crate::item::Stats, mods: u8, aim: f32, bloom: f32) -> f32 {
+    let bloom = bloom * (1.0 - 0.7 * aim);
+    if stats.pellets <= 1 {
+        return bloom;
+    }
+    let hip = if mods & gun_mod::LASER != 0 {
+        stats.spread_laser
+    } else {
+        stats.spread_hip
+    };
+    hip + (stats.spread_aimed - hip) * aim + bloom
+}
+
+/// `dir` raised just enough that a bullet at `speed`, falling with `gravity`, comes down on
+/// the line of sight `dist` blocks away.
+fn zeroed(dir: Vec3, dist: f32, speed: f32, gravity: f32) -> Vec3 {
+    let t = dist / speed.max(1.0);
+    (dir * dist + Vec3::Y * 0.5 * gravity * t * t).normalize_or(dir)
+}
+
 /// The case a gun throws out.
 fn case_kind(kind: GunKind) -> CaseKind {
     match kind {
@@ -348,6 +391,11 @@ impl Game {
             f.0 -= dt / 0.06;
         }
         self.guns.remote_flashes.retain(|f| f.0 > 0.0);
+        // Holes go with their block, and after a while.
+        let (time, world) = (self.time, &self.terrain.world);
+        self.guns
+            .holes
+            .retain(|h| time - h.born < HOLE_LIFE && world.geti(h.block) == h.id);
         self.guns.flash_light.0 = (self.guns.flash_light.0 - dt / 0.08).max(0.0);
         self.guns.heat = (self.guns.heat - dt * 0.5).max(0.0);
         self.guns.wisp -= dt;
@@ -454,21 +502,21 @@ impl Game {
         let eye = self.player.eye();
         let look = look_dir(self.yaw, self.pitch);
         let aim = smoothstep(0.0, 1.0, self.guns.aim);
-        let hip = if mods & gun_mod::LASER != 0 {
-            stats.spread_laser
-        } else {
-            stats.spread_hip
-        };
-        let spread = hip + (stats.spread_aimed - hip) * aim + self.guns.bloom * (1.0 - 0.7 * aim);
+        let spread = shot_spread(stats, mods, aim, self.guns.bloom);
         self.guns.bloom = (self.guns.bloom + BLOOM_PER_SHOT).min(BLOOM_MAX);
+        // What the crosshair is on: the bullets are aimed a little high to drop onto it.
+        let range = stats.range;
+        let target = self
+            .laser_hit(eye, look, range, None)
+            .map_or(range, |p| p.distance(eye) + 0.03);
 
         let muzzle = self.muzzle_now().unwrap_or(eye + look * 0.9);
         let mut sent = Vec::new();
         for _ in 0..stats.pellets {
             let (r1, r2) = (self.random(), self.random());
-            let dir = scatter(look, spread, r1, r2);
             // A silencer slows the bullet a little.
             let speed = stats.speed * if mods & gun_mod::SILENCER != 0 { 0.9 } else { 1.0 };
+            let dir = zeroed(scatter(look, spread, r1, r2), target, speed, stats.gravity);
             sent.push(dir * speed);
             self.guns.bullets.push(Bullet {
                 pos: eye,
@@ -481,6 +529,7 @@ impl Game {
                 damage: stats.damage,
                 knockback: stats.knockback,
                 visual: false,
+                small: stats.pellets > 1,
             });
         }
         // The others see the shot too.
@@ -580,6 +629,7 @@ impl Game {
                 damage: 0.0,
                 knockback: 0.0,
                 visual: true,
+                small: stats.pellets > 1,
             });
         }
         let (sky, blk) = self.terrain.world.light_estimate(muzzle);
@@ -685,8 +735,24 @@ impl Game {
                 let b_id = self.terrain.world.geti(hit);
                 let tint = self.block_tint(hit, b_id);
                 let n = normal.as_vec3();
+                let at = b.pos + dir * d;
                 self.particles
-                    .impact(&self.terrain.world, b.pos + dir * d + n * 0.02, n, b_id, tint);
+                    .impact(&self.terrain.world, at + n * 0.02, n, b_id, tint);
+                // A hole where it went in (smaller from a shotgun's pellets).
+                if self.guns.holes.len() >= MAX_HOLES {
+                    self.guns.holes.remove(0);
+                }
+                let size = if b.small { 0.07 } else { 0.1 } * (0.85 + 0.3 * self.random());
+                let turn = self.random() * TAU;
+                self.guns.holes.push(Hole {
+                    pos: at,
+                    normal: n,
+                    block: hit,
+                    id: b_id,
+                    turn,
+                    size,
+                    born: self.time,
+                });
                 return false;
             }
             b.pos += step;
@@ -742,6 +808,37 @@ impl Game {
         }
     }
 
+    /// The bullet holes, multiplied onto the blocks they are in.
+    pub(super) fn build_bullet_holes(&self, out: &mut Vec<Vertex>, cam: Vec3) {
+        use crate::world::mesh::flags;
+        for h in &self.guns.holes {
+            if h.pos.distance_squared(cam) > 64.0 * 64.0 {
+                continue;
+            }
+            let left = HOLE_LIFE - (self.time - h.born);
+            let size = h.size * (left / 3.0).min(1.0);
+            let n = h.normal;
+            let a = if n.y.abs() > 0.5 { Vec3::X } else { Vec3::Y };
+            let t1 = n.cross(a).normalize();
+            let t2 = n.cross(t1);
+            let (s, c) = h.turn.sin_cos();
+            let (r, u) = ((t1 * c + t2 * s) * size, (t2 * c - t1 * s) * size);
+            let p = h.pos + n * 0.002;
+            let corners = [p - r - u, p + r - u, p + r + u, p - r + u];
+            let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+            let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
+                pos: corners[i].to_array(),
+                uv: uv[i],
+                layer: crate::world::textures::tex::BULLET_HOLE as f32,
+                light: [255, 255, 0, 0],
+                tint: [255, 255, 255, flags::OVERLAY],
+            });
+            // Both sides.
+            out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
+            out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+        }
+    }
+
     /// The gun's part of the HUD while holding one: the scope's picture when aimed through
     /// it, the crosshair (it opens up after shots and fades while aiming), the rounds and the
     /// controls.
@@ -779,12 +876,7 @@ impl Game {
         } else if playing && self.camera.mode != 2 && aim < 0.6 {
             // Four lines around a dot, as far apart as the shots scatter.
             let a = 1.0 - aim / 0.6;
-            let hip = if mods & gun_mod::LASER != 0 {
-                stats.spread_laser
-            } else {
-                stats.spread_hip
-            };
-            let spread = hip + self.guns.bloom;
+            let spread = shot_spread(stats, mods, 0.0, self.guns.bloom);
             let half_fov = (self.fov_current.to_radians() * 0.5).tan();
             let gap = (spread.to_radians().tan() / half_fov * h * 0.5).max(3.0 * s) + 2.0 * s;
             let (len, th) = (6.0 * s, (s * 0.5).max(1.0).round());
@@ -925,6 +1017,23 @@ fn t_owned(key: &'static str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_zeroed_bullet_comes_down_on_the_line_of_sight() {
+        let (speed, gravity, dt) = (180.0, 12.0, 1.0 / 120.0);
+        let dir = Vec3::new(0.2, -0.1, -1.0).normalize();
+        for dist in [5.0, 30.0, 80.0] {
+            let mut vel = zeroed(dir, dist, speed, gravity) * speed;
+            let mut pos = Vec3::ZERO;
+            // Fly as `update_bullets` does, until it is as far along as the target.
+            while pos.dot(dir) < dist {
+                pos += vel * dt;
+                vel.y -= gravity * dt;
+            }
+            let miss = (pos - dir * pos.dot(dir)).length();
+            assert!(miss < 0.06, "{dist}: {miss}");
+        }
+    }
 
     #[test]
     fn shots_scatter_within_their_cone() {

@@ -595,6 +595,7 @@ impl Game {
             .build(&mut scene.particles, view.right, view.up);
         if in_world {
             self.build_gun_effects(&mut scene.particles, cam, view.right, view.up);
+            self.build_bullet_holes(&mut scene.overlay, cam);
         }
         if let (Some((p, prog)), Screen::Playing) = (self.mining, self.screen) {
             if prog > 0.02 && !self.creative() {
