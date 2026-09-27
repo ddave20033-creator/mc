@@ -228,6 +228,9 @@ pub struct Game {
     /// its highlighted slot.
     station_hover: Option<gui::SlotRef>,
     station_frame: Option<[Vec3; 4]>,
+    /// The mouse is over the open chest or table, or the inventory under it: a click there
+    /// does not throw the held stack.
+    station_inside: bool,
     /// The side each crafting table was last used from (its grid faces that way).
     table_sides: crate::world::FastMap<IVec3, u8>,
     /// What was crafted at the open table, lying in the middle of its grid until taken.
@@ -460,6 +463,7 @@ impl Game {
             station: None,
             station_hover: None,
             station_frame: None,
+            station_inside: false,
             table_sides: Default::default(),
             craft_out: None,
             craft_fx: None,

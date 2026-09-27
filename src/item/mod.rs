@@ -544,12 +544,12 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Sült disznóhús",
         tex::COOKED_PORKCHOP,
     ),
-    (MUTTON, "mutton", "Raw Mutton", "Nyers ürühús", tex::MUTTON),
+    (MUTTON, "mutton", "Raw Mutton", "Nyers birkahús", tex::MUTTON),
     (
         COOKED_MUTTON,
         "cooked_mutton",
         "Cooked Mutton",
-        "Sült ürühús",
+        "Sült birkahús",
         tex::COOKED_MUTTON,
     ),
     (
@@ -563,7 +563,7 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         HALF_COOKED_MUTTON,
         "half_cooked_mutton",
         "Half-Cooked Mutton",
-        "Félig sült ürühús",
+        "Félig sült birkahús",
         tex::HALF_COOKED_MUTTON,
     ),
     (
@@ -577,7 +577,7 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         BURNT_MUTTON,
         "burnt_mutton",
         "Burnt Mutton",
-        "Szenes ürühús",
+        "Szenes birkahús",
         tex::BURNT_MUTTON,
     ),
     (
@@ -591,7 +591,7 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         HALF_BURNT_MUTTON,
         "half_burnt_mutton",
         "Half-Burnt Mutton",
-        "Félig szenes ürühús",
+        "Félig szenes birkahús",
         tex::HALF_BURNT_MUTTON,
     ),
     (
@@ -605,7 +605,7 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         RAW_BURNT_MUTTON,
         "raw_burnt_mutton",
         "Burnt-Raw Mutton",
-        "Szenes-nyers ürühús",
+        "Szenes-nyers birkahús",
         tex::RAW_BURNT_MUTTON,
     ),
     (SHEARS, "shears", "Shears", "Olló", tex::SHEARS),

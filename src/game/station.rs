@@ -329,6 +329,20 @@ impl Game {
         }
         self.station_hover = hovered.filter(|r| !matches!(r, SlotRef::Inv(_)));
         self.station_frame = frame;
+        // Over the chest (both halves) or the table itself, or the inventory.
+        let blocks: Vec<IVec3> = match c {
+            Container::Chest(p) => {
+                let (a, b) = self.chest_halves(p);
+                std::iter::once(a).chain(b).collect()
+            }
+            Container::Crafting(p) => vec![p],
+            _ => Vec::new(),
+        };
+        let over_block = blocks.iter().any(|q| {
+            let min = q.as_vec3();
+            crate::util::ray_box(o, d, min, min + Vec3::ONE, 64.0).is_some()
+        });
+        self.station_inside = over_inventory || over_block;
         hovered
     }
 }

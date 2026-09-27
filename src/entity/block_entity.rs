@@ -747,7 +747,7 @@ pub fn build_furnace_items(
         let lying = if g.down == 1 { -FRAC_PI_2 } else { FRAC_PI_2 };
         let turn = ((p.x * 13 + p.z * 29 + i as i32 * 11).rem_euclid(7)) as f32 * 0.09 - 0.27;
         // A thick piece: its rim shows how the side on the fire is doing.
-        let (size, thick) = (0.4, 3.0);
+        let (size, thick) = (0.4, 1.6);
         let m = Mat4::from_translation(Vec3::new(
             c.x,
             base.y + 1.0 + size * thick / 32.0 + 0.004 + lift,

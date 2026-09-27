@@ -1,6 +1,7 @@
 //! Furnaces without a screen. A right click puts meat on a corner of the top (and turns
 //! over what is there), things to smelt into the front's mouth above and fuel into the
 //! firebox below; a left click takes out what is there (instead of mining the furnace).
+//! At the mouth a right click takes out what is smelted first, then what is left.
 //! What is smelted stays in the mouth until taken. The corner of the top under the
 //! crosshair is lit up a little.
 
@@ -86,13 +87,19 @@ impl Game {
     }
 
     /// A click on the aimed part of a furnace: `take` for a left click (takes out what is
-    /// there), otherwise a right click (puts in, turns meat over). Returns false when it
-    /// does nothing there.
+    /// there), otherwise a right click (puts in, turns meat over). At the mouth a right click
+    /// takes out too: what is smelted first, whenever there is some; with none, it puts in
+    /// what is held, or takes out what is still to smelt. Returns false when it does nothing.
     pub(super) fn use_furnace(&mut self, p: IVec3, k: u8, take: bool) -> bool {
         let slot = self.hotbar_slot;
         let held = self.inventory.slots[slot];
         let f = self.block_entities.furnaces.entry(p).or_default();
-        let puts = held.is_some_and(|h| f.accepts(k, h.item));
+        let mut puts = held.is_some_and(|h| f.accepts(k, h.item));
+        let take = take
+            || (k == part::INPUT && (f.output.is_some() || (!puts && f.input.is_some())));
+        if take {
+            puts = false;
+        }
         let able = if take {
             f.has(k)
         } else {
