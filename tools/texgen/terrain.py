@@ -15,7 +15,7 @@ import zlib
 import numpy as np
 from scipy import ndimage
 
-from common import S, fbm, grid, hexc, noise, pix, rgba, rng
+from common import S, Ramp, fbm, grid, hexc, noise, pix, rgba, rng
 
 TAU = 2.0 * np.pi
 YY, XX = grid()
@@ -719,10 +719,22 @@ def paint_birch_log_top(seed):
 
 
 # ---------------------------------------------------------------------------- leaves
+# (First-round leaves, preferred by the user: small sprays of pointed leaves over a dark
+# inner canopy, 12-15 % holes mostly in the gaps between leaves.)
+
+LEAF = Ramp("#2c2c2c", "#3c3c3c", "#4d4d4d", "#5f5f5f", "#717171", "#838383", "#969696",
+            "#a9a9a9")
+
+
+def q(a: np.ndarray, ky: int = 2, kx: int | None = None) -> np.ndarray:
+    """Snaps a field to ky x kx pixel clusters (pixel-art grain)."""
+    kx = kx or ky
+    h, w = a.shape[:2]
+    return np.repeat(np.repeat(a[::ky, ::kx], ky, 0), kx, 1)[:h, :w]
 
 
 def window(cy: float, cx: float, R: int):
-    """Wrapped index window around a point: (index, dy, dx) for stamping small shapes."""
+    """Wrapped index window around a point: (rows, cols, dy, dx) for stamping small shapes."""
     iy = np.arange(int(np.floor(cy)) - R, int(np.floor(cy)) + R + 1)
     ix = np.arange(int(np.floor(cx)) - R, int(np.floor(cx)) + R + 1)
     dy = (iy + 0.5 - cy)[:, None] * np.ones((1, len(ix)), np.float32)
@@ -730,146 +742,82 @@ def window(cy: float, cx: float, R: int):
     return np.ix_(iy % S, ix % S), dy, dx
 
 
-def leaf_uv(bx, by, ang, L):
-    """Window around a leaf growing from (bx, by) along `ang`: index, u (along), v (across)."""
-    cx, cy = bx + np.cos(ang) * L / 2, by + np.sin(ang) * L / 2
-    idx, dy, dx = window(cy, cx, int(L / 2) + 3)
-    u = dx * np.cos(ang) + dy * np.sin(ang) + L / 2
+def stamp_leaf(t, cov, cy, cx, ang, L, W, base, vein=True):
+    """Draws one pointed leaf (shade values into `t`, coverage into `cov`), lit top left."""
+    R = int(np.ceil(L)) + 1
+    idx, dy, dx = window(cy, cx, R)
+    u = dx * np.cos(ang) + dy * np.sin(ang)
     v = -dx * np.sin(ang) + dy * np.cos(ang)
-    return idx, u, v
+    f = np.clip(1 - (u / L) ** 2, 0, 1)
+    wv = W * f ** 0.7
+    m = np.abs(v) <= wv + 0.15
+    if not m.any():
+        return
+    lit = -(dy + dx) / (1.4142 * L)
+    tl = base + lit * 0.25
+    rim = (np.abs(v) > wv - 1.1) | (np.abs(u) > L - 1.1)
+    tl = np.where(rim & (dy + dx > 0), tl - 0.3, tl)
+    tl = np.where(rim & (dy + dx <= 0), tl + 0.08, tl)
+    if vein:
+        tl = np.where((np.abs(v) < 0.6) & (np.abs(u) < L - 1.5), tl - 0.1, tl)
+    sub = t[idx]
+    sub[m] = tl[m]
+    t[idx] = sub
+    if cov is not None:
+        c = cov[idx]
+        c[m] = True
+        cov[idx] = c
 
 
-def put(target, idx, m, val):
-    sub = target[idx]
-    sub[m] = val[m] if np.ndim(val) else val
-    target[idx] = sub
-
-
-def paint_leaf(cidx, cov, bx, by, ang, L, W, tones, lobes=0, seed=0):
-    """A leaf: `tones` = (vein, body, light side) palette indices."""
-    idx, u, v = leaf_uv(bx, by, ang, L)
-    f = np.clip(u / L, 0, 1)
-    prof = np.sin(np.pi * f) ** (0.45 if lobes else 0.7) * (1 - (0.15 if lobes else 0.35) * f)
-    if lobes:
-        prof = prof * (0.84 + 0.16 * np.cos(f * TAU * lobes))
-    grain = pix(seed + 7, 2)[idx]
-    serr = (pix(seed + 8, 2)[idx] - 0.5) * 2.0 if lobes else 0.0
-    m = (u >= 0) & (u <= L) & (np.abs(v) <= W * prof + 0.3 + serr)
-    vein, body, lite = tones
-    val = np.where(v < 0, lite, body)
-    # Speckled surface: a few body-tone clusters on the lit half and vice versa.
-    val = np.where((grain > 0.8) & (v < 0), body, val)
-    val = np.where((grain < 0.12) & (v >= 0), lite, val)
-    mid = (np.abs(v) < 1.0) & (f > 0.08) & (f < 0.85)
-    val = np.where(mid, vein, val)
-    if lobes:
-        # Side veins slanting to the tip.
-        side = (np.abs(((u - np.abs(v) * 0.9) % (L / (lobes + 0.5)))) < 1.0) & (np.abs(v) > 1) \
-            & (np.abs(v) < W * prof - 1.5)
-        val = np.where(side, vein, val)
-    put(cidx, idx, m, val)
-    put(cov, idx, m, True)
-
-
-LEAF_OAK = pal("#686468", "#777577", "#989998", "#b9bcb9")
+def leaves(seed: int, kind: str, holes: float = 0.14, bright: float = 0.0):
+    r = rng(seed)
+    # Holes: scattered clumps of 2-6 px, the rest is dark inner canopy.
+    hn = q(noise(seed + 1, 8) * 0.45 + pix(seed + 2, 4) * 0.4 + pix(seed + 5, 2) * 0.15, 2)
+    t = np.full((S, S), 0.12, np.float32) + (pix(seed + 3, 2) - 0.5) * 0.1
+    n_sprays = {"oak": 150, "birch": 200, "spruce": 210}[kind]
+    for i in range(n_sprays):
+        sy, sx = r.random() * S, r.random() * S
+        a0 = r.uniform(0, TAU)
+        count = int(r.integers(4, 7)) if kind != "spruce" else int(r.integers(6, 10))
+        for j in range(count):
+            if kind == "spruce":
+                # Needles on both sides of a short twig.
+                twig = a0
+                along = (j // 2) * 3.0 - 6
+                side = 1 if j % 2 else -1
+                ang = twig + side * r.uniform(0.6, 0.9)
+                L, W = r.uniform(3.5, 5.5), r.uniform(1.0, 1.4)
+                cy = sy + np.sin(twig) * along + np.sin(ang) * L * 0.9
+                cx = sx + np.cos(twig) * along + np.cos(ang) * L * 0.9
+            else:
+                ang = a0 + j * TAU / count + r.uniform(-0.3, 0.3)
+                if kind == "birch":
+                    L, W = r.uniform(3.5, 4.8), r.uniform(2.2, 3.0)
+                else:
+                    L, W = r.uniform(4.5, 6.5), r.uniform(2.4, 3.3)
+                cy = sy + np.sin(ang) * L * 0.85
+                cx = sx + np.cos(ang) * L * 0.85
+            stamp_leaf(t, None, cy, cx, ang, L, W, r.uniform(0.42, 0.78) + bright,
+                       vein=kind != "spruce")
+    # Holes where the hole noise is low, preferably in the gaps between leaves.
+    score = hn + (t > 0.3) * 0.35
+    cov = score > np.quantile(score, holes)
+    t += (pix(seed + 4, 2) - 0.5) * 0.08
+    out = rgba(LEAF.shade(t, 0.4), np.where(cov, 255, 0))
+    out[~cov, :3] = 0
+    return out
 
 
 def paint_oak_leaves(seed):
-    r = rng(seed)
-    cidx = np.zeros((S, S), np.int32)
-    cov = np.zeros((S, S), bool)
-    # Thin twigs winding across the tile.
-    for k in range(4):
-        y0 = (k + 0.3) * S / 4
-        amp, ph = r.uniform(6, 12), r.random()
-        per = S / r.choice([1, 2])
-        yc = y0 + amp * np.sin(TAU * (XX / per + ph))
-        dy = (YY - yc + S / 2) % S - S / 2
-        tw = (np.abs(dy) < 1.0) & (anoise(seed + 5 + k, 128, 32) > 0.3)
-        cidx = np.where(tw, 0, cidx)
-        cov |= tw
-    n = 4
-    for i in range(n):
-        for j in range(n):
-            bx = (j + 0.5 + 0.5 * (i % 2) + (r.random() - 0.5) * 0.3) * S / n
-            by = (i + 0.5 + (r.random() - 0.5) * 0.3) * S / n
-            ang = r.uniform(-0.5, 1.4) + (0 if r.random() < 0.6 else np.pi)
-            light = r.random() < 0.55
-            tones = (2, 2, 3) if light else (0, 1, 1)
-            L = r.uniform(33, 38)
-            paint_leaf(cidx, cov, bx - np.cos(ang) * L / 2, by - np.sin(ang) * L / 2, ang, L,
-                       r.uniform(13, 15), tones, lobes=3, seed=seed + i * n + j)
-    out = rgba(out_rgb(LEAF_OAK, cidx), np.where(cov, 255, 0))
-    out[~cov, :3] = 0
-    return out
-
-
-LEAF_BIRCH = pal("#6f6d6f", "#878686", "#979897", "#b6b8b6")
-
-
-def paint_birch_leaves(seed):
-    r = rng(seed)
-    cidx = np.zeros((S, S), np.int32)
-    cov = np.zeros((S, S), bool)
-    n = 5
-    for i in range(n):
-        for j in range(n):
-            bx = (j + 0.1 + 0.5 * (i % 2) + (r.random() - 0.5) * 0.25) * S / n
-            by = (i + 0.2 + (r.random() - 0.5) * 0.25) * S / n
-            ang = r.uniform(0, TAU)
-            tone = r.random()
-            tones = (0, 1, 2) if tone < 0.5 else (1, 2, 3)
-            L = r.uniform(27, 32)
-            paint_leaf(cidx, cov, bx - np.cos(ang) * L / 2, by - np.sin(ang) * L / 2, ang, L,
-                       r.uniform(9.5, 11), tones)
-    out = rgba(out_rgb(LEAF_BIRCH, cidx), np.where(cov, 255, 0))
-    out[~cov, :3] = 0
-    return out
-
-
-LEAF_SPRUCE = pal("#424242", "#4f4f4f", "#555555", "#8a8a8a", "#989898", "#9a9a9a")
-
-
-def spruce_sprig(cidx, cov, cx, top, h, w, seed):
-    """A small fir sprig: a stem with needles slanting down on both sides, dark tip."""
-    r = rng(seed)
-    idx, dy, dx = window(top + h / 2, cx, int(max(h, 2 * w) / 2) + 2)
-    yy = dy + h / 2  # 0 at the top
-    stem = (np.abs(dx) < 1.5) & (yy >= 0) & (yy <= h)
-    m = stem.copy()
-    val = np.full(dx.shape, 4, np.int32)
-    k = 0
-    for y0 in np.arange(4, h - 4, 10.0):
-        ln = w * (0.35 + 0.65 * (y0 / h)) * r.uniform(0.8, 1.1)
-        for sgn in (-1, 1):
-            # needle from (0, y0) going sideways and down, its lower edge in shadow
-            off = yy - (y0 + 0.9 * sgn * dx)
-            # serrated: little bumps along the top edge of each needle
-            ser = (((sgn * dx) % 5) < 2) & (off > -5) & (off < 0)
-            nd = (sgn * dx >= 1) & (sgn * dx <= ln) & ((np.abs(off) < 2.6) | ser)
-            m |= nd
-            tone = 3 if (k + (sgn > 0)) % 2 else 5
-            val = np.where(nd & ~stem, np.where(off > 1.2, 2, tone), val)
-        k += 1
-    val = np.where(m & (yy < 8) & (np.abs(dx) < 3), 1, val)
-    put(cidx, idx, m, val)
-    put(cov, idx, m, True)
+    return leaves(seed, "oak", 0.14)
 
 
 def paint_spruce_leaves(seed):
-    r = rng(seed)
-    cidx = np.zeros((S, S), np.int32)
-    cov = np.zeros((S, S), bool)
-    rows, cols = 4, 4
-    for i in range(rows):
-        for j in range(cols):
-            cx = (j + 0.5 * (i % 2) + (r.random() - 0.5) * 0.25) * S / cols
-            top = (i + (r.random() - 0.5) * 0.2) * S / rows - 4
-            spruce_sprig(cidx, cov, cx, top, r.uniform(46, 52), r.uniform(18, 21),
-                         seed + i * cols + j)
-    out = rgba(out_rgb(LEAF_SPRUCE, cidx), np.where(cov, 255, 0))
-    out[~cov, :3] = 0
-    return out
+    return leaves(seed, "spruce", 0.12, bright=-0.06)
+
+
+def paint_birch_leaves(seed):
+    return leaves(seed, "birch", 0.15, bright=0.05)
 
 
 # ---------------------------------------------------------------------------- cactus
