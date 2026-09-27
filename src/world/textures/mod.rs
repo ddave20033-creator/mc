@@ -176,7 +176,12 @@ pub mod tex {
     /// The furnace front with its openings cut out, and the sooty stone inside them.
     pub const FURNACE_FRONT_CUT: u32 = SLOT_GLOW + 1;
     pub const FURNACE_INSIDE: u32 = SLOT_GLOW + 2;
-    pub const LAYERS: usize = (FURNACE_INSIDE + 1) as usize;
+    /// The sides of meat on the grill, cooked and burnt, in the raw meat's shape.
+    pub const GRILL_COOKED_PORKCHOP: u32 = FURNACE_INSIDE + 1;
+    pub const GRILL_COOKED_MUTTON: u32 = FURNACE_INSIDE + 2;
+    pub const GRILL_BURNT_PORKCHOP: u32 = FURNACE_INSIDE + 3;
+    pub const GRILL_BURNT_MUTTON: u32 = FURNACE_INSIDE + 4;
+    pub const LAYERS: usize = (GRILL_BURNT_MUTTON + 1) as usize;
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -253,6 +258,7 @@ fn is_item_icon(l: u32) -> bool {
         || l == tex::BED_ITEM
         || (tex::MUTTON..=tex::SHEEP_SPAWN_EGG).contains(&l)
         || (tex::HALF_COOKED_PORKCHOP..=tex::BURNT_MUTTON).contains(&l)
+        || (tex::GRILL_COOKED_PORKCHOP..=tex::GRILL_BURNT_MUTTON).contains(&l)
 }
 
 fn is_crack(l: u32) -> bool {
@@ -661,86 +667,163 @@ fn synth_furnace_cut(base: &mut [u8]) {
     }
 }
 
-/// Inside a furnace: its stone blackened with soot, darkest deep inside.
+/// Inside a furnace: charred, sooty black all over, with soft smudges of soot and ash and
+/// a fine grain (smooth like the other textures, not blocky).
 fn synth_furnace_inside(base: &mut [u8]) {
-    let layer_bytes = TILE * TILE * 4;
-    let src = base[tex::FURNACE_SIDE as usize * layer_bytes..][..layer_bytes].to_vec();
-    let o = tex::FURNACE_INSIDE as usize * layer_bytes;
-    for i in (0..layer_bytes).step_by(4) {
-        let k = 0.52;
-        base[o + i] = (src[i] as f32 * k + 6.0) as u8;
-        base[o + i + 1] = (src[i + 1] as f32 * k + 4.0) as u8;
-        base[o + i + 2] = (src[i + 2] as f32 * k + 3.0) as u8;
-        base[o + i + 3] = 255;
+    let o = tex::FURNACE_INSIDE as usize * TILE * TILE * 4;
+    // Smooth value noise with cells of `size` texels, tiling across the texture's edges.
+    let smooth = |x: usize, y: usize, size: usize, salt: u32| {
+        let n = TILE / size;
+        let (fx, fy) = (x as f32 / size as f32, y as f32 / size as f32);
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+        let (tx, ty) = (tx * tx * (3.0 - 2.0 * tx), ty * ty * (3.0 - 2.0 * ty));
+        let at = |cx: usize, cy: usize| texel_noise(cx % n, cy % n, salt);
+        let top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx;
+        let bottom = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
+        top + (bottom - top) * ty
+    };
+    for y in 0..TILE {
+        for x in 0..TILE {
+            let smudge = smooth(x, y, TILE / 4, 11) * 0.65 + smooth(x, y, TILE / 16, 13) * 0.35;
+            let grain = texel_noise(x, y, 12);
+            let v = 22.0 + 28.0 * smudge * smudge + 6.0 * grain;
+            let i = o + (y * TILE + x) * 4;
+            base[i..i + 4].copy_from_slice(&[
+                (v * 1.06) as u8,
+                v as u8,
+                (v * 0.94) as u8,
+                255,
+            ]);
+        }
     }
 }
 
-/// Grilled meat made from the final raw and cooked textures (unless a pack has them): one
-/// side cooked shows the cooked meat over its upper left half, burnt meat is cooked meat
-/// charred almost black with a few glowing embers.
+/// A hash of a texel for noise, 0..1.
+fn texel_noise(x: usize, y: usize, salt: u32) -> f32 {
+    let h = (x as u32)
+        .wrapping_mul(0x9E37_79B1)
+        .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B))
+        .wrapping_add(salt.wrapping_mul(0xC2B2_AE35));
+    let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
+    ((h >> 8) & 0xFF) as f32 / 255.0
+}
+
+/// Raw meat roasted, keeping its shape and shading: its light and dark parts turn into a
+/// golden to dark brown by how light they were, with grill stripes across it.
+fn roast(raw: &[u8]) -> Vec<u8> {
+    let luma = |i: usize| raw[i] as f32 * 0.3 + raw[i + 1] as f32 * 0.59 + raw[i + 2] as f32 * 0.11;
+    let (mut lo, mut hi) = (255.0f32, 0.0f32);
+    for i in (0..raw.len()).step_by(4) {
+        if raw[i + 3] > 127 {
+            lo = lo.min(luma(i));
+            hi = hi.max(luma(i));
+        }
+    }
+    let span = (hi - lo).max(1.0);
+    let ramp = |t: f32| -> [f32; 3] {
+        let dark = [62.0, 30.0, 16.0];
+        let mid = [146.0, 80.0, 42.0];
+        let light = [214.0, 152.0, 88.0];
+        let (a, b, k) = if t < 0.55 {
+            (dark, mid, t / 0.55)
+        } else {
+            (mid, light, (t - 0.55) / 0.45)
+        };
+        std::array::from_fn(|c| a[c] + (b[c] - a[c]) * k)
+    };
+    let mut out = raw.to_vec();
+    for y in 0..TILE {
+        for x in 0..TILE {
+            let i = (y * TILE + x) * 4;
+            if raw[i + 3] <= 127 {
+                continue;
+            }
+            let t = ((luma(i) - lo) / span).clamp(0.0, 1.0);
+            let mut c = ramp(t);
+            // Grill stripes over the meat (not its dark rim).
+            let stripe = (x + 2 * y) % (TILE / 5) < TILE / 28;
+            let k = if stripe && t > 0.25 { 0.55 } else { 1.0 };
+            let grain = 0.93 + 0.14 * texel_noise(x, y, 7);
+            for (v, o) in c.iter_mut().zip(&mut out[i..i + 3]) {
+                *v *= k * grain;
+                *o = v.clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
+/// Charred: roasted meat blackened almost all over, with a few glowing embers.
+fn char_meat(roasted: &[u8]) -> Vec<u8> {
+    let mut out = roasted.to_vec();
+    for y in 0..TILE {
+        for x in 0..TILE {
+            let i = (y * TILE + x) * 4;
+            let noise = texel_noise(x, y, 3);
+            let c = &roasted[i..i + 4];
+            let luma = (c[0] as f32 * 0.3 + c[1] as f32 * 0.59 + c[2] as f32 * 0.11) / 255.0;
+            let k = 0.16 + 0.22 * luma + 0.06 * noise;
+            out[i] = (c[0] as f32 * k + 10.0) as u8;
+            out[i + 1] = (c[1] as f32 * k * 0.8 + 6.0) as u8;
+            out[i + 2] = (c[2] as f32 * k * 0.7 + 4.0) as u8;
+            if noise > 0.985 && c[3] > 127 {
+                out[i..i + 3].copy_from_slice(&[168, 58, 18]);
+            }
+        }
+    }
+    out
+}
+
+/// Grilled meat, all made from the final raw textures (unless a pack has them), so every
+/// state has the raw meat's shape and both sides of a piece on the grill match: roasted and
+/// charred sides for the grill, one side cooked (the item: roasted over its upper left
+/// half), and burnt (the item: the cooked texture charred).
 fn synth_grilled(base: &mut [u8]) {
     let layer_bytes = TILE * TILE * 4;
     let get = |base: &[u8], l: u32| base[l as usize * layer_bytes..][..layer_bytes].to_vec();
-    for (raw, cooked, half, burnt) in [
+    let empty = |base: &[u8], l: u32| get(base, l).iter().all(|&v| v == 0);
+    for (raw, cooked, half, burnt, grill_cooked, grill_burnt) in [
         (
             tex::PORKCHOP,
             tex::COOKED_PORKCHOP,
             tex::HALF_COOKED_PORKCHOP,
             tex::BURNT_PORKCHOP,
+            tex::GRILL_COOKED_PORKCHOP,
+            tex::GRILL_BURNT_PORKCHOP,
         ),
         (
             tex::MUTTON,
             tex::COOKED_MUTTON,
             tex::HALF_COOKED_MUTTON,
             tex::BURNT_MUTTON,
+            tex::GRILL_COOKED_MUTTON,
+            tex::GRILL_BURNT_MUTTON,
         ),
     ] {
-        let (r, c) = (get(base, raw), get(base, cooked));
-        let empty = |base: &[u8], l: u32| get(base, l).iter().all(|&v| v == 0);
-        if empty(base, half) {
-            let o = half as usize * layer_bytes;
-            for y in 0..TILE {
-                for x in 0..TILE {
+        let r = get(base, raw);
+        let roasted = roast(&r);
+        let put = |base: &mut [u8], l: u32, px: &[u8]| {
+            if empty(base, l) {
+                base[l as usize * layer_bytes..][..layer_bytes].copy_from_slice(px);
+            }
+        };
+        put(base, grill_cooked, &roasted);
+        put(base, grill_burnt, &char_meat(&roasted));
+        let mut halfway = r.clone();
+        for y in 0..TILE {
+            for x in 0..TILE {
+                // A slightly ragged diagonal between the roasted and the raw half.
+                let wobble = ((x * 7 + y * 13) % 5) as i32 - 2;
+                if (x + y) as i32 + wobble * 2 < TILE as i32 {
                     let i = (y * TILE + x) * 4;
-                    // A slightly ragged diagonal between the two halves.
-                    let wobble = ((x * 7 + y * 13) % 5) as i32 - 2;
-                    let cooked_side = (x + y) as i32 + wobble * 2 < TILE as i32;
-                    let src = if (cooked_side && c[i + 3] > 127) || r[i + 3] <= 127 {
-                        &c
-                    } else {
-                        &r
-                    };
-                    base[o + i..o + i + 4].copy_from_slice(&src[i..i + 4]);
+                    halfway[i..i + 4].copy_from_slice(&roasted[i..i + 4]);
                 }
             }
         }
-        if empty(base, burnt) {
-            let o = burnt as usize * layer_bytes;
-            for y in 0..TILE {
-                for x in 0..TILE {
-                    let i = (y * TILE + x) * 4;
-                    let h = (x as u32)
-                        .wrapping_mul(0x9E37_79B1)
-                        .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B));
-                    let h = (h ^ (h >> 15)).wrapping_mul(0x2C1B_3C6D);
-                    let noise = ((h >> 8) & 0xFF) as f32 / 255.0;
-                    let luma =
-                        (c[i] as f32 * 0.3 + c[i + 1] as f32 * 0.59 + c[i + 2] as f32 * 0.11)
-                            / 255.0;
-                    let k = 0.16 + 0.22 * luma + 0.06 * noise;
-                    let mut px = [
-                        (c[i] as f32 * k + 10.0) as u8,
-                        (c[i + 1] as f32 * k * 0.8 + 6.0) as u8,
-                        (c[i + 2] as f32 * k * 0.7 + 4.0) as u8,
-                        c[i + 3],
-                    ];
-                    if noise > 0.985 && px[3] > 127 {
-                        px = [168, 58, 18, 255];
-                    }
-                    base[o + i..o + i + 4].copy_from_slice(&px);
-                }
-            }
-        }
+        put(base, half, &halfway);
+        let c = get(base, cooked);
+        put(base, burnt, &char_meat(&c));
     }
 }
 

@@ -514,7 +514,6 @@ impl Game {
         }
 
         let held = self.held();
-        let furnace_hint = self.furnace_hint();
         let ui = &mut self.ui;
         if self.slot_name_timer > 0.0 && playing && held != NONE {
             let a = self.slot_name_timer.min(0.5) / 0.5;
@@ -531,13 +530,6 @@ impl Game {
                 with_alpha(WHITE, a),
                 true,
             );
-        }
-
-        // What a right click does at the furnace part under the crosshair.
-        if let (Screen::Playing, Some(text)) = (self.screen, furnace_hint) {
-            let fs = (s - 1.0).max(1.0);
-            let y = (h * 0.5 + 14.0 * s).round();
-            ui.text_centered(text, w * 0.5, y, fs, rgba(255, 255, 255, 200), true);
         }
 
         if self.hint_timer > 0.0 && self.screen == Screen::Playing {

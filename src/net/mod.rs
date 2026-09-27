@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 12;
+pub const PROTOCOL: u16 = 13;
 
 // ---------------------------------------------------------------------------- data
 
@@ -154,13 +154,13 @@ pub enum Msg {
     },
     Command(String),
     Save(PlayerState),
-    /// Used a part of a furnace (`block_entity::part`), turning meat over when `flip`. The
-    /// player already took `offered` from their hand; the host gives back what did not go
-    /// in, and what came out.
+    /// Used a part of a furnace (`block_entity::part`): a left click (`take`) takes out
+    /// what is there, a right click puts in or turns meat over. The player already took
+    /// `offered` from their hand; the host gives back what did not go in, and what came out.
     FurnaceUse {
         p: IVec3,
         part: u8,
-        flip: bool,
+        take: bool,
         offered: Slot,
     },
 
@@ -226,6 +226,8 @@ pub enum Msg {
         cook: f32,
         input: Slot,
         fuel: Slot,
+        /// What is smelted (it stays in the mouth).
+        output: Slot,
         grill: Vec<(u8, Grilled)>,
     },
     Chat {
@@ -503,13 +505,13 @@ impl Msg {
             Msg::FurnaceUse {
                 p,
                 part,
-                flip,
+                take,
                 offered,
             } => {
                 w.u8(12);
                 w.ivec3(*p);
                 w.u8(*part);
-                w.bool(*flip);
+                w.bool(*take);
                 w.slot(*offered);
             }
             Msg::DropItem {
@@ -661,6 +663,7 @@ impl Msg {
                 cook,
                 input,
                 fuel,
+                output,
                 grill,
             } => {
                 w.u8(43);
@@ -669,6 +672,7 @@ impl Msg {
                 w.f32(*cook);
                 w.slot(*input);
                 w.slot(*fuel);
+                w.slot(*output);
                 w.u32(grill.len() as u32);
                 for (corner, g) in grill {
                     w.u8(*corner);
@@ -737,7 +741,7 @@ impl Msg {
             12 => Msg::FurnaceUse {
                 p: r.ivec3()?,
                 part: r.u8()?,
-                flip: r.bool()?,
+                take: r.bool()?,
                 offered: r.slot()?,
             },
             20 => Msg::Welcome {
@@ -811,6 +815,7 @@ impl Msg {
                 cook: r.f32()?,
                 input: r.slot()?,
                 fuel: r.slot()?,
+                output: r.slot()?,
                 grill: r.list(|r| {
                     let corner = r.u8()?;
                     let g = Grilled {
@@ -937,6 +942,7 @@ mod tests {
             cook: 4.0,
             input: None,
             fuel: Some(Stack::new(257, 7)),
+            output: Some(Stack::new(259, 3)),
             grill: vec![(
                 2,
                 Grilled {
@@ -950,7 +956,7 @@ mod tests {
         roundtrip(Msg::FurnaceUse {
             p: IVec3::new(1, 2, 3),
             part: 3,
-            flip: true,
+            take: true,
             offered: Some(Stack::one(268)),
         });
         roundtrip(Msg::Chat {

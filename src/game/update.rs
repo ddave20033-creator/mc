@@ -133,7 +133,9 @@ impl Game {
         if sword {
             self.mining = None;
         }
-        if control && self.left_down && self.action_cooldown <= 0.0 && !sword {
+        // A left click on what is in a furnace takes it out instead of mining.
+        let furnace_hold = control && self.furnace_left_click();
+        if control && self.left_down && self.action_cooldown <= 0.0 && !sword && !furnace_hold {
             if let Some((hit, _)) = self.target {
                 let b = self.terrain.world.geti(hit);
                 let time =

@@ -564,6 +564,7 @@ impl Game {
             cook: f.cook,
             input: f.input,
             fuel: f.fuel,
+            output: f.output,
             grill: f
                 .grill
                 .iter()
@@ -580,8 +581,7 @@ impl Game {
         p: IVec3,
         burn: f32,
         cook: f32,
-        input: Slot,
-        fuel: Slot,
+        [input, fuel, output]: [Slot; 3],
         grill: Vec<(u8, crate::entity::Grilled)>,
     ) {
         let f = self.block_entities.furnaces.entry(p).or_default();
@@ -589,6 +589,7 @@ impl Game {
         f.cook = cook;
         f.input = input;
         f.fuel = fuel;
+        f.output = output;
         f.grill = [None; 4];
         for (i, g) in grill {
             f.grill[i as usize & 3] = Some(g);

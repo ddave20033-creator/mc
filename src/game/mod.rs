@@ -189,6 +189,9 @@ pub struct Game {
     /// The furnace part under the crosshair: a corner of the top (0..4) or the front's
     /// upper or lower half (`block_entity::part`).
     furnace_part: Option<(IVec3, u8)>,
+    /// Something was just taken out of a furnace with the left button, still held: it does
+    /// not start mining the furnace.
+    furnace_hold: bool,
     /// Where the look ray meets the targeted block.
     target_point: Vec3,
 
@@ -218,14 +221,18 @@ pub struct Game {
     press_pick: Option<gui::SlotRef>,
     /// The camera over an open chest or crafting table (and gliding back after).
     station: Option<station::Station>,
-    /// What the mouse points at in the chest or on the table, and the frame drawn around
-    /// its slot there.
+    /// What the mouse points at in the open chest or on the open table, and the corners of
+    /// its highlighted slot.
     station_hover: Option<gui::SlotRef>,
     station_frame: Option<[Vec3; 4]>,
-    /// Something just crafted at a table, shown flying together.
-    craft_fx: Option<station::CraftFx>,
     /// The side each crafting table was last used from (its grid faces that way).
     table_sides: crate::world::FastMap<IVec3, u8>,
+    /// What was crafted at the open table, lying in the middle of its grid until taken.
+    craft_out: Slot,
+    /// The ingredients sliding into the middle of the table: seconds since, and the grid as
+    /// it was.
+    craft_fx: Option<(f32, [Slot; 9])>,
+
     /// Time and slot of the last left click, for double-click collecting.
     slot_click: (f32, Option<gui::SlotRef>),
     block_entities: BlockEntities,
@@ -429,6 +436,7 @@ impl Game {
             camera: camera::Rig::default(),
             target: None,
             furnace_part: None,
+            furnace_hold: false,
             target_point: Vec3::ZERO,
             inventory: Inventory::new(),
             hotbar_slot: 0,
@@ -448,7 +456,9 @@ impl Game {
             station_hover: None,
             station_frame: None,
             table_sides: Default::default(),
+            craft_out: None,
             craft_fx: None,
+
             slot_click: (-1.0, None),
             block_entities: BlockEntities::default(),
             items: Vec::new(),

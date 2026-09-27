@@ -42,7 +42,8 @@ impl Game {
         let at_table = matches!(self.screen, Screen::Container(Container::Crafting(_)));
         let mut slots = self.inventory.slots;
         let grid = if at_table { &[][..] } else { &self.craft[..] };
-        for s in grid.iter().chain(std::iter::once(&self.cursor)).flatten() {
+        let held = [self.cursor, self.craft_out];
+        for s in grid.iter().chain(held.iter()).flatten() {
             let _ = inventory::add_to(&mut slots, *s);
         }
         slots
@@ -78,7 +79,7 @@ impl Game {
             }
             // Furnaces have no screen: meat goes on top, the rest into the front.
             if let Some((p, k)) = self.furnace_part.filter(|(p, _)| *p == hit) {
-                if self.right_pressed && self.use_furnace(p, k, sneaking) {
+                if self.right_pressed && self.use_furnace(p, k, false) {
                     return;
                 }
             }

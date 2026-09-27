@@ -1,43 +1,29 @@
 //! Chests and crafting tables without a window: the camera glides from the eye over the
-//! block, what is inside lies in it in 3D and is picked with the mouse, and the inventory
-//! runs along the bottom of the screen. Closing glides the camera back into the head.
+//! block, what is in it or on it lies there in 3D and is picked with the mouse, and the
+//! inventory runs along the bottom of the screen. At a table, a click anywhere but on a slot
+//! crafts what the grid makes into its middle. Closing glides the camera back into the head.
 
 use super::gui::SlotRef;
 use super::*;
 use crate::entity::block_entity::{
-    chest_cell, chest_cell_at, chest_cell_size, chest_side, table_cell, table_cell_at,
-    table_result_pos, CHEST_FLOOR, TABLE_CELL,
+    chest_cell, chest_cell_at, chest_cell_size, chest_side, table_cell, table_cell_at, CHEST_FLOOR,
+    CRAFT_SLIDE, TABLE_CELL,
 };
-use crate::item::Stack;
 
 /// Vertical field of view over the block.
 const FOV: f32 = 60.0;
 /// Seconds the camera takes to glide there (and back).
 const GLIDE: f32 = 0.4;
-/// How steeply the camera looks down: into a chest (steep, to see down into it), and at a
-/// crafting table (flatter, so what it makes floats above the grid).
-const CHEST_PITCH: f32 = 68.0;
-const TABLE_PITCH: f32 = 40.0;
+/// How steeply the camera looks down at the chest or table.
+const PITCH: f32 = 55.0;
 
-/// The block a chest or crafting table view is over, and how far the camera has glided.
+/// The chest or table the view is over, and how far the camera has glided.
 pub(super) struct Station {
     pub pos: IVec3,
     /// 0 at the player's eye .. 1 over the block.
     pub blend: f32,
     /// Gliding back to the eye (the view closed).
     pub closing: bool,
-}
-
-/// A crafting being shown: the ingredients flying together over the table (see
-/// `block_entity::build_craft_fx`).
-pub(super) struct CraftFx {
-    pub pos: IVec3,
-    pub side: u8,
-    /// Seconds since the click.
-    pub t: f32,
-    /// The grid as it was, and what it made.
-    pub grid: [Slot; 9],
-    pub made: Stack,
 }
 
 /// Where things are on the screen: the view's camera matrix and the window size.
@@ -72,14 +58,8 @@ impl Screen2 {
 /// `half_w` wide, `half_d` deep): across it fills most of the width, seen at an angle its
 /// depth about half the height, and it sits in the upper part of the screen, above the
 /// inventory. Returns (position, look direction).
-fn framing(
-    center: Vec3,
-    toward: Vec3,
-    (half_w, half_d): (f32, f32),
-    pitch: f32,
-    aspect: f32,
-) -> (Vec3, Vec3) {
-    let pitch = pitch.to_radians();
+fn framing(center: Vec3, toward: Vec3, (half_w, half_d): (f32, f32), aspect: f32) -> (Vec3, Vec3) {
+    let pitch = PITCH.to_radians();
     let tv = (FOV.to_radians() * 0.5).tan();
     let th = tv * aspect;
     let look = -toward * pitch.cos() - Vec3::Y * pitch.sin();
@@ -122,75 +102,43 @@ impl Game {
         });
     }
 
-    /// Something was just crafted at the open table (`grid` as it was before).
-    pub(super) fn start_craft_fx(&mut self, c: Container, grid: [Slot; 9], made: Stack) {
-        if let Container::Crafting(pos) = c {
-            self.craft_fx = Some(CraftFx {
-                pos,
-                side: self.table_side(pos),
-                t: 0.0,
-                grid,
-                made,
-            });
-        }
-    }
-
-    /// The crafting animation moves on; where the ingredients meet, a puff.
-    pub(super) fn update_craft_fx(&mut self, dt: f32) {
-        let Some(fx) = &mut self.craft_fx else { return };
-        let before = fx.t;
-        fx.t += dt;
-        let (t, pos, side) = (fx.t, fx.pos, fx.side);
-        use crate::entity::block_entity::{table_result_pos, CRAFT_FX_TIME, CRAFT_MEET};
-        if before < CRAFT_MEET && t >= CRAFT_MEET {
-            let at = table_result_pos(pos, side, self.time);
-            // A few small bright sparks where they meet.
-            let (sky, blk) = {
-                let w = &self.terrain.world;
-                (w.sky_estimate(at), w.block_light_estimate(at))
-            };
-            for _ in 0..7 {
-                let off = Vec3::new(
-                    self.random() - 0.5,
-                    self.random() * 0.5,
-                    self.random() - 0.5,
-                ) * 0.22;
-                self.particles.smoke_shaded(at + off, 245, sky, blk);
-            }
-        }
-        if t >= CRAFT_FX_TIME {
-            self.craft_fx = None;
-        }
-    }
-
     /// Which way a crafting table's grid faces (toward who last used it).
     pub(super) fn table_side(&self, p: IVec3) -> u8 {
         self.table_sides.get(&p).copied().unwrap_or(2)
     }
 
-    /// The camera over the open block: (position, look direction), framed so what is in
-    /// the block fills the upper part of the screen above the inventory.
+    /// The ingredients slide into the middle of the table.
+    pub(super) fn update_craft_fx(&mut self, dt: f32) {
+        if let Some((t, _)) = &mut self.craft_fx {
+            *t += dt;
+            if *t > CRAFT_SLIDE + 1.0 {
+                self.craft_fx = None;
+            }
+        }
+    }
+
+    /// The camera over the open chest or table: (position, look direction), framed so what is
+    /// in or on it fills the upper part of the screen above the inventory.
     fn station_target(&self, st: &Station, aspect: f32) -> Option<(Vec3, Vec3)> {
         let w = &self.terrain.world;
         let b = w.geti(st.pos);
-        // Middle of what is shown, the direction toward the viewer, and half its width
-        // and depth.
-        let (center, toward, half_w, half_d, pitch) = if is_chest(b) {
-            let f = facing(b)?;
+        let (center, toward, half_w, half_d) = if b == CRAFTING_TABLE {
+            let toward = facing_dir(self.table_side(st.pos)).as_vec3();
+            (
+                st.pos.as_vec3() + Vec3::new(0.5, 1.05, 0.5),
+                toward,
+                0.4,
+                0.4,
+            )
+        } else {
+            let f = facing(b).filter(|_| is_chest(b))?;
             let (a, other) = self.chest_halves(st.pos);
             let mid = other.map_or(a.as_vec3(), |o| (a.as_vec3() + o.as_vec3()) * 0.5);
             let half_w = if other.is_some() { 0.95 } else { 0.47 };
             let center = mid + Vec3::new(0.5, CHEST_FLOOR + 0.05, 0.5);
-            (center, facing_dir(f).as_vec3(), half_w, 0.45, CHEST_PITCH)
-        } else if b == CRAFTING_TABLE {
-            // The grid and what it makes floating over it.
-            let toward = facing_dir(self.table_side(st.pos)).as_vec3();
-            let mid = st.pos.as_vec3() + Vec3::new(0.5, 1.2, 0.5);
-            (mid, toward, 0.5, 0.55, TABLE_PITCH)
-        } else {
-            return None;
+            (center, facing_dir(f).as_vec3(), half_w, 0.45)
         };
-        let (want, fwd) = framing(center, toward, (half_w, half_d), pitch, aspect);
+        let (want, fwd) = framing(center, toward, (half_w, half_d), aspect);
         // Not into a wall or ceiling over the block (checked from high enough above it that
         // the block itself is not in the way).
         let origin = Vec3::new(center.x, st.pos.y as f32 + 1.45, center.z);
@@ -248,14 +196,15 @@ impl Game {
         )
     }
 
-    /// The camera is (partly) over a chest or table: the hand and the first-person body
-    /// are not drawn.
+    /// The camera is (partly) over a chest or table: the hand and the first-person body are
+    /// not drawn.
     pub(super) fn in_station(&self) -> bool {
         self.station.is_some()
     }
 
-    /// The chest or table view: the inventory along the bottom, the counts of the stacks
-    /// lying in the block, and what the mouse points at (in 3D or in the inventory).
+    /// The chest or table view: the inventory along the bottom, the counts of the stacks lying
+    /// in the chest or on the table, and what the mouse points at (in 3D or in the
+    /// inventory).
     pub(super) fn station_screen(&mut self, c: Container) -> Option<SlotRef> {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let mut hovered = None;
@@ -289,85 +238,65 @@ impl Game {
         let fs = (s * 0.67).round().max(1.0);
         let mut labels: Vec<(Vec3, u8)> = Vec::new();
         let mut frame = None;
-        match c {
-            Container::Chest(p) => {
-                let world = &self.terrain.world;
-                let (a, b) = self.chest_halves(p);
-                let f = facing(world.geti(a)).unwrap_or(0);
-                let slots = self.chest_slots(p);
-                let front = facing_dir(f).as_vec3();
-                let right = chest_right(f).as_vec3();
-                let floor = a.y as f32 + CHEST_FLOOR;
-                let point = hit_plane(o, d, floor).filter(|_| ready && !over_inventory);
-                for (half, q) in std::iter::once(a).chain(b).enumerate() {
-                    let side = chest_side(world.geti(q), f);
-                    let (cw, cd) = chest_cell_size(side);
-                    if let Some(i) = point.and_then(|pt| chest_cell_at(q, f, side, pt)) {
-                        hovered = Some(SlotRef::Chest(half * 27 + i));
-                        let c = chest_cell(q, f, side, i) + Vec3::Y * 0.002;
-                        let (x, z) = (right * (cw * 0.5 - 0.004), front * (cd * 0.5 - 0.004));
-                        frame = Some([c - x - z, c + x - z, c + x + z, c - x + z]);
-                    }
-                    for i in 0..27 {
-                        if let Some(st) = slots.get(half * 27 + i).copied().flatten() {
-                            if st.count > 1 {
-                                let at =
-                                    chest_cell(q, f, side, i) + front * cd * 0.2 + right * cw * 0.3;
-                                labels.push((at, st.count));
-                            }
-                        }
-                    }
-                }
-            }
-            Container::Crafting(p) => {
-                let side = self.table_side(p);
-                let toward = facing_dir(side).as_vec3();
-                let point = hit_plane(o, d, p.y as f32 + 1.0).filter(|_| ready && !over_inventory);
-                if let Some(i) = point.and_then(|pt| table_cell_at(p, side, pt)) {
-                    hovered = Some(SlotRef::Craft(i));
-                    let c = table_cell(p, side, i) + Vec3::Y * 0.002;
-                    let right = (-toward).cross(Vec3::Y);
-                    let (x, z) = (right * TABLE_CELL * 0.47, toward * TABLE_CELL * 0.47);
+        if let Container::Chest(p) = c {
+            let world = &self.terrain.world;
+            let (a, b) = self.chest_halves(p);
+            let f = facing(world.geti(a)).unwrap_or(0);
+            let slots = self.chest_slots(p);
+            let front = facing_dir(f).as_vec3();
+            let right = chest_right(f).as_vec3();
+            let floor = a.y as f32 + CHEST_FLOOR;
+            let point = hit_plane(o, d, floor).filter(|_| ready && !over_inventory);
+            for (half, q) in std::iter::once(a).chain(b).enumerate() {
+                let side = chest_side(world.geti(q), f);
+                let (cw, cd) = chest_cell_size(side);
+                if let Some(i) = point.and_then(|pt| chest_cell_at(q, f, side, pt)) {
+                    hovered = Some(SlotRef::Chest(half * 27 + i));
+                    let c = chest_cell(q, f, side, i) + Vec3::Y * 0.002;
+                    let (x, z) = (right * (cw * 0.5 - 0.004), front * (cd * 0.5 - 0.004));
                     frame = Some([c - x - z, c + x - z, c + x + z, c - x + z]);
                 }
-                for (i, st) in self.craft.iter().enumerate() {
-                    if let Some(st) = st.filter(|st| st.count > 1) {
-                        labels.push((
-                            table_cell(p, side, i) + toward * TABLE_CELL * 0.38,
-                            st.count,
-                        ));
-                    }
-                }
-                // The result rises over the middle of the table's far edge: anywhere on it
-                // (a box around it on the screen) picks it.
-                if let Some(res) = self.craft_result(c) {
-                    let at = table_result_pos(p, side, self.time);
-                    let corners: Vec<Vec2> = (0..8)
-                        .filter_map(|k| {
-                            let e = Vec3::new(
-                                if k & 1 == 0 { -0.2 } else { 0.2 },
-                                if k & 2 == 0 { -0.2 } else { 0.2 },
-                                if k & 4 == 0 { -0.2 } else { 0.2 },
-                            );
-                            view.to_screen(at + e)
-                        })
-                        .collect();
-                    if corners.len() == 8 {
-                        let lo = corners.iter().fold(Vec2::MAX, |m, c| m.min(*c));
-                        let hi = corners.iter().fold(Vec2::MIN, |m, c| m.max(*c));
-                        let m = self.ui.mouse;
-                        let inside = m.cmpge(lo).all() && m.cmple(hi).all();
-                        if ready && !over_inventory && inside {
-                            hovered = Some(SlotRef::CraftOut);
-                            frame = None;
+                for i in 0..27 {
+                    if let Some(st) = slots.get(half * 27 + i).copied().flatten() {
+                        if st.count > 1 {
+                            let at =
+                                chest_cell(q, f, side, i) + front * cd * 0.2 + right * cw * 0.3;
+                            labels.push((at, st.count));
                         }
-                    }
-                    if res.count > 1 {
-                        labels.push((at - Vec3::Y * 0.22, res.count));
                     }
                 }
             }
-            _ => {}
+        }
+        if let Container::Crafting(p) = c {
+            let side = self.table_side(p);
+            let toward = facing_dir(side).as_vec3();
+            let right = (-toward).cross(Vec3::Y);
+            let top = p.y as f32 + 1.0;
+            let point = hit_plane(o, d, top).filter(|_| ready && !over_inventory);
+            if let Some(i) = point.and_then(|pt| table_cell_at(p, side, pt)) {
+                // What was crafted lies in the middle, over that cell.
+                let made = i == 4 && self.craft_out.is_some();
+                hovered = Some(if made {
+                    SlotRef::CraftOut
+                } else {
+                    SlotRef::Craft(i)
+                });
+                let c = table_cell(p, side, i) + Vec3::Y * 0.002;
+                let (x, z) = (right * TABLE_CELL * 0.47, toward * TABLE_CELL * 0.47);
+                frame = Some([c - x - z, c + x - z, c + x + z, c - x + z]);
+            }
+            let label = |i: usize| table_cell(p, side, i) + toward * 0.05 + right * 0.06;
+            for (i, st) in self.craft.iter().enumerate() {
+                if let Some(st) = st.filter(|st| st.count > 1) {
+                    if i != 4 || self.craft_out.is_none() {
+                        labels.push((label(i), st.count));
+                    }
+                }
+            }
+            let settled = self.craft_fx.is_none_or(|(t, _)| t >= CRAFT_SLIDE);
+            if let Some(st) = self.craft_out.filter(|st| st.count > 1 && settled) {
+                labels.push((label(4) + Vec3::Y * 0.04, st.count));
+            }
         }
         // How many of each stack there are, under it.
         for (at, n) in labels {
@@ -390,7 +319,7 @@ mod tests {
     /// A chest's floor seen through the framing, in screen coordinates (0..1, y down).
     fn floor_on_screen(half_w: f32, aspect: f32) -> Vec<Vec2> {
         let center = Vec3::new(0.5, CHEST_FLOOR + 0.05, 0.5);
-        let (cam, fwd) = framing(center, Vec3::Z, (half_w, 0.45), CHEST_PITCH, aspect);
+        let (cam, fwd) = framing(center, Vec3::Z, (half_w, 0.45), aspect);
         let mut proj = Mat4::perspective_rh(FOV.to_radians(), aspect, 0.05, 100.0);
         proj.y_axis.y *= -1.0;
         let view = Screen2 {
@@ -430,7 +359,7 @@ mod tests {
 
     #[test]
     fn mouse_ray_goes_through_its_screen_point() {
-        let (cam, fwd) = framing(Vec3::new(0.5, 0.7, 0.5), Vec3::X, (0.47, 0.45), 60.0, 1.5);
+        let (cam, fwd) = framing(Vec3::new(0.5, 0.7, 0.5), Vec3::X, (0.47, 0.45), 1.5);
         let mut proj = Mat4::perspective_rh(FOV.to_radians(), 1.5, 0.05, 100.0);
         proj.y_axis.y *= -1.0;
         let view = Screen2 {

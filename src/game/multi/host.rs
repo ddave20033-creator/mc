@@ -472,9 +472,9 @@ impl Game {
             Msg::FurnaceUse {
                 p,
                 part,
-                flip,
+                take,
                 offered,
-            } => self.remote_use_furnace(id, p, part, flip, offered),
+            } => self.remote_use_furnace(id, p, part, take, offered),
             Msg::Container { p, kind, slots } => {
                 self.apply_container(p, kind, &slots);
                 // What the player has now; no need to send it back.

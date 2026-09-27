@@ -80,13 +80,19 @@ impl Grilled {
         }
     }
 
-    /// The look of one side for how done it is.
-    pub fn side_item(&self, side: usize) -> ItemId {
-        let m = meat(self.raw).unwrap_or([self.raw; 4]);
-        match doneness(self.cook[side]) {
-            Doneness::Raw => m[0],
-            Doneness::Cooked => m[2],
-            Doneness::Burnt => m[3],
+    /// The texture of one side for how done it is: all in the raw meat's shape, so both
+    /// sides of the piece match.
+    pub fn side_layer(&self, side: usize) -> u32 {
+        let pork = meat(self.raw).is_some_and(|m| m[0] == crate::item::PORKCHOP);
+        match (doneness(self.cook[side]), pork) {
+            (Doneness::Raw, _) => match icon(self.raw) {
+                Icon::Flat(l) => l,
+                Icon::Block(_) => tex::STONE,
+            },
+            (Doneness::Cooked, true) => tex::GRILL_COOKED_PORKCHOP,
+            (Doneness::Cooked, false) => tex::GRILL_COOKED_MUTTON,
+            (Doneness::Burnt, true) => tex::GRILL_BURNT_PORKCHOP,
+            (Doneness::Burnt, false) => tex::GRILL_BURNT_MUTTON,
         }
     }
 }
@@ -109,7 +115,7 @@ pub fn grill_box(i: usize) -> (Vec3, Vec3) {
 pub struct Furnace {
     pub input: Slot,
     pub fuel: Slot,
-    /// Smelted items waiting to pop out of the front (the world throws them out).
+    /// What is smelted, staying in the mouth (with what is still to smelt) until taken.
     pub output: Slot,
     /// Seconds of fuel left.
     pub burn: f32,
@@ -209,32 +215,33 @@ impl Furnace {
     pub fn has(&self, part: u8) -> bool {
         match part {
             0..=3 => self.grill[part as usize].is_some(),
-            part::INPUT => self.input.is_some(),
+            part::INPUT => self.input.is_some() || self.output.is_some(),
             part::FUEL => self.fuel.is_some(),
             _ => false,
         }
     }
 
-    /// A player uses `part` holding `held`. `flip` (sneaking) turns the meat on a corner
-    /// over; otherwise meat goes onto an empty corner and a piece on it comes off, and the
-    /// front takes the held stack into its half (or gives back what is in there).
-    pub fn use_part(&mut self, part: u8, held: Slot, flip: bool) -> UseResult {
+    /// A player uses `part` holding `held`: with `take` (a left click) whatever is there
+    /// comes out (a piece of meat, what is smelted before what is still smelting, the fuel);
+    /// otherwise (a right click) meat goes onto an empty corner or the meat there is turned
+    /// over, and the front takes the held stack into its half.
+    pub fn use_part(&mut self, part: u8, held: Slot, take: bool) -> UseResult {
         let mut r = UseResult::default();
         match part {
             0..=3 => {
                 let g = &mut self.grill[part as usize];
                 match g {
-                    Some(m) if flip => {
+                    Some(m) if take => {
+                        r.give.push(Stack::one(m.item()));
+                        *g = None;
+                    }
+                    Some(m) => {
                         if m.flip <= 0.0 {
                             m.down ^= 1;
                             m.flip = FLIP_TIME;
                         }
                     }
-                    Some(m) => {
-                        r.give.push(Stack::one(m.item()));
-                        *g = None;
-                    }
-                    None if !flip => {
+                    None if !take => {
                         if let Some(new) = held.and_then(|h| Grilled::new(h.item)) {
                             *g = Some(new);
                             r.used = 1;
@@ -243,19 +250,23 @@ impl Furnace {
                     None => {}
                 }
             }
-            part::INPUT | part::FUEL => {
-                let accepts = held.is_some_and(|h| self.accepts(part, h.item));
-                let slot = if part == part::INPUT {
-                    &mut self.input
+            part::INPUT | part::FUEL if take => {
+                let out = if part == part::FUEL {
+                    self.fuel.take()
                 } else {
-                    &mut self.fuel
+                    self.output.take().or_else(|| self.input.take())
                 };
-                match held {
-                    Some(h) if accepts => {
-                        let left = add_to(std::slice::from_mut(slot), h);
-                        r.used = h.count - left.map_or(0, |l| l.count);
-                    }
-                    _ => r.give.extend(slot.take()),
+                r.give.extend(out);
+            }
+            part::INPUT | part::FUEL => {
+                if let Some(h) = held.filter(|h| self.accepts(part, h.item)) {
+                    let slot = if part == part::INPUT {
+                        &mut self.input
+                    } else {
+                        &mut self.fuel
+                    };
+                    let left = add_to(std::slice::from_mut(slot), h);
+                    r.used = h.count - left.map_or(0, |l| l.count);
                 }
             }
             _ => {}
@@ -319,8 +330,6 @@ fn emit_part(out: &mut Vec<Vertex>, m: Mat4, lo: Vec3, hi: Vec3, layers: [u32; 6
     }
 }
 
-/// Spacing of the 3x3 grid drawn on the crafting table's top (about 3.3 of 16 pixels).
-pub const TABLE_CELL: f32 = 0.207;
 /// A chest half's 27 slots lie on its floor in 3 rows of 9, like Minecraft's chest screen.
 pub const CHEST_COLS: usize = 9;
 pub const CHEST_ROWS: usize = 3;
@@ -388,40 +397,6 @@ pub fn chest_side(b: u8, facing: u8) -> i32 {
     chest_partner_offset(b).map_or(0, |d| d.dot(chest_right(facing)))
 }
 
-/// A table's grid as seen by someone standing on its `side` (a facing: the direction from
-/// the table to them): (top center, their right, toward them).
-fn table_top(p: IVec3, side: u8) -> (Vec3, Vec3, Vec3) {
-    let toward = facing_dir(side).as_vec3();
-    (
-        p.as_vec3() + Vec3::new(0.5, 1.0, 0.5),
-        (-toward).cross(Vec3::Y),
-        toward,
-    )
-}
-
-/// Where cell `i` of a crafting table's grid is, read like a page from `side`.
-pub fn table_cell(p: IVec3, side: u8, i: usize) -> Vec3 {
-    let (o, right, toward) = table_top(p, side);
-    o + right * ((i % 3) as f32 - 1.0) * TABLE_CELL + toward * ((i / 3) as f32 - 1.0) * TABLE_CELL
-}
-
-/// The grid cell of a crafting table under `point` on its top.
-pub fn table_cell_at(p: IVec3, side: u8, point: Vec3) -> Option<usize> {
-    let (o, right, toward) = table_top(p, side);
-    let x = (point - o).dot(right) / TABLE_CELL + 1.5;
-    let z = (point - o).dot(toward) / TABLE_CELL + 1.5;
-    if !(0.0..3.0).contains(&x) || !(0.0..3.0).contains(&z) {
-        return None;
-    }
-    Some(z as usize * 3 + x as usize)
-}
-
-/// Where a crafting table shows what its grid makes: floating over the middle of the grid.
-pub fn table_result_pos(p: IVec3, side: u8, time: f32) -> Vec3 {
-    let (o, _, _) = table_top(p, side);
-    o + Vec3::Y * (0.5 + (time * 2.0).sin() * 0.015)
-}
-
 /// An item lying on a surface at `c`: blocks as little cubes, the rest flat. `size` is the
 /// flat item's size; `lift` raises it (the one under the mouse).
 fn lying_item(
@@ -451,7 +426,7 @@ fn lying_item(
     crate::model::emit_lying(out, m, st.item, light, flags::ENTITY);
     // A second copy on top for a stack, like a small pile.
     if st.count > 1 && matches!(icon(st.item), Icon::Flat(_)) {
-        let pile = Mat4::from_translation(Vec3::new(size * 0.12, size * 0.1, -size * 0.1));
+        let pile = Mat4::from_translation(Vec3::new(size * 0.06, size * 0.1, -size * 0.06));
         crate::model::emit_lying(out, pile * m, st.item, light, flags::ENTITY);
     }
 }
@@ -470,8 +445,8 @@ pub fn build_chest_items(
 ) {
     let light = vertex_light(sky, blk);
     let (cw, cd) = chest_cell_size(side);
-    // A bit wider than a cell's width (they are narrow and deep): items are thin.
-    let size = (cw * 1.25).min(cd * 0.9);
+    // Within its cell, so the ones along the edges stay inside the frame.
+    let size = cw.min(cd) * 0.9;
     let face_yaw = {
         let d = facing_dir(facing).as_vec3();
         d.x.atan2(d.z)
@@ -647,9 +622,40 @@ pub fn build_door(out: &mut Vec<Vertex>, p: IVec3, b: u8, open: f32, sky: u8, bl
     }
 }
 
+/// Spacing of the 3x3 grid drawn on the crafting table's top (about 3.3 of 16 pixels).
+pub const TABLE_CELL: f32 = 0.207;
+
+/// A table's grid as seen by someone standing on its `side` (a facing: the direction from
+/// the table to them): (top center, their right, toward them).
+fn table_top(p: IVec3, side: u8) -> (Vec3, Vec3, Vec3) {
+    let toward = facing_dir(side).as_vec3();
+    (
+        p.as_vec3() + Vec3::new(0.5, 1.0, 0.5),
+        (-toward).cross(Vec3::Y),
+        toward,
+    )
+}
+
+/// Where cell `i` of a crafting table's grid is, read like a page from `side` (cell 4 is the
+/// middle, where what is crafted appears).
+pub fn table_cell(p: IVec3, side: u8, i: usize) -> Vec3 {
+    let (o, right, toward) = table_top(p, side);
+    o + right * ((i % 3) as f32 - 1.0) * TABLE_CELL + toward * ((i / 3) as f32 - 1.0) * TABLE_CELL
+}
+
+/// The grid cell of a crafting table under `point` on its top.
+pub fn table_cell_at(p: IVec3, side: u8, point: Vec3) -> Option<usize> {
+    let (o, right, toward) = table_top(p, side);
+    let x = (point - o).dot(right) / TABLE_CELL + 1.5;
+    let z = (point - o).dot(toward) / TABLE_CELL + 1.5;
+    if !(0.0..3.0).contains(&x) || !(0.0..3.0).contains(&z) {
+        return None;
+    }
+    Some(z as usize * 3 + x as usize)
+}
+
 /// Items left in a crafting table grid, lying on its top in a 3x3 layout facing whoever
-/// last used it from `side`; `lift` is the cell under the mouse. When they make something
-/// (`ready`), they hover a little, rising and falling together.
+/// last used it from `side`; `lift` is the cell under the mouse.
 #[allow(clippy::too_many_arguments)]
 pub fn build_table_items(
     out: &mut Vec<Vertex>,
@@ -657,102 +663,64 @@ pub fn build_table_items(
     side: u8,
     grid: &[Slot; 9],
     lift: Option<usize>,
-    ready: Option<f32>,
     sky: u8,
     blk: u8,
 ) {
     let light = vertex_light(sky, blk);
     let toward = facing_dir(side).as_vec3();
     let face_yaw = toward.x.atan2(toward.z);
-    let hover = ready.map_or(0.0, |time| 0.025 + (time * 3.0).sin() * 0.012);
     for (i, st) in grid.iter().enumerate() {
         let Some(st) = st else { continue };
         let c = table_cell(p, side, i);
         // A little turn per slot so it looks placed by hand.
         let turn = ((p.x * 31 + p.z * 17 + i as i32 * 7).rem_euclid(9)) as f32 * 0.07 - 0.28;
-        let up = hover + if lift == Some(i) { 0.04 } else { 0.0 };
+        let up = if lift == Some(i) { 0.04 } else { 0.0 };
         lying_item(out, c, face_yaw + turn, 0.2, up, st, light);
     }
 }
 
-/// Tints the vertices from `start` on: multiplied by `tint`, glowing.
-fn glow_tint(out: &mut [Vertex], start: usize, tint: [u8; 3]) {
-    for v in &mut out[start..] {
-        for (c, t) in v.tint.iter_mut().zip(tint) {
-            *c = ((*c as u16 * t as u16) / 255) as u8;
-        }
-        v.tint[3] |= flags::EMISSIVE;
-    }
-}
+/// Seconds the ingredients take to slide together into the middle of the table.
+pub const CRAFT_SLIDE: f32 = 0.3;
 
-/// What a crafting table's grid makes: a glowing, slowly turning likeness of it floating over
-/// the middle of the table, pulsing (brighter under the mouse).
+/// What was crafted at a table, lying in the middle of the grid (over whatever is left there).
+/// `t` is the seconds since it was made: the ingredients (`used`, one of each cell) slide into
+/// the middle, shrinking, and it swells up there. `hovered`: lifted a little.
 #[allow(clippy::too_many_arguments)]
-pub fn build_craft_result(
+pub fn build_table_made(
     out: &mut Vec<Vertex>,
     p: IVec3,
     side: u8,
-    st: &Stack,
-    time: f32,
-    hovered: bool,
-) {
-    let size = if hovered { 0.13 } else { 0.115 };
-    let m =
-        Mat4::from_translation(table_result_pos(p, side, time)) * Mat4::from_rotation_y(time * 1.2);
-    let start = out.len();
-    crate::model::emit_item_flat_or_block(out, m, st.item, size, [255, 255, 255, 2], flags::ENTITY);
-    // Its own colors, glowing, softly pulsing.
-    let pulse = 0.5 + 0.5 * (time * 4.0).sin();
-    let k = if hovered { 1.0 } else { 0.8 + 0.12 * pulse };
-    let tint = [255.0 * k, 250.0 * k, 240.0 * k].map(|c: f32| c.min(255.0) as u8);
-    glow_tint(out, start, tint);
-}
-
-/// Crafting: the ingredients (`grid` as it was) fly together into the middle over the table,
-/// turning and shrinking, and the made thing flashes up where they meet. `t` is seconds
-/// since the click (the whole thing takes `CRAFT_FX_TIME`).
-#[allow(clippy::too_many_arguments)]
-pub fn build_craft_fx(
-    out: &mut Vec<Vertex>,
-    p: IVec3,
-    side: u8,
-    grid: &[Slot; 9],
     made: &Stack,
+    used: &[Slot; 9],
     t: f32,
-    time: f32,
+    hovered: bool,
     sky: u8,
     blk: u8,
 ) {
     let light = vertex_light(sky, blk);
-    let meet = table_result_pos(p, side, time);
-    let fly = (t / CRAFT_MEET).clamp(0.0, 1.0);
-    let ease = fly * fly;
-    if fly < 1.0 {
-        for (i, st) in grid.iter().enumerate() {
+    let toward = facing_dir(side).as_vec3();
+    let face_yaw = toward.x.atan2(toward.z);
+    let middle = table_cell(p, side, 4);
+    let k = (t / CRAFT_SLIDE).clamp(0.0, 1.0);
+    if k < 1.0 {
+        let ease = k * k * (3.0 - 2.0 * k);
+        for (i, st) in used.iter().enumerate() {
             let Some(st) = st else { continue };
-            let from = table_cell(p, side, i) + Vec3::Y * 0.03;
-            // Up and in, on a little arc.
-            let at = from.lerp(meet, ease) + Vec3::Y * (fly * PI).sin() * 0.12;
-            let k = 1.0 - 0.7 * ease;
-            let m = Mat4::from_translation(at)
-                * Mat4::from_rotation_y(fly * 7.0 + i as f32)
-                * Mat4::from_scale(Vec3::splat(k));
-            crate::model::emit_item_flat_or_block(out, m, st.item, 0.08, light, flags::ENTITY);
+            let at = table_cell(p, side, i).lerp(middle, ease) + Vec3::Y * 0.02;
+            let turn = face_yaw + ease * 2.0;
+            lying_item(out, at, turn, 0.2 * (1.0 - 0.6 * ease), 0.0, st, light);
         }
-    } else {
-        // The flash: the made thing swells up bright, then is gone (it is on the cursor).
-        let k = ((t - CRAFT_MEET) / (CRAFT_FX_TIME - CRAFT_MEET)).clamp(0.0, 1.0);
-        let size = 0.115 + 0.06 * (k * PI).sin();
-        let m = Mat4::from_translation(meet) * Mat4::from_rotation_y(time * 1.2 + k * 3.0);
-        let start = out.len();
-        crate::model::emit_item_flat_or_block(out, m, made.item, size, light, flags::ENTITY);
-        glow_tint(out, start, [255, 250, 230]);
+    }
+    // It appears as they meet, a little bigger at first, then settles: within the middle
+    // cell, just above whatever is left there.
+    let grow = ((k - 0.7) / 0.3).clamp(0.0, 1.0);
+    if grow > 0.0 {
+        let pop = 1.0 + 0.15 * (grow * PI).sin() * (1.0 - (t - CRAFT_SLIDE).clamp(0.0, 1.0));
+        let up = 0.02 + if hovered { 0.03 } else { 0.0 };
+        let size = TABLE_CELL * 0.78 * grow * pop;
+        lying_item(out, middle, face_yaw, size, up, made, light);
     }
 }
-
-/// Seconds a crafting takes to show: the ingredients meet, then the flash.
-pub const CRAFT_MEET: f32 = 0.38;
-pub const CRAFT_FX_TIME: f32 = 0.56;
 
 /// What lies on and in a furnace: meat on the corners of its top (with the side on the fire
 /// underneath, turning over while flipped), and what is being smelted in its mouth.
@@ -793,15 +761,11 @@ pub fn build_furnace_items(
         )) * Mat4::from_rotation_y(turn)
             * Mat4::from_rotation_x(lying + PI * (1.0 - ease))
             * Mat4::from_scale(Vec3::splat(size));
-        let layer = |item: ItemId| match icon(item) {
-            Icon::Flat(l) => l,
-            Icon::Block(_) => tex::STONE,
-        };
         crate::model::emit_sprite_sides(
             out,
             m,
-            layer(g.side_item(0)),
-            layer(g.side_item(1)),
+            g.side_layer(0),
+            g.side_layer(1),
             light,
             flags::ENTITY,
         );
@@ -920,26 +884,53 @@ fn build_furnace_inside(
         center + right * a + d * t + Vec3::Y * (floor + up)
     };
 
-    // The mouth.
-    if let Some(st) = f.input {
-        let result = smelt(st.item);
+    // The mouth: what is still to smelt and what is done, in one heap. How big it is shows
+    // how much is in there, and the share of finished pieces how much of it is done.
+    let raw = f.input.map_or(0, |s| s.count);
+    let done = f.output.map_or(0, |s| s.count);
+    let total = raw as u32 + done as u32;
+    if total > 0 {
+        let n = pile_stage(total.min(255) as u8);
+        let mut finished = ((n as u32 * done as u32 + total / 2) / total) as usize;
+        if done > 0 {
+            finished = finished.max(1);
+        }
+        if raw > 0 {
+            finished = finished.min(n - 1);
+        }
+        let raw_item = f.input.map(|s| s.item);
+        let smelts_into = raw_item.and_then(smelt);
+        let done_item = f.output.map(|s| s.item).or(smelts_into);
         let progress = (f.cook / SMELT_TIME).clamp(0.0, 1.0);
-        for i in (0..pile_stage(st.count)).rev() {
+        let smelting = raw_item.and_then(smelt).is_some() && (lit || f.cook > 0.0);
+        // The front pieces are the ones still to smelt (the first of them is being smelted),
+        // the finished ones lie behind.
+        let first_done = n - finished;
+        for i in (0..n).rev() {
             let turn = yaw + ((seed + i as i32 * 23) % 11) as f32 * 0.12 - 0.6;
             let tilt = [0.0, 0.18, -0.15, 0.1, -0.2, 0.25][i];
-            let (mut item, mut heat, mut scale) = (st.item, if lit { 0.12 } else { 0.0 }, 1.0);
-            if i == 0 && result.is_some() && (lit || f.cook > 0.0) {
+            let warm = if lit { 0.12 } else { 0.0 };
+            let (item, heat, scale) = if i >= first_done {
+                (done_item.unwrap_or(0), warm, 1.0)
+            } else if i == 0 && smelting {
                 // Heats up (0..0.55), changes (0.55..0.65), cools (0.65..1).
                 let change = ((progress - 0.55) / 0.1).clamp(0.0, 1.0);
-                heat = if progress < 0.55 {
+                let heat = if progress < 0.55 {
                     ((progress - 0.05) / 0.5).clamp(0.0, 1.0)
                 } else {
                     1.0 - ((progress - 0.65) / 0.35).clamp(0.0, 1.0) * 0.8
                 };
-                scale = 1.0 - (change * PI).sin() * 0.5;
-                if change >= 0.5 {
-                    item = result.unwrap_or(item);
-                }
+                let item = if change >= 0.5 {
+                    done_item.unwrap_or(0)
+                } else {
+                    raw_item.unwrap_or(0)
+                };
+                (item, heat, 1.0 - (change * PI).sin() * 0.5)
+            } else {
+                (raw_item.unwrap_or(0), warm, 1.0)
+            };
+            if item == 0 {
+                continue;
             }
             let shake = if i == 0 && heat > 0.6 {
                 (time * 40.0).sin() * 0.05 * heat
@@ -1043,16 +1034,17 @@ mod tests {
         run(&mut f, 10.2);
         // Only the side on the fire is done: half cooked if taken off now.
         assert_eq!(f.grill[0].unwrap().item(), HALF_COOKED_PORKCHOP);
-        // Turned over: nothing cooks while it is in the air, then the other side does.
-        f.use_part(0, None, true);
+        // Turned over (right click): nothing cooks while it is in the air, then the other
+        // side does.
+        f.use_part(0, None, false);
         run(&mut f, 10.8);
         let g = f.grill[0].unwrap();
         assert_eq!(g.item(), COOKED_PORKCHOP);
         assert!(g.cook.iter().all(|&t| (10.0..20.0).contains(&t)), "{g:?}");
-        // Left on too long, it burns.
+        // Left on too long, it burns. A left click takes it off.
         run(&mut f, 10.0);
         assert_eq!(f.grill[0].unwrap().item(), BURNT_PORKCHOP);
-        let r = f.use_part(0, None, false);
+        let r = f.use_part(0, None, true);
         assert_eq!(r.give, vec![Stack::one(BURNT_PORKCHOP)]);
         assert!(f.grill[0].is_none());
     }
@@ -1076,10 +1068,15 @@ mod tests {
         let r = f.use_part(part::FUEL, Some(Stack::new(COAL, 1)), false);
         assert_eq!(r.used, 1);
         run(&mut f, 10.2);
+        // What is smelted stays inside; taking gets it first, then what is left.
         assert_eq!(f.output, Some(Stack::one(IRON_INGOT)));
-        // An empty hand takes the rest back out.
-        let r = f.use_part(part::INPUT, None, false);
+        let r = f.use_part(part::INPUT, None, true);
+        assert_eq!(r.give, vec![Stack::one(IRON_INGOT)]);
+        let r = f.use_part(part::INPUT, None, true);
         assert_eq!(r.give, vec![Stack::new(IRON_ORE as ItemId, 2)]);
+        // A right click with nothing to put in does nothing.
+        let r = f.use_part(part::FUEL, None, false);
+        assert_eq!(r, UseResult::default());
     }
 
     #[test]
@@ -1104,8 +1101,5 @@ mod tests {
                 assert_eq!(table_cell_at(q, facing, table_cell(q, facing, i)), Some(i));
             }
         }
-        // Seen from the south (facing 2), the table reads like the old fixed layout.
-        let c = table_cell(q, 2, 0) - (q.as_vec3() + Vec3::new(0.5, 1.0, 0.5));
-        assert!(c.x < 0.0 && c.z < 0.0);
     }
 }

@@ -1,12 +1,13 @@
-//! Furnaces without a screen: meat goes on the four corners of the top and is turned over by
-//! hand, things to smelt go into the front's upper half and fuel into the lower half, and
-//! what is smelted pops out of the front. The part under the crosshair gets a small outline
-//! when there is something to do with it.
+//! Furnaces without a screen. A right click puts meat on a corner of the top (and turns
+//! over what is there), things to smelt into the front's mouth above and fuel into the
+//! firebox below; a left click takes out what is there (instead of mining the furnace).
+//! What is smelted stays in the mouth until taken. The corner of the top under the
+//! crosshair is lit up a little.
 
 use super::*;
 use crate::entity::block_entity::{doneness, grill_box, part, Doneness, BURN_TIME, SMELT_TIME};
 use crate::entity::Furnace;
-use crate::item::inventory::take;
+use crate::item::inventory;
 use crate::item::*;
 
 impl Game {
@@ -30,6 +31,25 @@ impl Game {
         }
     }
 
+    /// A left click on a furnace part with something in it takes that out instead of
+    /// starting to mine the furnace; keeping the button held then does not mine it either
+    /// (until it is let go). Returns true while mining is held off.
+    pub(super) fn furnace_left_click(&mut self) -> bool {
+        if !self.left_down {
+            self.furnace_hold = false;
+            return false;
+        }
+        if self.left_pressed {
+            if let Some((p, k)) = self.furnace_part {
+                if self.use_furnace(p, k, true) {
+                    self.furnace_hold = true;
+                    self.mining = None;
+                }
+            }
+        }
+        self.furnace_hold
+    }
+
     /// Finds the furnace part under the crosshair (after targeting).
     pub(super) fn aim_furnace(&mut self) {
         self.furnace_part = self
@@ -45,21 +65,6 @@ impl Game {
         let empty = Furnace::default();
         let f = self.block_entities.furnaces.get(&p).unwrap_or(&empty);
         (f.has(k) || held.is_some_and(|h| f.accepts(k, h.item))).then_some((p, k))
-    }
-
-    /// What a right click does at the aimed furnace part (a hint under the crosshair).
-    pub(super) fn furnace_hint(&self) -> Option<&'static str> {
-        let (p, k) = self.furnace_part_active()?;
-        let held = self.inventory.slots[self.hotbar_slot];
-        let empty = Furnace::default();
-        let f = self.block_entities.furnaces.get(&p).unwrap_or(&empty);
-        let key = match (k < 4, f.has(k)) {
-            (true, true) => "furnace.meat",
-            (true, false) => "furnace.put",
-            (false, _) if held.is_some_and(|h| f.accepts(k, h.item)) => "furnace.insert",
-            (false, _) => "furnace.take",
-        };
-        Some(t(key))
     }
 
     /// The corner of a furnace's top where the held meat goes (or the meat to take or turn
@@ -80,23 +85,25 @@ impl Game {
         None
     }
 
-    /// A right click on the aimed part of a furnace; `flip` when sneaking (turns the meat
-    /// over). Returns false when it does nothing there.
-    pub(super) fn use_furnace(&mut self, p: IVec3, k: u8, flip: bool) -> bool {
+    /// A click on the aimed part of a furnace: `take` for a left click (takes out what is
+    /// there), otherwise a right click (puts in, turns meat over). Returns false when it
+    /// does nothing there.
+    pub(super) fn use_furnace(&mut self, p: IVec3, k: u8, take: bool) -> bool {
         let slot = self.hotbar_slot;
         let held = self.inventory.slots[slot];
         let f = self.block_entities.furnaces.entry(p).or_default();
-        let able = if flip {
-            k < 4 && f.has(k)
+        let puts = held.is_some_and(|h| f.accepts(k, h.item));
+        let able = if take {
+            f.has(k)
         } else {
-            f.has(k) || held.is_some_and(|h| f.accepts(k, h.item))
+            puts || (k < 4 && f.has(k))
         };
         if !able {
             return false;
         }
-        let r = f.use_part(k, held, flip);
+        let r = f.use_part(k, held, take);
         if r.used > 0 && !self.creative() {
-            take(&mut self.inventory.slots[slot], r.used);
+            inventory::take(&mut self.inventory.slots[slot], r.used);
         }
         if self.is_client() {
             // The host does it for real and sends back what comes out.
@@ -106,7 +113,7 @@ impl Game {
             self.send(crate::net::Msg::FurnaceUse {
                 p,
                 part: k,
-                flip,
+                take,
                 offered,
             });
         } else {
@@ -126,7 +133,7 @@ impl Game {
         id: u8,
         p: IVec3,
         k: u8,
-        flip: bool,
+        take: bool,
         offered: Slot,
     ) {
         if !is_furnace(self.terrain.world.geti(p)) {
@@ -136,7 +143,7 @@ impl Game {
             return;
         }
         let f = self.block_entities.furnaces.entry(p).or_default();
-        let r = f.use_part(k, offered, flip);
+        let r = f.use_part(k, offered, take);
         let mut back = r.give;
         if let Some(o) = offered {
             if o.count > r.used {
@@ -155,10 +162,9 @@ impl Game {
         }
     }
 
-    /// Host: furnaces burn, cook and smelt; smelted items pop out of the front.
+    /// Host: furnaces burn, cook and smelt.
     pub(super) fn update_furnaces(&mut self, dt: f32) {
         let mut relight = Vec::new();
-        let mut out = Vec::new();
         for (p, f) in self.block_entities.furnaces.iter_mut() {
             let lit = f.update(dt);
             let b = self.terrain.world.geti(*p);
@@ -171,20 +177,10 @@ impl Game {
                 if want != b {
                     relight.push((*p, want));
                 }
-                if let Some(st) = f.output.take() {
-                    out.push((*p, fac, st));
-                }
             }
         }
         for (p, b) in relight {
             self.set_block(p, b);
-        }
-        for (p, fac, st) in out {
-            let d = facing_dir(fac).as_vec3();
-            let pos = p.as_vec3() + Vec3::new(0.5, 0.35, 0.5) + d * 0.62;
-            let side = (self.random() - 0.5) * 0.6;
-            let vel = d * 1.8 + Vec3::Y * 2.2 + d.cross(Vec3::Y) * side;
-            self.add_item(ItemEntity::new(pos, vel, st, 0.3));
         }
     }
 
@@ -216,7 +212,12 @@ impl Game {
             let b = self.terrain.world.geti(*p);
             // The resource pack's flame particles burn in the firebox, like on its torches.
             if let (true, Some(fac)) = (self.torch_particles, facing(b)) {
-                let n = f.fuel.map_or(1, |s| if s.count > 16 { 3 } else { 2 });
+                // Bigger with more fuel: embers, a fire, a blaze.
+                let n = match f.fuel.map_or(0, |s| s.count) {
+                    0 => 1,
+                    1..=16 => 2,
+                    _ => 3,
+                };
                 fires.push((*p, fac, n));
             }
             if let (true, Some(fac)) = (heating, facing(b)) {
@@ -241,10 +242,19 @@ impl Game {
             }
         }
         for (p, fac, n) in fires {
-            if self.random() < dt * 6.0 * n as f32 {
-                let k = self.random();
-                let at = crate::entity::block_entity::furnace_flame_spot(p, fac, k);
-                self.particles.flame(at);
+            // Several per frame at a high rate: a fire, not a few sparks.
+            let mut due = dt * 12.0 * n as f32;
+            while due > 0.0 {
+                if self.random() < due.min(1.0) {
+                    let k = self.random();
+                    let at = crate::entity::block_entity::furnace_flame_spot(p, fac, k);
+                    if self.random() < 0.75 {
+                        self.particles.fire(at);
+                    } else {
+                        self.particles.flame(at + Vec3::Y * 0.08);
+                    }
+                }
+                due -= 1.0;
             }
         }
         for (mouth, right) in sparks {

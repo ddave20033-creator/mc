@@ -81,8 +81,8 @@ pub const FACE_V: [[i32; 3]; 6] = [
 ];
 pub const CORNERS: [(i32, i32); 4] = [(-1, -1), (1, -1), (1, 1), (-1, 1)];
 
-/// Height of the floor inside a chest (what is in it lies there).
-pub const CHEST_FLOOR: f32 = 4.0 / 16.0;
+/// Height of the top of a chest's base, drawn as its inside (what is in it lies there).
+pub const CHEST_FLOOR: f32 = 10.0 / 16.0;
 /// The hollows behind a furnace's front openings: (bottom, top, depth) of the mouth above
 /// and the firebox below, and their half width. A little bigger than the openings in the
 /// texture, so their edges stay hidden behind the front.
@@ -598,9 +598,8 @@ impl Builder {
         }
     }
 
-    /// Chest base, hollow: its walls, the rim on top, and inside the walls and the floor
-    /// (`CHEST_FLOOR`) where what is in it lies. The lid is drawn separately every frame so it
-    /// can open. A double chest half reaches the other half, with no wall between them.
+    /// Chest base; the lid is drawn separately every frame so it can open. A double chest
+    /// half reaches the other half, with no wall between them.
     fn chest(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
         let (s, bl) = r.light(x, y, z);
         let (mut lo, mut hi) = (
@@ -618,13 +617,17 @@ impl Builder {
             }
         }
         for (face, &n) in FACE_N.iter().enumerate() {
-            if face == 2 || (face == 3 && is_opaque(r.get(x, y - 1, z))) {
+            if face == 3 && is_opaque(r.get(x, y - 1, z)) {
                 continue;
             }
             if dir == Some(n) {
                 continue;
             }
-            let layer = face_texture(b, face);
+            let layer = if face == 2 {
+                tex::CHEST_INSIDE
+            } else {
+                face_texture(b, face)
+            };
             let layer = dir.map_or(layer, |d| chest_open_layer(layer, face, d));
             let base = self.verts.len() as u32;
             for &(su, sv) in &CORNERS {
@@ -645,39 +648,6 @@ impl Builder {
             self.opaque
                 .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
-        // Inside the walls (1/16 thick), open toward the other half.
-        let wall = 1.0 / 16.0;
-        let mut ilo = [lo[0] + wall, CHEST_FLOOR, lo[2] + wall];
-        let mut ihi = [hi[0] - wall, hi[1], hi[2] - wall];
-        if let Some(d) = dir {
-            for k in [0, 2] {
-                match d[k] {
-                    1 => ihi[k] = 1.0,
-                    -1 => ilo[k] = 0.0,
-                    _ => {}
-                }
-            }
-        }
-        // The rim on top of the walls.
-        let top = dir.map_or(tex::CHEST_INSIDE, |d| {
-            chest_open_layer(tex::CHEST_INSIDE, 2, d)
-        });
-        let at = (x, y, z);
-        let rims = [
-            ([lo[0], 0.0, lo[2]], [hi[0], 0.0, ilo[2]]),
-            ([lo[0], 0.0, ihi[2]], [hi[0], 0.0, hi[2]]),
-            ([lo[0], 0.0, ilo[2]], [ilo[0], 0.0, ihi[2]]),
-            ([ihi[0], 0.0, ilo[2]], [hi[0], 0.0, ihi[2]]),
-        ];
-        for (rlo, rhi) in rims {
-            if rhi[0] - rlo[0] > 1e-4 && rhi[2] - rlo[2] > 1e-4 {
-                self.plane_face(at, 2, rlo, rhi, hi[1], top, (s, bl), 255, 1.0);
-            }
-        }
-        // Inside: only the plain wood in the middle of the texture (its edges have the rim
-        // and, past it, nothing).
-        let open: Vec<[i32; 3]> = dir.into_iter().collect();
-        self.hollow(at, ilo, ihi, &open, false, tex::CHEST_INSIDE, (s, bl), 0.7);
     }
 
     /// Furnace: a cube whose front has two openings (the mouth above, for things to smelt,

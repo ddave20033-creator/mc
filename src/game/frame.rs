@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::entity::block_entity::{
-    build_chest_items, build_chest_lid, build_craft_fx, build_craft_result, build_door,
-    build_furnace_items, build_glow, build_table_items, chest_side,
+    build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow,
+    build_table_items, build_table_made, chest_side,
 };
 use crate::render::MAX_HELD_LIGHTS;
 use crate::world::textures::tex;
@@ -864,33 +864,25 @@ impl Game {
             Screen::Container(Container::Crafting(p)) => Some(p),
             _ => None,
         };
-        let lift = match self.station_hover {
-            Some(gui::SlotRef::Craft(i)) => Some(i),
-            _ => None,
-        };
         for (p, grid) in self.block_entities.tables.iter().filter(|(p, _)| near(p)) {
-            if open_table == Some(*p) {
-                continue;
+            if open_table != Some(*p) {
+                let (sky, blk) = light(*p);
+                build_table_items(target, *p, self.table_side(*p), grid, None, sky, blk);
             }
-            let (sky, blk) = light(*p);
-            build_table_items(target, *p, self.table_side(*p), grid, None, None, sky, blk);
         }
         if let Some(p) = open_table {
+            // The open table: its grid (lifted under the mouse), and what was crafted.
+            let lift = match self.station_hover {
+                Some(gui::SlotRef::Craft(i)) => Some(i),
+                _ => None,
+            };
             let (sky, blk) = light(p);
             let side = self.table_side(p);
-            let res = self.craft_result(Container::Crafting(p));
-            let ready = res.map(|_| self.time);
-            build_table_items(target, p, side, &self.craft, lift, ready, sky, blk);
-            match (&self.craft_fx, res) {
-                (Some(fx), _) if fx.pos == p => {
-                    let t = fx.t;
-                    build_craft_fx(target, p, side, &fx.grid, &fx.made, t, self.time, sky, blk);
-                }
-                (_, Some(res)) => {
-                    let hovered = self.station_hover == Some(gui::SlotRef::CraftOut);
-                    build_craft_result(target, p, side, &res, self.time, hovered);
-                }
-                _ => {}
+            build_table_items(target, p, side, &self.craft, lift, sky, blk);
+            if let Some(made) = &self.craft_out {
+                let (t, used) = self.craft_fx.unwrap_or((10.0, [None; 9]));
+                let hovered = self.station_hover == Some(gui::SlotRef::CraftOut);
+                build_table_made(target, p, side, made, &used, t, hovered, sky, blk);
             }
         }
         // The highlighted slot in an open chest or on a table, or spot of a furnace.

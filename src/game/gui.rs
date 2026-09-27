@@ -347,6 +347,8 @@ impl Game {
         self.stash_table(true);
         let mut back: Vec<Stack> = self.craft.iter_mut().filter_map(|s| s.take()).collect();
         back.extend(self.cursor.take());
+        back.extend(self.craft_out.take());
+        self.craft_fx = None;
         for s in back {
             self.give(s);
         }
@@ -428,6 +430,42 @@ impl Game {
         }
     }
 
+    /// What the result slot shows: at a table what was crafted into its middle, in the
+    /// inventory what the 2x2 grid makes.
+    fn craft_out_stack(&self, c: Container) -> Option<Stack> {
+        if matches!(c, Container::Crafting(_)) {
+            self.craft_out
+        } else {
+            self.craft_result(c)
+        }
+    }
+
+    /// A left click at an open table away from the slots: crafts from the grid as many as
+    /// fit in one stack (64, or one of what does not stack), into the middle of the table.
+    /// With more on the grid, the next click makes the next stack once this one is taken.
+    fn craft_batch(&mut self, c: Container) {
+        let before = self.craft;
+        let mut made = self.craft_out;
+        while let Some(res) = self.craft_result(c) {
+            match &mut made {
+                None => made = Some(res),
+                Some(m)
+                    if m.stacks_with(&res)
+                        && m.count as u16 + res.count as u16 <= max_stack(m.item) as u16 =>
+                {
+                    m.count += res.count
+                }
+                _ => break,
+            }
+            self.consume_craft_inputs(c);
+        }
+        if made != self.craft_out {
+            self.craft_out = made;
+            self.craft_fx = Some((0.0, before));
+            self.hand.swing();
+        }
+    }
+
     /// Shift-click inside the inventory: from the hotbar (slot `i` < 9) into the main part,
     /// or the other way round. Returns what does not fit.
     fn move_within_inventory(&mut self, i: usize, stack: Stack) -> Option<Stack> {
@@ -463,6 +501,13 @@ impl Game {
 
     fn click_slot(&mut self, c: Container, r: SlotRef, right: bool, shift: bool) {
         match r {
+            SlotRef::CraftOut if matches!(c, Container::Crafting(_)) => {
+                // At a table, what was crafted lies in the middle: a click puts it straight
+                // into the inventory (what does not fit stays there).
+                if let Some(st) = self.craft_out {
+                    self.craft_out = self.inventory.add(st);
+                }
+            }
             SlotRef::CraftOut => {
                 let Some(res) = self.craft_result(c) else {
                     return;
@@ -1049,7 +1094,7 @@ impl Game {
             if let Some(r) = hovered {
                 let st = match r {
                     SlotRef::Creative(_) => hovered_stack,
-                    SlotRef::CraftOut => self.craft_result(c),
+                    SlotRef::CraftOut => self.craft_out_stack(c),
                     SlotRef::Trash => None,
                     _ => self.slot_mut(c, r).and_then(|s| *s),
                 };
@@ -1088,7 +1133,7 @@ impl Game {
             if middle && self.creative() && self.cursor.is_none() {
                 let st = match r {
                     SlotRef::Creative(id) => Some(Stack::one(id)),
-                    SlotRef::CraftOut => self.craft_result(c),
+                    SlotRef::CraftOut => self.craft_out_stack(c),
                     SlotRef::Trash => None,
                     _ => self.slot_mut(c, r).and_then(|s| *s),
                 };
@@ -1117,13 +1162,7 @@ impl Game {
                     }
                     _ => {
                         let empty = self.cursor.is_none();
-                        let (grid, made) = (self.craft, self.craft_result(c));
                         self.click_slot(c, r, right, shift && !right);
-                        if let (SlotRef::CraftOut, Some(made)) = (r, made) {
-                            if self.craft != grid {
-                                self.start_craft_fx(c, grid, made);
-                            }
-                        }
                         if empty && !right && !shift && self.cursor.is_some() {
                             self.press_pick = Some(r);
                         }
@@ -1143,6 +1182,9 @@ impl Game {
                     self.inventory.slots[d] = hot;
                 }
             }
+        } else if self.ui.pressed && matches!(c, Container::Crafting(_)) && self.in_station() {
+            // At a table: a click anywhere but on a slot crafts.
+            self.craft_batch(c);
         } else if self.ui.pressed || self.ui.right_pressed {
             // Clicking outside the window throws the held stack.
             let inside = panel.is_none_or(|(x, y, w, h)| self.ui.hit(x, y, w, h));
