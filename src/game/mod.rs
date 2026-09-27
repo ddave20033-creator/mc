@@ -14,6 +14,7 @@ mod items;
 mod mobs;
 mod multi;
 mod sleep;
+mod spectate;
 mod station;
 mod update;
 mod worlds;
@@ -106,12 +107,16 @@ pub enum Screen {
     Connecting,
     /// Left a LAN game (or could not join): shows why.
     Disconnected,
+    /// Spectator mode: the other players, to watch one through their eyes.
+    Spectate,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GameMode {
     Survival,
     Creative,
+    /// Flies through blocks, touches nothing, and can watch another player.
+    Spectator,
 }
 
 /// Opens a web page in the default browser.
@@ -344,6 +349,8 @@ pub struct Game {
     net_message: String,
     /// The other player the crosshair is on.
     player_target: Option<u8>,
+    /// Spectator mode: the player whose eyes the camera is in.
+    spectating: Option<u8>,
     /// Last frame's camera matrix (for name tags).
     view_proj: Mat4,
     /// Swing of the lantern in this player's hand (third person and body model).
@@ -555,6 +562,7 @@ impl Game {
             mp_selected: None,
             net_message: String::new(),
             player_target: None,
+            spectating: None,
             view_proj: Mat4::IDENTITY,
             lantern_swing: Default::default(),
             options: Default::default(),
@@ -615,6 +623,7 @@ impl Game {
                     | Screen::Paused
                     | Screen::Container(_)
                     | Screen::Chat
+                    | Screen::Spectate
                     | Screen::Dead
                     | Screen::Options { in_game: true }
                     | Screen::ResourcePacks { in_game: true }
@@ -624,6 +633,10 @@ impl Game {
 
     fn creative(&self) -> bool {
         self.game_mode == GameMode::Creative
+    }
+
+    fn spectator(&self) -> bool {
+        self.game_mode == GameMode::Spectator
     }
 
     fn effective_skin(&self) -> u8 {
@@ -846,7 +859,7 @@ impl Game {
         if code == KeyCode::Escape {
             match self.screen {
                 Screen::Playing => self.pause(),
-                Screen::Paused => self.resume(),
+                Screen::Paused | Screen::Spectate => self.resume(),
                 Screen::Container(_) => self.close_container(),
                 Screen::SelectWorld => self.screen = Screen::MainMenu,
                 Screen::DeleteWorld => self.screen = Screen::SelectWorld,
@@ -873,6 +886,9 @@ impl Game {
         }
         if inventory {
             match self.screen {
+                // Spectators have no inventory: the key lists the players to watch.
+                Screen::Playing if self.spectator() => self.open_spectate_menu(),
+                Screen::Spectate => self.resume(),
                 Screen::Playing => self.open_container(if self.creative() {
                     Container::Creative
                 } else {
@@ -886,7 +902,33 @@ impl Game {
             self.digit = digit;
             return;
         }
+        if self.screen == Screen::Spectate {
+            if let Some(i) = digit {
+                self.spectate_nth(i);
+            }
+            return;
+        }
         if self.screen != Screen::Playing {
+            return;
+        }
+        if self.spectator() {
+            // Nothing in the hands: the hotbar, dropping and reloading do nothing.
+            if forward && !self.keys.contains(&code) {
+                if self.time - self.last_w < 0.3 {
+                    self.w_sprint = true;
+                    self.last_w = -1.0;
+                } else {
+                    self.last_w = self.time;
+                }
+            }
+            if stop_sprint {
+                self.w_sprint = false;
+            }
+            if chat {
+                self.open_chat("");
+            } else if command {
+                self.open_chat("/");
+            }
             return;
         }
         self.book_key(code);

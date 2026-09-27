@@ -92,7 +92,9 @@ impl Game {
             }
             let tx = lx + 8.0 * s;
             self.ui.text(&meta.name, tx, y + 5.0 * s, s, WHITE, true);
-            let mode = if meta.creative {
+            let mode = if meta.spectator {
+                t("mode.spectator_long")
+            } else if meta.creative {
                 t("mode.creative_long")
             } else {
                 t("mode.survival_long")
@@ -340,7 +342,10 @@ impl Game {
         self.chest_open.clear();
         self.air = MAX_AIR;
         self.invuln = 0.0;
-        self.game_mode = if meta.creative {
+        self.spectating = None;
+        self.game_mode = if meta.spectator {
+            GameMode::Spectator
+        } else if meta.creative {
             GameMode::Creative
         } else {
             GameMode::Survival
@@ -399,7 +404,8 @@ impl Game {
                 self.player = Player {
                     pos: Vec3::from(p.pos),
                     spawned: true,
-                    flying: p.flying && self.creative(),
+                    flying: p.flying && !matches!(self.game_mode, GameMode::Survival),
+                    noclip: self.spectator(),
                     ..Default::default()
                 };
                 self.yaw = p.yaw;
@@ -522,6 +528,7 @@ impl Game {
         meta.spawn = Some(self.spawn);
         meta.bed = self.bed_spawn;
         meta.creative = self.game_mode == GameMode::Creative;
+        meta.spectator = self.game_mode == GameMode::Spectator;
         if player.is_some() {
             meta.player = player;
         }

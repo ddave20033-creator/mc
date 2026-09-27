@@ -11,6 +11,8 @@ use std::f32::consts::PI;
 
 /// Seconds a page takes to turn over.
 pub const TURN_TIME: f32 = 0.45;
+/// Seconds a page takes to turn while leafing through several (to a chapter far away).
+pub const RIFFLE_TIME: f32 = 0.16;
 /// Block texture layers of one page (2 across, 3 down), and the part of them the page fills.
 pub const SHEET_LAYERS: u32 = 6;
 pub const SHEET_FILL: Vec2 = Vec2::new(168.0 * 1.52 / 256.0, 216.0 * 1.52 / 384.0);
@@ -325,8 +327,10 @@ fn ease(t: f32) -> f32 {
 #[derive(Default)]
 pub struct TurnAnim {
     last: Option<u8>,
-    /// Progress of the page turning now (0 none), and whether it goes back.
+    /// Progress of the page turning now (0 none), how long it takes, and whether it goes
+    /// back.
     t: f32,
+    time: f32,
     back: bool,
     /// How far the book is turned around to show it (eases toward what the pose says).
     show: f32,
@@ -349,17 +353,21 @@ impl TurnAnim {
             return None;
         }
         let turns = book & TURNS;
-        if self.last.is_some_and(|l| l != turns) {
+        if let Some(last) = self.last.filter(|&l| l != turns) {
+            // Several turns at once, or one before the last is done: they are leafing
+            // through, so the pages go over as quickly as in their hands.
+            let many = turns.wrapping_sub(last) & TURNS > 1;
+            self.time = if many || self.t > 0.0 { RIFFLE_TIME } else { TURN_TIME };
             self.t = dt;
             self.back = book & BACK != 0;
         } else if self.t > 0.0 {
             self.t += dt;
-            if self.t >= TURN_TIME {
+            if self.t >= self.time {
                 self.t = 0.0;
             }
         }
         self.last = Some(turns);
-        let k = self.t / TURN_TIME;
+        let k = if self.t > 0.0 { (self.t / self.time).min(1.0) } else { 0.0 };
         Some(if self.back { -k } else { k })
     }
 }
@@ -380,5 +388,23 @@ mod tests {
         // Over the tops: the tabs, the left half's first.
         assert_eq!(hit(-GAP - PAGE_W * 0.9, -PAGE_H * 0.5 - TAB_H * 0.5), Some(BookHit::Tab(0)));
         assert_eq!(hit(GAP + PAGE_W * 0.3, -PAGE_H * 0.5 - TAB_H * 0.5), Some(BookHit::Tab(5)));
+    }
+
+    #[test]
+    fn another_players_page_turns_follow_their_count() {
+        use crate::net::book::{BACK, OPEN};
+        let mut a = TurnAnim::default();
+        assert_eq!(a.update(0, 0.1), None);
+        assert_eq!(a.update(OPEN | 3, 0.1), Some(0.0));
+        // One turn forward: a slow page turn.
+        let k = a.update(OPEN | 4, 0.1).unwrap();
+        assert!(k > 0.0 && a.time == TURN_TIME);
+        // The next one before it is done: leafing, quicker.
+        let k = a.update(OPEN | BACK | 5, 0.05).unwrap();
+        assert!(k < 0.0 && a.time == RIFFLE_TIME);
+        for _ in 0..10 {
+            a.update(OPEN | BACK | 5, 0.05);
+        }
+        assert_eq!(a.update(OPEN | BACK | 5, 0.05), Some(0.0));
     }
 }

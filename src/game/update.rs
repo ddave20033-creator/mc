@@ -14,7 +14,7 @@ impl Game {
             let sens = 0.0022 * self.settings.sensitivity / 100.0 * zoom;
             self.yaw += self.mouse_delta.x * sens;
             self.pitch = (self.pitch - self.mouse_delta.y * sens).clamp(-1.55, 1.55);
-            if self.scroll != 0.0 {
+            if self.scroll != 0.0 && !self.spectator() {
                 let d = if self.scroll > 0.0 { -1 } else { 1 };
                 self.hotbar_slot = (self.hotbar_slot as i32 + d).rem_euclid(9) as usize;
                 self.slot_name_timer = 2.0;
@@ -25,6 +25,11 @@ impl Game {
             self.update_sleep(dt, control);
             return;
         }
+        if self.spectator() {
+            self.update_spectator(dt, control);
+            return;
+        }
+        self.player.noclip = false;
         if !self.creative() {
             self.player.flying = false;
         }
@@ -317,7 +322,8 @@ impl Game {
         // Dropped items: physics and pickup.
         let center = self.player.pos + Vec3::Y * 0.9;
         let pickup_target = self.player.eye() - Vec3::Y * 0.25;
-        let alive = self.player.spawned && self.screen != Screen::Dead;
+        // Spectators pick nothing up.
+        let alive = self.player.spawned && self.screen != Screen::Dead && !self.spectator();
         let mut pickup_visuals = Vec::new();
         let mut i = 0;
         while i < self.items.len() {

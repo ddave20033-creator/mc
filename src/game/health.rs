@@ -5,7 +5,9 @@ use super::*;
 use crate::item::*;
 impl Game {
     pub(super) fn damage(&mut self, amount: f32, cause: &'static str) {
-        if self.creative() || self.invuln > 0.0 || self.screen == Screen::Dead || self.health <= 0.0
+        if self.creative()
+            || self.spectator()
+            || self.invuln > 0.0 || self.screen == Screen::Dead || self.health <= 0.0
         {
             return;
         }
@@ -32,7 +34,8 @@ impl Game {
     /// gets through.
     pub(super) fn armor_hit(&mut self, dmg: f32, kind: u8) -> f32 {
         use crate::net::hurt;
-        if self.creative() || self.inventory.armor.iter().all(|s| s.is_none()) {
+        if self.creative() || self.spectator() || self.inventory.armor.iter().all(|s| s.is_none())
+        {
             return dmg;
         }
         let (bullet, blast) = (kind == hurt::BULLET, kind == hurt::BLAST);

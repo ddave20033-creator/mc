@@ -81,25 +81,22 @@ impl Game {
                 let mode = match *m {
                     "survival" | "s" | "0" => Some(GameMode::Survival),
                     "creative" | "c" | "1" => Some(GameMode::Creative),
+                    "spectator" | "sp" | "3" => Some(GameMode::Spectator),
                     _ => None,
                 };
                 match mode {
                     Some(mode) => {
-                        self.game_mode = mode;
-                        if mode == GameMode::Survival {
-                            self.player.flying = false;
-                        } else {
-                            self.fire = 0.0;
-                        }
-                        let name = if mode == GameMode::Survival {
-                            t("mode.survival_long")
-                        } else {
-                            t("mode.creative_long")
-                        };
+                        self.set_game_mode(mode);
+                        let name = Self::mode_name(mode);
                         self.say(tf("cmd.gamemode", &[&name]), chat::WHITE);
                     }
                     None => self.say(tf("cmd.bad_mode", &[m]), chat::RED),
                 }
+            }
+            ["spectate"] => self.spectate_command(None),
+            ["spectate", name @ ..] => {
+                let name = name.join(" ");
+                self.spectate_command(Some(&name));
             }
             ["give", item, rest @ ..] => match from_key(item) {
                 Some(id) => {

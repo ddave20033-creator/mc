@@ -287,7 +287,7 @@ impl Game {
                 self.update_player(dt, true);
                 self.update_world(dt);
             }
-            Screen::Chat | Screen::Container(_) => {
+            Screen::Chat | Screen::Container(_) | Screen::Spectate => {
                 self.update_player(dt, false);
                 self.update_world(dt);
             }
@@ -405,7 +405,7 @@ impl Game {
             cam_fx *= Mat4::from_rotation_x((t * 53.0).sin() * 2.2f32.to_radians() * k)
                 * Mat4::from_rotation_z((t * 41.0).sin() * 1.6f32.to_radians() * k);
         }
-        if in_world && self.needs.nausea > 0.0 && !self.creative() {
+        if in_world && self.needs.nausea > 0.0 && !self.creative() && !self.spectator() {
             // Nausea: the view slowly rolls and sways, fading out over the last 3 seconds.
             let k = (self.needs.nausea / 3.0).min(1.0);
             let t = self.time;
@@ -569,7 +569,12 @@ impl Game {
         if let Some(p) = self.guns.flash_light_pos().filter(|_| in_world) {
             lights.push(p);
         }
-        if in_world && self.player.spawned && self.screen != Screen::Dead && held_up(self.held()) {
+        if in_world
+            && self.player.spawned
+            && self.screen != Screen::Dead
+            && !self.spectator()
+            && held_up(self.held())
+        {
             let p = self.player.eye() - Vec3::Y * 0.35;
             lights.push((p, intensity(self.held(), 0.0)));
         }
@@ -652,6 +657,7 @@ impl Game {
             && self.screen != Screen::Dead
             && self.sleep.is_none()
             && !self.in_station()
+            && !self.spectator()
         {
             let f = look_dir(self.yaw, self.pitch);
             let r = f.cross(Vec3::Y).normalize();
@@ -694,8 +700,8 @@ impl Game {
             self.guns.laser_from = None;
             self.set_book_hit(None);
         }
-        // The player model (shadow only in first person).
-        if in_world && self.player.spawned && self.screen != Screen::Dead {
+        // The player model (shadow only in first person); a spectator has no body.
+        if in_world && self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
             // In bed: built standing, then laid down on it.
             let bed = self.sleep.map(|s| {
                 crate::model::player::lying(self.player.pos, facing_dir(s.facing).as_vec3())
@@ -862,7 +868,9 @@ impl Game {
             let (sky, blk) = world.light_estimate(m.center());
             m.build(&mut mob_verts, sky, blk);
         }
-        multi::build_remote_players(&mut self.remotes, world, self.time, &mut mob_verts, dt);
+        // Watching someone through their eyes: their own model would be in the way.
+        let inside = self.spectating.filter(|_| !third_person);
+        multi::build_remote_players(&mut self.remotes, world, self.time, &mut mob_verts, dt, inside);
         let near = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < 48.0 * 48.0;
         let light = |p: IVec3| world.light_estimate(p.as_vec3() + Vec3::new(0.5, 1.2, 0.5));
         for p in self.block_entities.chests.keys().filter(|p| near(p)) {
@@ -1038,6 +1046,10 @@ impl Game {
             Screen::Multiplayer => self.multiplayer_screen(),
             Screen::Connecting | Screen::Disconnected => self.net_status_screen(),
             Screen::Dead => screens::death(&mut self.ui, &self.death_message),
+            Screen::Spectate => {
+                self.spectate_screen();
+                Action::None
+            }
             Screen::Container(c) => {
                 self.container_screen(c);
                 Action::None
