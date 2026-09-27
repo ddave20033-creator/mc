@@ -113,7 +113,7 @@ void main() {
     vec2 flow = vec2(0.0);
     if (fluid) {
         // Texture streams along the flow direction (downhill on top, downward on sides).
-        float speed = water ? 0.9 : 0.22;
+        float speed = water ? 0.9 : 0.3;
         flow = vTint.rg * 2.0 - 1.0;
         bool falling = vTint.b > 0.5;
         if (vNormal == 2) {
@@ -123,7 +123,7 @@ void main() {
                 uv += vec2(time * 0.03, time * 0.045) * speed;
             }
         } else if (vNormal != 3) {
-            uv.y -= time * speed * (falling ? 1.6 : 0.6);
+            uv.y += time * speed * (falling ? 1.6 : 0.6);
         }
     }
     bool torchFire = abs(vLayer - TORCH_FLAME_LAYER) < 0.5;

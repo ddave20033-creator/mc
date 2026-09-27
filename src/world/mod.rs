@@ -41,7 +41,7 @@ pub struct ChunkLight {
 
 /// How long a fluid surface takes to move to its new height (one flow step).
 pub const WATER_ANIM: f32 = 0.25;
-pub const LAVA_ANIM: f32 = 1.5;
+pub const LAVA_ANIM: f32 = 1.0;
 
 impl World {
     pub fn new() -> Self {

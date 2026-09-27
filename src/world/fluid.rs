@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 const TICK: f32 = 0.05;
 const WATER_DELAY: u64 = 5;
-const LAVA_DELAY: u64 = 30;
+const LAVA_DELAY: u64 = 20;
 const BUDGET: usize = 3000;
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
 

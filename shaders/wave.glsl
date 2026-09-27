@@ -11,7 +11,7 @@ vec3 displace(vec3 p, vec2 uv, int flags, float t, float layer, vec2 flowEnc) {
     // Fluids: uv = (previous y, change time). Move to the new shape over exactly one flow
     // step at constant speed, so consecutive steps join into one continuous flow.
     if ((flags & F_FLUID) != 0) {
-        float dur = (flags & F_EMISSIVE) != 0 ? 1.5 : 0.25;
+        float dur = (flags & F_EMISSIVE) != 0 ? 1.0 : 0.25;
         // Small delay covers the time the updated mesh takes to arrive.
         float k = clamp((t - uv.y - 0.04) / dur, 0.0, 1.0);
         p.y = mix(uv.x, p.y, k);
