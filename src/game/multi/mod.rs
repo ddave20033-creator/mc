@@ -409,6 +409,7 @@ impl Game {
             p.gun_mods = t.gun_mods;
             p.armor = t.armor;
             p.book = t.book;
+            p.book_page = t.book_page;
         }
     }
 

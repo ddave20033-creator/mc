@@ -11,7 +11,7 @@ mod content;
 
 use super::*;
 use crate::item::GUIDE_BOOK;
-use crate::model::book::{BookHit, BookView, SHEET_LAYERS, TAB_LAYERS, TURN_TIME};
+use crate::model::book::{BookHit, BookView, RIFFLE_TIME, SHEET_LAYERS, TAB_LAYERS, TURN_TIME};
 use crate::world::textures::{tex, TILE};
 use content::{contents_entry, draw_page, draw_tabs, layout, Layout, Look, DARK, LIGHT, PAGE_PX};
 
@@ -33,8 +33,6 @@ struct Turn {
     time: f32,
 }
 
-/// Seconds a page takes to turn while leafing through several (to a chapter far away).
-const RIFFLE_TIME: f32 = 0.16;
 /// At most this many pages turn over on the way to a chapter far away.
 const RIFFLE_TURNS: usize = 6;
 /// Holding the right button this long turns the book around to show it (a shorter click
