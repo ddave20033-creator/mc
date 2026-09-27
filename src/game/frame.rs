@@ -347,7 +347,10 @@ impl Game {
         let up = right.cross(fwd);
         // Zoom key held: a narrow view, like OptiFine's zoom.
         let zooming = self.screen == Screen::Playing && self.bind_down(Bind::Zoom);
+        // Aiming a gun narrows the view too (a lot through a scope).
+        let gun_zoom = if in_world { self.gun_zoom() } else { 1.0 };
         let fov_target = self.settings.fov
+            * gun_zoom
             * if zooming {
                 0.25
             } else if self.player.sprinting || (self.player.flying && self.bind_down(Bind::Sprint))
@@ -359,7 +362,7 @@ impl Game {
         self.fov_current += (fov_target - self.fov_current) * (1.0 - (-10.0 * dt).exp());
         // The field of view detail is measured with: the setting and the zoom, not the sprint
         // widening (the simplified distance would slide back and forth).
-        let detail_target = self.settings.fov * if zooming { 0.25 } else { 1.0 };
+        let detail_target = self.settings.fov * gun_zoom * if zooming { 0.25 } else { 1.0 };
         self.detail_fov += (detail_target - self.detail_fov) * (1.0 - (-10.0 * dt).exp());
         let fov = if in_world {
             self.fov_current
@@ -557,6 +560,9 @@ impl Game {
         let mut scene = Scene::default();
         self.particles
             .build(&mut scene.particles, view.right, view.up);
+        if in_world {
+            self.build_gun_effects(&mut scene.particles, cam, view.right, view.up);
+        }
         if let (Some((p, prog)), Screen::Playing) = (self.mining, self.screen) {
             if prog > 0.02 && !self.creative() {
                 crack_overlay(&mut scene.overlay, p, prog);
@@ -580,11 +586,13 @@ impl Game {
         let torch = self.held() == TORCH as ItemId;
         // Where the held torch burns (for its flame particles), from whichever model shows it.
         let mut held_torch_tip = None;
-        // A lantern is always held by the first-person hand (hanging with the body shown).
+        // A lantern is always held by the first-person hand (hanging with the body shown), and
+        // so is a pistol (the body's arm would point it at the ground when looking down).
         let lantern = self.held() == LANTERN as ItemId;
+        let pistol = self.held() == crate::item::PISTOL;
         let down = -self.pitch.to_degrees();
         let lower = &mut self.hand.lower;
-        if !fp_body || torch || lantern || down <= 15.0 {
+        if !fp_body || torch || lantern || pistol || down <= 15.0 {
             *lower = (*lower + 8.0 * dt).min(1.0);
         } else if down < 30.0 {
             *lower = 15.0 / down;
@@ -594,7 +602,7 @@ impl Game {
         if in_world
             && !third_person
             && !self.hide_hud
-            && !(fp_body && (torch || (down > 35.0 && !lantern)))
+            && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol)))
             && self.screen != Screen::Dead
             && self.sleep.is_none()
         {
@@ -618,11 +626,22 @@ impl Game {
             );
             // The hand is drawn with its own 70 degree view: move its torch tip to where the
             // world's view shows the same spot, so the flame sits on the torch.
-            if let Some(tip) = self.hand.torch_tip {
+            let k = (self.fov_current.to_radians() * 0.5).tan() / 35f32.to_radians().tan();
+            let to_world_view = |tip: Vec3| {
                 let p = cam_to_world.inverse().transform_point3(tip);
-                let k = (self.fov_current.to_radians() * 0.5).tan() / 35f32.to_radians().tan();
-                held_torch_tip = Some(cam_to_world.transform_point3(Vec3::new(p.x * k, p.y * k, p.z)));
+                cam_to_world.transform_point3(Vec3::new(p.x * k, p.y * k, p.z))
+            };
+            if let Some(tip) = self.hand.torch_tip {
+                held_torch_tip = Some(to_world_view(tip));
             }
+            // The same for the pistol's muzzle flash and the spent cases.
+            self.guns.muzzle = self.hand.muzzle_tip.map(to_world_view);
+            self.guns.eject = self.hand.eject_tip.map(to_world_view);
+            self.guns.laser_from = self.hand.laser_tip.map(to_world_view);
+        } else {
+            self.guns.muzzle = None;
+            self.guns.eject = None;
+            self.guns.laser_from = None;
         }
         // The player model (shadow only in first person).
         if in_world && self.player.spawned && self.screen != Screen::Dead {
@@ -653,6 +672,7 @@ impl Game {
                 hide_arms: false,
                 hide_right_arm: false,
                 lantern: None,
+                gun_mods: self.held_gun_mods(),
             };
             let target = limb_targets(&PlayerPose {
                 first_person: fp_body,
@@ -693,8 +713,8 @@ impl Game {
                 let fp = PlayerPose {
                     pos: pose.pos - body_fwd * back,
                     first_person: true,
-                    hide_arms: !torch && !lantern && down <= 30.0,
-                    hide_right_arm: lantern,
+                    hide_arms: !torch && !lantern && !pistol && down <= 30.0,
+                    hide_right_arm: lantern || pistol,
                     ..pose
                 };
                 build_player(&mut scene.particles, &fp, &limbs, player_sky, player_blk);

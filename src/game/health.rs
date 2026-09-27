@@ -37,6 +37,8 @@ impl Game {
         self.stash_table(true);
         let mut loose: Vec<Stack> = self.craft.iter_mut().filter_map(|s| s.take()).collect();
         loose.extend(self.cursor.take());
+        loose.extend(self.guns.bench.items());
+        self.guns.bench.clear();
         if !self.creative() {
             let center = self.player.pos + Vec3::Y * 0.8;
             let mut stacks: Vec<Stack> = self

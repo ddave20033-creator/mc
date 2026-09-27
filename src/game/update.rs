@@ -126,13 +126,16 @@ impl Game {
             }
         }
         self.action_cooldown -= dt;
+        self.update_guns(dt, control);
         let mut breaking = None;
-        // A sword does not break blocks at all (it only fights).
+        // A sword does not break blocks at all (it only fights); with a pistol the left mouse
+        // button shoots instead (one shot per click, no hitting).
         let sword = is_sword(self.held());
-        if sword {
+        let gun = self.held() == PISTOL;
+        if sword || gun {
             self.mining = None;
         }
-        if control && self.left_down && self.action_cooldown <= 0.0 && !sword {
+        if control && self.left_down && self.action_cooldown <= 0.0 && !sword && !gun {
             if let Some((hit, _)) = self.target {
                 let b = self.terrain.world.geti(hit);
                 let time =
@@ -166,7 +169,12 @@ impl Game {
             self.dig_timer = 0.0;
         }
         // Hitting: either block with the sword or strike, not both.
-        if control && self.left_pressed && (self.target.is_none() || sword) && !self.blocking {
+        if control
+            && self.left_pressed
+            && (self.target.is_none() || sword)
+            && !self.blocking
+            && !gun
+        {
             if let Some(i) = self.mob_target {
                 self.attack(Some(i), None);
             }
@@ -174,6 +182,9 @@ impl Game {
                 self.attack(None, Some(id));
             }
             self.hand.swing();
+        }
+        if control && gun && self.left_pressed {
+            self.shoot();
         }
         if let Some(p) = breaking {
             self.break_block(p);

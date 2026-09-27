@@ -55,6 +55,8 @@ pub const WALL_TORCH: u8 = 55;
 pub const LANTERN: u8 = 59;
 pub const LANTERN_HANGING: u8 = 60;
 pub const WOOL: u8 = 61;
+/// Metal workbench for assembling and cleaning guns.
+pub const GUN_STATION: u8 = 62;
 
 /// Fluids: base id + level. Level 0 = source, 1..7 = flowing, 8 = falling.
 pub const WATER: u8 = 64;
@@ -714,6 +716,11 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
         COAL_BLOCK => tex::COAL_BLOCK,
         STONE_BRICKS => tex::STONE_BRICKS,
         WOOL => tex::WOOL,
+        GUN_STATION => match face {
+            2 => tex::GUN_STATION_TOP,
+            3 => tex::GUN_STATION_BOTTOM,
+            _ => tex::GUN_STATION_SIDE,
+        },
         _ if is_water(b) => tex::WATER,
         _ if is_lava(b) => tex::LAVA,
         _ => tex::STONE,

@@ -56,6 +56,22 @@ pub struct HandAnim {
     /// Where the held torch's fire was drawn last frame (world, but in the hand's own
     /// projection), for its flame particles.
     pub torch_tip: Option<Vec3>,
+    /// A held pistol's kick after a shot: 1 right after it, back to 0 as it settles.
+    recoil: f32,
+    /// Where the held pistol's muzzle was drawn last frame (like `torch_tip`).
+    pub muzzle_tip: Option<Vec3>,
+    /// And its ejection port, where the spent cases fly out, and its laser sight's lens.
+    pub eject_tip: Option<Vec3>,
+    pub laser_tip: Option<Vec3>,
+    /// The held pistol: aimed down the sights (0 from the hip .. 1 aimed), how far a reload
+    /// has got (0..1) and its attachments.
+    pub aim: f32,
+    pub reload: Option<f32>,
+    pub gun_mods: u8,
+    /// The held pistol's magazine is empty (its slide stays back), and the reload going on
+    /// started from an empty one (the slide gets racked at the end).
+    pub gun_empty: bool,
+    pub reload_empty: bool,
 }
 
 impl HandAnim {
@@ -78,7 +94,21 @@ impl HandAnim {
             fancy_lantern: false,
             lantern_swing: crate::model::lantern::SmoothSwing::default(),
             torch_tip: None,
+            recoil: 0.0,
+            muzzle_tip: None,
+            eject_tip: None,
+            laser_tip: None,
+            aim: 0.0,
+            reload: None,
+            gun_mods: 0,
+            gun_empty: false,
+            reload_empty: false,
         }
+    }
+
+    /// A shot from the held pistol: it kicks up and back, and the slide flies back.
+    pub fn shoot(&mut self) {
+        self.recoil = 1.0;
     }
 
     /// One swing per action (breaking or placing a block, hitting, throwing). The swing
@@ -151,6 +181,7 @@ impl HandAnim {
             self.keep_swinging();
         }
         self.equip = (self.equip + dt * 4.0).min(1.0);
+        self.recoil = (self.recoil - dt / 0.25).max(0.0);
         // The sword swings into the blocking pose and back in about 0.15 s.
         let target = if self.blocking { 1.0 } else { 0.0 };
         let step = dt / 0.15;
@@ -218,6 +249,9 @@ impl HandAnim {
         let light = vertex_light(sky, blk);
         let fl = flags::VIEWMODEL;
         self.torch_tip = None;
+        self.muzzle_tip = None;
+        self.eject_tip = None;
+        self.laser_tip = None;
         let s = self.attack();
         let sq = s.sqrt();
         let eq = {
@@ -270,6 +304,10 @@ impl HandAnim {
             * rz(f1 * -20.0)
             * rx(f1 * -80.0)
             * ry(-45.0);
+        if self.held == crate::item::PISTOL {
+            self.build_pistol(out, base, light, fl, eq, (s, sq, f1), skin);
+            return;
+        }
         let flat = matches!(icon(self.held), Icon::Flat(_));
         if self.held == crate::world::LANTERN as ItemId && self.fancy_lantern {
             // Hanging by its chain from the fist. Its body follows the hand with the same
@@ -346,6 +384,174 @@ impl HandAnim {
             self.torch_tip = Some(item.transform_point3(super::player::TORCH_TIP));
         }
         emit_held(out, item, self.held, light, fl);
+    }
+}
+
+impl HandAnim {
+    /// The held pistol. From the hip it is held out in the lower right, the barrel pointing
+    /// ahead (a hair toward the crosshair); aimed, its sight line lies on the view's axis
+    /// with the rear sight (or the scope's eyepiece) just in front of the eye. A shot kicks
+    /// it up about the grip and throws the slide back; with the magazine empty the slide
+    /// stays locked back.
+    ///
+    /// Reloading: the gun is raised and turned in with the magazine well facing the left
+    /// hand, the old magazine drops out tumbling, the left hand brings a new one up and
+    /// pushes it in (the gun bumps); after an empty magazine the slide stop is let go and the
+    /// slide slams forward. Then the hand leaves and the gun turns back.
+    #[allow(clippy::too_many_arguments)]
+    fn build_pistol(
+        &mut self,
+        out: &mut Vec<Vertex>,
+        base: Mat4,
+        light: [u8; 4],
+        fl: u8,
+        eq: f32,
+        (s, sq, f1): (f32, f32, f32),
+        skin: u8,
+    ) {
+        use super::gun;
+        use crate::item::gun_mod;
+        let smooth = |x: f32| {
+            let x = x.clamp(0.0, 1.0);
+            x * x * (3.0 - 2.0 * x)
+        };
+        // 0 until `a`, 1 from `b`, eased in between.
+        let span = |p: f32, a: f32, b: f32| smooth((p - a) / (b - a));
+        let mods = self.gun_mods;
+        let scope = mods & gun_mod::SCOPE != 0;
+        let reloading = self.reload.is_some();
+        let p = self.reload.unwrap_or(0.0);
+
+        // Turned in toward the middle while reloading.
+        let tilt = if reloading {
+            span(p, 0.0, 0.12) * (1.0 - span(p, 0.88, 1.0))
+        } else {
+            0.0
+        };
+        // Little bumps: the magazine release, the new magazine seating, the slide slamming shut.
+        let pulse = |at: f32, len: f32| {
+            let d = p - at;
+            if reloading && (0.0..len).contains(&d) {
+                (d / len * PI).sin()
+            } else {
+                0.0
+            }
+        };
+        let bump = pulse(0.15, 0.05) * 0.5 + pulse(0.66, 0.06) + pulse(0.75, 0.06) * 0.8;
+        // Raised and brought in so the magazine well is in view.
+        let base = base * t(-0.13 * tilt, 0.2 * tilt, 0.02 * tilt);
+
+        let scale = Mat4::from_scale(Vec3::splat(0.022));
+        let hip = base
+            * t(-0.2 * f1, 0.1 * (sq * TAU).sin(), -0.2 * (s * PI).sin())
+            * t(0.3, -0.29 - (1.0 - eq) * 0.6, -0.56)
+            * ry(92.0 + 18.0 * tilt)
+            * scale
+            * Mat4::from_translation(-gun::GRIP);
+        let (height, eye) = if scope {
+            (gun::SCOPE_HEIGHT, gun::SCOPE_EYE)
+        } else {
+            (gun::SIGHT_HEIGHT - 0.05, gun::REAR_SIGHT)
+        };
+        let aimed = base * t(0.0, -(1.0 - eq) * 0.6, -0.2) * ry(90.0) * scale * t(-eye, -height, 0.0);
+        let a = smooth(self.aim);
+        let pose = blend(hip, aimed, a);
+
+        let r = self.recoil;
+        let kick = r * r * (3.0 - 2.0 * r);
+        let about_grip = |m: Mat4| Mat4::from_translation(gun::GRIP) * m * Mat4::from_translation(-gun::GRIP);
+        let recoil = about_grip(t(-1.5 * kick, 0.0, 0.0) * rz(kick * (16.0 - 10.0 * a)));
+        // Muzzle up and rolled so the magazine well faces the left hand.
+        let turn = about_grip(rz(22.0 * tilt + 3.0 * bump) * rx(34.0 * tilt));
+        let m = pose * recoil * turn;
+
+        // The slide: back after a shot; locked back while the magazine is empty; released to
+        // slam forward once a new magazine is in.
+        let shot = (r * 2.5).min(1.0) * 2.2;
+        let slide = if reloading && self.reload_empty {
+            2.2 * (1.0 - span(p, 0.74, 0.76))
+        } else if self.gun_empty {
+            2.2
+        } else {
+            shot
+        };
+
+        // The left hand: where its fist is (gun space) and which way its forearm points.
+        let well = gun::magazine_bottom();
+        let axis = gun::grip_axis();
+        let holding = |d: f32| well + axis * (d + 1.2);
+        let away = Vec3::new(-6.0, -34.0, -22.0);
+        // The forearm reaches down and to the left (away from the view), not toward the eye.
+        let arm_dir = Vec3::new(-0.1, 1.0, 0.6).normalize();
+        let lerp = |a: Vec3, b: Vec3, k: f32| a + (b - a) * k;
+        let fist = if !reloading || p < 0.25 {
+            away
+        } else if p < 0.55 {
+            lerp(away, holding(7.0), span(p, 0.25, 0.55))
+        } else if p < 0.7 {
+            lerp(holding(7.0), holding(0.0), span(p, 0.55, 0.66))
+        } else {
+            lerp(holding(0.0), away, span(p, 0.7, 0.88))
+        };
+
+        // The magazines: the old one drops out tumbling; the new one rides in the left hand
+        // until it is pushed in.
+        let old_mag = |p: f32| {
+            let k = (p - 0.15) / 0.3;
+            let fall = axis * (2.0 + 26.0 * k * k) + Vec3::new(0.0, 0.0, -4.0 * k);
+            Mat4::from_translation(fall)
+                * Mat4::from_translation(well)
+                * rz(40.0 * k * k)
+                * rx(-25.0 * k)
+                * Mat4::from_translation(-well)
+        };
+        let in_hand = Mat4::from_translation(fist - holding(0.0));
+        let magazine = if !reloading || p < 0.15 {
+            Some(Mat4::IDENTITY)
+        } else if p < 0.25 {
+            None
+        } else if p < 0.68 {
+            Some(in_hand)
+        } else {
+            Some(Mat4::IDENTITY)
+        };
+
+        // Aimed through the scope, the view is the scope's picture instead (drawn by the HUD).
+        if !(scope && self.aim > 0.97) {
+            gun::emit_pistol_parts(out, m, light, fl, mods, |part| match part {
+                gun::SLIDE => Some(Mat4::from_translation(Vec3::new(-slide, 0.0, 0.0))),
+                gun::MAGAZINE => magazine,
+                _ => Some(Mat4::IDENTITY),
+            });
+            if reloading && (0.15..0.45).contains(&p) {
+                let at = old_mag(p);
+                gun::emit_pistol_parts(out, m, light, fl, mods, |part| {
+                    (part == gun::MAGAZINE).then_some(at)
+                });
+            }
+            if reloading && p >= 0.25 {
+                // The left hand and forearm, fist first (model pixels, about the size of the
+                // gun's grip across).
+                let rot = glam::Quat::from_rotation_arc(Vec3::Y, arm_dir);
+                let px = 1.0 / 16.0 / 0.022 * 0.45;
+                let arm = m * Mat4::from_scale_rotation_translation(Vec3::splat(px), rot, fist);
+                emit_box(
+                    out,
+                    arm,
+                    Vec3::new(-2.0, -7.0, -2.0),
+                    Vec3::new(2.0, 1.0, 2.0),
+                    ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
+                    [[255; 3]; 6],
+                    light,
+                    fl,
+                );
+            }
+        }
+        self.muzzle_tip = Some(m.transform_point3(gun::muzzle(mods)));
+        self.eject_tip = Some(m.transform_point3(gun::EJECTION_PORT));
+        if mods & gun_mod::LASER != 0 {
+            self.laser_tip = Some(m.transform_point3(gun::LASER));
+        }
     }
 }
 

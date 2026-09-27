@@ -351,13 +351,20 @@ impl Game {
         {
             let ui = &mut self.ui;
 
-            // Crosshair
-            if self.screen == Screen::Playing && self.camera.mode != 2 {
+            // Crosshair (a pistol draws its own)
+            if self.screen == Screen::Playing
+                && self.camera.mode != 2
+                && self.inventory.slots[self.hotbar_slot].is_none_or(|s| s.item != item::PISTOL)
+            {
                 let center = Vec2::new((w * 0.5).round(), (h * 0.5).round());
                 // Keep the aiming circle small even when the GUI scale is high.
                 ui.ring(center, 3.0, 2.4, rgba(0, 0, 0, 170));
                 ui.ring(center, 3.0, 1.2, rgba(255, 255, 255, 235));
             }
+        }
+
+        if matches!(self.screen, Screen::Playing | Screen::Chat) && self.sleep.is_none() {
+            self.draw_gun_hud();
         }
 
         // Names of the other LAN players.

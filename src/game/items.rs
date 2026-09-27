@@ -45,6 +45,10 @@ impl Game {
         for s in grid.iter().chain(std::iter::once(&self.cursor)).flatten() {
             let _ = inventory::add_to(&mut slots, *s);
         }
+        // What is on an open gun station goes back to the player when it closes.
+        for s in self.guns.bench.items() {
+            let _ = inventory::add_to(&mut slots, s);
+        }
         slots
     }
 
@@ -57,6 +61,10 @@ impl Game {
 
     pub(super) fn use_item(&mut self) {
         let held = self.held();
+        // With a pistol the right mouse button aims: no opening or placing with it.
+        if held == PISTOL {
+            return;
+        }
         let sneaking = self.sneaking();
         if let Some(i) = self.mob_target {
             if held == SHEARS && self.mobs[i].can_shear() {
@@ -69,6 +77,7 @@ impl Game {
             // Opening things (tables, chests, doors, beds...) takes a fresh click: holding the
             // button (blocking with a sword, placing blocks) and looking at one does nothing.
             let opens = hb == CRAFTING_TABLE
+                || hb == GUN_STATION
                 || is_furnace(hb)
                 || is_door(hb)
                 || is_bed(hb)
@@ -86,6 +95,10 @@ impl Game {
                         .copied()
                         .unwrap_or([None; 9]);
                     self.open_container(Container::Crafting(hit));
+                    return;
+                }
+                if hb == GUN_STATION {
+                    self.open_gun_station(hit);
                     return;
                 }
                 if is_furnace(hb) {
@@ -153,7 +166,12 @@ impl Game {
         let at_container = !sneaking
             && self.target.is_some_and(|(hit, _)| {
                 let b = self.terrain.world.geti(hit);
-                b == CRAFTING_TABLE || is_furnace(b) || is_chest(b) || is_door(b) || is_bed(b)
+                b == CRAFTING_TABLE
+                    || b == GUN_STATION
+                    || is_furnace(b)
+                    || is_chest(b)
+                    || is_door(b)
+                    || is_bed(b)
             });
         let ok = control
             && self.right_down

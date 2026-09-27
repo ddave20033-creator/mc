@@ -412,6 +412,7 @@ pub(super) fn build_remote_players(
                 hide_arms: false,
                 hide_right_arm: false,
                 lantern: None,
+                gun_mods: 0,
             };
             let limbs = r.limbs.update(limb_targets(&pose), dt);
             let lantern = if pose.held == LANTERN as ItemId {

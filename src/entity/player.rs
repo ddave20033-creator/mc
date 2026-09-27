@@ -329,6 +329,16 @@ pub fn raycast_fluid(
     })
 }
 
+/// Like `raycast`, but only solid blocks stop it (a bullet flies through grass and torches).
+pub fn raycast_solid(
+    world: &World,
+    origin: Vec3,
+    dir: Vec3,
+    max_dist: f32,
+) -> Option<(IVec3, IVec3)> {
+    raycast_by(world, origin, dir, max_dist, is_solid)
+}
+
 fn raycast_by(
     world: &World,
     origin: Vec3,

@@ -484,6 +484,11 @@ impl Ui {
         self.block_face(p, layer, shade, [255; 3]);
     }
 
+    /// `tex_quad` with a color tint.
+    pub fn tex_quad_tint(&mut self, p: [Vec2; 4], layer: u32, shade: f32, tint: [u8; 3]) {
+        self.block_face(p, layer, shade, tint);
+    }
+
     // ---------- text ----------
 
     pub fn text_width(&self, s: &str, size: f32) -> f32 {

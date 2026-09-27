@@ -45,6 +45,8 @@ pub struct PlayerPose {
     pub hide_right_arm: bool,
     /// Held lantern: direction from the hand down its chain (from its swing).
     pub lantern: Option<Vec3>,
+    /// The held pistol's attachments.
+    pub gun_mods: u8,
 }
 
 // Face order for layers: +X, -X, +Y, -Y, +Z (back), -Z (front)
@@ -166,6 +168,14 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
             -(0.1 + head_yaw).clamp(-0.2, 0.2),
             0.1,
         );
+    } else if p.held == crate::item::PISTOL && !swinging && !p.blocking {
+        // Aiming: the arm points where the head looks.
+        let head_yaw = p.head_yaw - p.body_yaw;
+        l.right_arm = Vec3::new(
+            (PI / 2.0 + p.pitch).clamp(0.2, 3.0),
+            -(0.1 + head_yaw).clamp(-0.7, 0.7),
+            0.0,
+        );
     }
     if p.first_person && !held_up(p.held) {
         // First Person Model's dynamic hands: just past the angle where the body's arms take
@@ -273,6 +283,8 @@ pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u
         let dir = p.lantern.unwrap_or(Vec3::NEG_Y);
         let style = crate::model::lantern::ON_MODEL;
         crate::model::lantern::emit_held_lantern(out, style, pivot, dir, p.body_yaw, light, fl);
+    } else if p.held == crate::item::PISTOL && show_right {
+        super::gun::emit_pistol(out, right * super::gun::in_arm(), light, fl, p.gun_mods);
     } else if p.held != NONE && show_right {
         emit_held(out, held_item(p, right), p.held, light, fl);
     }

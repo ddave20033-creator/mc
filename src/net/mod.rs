@@ -16,7 +16,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 11;
+pub const PROTOCOL: u16 = 12;
 
 // ---------------------------------------------------------------------------- data
 
@@ -266,6 +266,7 @@ impl W {
         self.u16(s.item);
         self.u8(s.count);
         self.u16(s.damage);
+        self.u16(s.data);
     }
     fn slot(&mut self, s: Slot) {
         match s {
@@ -372,6 +373,7 @@ impl R<'_> {
             item: self.u16()?,
             count: self.u8()?,
             damage: self.u16()?,
+            data: self.u16()?,
         })
     }
     fn slot(&mut self) -> Option<Slot> {
@@ -797,6 +799,7 @@ mod tests {
             item: 300,
             count: 1,
             damage: 12,
+            data: 0x0305,
         };
         let state = PlayerState {
             pos: Vec3::new(1.0, 70.5, -3.25),

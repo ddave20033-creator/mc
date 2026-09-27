@@ -242,6 +242,9 @@ pub fn delete_world(folder: &str) {
 
 fn slot_str(s: &Slot) -> String {
     match s {
+        Some(s) if s.data != 0 => {
+            format!("{}*{}*{}*{}", key(s.item), s.count, s.damage, s.data)
+        }
         Some(s) => format!("{}*{}*{}", key(s.item), s.count, s.damage),
         None => "-".into(),
     }
@@ -249,13 +252,18 @@ fn slot_str(s: &Slot) -> String {
 
 fn parse_slot(s: &str) -> Slot {
     let p: Vec<&str> = s.split('*').collect();
-    if p.len() != 3 {
+    // The item's extra data (a pistol's rounds and attachments) is left out when it is 0.
+    if !(3..=4).contains(&p.len()) {
         return None;
     }
     Some(Stack {
         item: from_key(p[0])?,
         count: p[1].parse().ok().filter(|&n| n > 0)?,
         damage: p[2].parse().ok()?,
+        data: match p.get(3) {
+            Some(d) => d.parse().ok()?,
+            None => 0,
+        },
     })
 }
 

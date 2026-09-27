@@ -170,6 +170,63 @@ fn recipes() -> &'static Vec<Recipe> {
                 keys: vec![('C', vec![CLAY_BALL])],
                 result: Stack::one(CLAY as ItemId),
             },
+            // Guns: the station, the pistol's parts (put together at the station) and bullets.
+            Recipe {
+                pattern: &["III", "N N"],
+                keys: vec![('I', vec![IRON_INGOT]), ('N', vec![IRON_NUGGET])],
+                result: Stack::one(GUN_STATION as ItemId),
+            },
+            Recipe {
+                pattern: &["III", "I  "],
+                keys: vec![('I', vec![IRON_INGOT])],
+                result: Stack::one(PISTOL_FRAME),
+            },
+            Recipe {
+                pattern: &["III"],
+                keys: vec![('I', vec![IRON_INGOT])],
+                result: Stack::one(PISTOL_BARREL),
+            },
+            Recipe {
+                pattern: &["N", "N", "N"],
+                keys: vec![('N', vec![IRON_NUGGET])],
+                result: Stack::one(PISTOL_SPRING),
+            },
+            Recipe {
+                pattern: &["NNN", "NNN"],
+                keys: vec![('N', vec![IRON_NUGGET])],
+                result: Stack::one(PISTOL_SLIDE),
+            },
+            Recipe {
+                pattern: &["I", "I"],
+                keys: vec![('I', vec![IRON_INGOT])],
+                result: Stack::one(PISTOL_MAGAZINE),
+            },
+            // Pistol attachments.
+            Recipe {
+                pattern: &["GIG"],
+                keys: vec![('G', b(GLASS)), ('I', vec![IRON_INGOT])],
+                result: Stack::one(SCOPE),
+            },
+            Recipe {
+                pattern: &["I", "W", "I"],
+                keys: vec![('I', vec![IRON_INGOT]), ('W', b(WOOL))],
+                result: Stack::one(SILENCER),
+            },
+            Recipe {
+                pattern: &["M", "I"],
+                keys: vec![('M', vec![PISTOL_MAGAZINE]), ('I', vec![IRON_INGOT])],
+                result: Stack::one(EXTENDED_MAGAZINE),
+            },
+            Recipe {
+                pattern: &["NTG"],
+                keys: vec![('N', vec![IRON_NUGGET]), ('T', b(TORCH)), ('G', b(GLASS))],
+                result: Stack::one(LASER_SIGHT),
+            },
+            Recipe {
+                pattern: &["N", "C"],
+                keys: vec![('N', vec![IRON_NUGGET]), ('C', vec![COAL, CHARCOAL])],
+                result: Stack::new(BULLET, 4),
+            },
         ];
         // Storage blocks and back.
         for (block, item) in [

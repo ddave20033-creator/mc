@@ -4,6 +4,7 @@ mod camera;
 mod commands;
 mod frame;
 mod gui;
+mod guns;
 mod health;
 mod hud;
 mod items;
@@ -67,6 +68,8 @@ pub enum Container {
     Crafting(IVec3),
     Furnace(IVec3),
     Chest(IVec3),
+    /// Gun station: putting a pistol together and cleaning it.
+    GunStation(IVec3),
     Creative,
 }
 
@@ -212,6 +215,8 @@ pub struct Game {
     /// Time and slot of the last left click, for double-click collecting.
     slot_click: (f32, Option<gui::SlotRef>),
     block_entities: BlockEntities,
+    /// Shooting and the gun station.
+    guns: guns::Guns,
     items: Vec<ItemEntity>,
     falling: Vec<FallingBlock>,
     mobs: Vec<Mob>,
@@ -427,6 +432,7 @@ impl Game {
             drag: None,
             slot_click: (-1.0, None),
             block_entities: BlockEntities::default(),
+            guns: Default::default(),
             items: Vec::new(),
             falling: Vec::new(),
             mobs: Vec::new(),
@@ -769,6 +775,7 @@ impl Game {
         let debug = is(Bind::Debug);
         let perspective = is(Bind::Perspective);
         let inventory = is(Bind::Inventory);
+        let reload = is(Bind::Reload);
         if code == KeyCode::Escape {
             match self.screen {
                 Screen::Playing => self.pause(),
@@ -818,6 +825,9 @@ impl Game {
         if let Some(i) = digit {
             self.hotbar_slot = i;
             self.slot_name_timer = 2.0;
+        }
+        if reload {
+            self.guns.reload_pressed = true;
         }
         // Double tap forward to sprint.
         if forward && !self.keys.contains(&code) {

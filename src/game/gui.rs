@@ -3,6 +3,8 @@
 //! splits / places one, shift-click moves between sections, 1-9 swaps with the hotbar,
 //! dragging a held stack spreads it over slots and double-click collects matching items.
 
+mod gun_station;
+
 use super::*;
 use crate::entity::SMELT_TIME;
 use crate::item::inventory::{add_to, click, take};
@@ -22,6 +24,10 @@ pub(super) enum SlotRef {
     Chest(usize),
     Creative(ItemId),
     Trash,
+    /// The pistol being cleaned or tuned at the gun station.
+    GunSlot,
+    /// An attachment's place on that pistol (index into ATTACHMENTS).
+    GunMod(usize),
 }
 
 /// Colors of the item screens; light is classic Minecraft, dark is the optional dark mode.
@@ -345,6 +351,9 @@ impl Game {
             }
         }
         self.stash_table(true);
+        if let Screen::Container(Container::GunStation(_)) = self.screen {
+            self.close_gun_station();
+        }
         let mut back: Vec<Stack> = self.craft.iter_mut().filter_map(|s| s.take()).collect();
         back.extend(self.cursor.take());
         for s in back {
@@ -357,7 +366,7 @@ impl Game {
     pub(super) fn container_pos(c: Container) -> Option<IVec3> {
         match c {
             Container::Crafting(p) | Container::Furnace(p) | Container::Chest(p) => Some(p),
-            Container::Inventory | Container::Creative => None,
+            Container::Inventory | Container::Creative | Container::GunStation(_) => None,
         }
     }
 
@@ -422,6 +431,10 @@ impl Game {
                 }
                 _ => None,
             },
+            SlotRef::GunSlot => match c {
+                Container::GunStation(_) => Some(&mut self.guns.bench.gun),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -471,6 +484,29 @@ impl Game {
                     }
                     _ => self.move_within_inventory(i, stack),
                 }
+            }
+            (Container::GunStation(_), SlotRef::Inv(_))
+                if stack.item == PISTOL && self.guns.bench.gun.is_none() =>
+            {
+                self.guns.bench.gun = Some(stack);
+                None
+            }
+            // An attachment goes onto the pistol being tuned, if it does not have one yet.
+            (Container::GunStation(_), SlotRef::Inv(i))
+                if self.guns.bench.mode == super::guns::BenchMode::Tune
+                    && self.guns.bench.gun.is_some_and(|g| {
+                        ATTACHMENTS
+                            .iter()
+                            .any(|&(bit, item)| item == stack.item && gun_mods(&g) & bit == 0)
+                    }) =>
+            {
+                let (bit, _) = *ATTACHMENTS.iter().find(|a| a.1 == stack.item).unwrap();
+                if let Some(g) = &mut self.guns.bench.gun {
+                    set_gun_mods(g, gun_mods(g) | bit);
+                }
+                let mut rest = stack;
+                rest.count -= 1;
+                (rest.count > 0).then_some(rest).and_then(|r| self.move_within_inventory(i, r))
             }
             (_, SlotRef::Inv(i)) => self.move_within_inventory(i, stack),
             _ => self.inventory.add(stack),
@@ -564,6 +600,9 @@ impl Game {
                 }
             }
             SlotRef::Trash => self.cursor = None,
+            // Only a pistol goes in.
+            SlotRef::GunSlot if self.cursor.is_some_and(|c| c.item != PISTOL) => {}
+            SlotRef::GunMod(i) => self.click_gun_mod(i, shift),
             _ => {
                 if shift {
                     self.quick_move(c, r);
@@ -680,7 +719,10 @@ impl Game {
     fn tooltip_for(&mut self, st: &Stack) {
         let mut text = name(st.item);
         let max = max_damage(st.item);
-        if max > 0 && st.damage > 0 {
+        if st.item == PISTOL {
+            let clean = 100 - st.damage as u32 * 100 / max as u32;
+            text = format!("{text}  ({})", tf("gun.cleanliness", &[&clean]));
+        } else if max > 0 && st.damage > 0 {
             text = format!(
                 "{text}  ({})",
                 tf("gui.durability", &[&(max - st.damage), &max])
@@ -950,6 +992,7 @@ impl Game {
             Container::Creative => (195.0, 160.0),
             Container::Chest(p) if self.chest_halves(p).1.is_some() => (176.0, 222.0),
             Container::Chest(_) => (176.0, 168.0),
+            Container::GunStation(_) => gun_station::PANEL,
             _ => (176.0, 166.0),
         };
         let (px, py) = self.panel(panel_w, panel_h);
@@ -1055,6 +1098,7 @@ impl Game {
                 self.label(t("gui.inventory"), lx, ly);
                 self.inventory_slots(px, py, 86.0 + extra, &mut hovered);
             }
+            Container::GunStation(_) => self.gun_station_panel(px, py, &mut hovered),
             Container::Creative => {
                 let (tx, ty) = at(8.0, 6.0);
                 self.label(t("gui.creative"), tx, ty);
@@ -1238,6 +1282,8 @@ impl Game {
                             | SlotRef::Creative(_)
                             | SlotRef::Trash
                             | SlotRef::Furnace(2)
+                            | SlotRef::GunSlot
+                            | SlotRef::GunMod(_)
                     )
                 {
                     let mut hot = self.inventory.slots[d].take();

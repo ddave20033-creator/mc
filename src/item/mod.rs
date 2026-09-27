@@ -42,6 +42,70 @@ pub const COOKED_MUTTON: ItemId = 275;
 /// Shear sheep, and mine leaves, grass and dead bushes so they drop themselves.
 pub const SHEARS: ItemId = 276;
 pub const SHEEP_SPAWN_EGG: ItemId = 277;
+/// Pistol ammunition: one is used up per shot.
+pub const BULLET: ItemId = 278;
+/// The five pistol parts, in the order they go together at the gun station: frame (with the
+/// grip and trigger), barrel, recoil spring, slide and magazine.
+pub const PISTOL_FRAME: ItemId = 279;
+pub const PISTOL_BARREL: ItemId = 280;
+pub const PISTOL_SPRING: ItemId = 281;
+pub const PISTOL_SLIDE: ItemId = 282;
+pub const PISTOL_MAGAZINE: ItemId = 283;
+pub const PISTOL_PARTS: [ItemId; 5] = [
+    PISTOL_FRAME,
+    PISTOL_BARREL,
+    PISTOL_SPRING,
+    PISTOL_SLIDE,
+    PISTOL_MAGAZINE,
+];
+/// Assembled at the gun station; shoots bullets with the right mouse button. Its `damage` is
+/// how dirty it is (one per shot); cleaned at the gun station.
+pub const PISTOL: ItemId = 284;
+/// Shots until a pistol is too dirty to fire.
+pub const PISTOL_DIRT_MAX: u16 = 40;
+/// Pistol attachments, fitted at the gun station: a scope (zooms in far when aiming), a
+/// silencer (no muzzle flash), an extended magazine and a laser sight (steadier from the hip).
+pub const SCOPE: ItemId = 285;
+pub const SILENCER: ItemId = 286;
+pub const EXTENDED_MAGAZINE: ItemId = 287;
+pub const LASER_SIGHT: ItemId = 288;
+
+/// A pistol's attachments as bits of `gun_mods`, with their items.
+pub mod gun_mod {
+    pub const SCOPE: u8 = 1;
+    pub const SILENCER: u8 = 2;
+    pub const EXTENDED_MAGAZINE: u8 = 4;
+    pub const LASER: u8 = 8;
+}
+pub const ATTACHMENTS: [(u8, ItemId); 4] = [
+    (gun_mod::SCOPE, SCOPE),
+    (gun_mod::SILENCER, SILENCER),
+    (gun_mod::EXTENDED_MAGAZINE, EXTENDED_MAGAZINE),
+    (gun_mod::LASER, LASER_SIGHT),
+];
+
+/// Rounds in a pistol's magazine (the low 6 bits of its data).
+pub fn gun_rounds(s: &Stack) -> u8 {
+    (s.data & 0x3f) as u8
+}
+pub fn set_gun_rounds(s: &mut Stack, n: u8) {
+    s.data = (s.data & !0x3f) | (n as u16 & 0x3f);
+}
+/// A pistol's attachments (`gun_mod` bits, in the data's high byte).
+pub fn gun_mods(s: &Stack) -> u8 {
+    (s.data >> 8) as u8
+}
+pub fn set_gun_mods(s: &mut Stack, mods: u8) {
+    s.data = (s.data & 0xff) | ((mods as u16) << 8);
+}
+/// Rounds a pistol's magazine holds.
+pub fn magazine_size(mods: u8) -> u8 {
+    if mods & gun_mod::EXTENDED_MAGAZINE != 0 {
+        20
+    } else {
+        12
+    }
+}
 /// Minecraft's shears durability.
 const SHEARS_DURABILITY: u16 = 238;
 const TOOL_BASE: ItemId = 300;
@@ -140,8 +204,10 @@ pub fn tool_of(id: ItemId) -> Option<(ToolKind, Tier)> {
 pub struct Stack {
     pub item: ItemId,
     pub count: u8,
-    /// Durability used up (tools).
+    /// Durability used up (tools); how dirty a pistol is.
     pub damage: u16,
+    /// Extra state of the item (a pistol: rounds in its magazine and its attachments).
+    pub data: u16,
 }
 
 impl Stack {
@@ -150,13 +216,17 @@ impl Stack {
             item,
             count,
             damage: 0,
+            data: 0,
         }
     }
     pub fn one(item: ItemId) -> Self {
         Self::new(item, 1)
     }
     pub fn stacks_with(&self, other: &Stack) -> bool {
-        self.item == other.item && self.damage == other.damage && max_stack(self.item) > 1
+        self.item == other.item
+            && self.damage == other.damage
+            && self.data == other.data
+            && max_stack(self.item) > 1
     }
 }
 
@@ -165,7 +235,7 @@ pub type Slot = Option<Stack>;
 pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
-        WATER_BUCKET | LAVA_BUCKET | SHEARS => 1,
+        WATER_BUCKET | LAVA_BUCKET | SHEARS | PISTOL => 1,
         _ if id == BED as ItemId => 1,
         BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
         _ => 64,
@@ -223,6 +293,9 @@ pub fn attack_damage(id: ItemId) -> f32 {
 pub fn max_damage(id: ItemId) -> u16 {
     if id == SHEARS {
         return SHEARS_DURABILITY;
+    }
+    if id == PISTOL {
+        return PISTOL_DIRT_MAX;
     }
     tool_of(id).map(|(_, t)| t.durability()).unwrap_or(0)
 }
@@ -314,6 +387,7 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
     (LANTERN, "lantern", "Lantern", "Lámpás"),
     (WOOL, "white_wool", "White Wool", "Fehér gyapjú"),
     (BED, "red_bed", "Red Bed", "Piros ágy"),
+    (GUN_STATION, "gun_station", "Gun Station", "Fegyverasztal"),
 ];
 
 /// The other items (ids from 256, tools aside), in creative inventory order: the id, key,
@@ -424,6 +498,65 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Sheep Spawn Egg",
         "Birka idéző tojás",
         tex::SHEEP_SPAWN_EGG,
+    ),
+    (PISTOL, "pistol", "Pistol", "Pisztoly", tex::PISTOL),
+    (BULLET, "bullet", "Bullet", "Töltény", tex::BULLET),
+    (
+        PISTOL_FRAME,
+        "pistol_frame",
+        "Pistol Frame",
+        "Pisztolyváz",
+        tex::PISTOL_PARTS,
+    ),
+    (
+        PISTOL_BARREL,
+        "pistol_barrel",
+        "Pistol Barrel",
+        "Pisztolycső",
+        tex::PISTOL_PARTS + 1,
+    ),
+    (
+        PISTOL_SPRING,
+        "pistol_spring",
+        "Recoil Spring",
+        "Visszatérítő rugó",
+        tex::PISTOL_PARTS + 2,
+    ),
+    (
+        PISTOL_SLIDE,
+        "pistol_slide",
+        "Pistol Slide",
+        "Pisztolyszán",
+        tex::PISTOL_PARTS + 3,
+    ),
+    (
+        PISTOL_MAGAZINE,
+        "pistol_magazine",
+        "Pistol Magazine",
+        "Pisztolytár",
+        tex::PISTOL_PARTS + 4,
+    ),
+    (SCOPE, "scope", "Scope", "Távcső", tex::GUN_ATTACHMENTS),
+    (
+        SILENCER,
+        "silencer",
+        "Silencer",
+        "Hangtompító",
+        tex::GUN_ATTACHMENTS + 1,
+    ),
+    (
+        EXTENDED_MAGAZINE,
+        "extended_magazine",
+        "Extended Magazine",
+        "Bővített tár",
+        tex::GUN_ATTACHMENTS + 2,
+    ),
+    (
+        LASER_SIGHT,
+        "laser_sight",
+        "Laser Sight",
+        "Lézeres célzó",
+        tex::GUN_ATTACHMENTS + 3,
     ),
 ];
 

@@ -165,7 +165,25 @@ pub mod tex {
     pub const WATER_ANIM: u32 = SHEEP_SPAWN_EGG + 1;
     pub const LAVA_ANIM: u32 = WATER_ANIM + FLUID_FRAMES;
     pub const FLUID_FRAMES: u32 = 32;
-    pub const LAYERS: usize = (LAVA_ANIM + FLUID_FRAMES) as usize;
+    /// Gun station faces.
+    pub const GUN_STATION_TOP: u32 = LAVA_ANIM + FLUID_FRAMES;
+    pub const GUN_STATION_SIDE: u32 = GUN_STATION_TOP + 1;
+    pub const GUN_STATION_BOTTOM: u32 = GUN_STATION_TOP + 2;
+    /// Surfaces of the 3D pistol model: blued steel (slide), bare steel (barrel, spring),
+    /// polymer (frame, grip, magazine).
+    pub const GUN_BLUED: u32 = GUN_STATION_TOP + 3;
+    pub const GUN_STEEL: u32 = GUN_STATION_TOP + 4;
+    pub const GUN_POLYMER: u32 = GUN_STATION_TOP + 5;
+    /// Item icons: the pistol, its five parts (frame, barrel, spring, slide, magazine) and
+    /// the bullet.
+    pub const PISTOL: u32 = GUN_STATION_TOP + 6;
+    pub const PISTOL_PARTS: u32 = PISTOL + 1;
+    pub const BULLET: u32 = PISTOL_PARTS + 5;
+    /// Attachment icons: scope, silencer, extended magazine, laser sight.
+    pub const GUN_ATTACHMENTS: u32 = BULLET + 1;
+    /// The scope's glass (the model's lenses).
+    pub const GUN_GLASS: u32 = GUN_ATTACHMENTS + 4;
+    pub const LAYERS: usize = (GUN_GLASS + 1) as usize;
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -241,6 +259,7 @@ fn is_item_icon(l: u32) -> bool {
         || l == tex::DOOR_ITEM
         || l == tex::BED_ITEM
         || (tex::MUTTON..=tex::SHEEP_SPAWN_EGG).contains(&l)
+        || (tex::PISTOL..tex::GUN_GLASS).contains(&l)
 }
 
 fn is_crack(l: u32) -> bool {

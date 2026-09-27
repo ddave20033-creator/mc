@@ -48,6 +48,7 @@ fn mining(b: u8) -> Option<Mining> {
         GOLD_ORE | DIAMOND_ORE => m(3.0, Some(Pickaxe), Some(2)),
         COAL_BLOCK => m(5.0, Some(Pickaxe), Some(0)),
         IRON_BLOCK => m(5.0, Some(Pickaxe), Some(1)),
+        GUN_STATION => m(3.5, Some(Pickaxe), Some(0)),
         GOLD_BLOCK => m(3.0, Some(Pickaxe), Some(2)),
         DIAMOND_BLOCK => m(5.0, Some(Pickaxe), Some(2)),
         OBSIDIAN => m(50.0, Some(Pickaxe), Some(3)),

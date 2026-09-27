@@ -72,6 +72,32 @@ impl Particles {
         }
     }
 
+    /// Chips of block `b` flying out of a bullet hole at `pos` on a face with normal `n`.
+    pub fn impact(&mut self, world: &World, pos: Vec3, n: Vec3, b: u8, tint: [u8; 3]) {
+        let layer = face_texture(b, 0);
+        let sky = world.sky_estimate(pos + n * 0.3);
+        let blk = world.block_light_estimate(pos + n * 0.3);
+        for _ in 0..8 {
+            let spread = Vec3::new(self.rand(), self.rand(), self.rand()) - Vec3::splat(0.5);
+            let vel = n * (2.0 + self.rand() * 2.5) + spread * 3.0 + Vec3::Y * 1.0;
+            let uv0 = [self.rand() * 0.75, self.rand() * 0.75];
+            let size = 0.03 + self.rand() * 0.04;
+            let life = 0.4 + self.rand() * 0.5;
+            self.list.push(Particle {
+                kind: Kind::Debris,
+                pos,
+                vel,
+                life,
+                max_life: life,
+                layer,
+                uv0,
+                size,
+                tint,
+                light: [sky, blk],
+            });
+        }
+    }
+
     /// Minecraft's torch flame particle at `pos` (just above the glowing tip).
     pub fn flame(&mut self, pos: Vec3) {
         let life = 0.4 + self.rand() * 0.4;

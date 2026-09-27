@@ -15,6 +15,7 @@ pub enum Bind {
     Zoom,
     Inventory,
     Drop,
+    Reload,
     Chat,
     Command,
     PlayerList,
@@ -36,7 +37,7 @@ pub enum Bind {
 
 /// (action, name in options.txt and the translation key `key.<name>`, default key), in the
 /// order the options list them.
-pub const BINDS: [(Bind, &str, KeyCode); 27] = [
+pub const BINDS: [(Bind, &str, KeyCode); 28] = [
     (Bind::Forward, "forward", KeyCode::KeyW),
     (Bind::Back, "back", KeyCode::KeyS),
     (Bind::Left, "left", KeyCode::KeyA),
@@ -47,6 +48,7 @@ pub const BINDS: [(Bind, &str, KeyCode); 27] = [
     (Bind::Zoom, "zoom", KeyCode::KeyV),
     (Bind::Inventory, "inventory", KeyCode::KeyE),
     (Bind::Drop, "drop", KeyCode::KeyQ),
+    (Bind::Reload, "reload", KeyCode::KeyR),
     (Bind::Chat, "chat", KeyCode::KeyT),
     (Bind::Command, "command", KeyCode::Slash),
     (Bind::PlayerList, "playerlist", KeyCode::Tab),
@@ -88,6 +90,7 @@ pub const CATEGORIES: [(&str, &[Bind]); 4] = [
         &[
             Bind::Inventory,
             Bind::Drop,
+            Bind::Reload,
             Bind::Hotbar1,
             Bind::Hotbar2,
             Bind::Hotbar3,

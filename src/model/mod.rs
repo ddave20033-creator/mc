@@ -2,6 +2,8 @@
 //! world-space vertices: the shared pieces (boxes, items, torches, crack overlays) and the
 //! models made of them.
 
+pub mod ballistics;
+pub mod gun;
 pub mod hand;
 pub mod lantern;
 pub mod particles;
@@ -19,6 +21,10 @@ use glam::{Mat4, Vec3};
 pub fn emit_held(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], fl: u8) {
     if item == TORCH as ItemId {
         emit_torch(out, m, light, fl, 94);
+        return;
+    }
+    if item == crate::item::PISTOL {
+        gun::emit_pistol(out, m * gun::gun_to_unit(), light, fl, 0);
         return;
     }
     match icon(item) {
