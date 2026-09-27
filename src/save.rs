@@ -29,6 +29,8 @@ pub struct WorldMeta {
     pub name: String,
     pub seed: u32,
     pub creative: bool,
+    /// The player was in spectator mode (saved as `mode:spectator`).
+    pub spectator: bool,
     pub cheats: bool,
     pub last_played: u64,
     pub time_of_day: f32,
@@ -112,6 +114,7 @@ impl WorldMeta {
             },
             seed,
             creative,
+            spectator: false,
             cheats,
             last_played: now_secs(),
             time_of_day: 0.03,
@@ -128,7 +131,9 @@ impl WorldMeta {
             "name:{}\nseed:{}\nmode:{}\ncheats:{}\nlast_played:{}\ntime:{}\n",
             self.name,
             self.seed,
-            if self.creative {
+            if self.spectator {
+                "spectator"
+            } else if self.creative {
                 "creative"
             } else {
                 "survival"
@@ -167,6 +172,7 @@ impl WorldMeta {
             name: folder.to_string(),
             seed: 0,
             creative: false,
+            spectator: false,
             cheats: false,
             last_played: 0,
             time_of_day: 0.03,
@@ -181,7 +187,10 @@ impl WorldMeta {
             match k {
                 "name" => m.name = v.to_string(),
                 "seed" => m.seed = v.parse().unwrap_or(0),
-                "mode" => m.creative = v == "creative",
+                "mode" => {
+                    m.creative = v == "creative";
+                    m.spectator = v == "spectator";
+                }
                 "cheats" => m.cheats = v == "true",
                 "last_played" => m.last_played = v.parse().unwrap_or(0),
                 "time" => m.time_of_day = v.parse().unwrap_or(0.03),

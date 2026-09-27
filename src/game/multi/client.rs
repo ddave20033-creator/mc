@@ -79,7 +79,11 @@ impl Game {
             } else {
                 self.needs.to_array()
             },
-            creative: self.creative(),
+            mode: match self.game_mode {
+                GameMode::Survival => crate::net::mode::SURVIVAL,
+                GameMode::Creative => crate::net::mode::CREATIVE,
+                GameMode::Spectator => crate::net::mode::SPECTATOR,
+            },
             flying: self.player.flying,
             slot: self.hotbar_slot as u8,
             inventory: slots.iter().chain(&self.inventory.armor).copied().collect(),
@@ -248,6 +252,7 @@ impl Game {
             name: world,
             seed,
             creative,
+            spectator: false,
             cheats,
             last_played: 0,
             time_of_day: time,
@@ -263,10 +268,10 @@ impl Game {
             let worn = crate::item::inventory::SIZE;
             self.inventory.armor = std::array::from_fn(|i| s.inventory.get(worn + i).copied().flatten());
             self.needs = Needs::from_array(s.needs);
-            self.game_mode = if s.creative {
-                GameMode::Creative
-            } else {
-                GameMode::Survival
+            self.game_mode = match s.mode {
+                crate::net::mode::CREATIVE => GameMode::Creative,
+                crate::net::mode::SPECTATOR => GameMode::Spectator,
+                _ => GameMode::Survival,
             };
             self.pending_player = Some(PlayerSave {
                 pos: s.pos.to_array(),

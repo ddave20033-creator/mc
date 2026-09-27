@@ -5,7 +5,9 @@ use super::*;
 use crate::item::*;
 impl Game {
     pub(super) fn damage(&mut self, amount: f32, cause: &'static str) {
-        if self.creative() || self.invuln > 0.0 || self.screen == Screen::Dead || self.health <= 0.0
+        if self.creative()
+            || self.spectator()
+            || self.invuln > 0.0 || self.screen == Screen::Dead || self.health <= 0.0
         {
             return;
         }

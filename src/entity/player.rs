@@ -29,6 +29,8 @@ pub struct Player {
     pub vel: Vec3,
     pub on_ground: bool,
     pub flying: bool,
+    /// Spectator mode: flies through blocks (nothing stops it).
+    pub noclip: bool,
     pub spawned: bool,
     pub sprinting: bool,
     pub sneaking: bool,
@@ -178,12 +180,32 @@ impl Player {
         (d - delta).abs() > 1e-5
     }
 
+    /// Spectator flight: like creative flying, but through blocks and never landing.
+    fn fly_through(&mut self, dt: f32, wish: Vec3, input: &MoveInput) {
+        self.flying = true;
+        self.on_ground = false;
+        self.hit_wall = false;
+        self.sneaking = false;
+        self.sprinting = input.sprint && input.forward > 0.0;
+        self.crouch += (0.0 - self.crouch) * (1.0 - (-14.0 * dt).exp());
+        let speed = if input.sprint { 22.0 } else { 11.0 };
+        let mut target = wish * speed;
+        target.y = (input.up as i32 - input.down as i32) as f32
+            * if input.sprint { 12.0 } else { 8.0 };
+        self.vel = self.vel.lerp(target, 1.0 - (-10.0 * dt).exp());
+        self.pos += self.vel * dt;
+    }
+
     pub fn update(&mut self, dt: f32, world: &World, yaw: f32, input: &MoveInput) {
         let fwd = Vec3::new(yaw.cos(), 0.0, yaw.sin());
         let right = Vec3::new(-yaw.sin(), 0.0, yaw.cos());
         let mut wish = fwd * input.forward + right * input.strafe;
         if wish.length_squared() > 0.0 {
             wish = wish.normalize();
+        }
+        if self.noclip {
+            self.fly_through(dt, wish, input);
+            return;
         }
         let fluid = self.fluid(world);
         let in_fluid = fluid != AIR;

@@ -453,6 +453,46 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("mode.creative", "Creative", "Kreatív"),
     ("mode.survival_long", "Survival Mode", "Túlélő mód"),
     ("mode.creative_long", "Creative Mode", "Kreatív mód"),
+    ("mode.spectator", "Spectator", "Néző"),
+    ("mode.spectator_long", "Spectator Mode", "Néző mód"),
+    // Spectator mode
+    ("spectate.title", "Spectate a player", "Játékos nézése"),
+    (
+        "spectate.none",
+        "No other players to watch",
+        "Nincs más játékos, akit nézhetnél",
+    ),
+    (
+        "spectate.single",
+        "Open the world to LAN to watch others",
+        "Nyisd meg a világot LAN-ra, hogy másokat nézhess",
+    ),
+    ("spectate.current", "watching", "nézed"),
+    ("spectate.stop", "Stop watching", "Nézés abbahagyása"),
+    ("spectate.now", "Now watching {}", "Most őt nézed: {}"),
+    ("spectate.stopped", "Stopped watching", "Már nem nézel senkit"),
+    ("spectate.lost", "The player you watched is gone", "A nézett játékos eltűnt"),
+    ("spectate.watching", "Watching {}", "{} nézése"),
+    (
+        "spectate.hint",
+        "E: players to watch  |  Space/Shift: up/down",
+        "E: játékosok nézése  |  Szóköz/Shift: fel/le",
+    ),
+    (
+        "spectate.hint_watching",
+        "Shift: stop watching  |  E: someone else",
+        "Shift: kilépés  |  E: másik játékos",
+    ),
+    (
+        "spectate.no_player",
+        "No player to watch named {}",
+        "Nincs ilyen nevű játékos: {}",
+    ),
+    (
+        "spectate.not_spectator",
+        "Only in spectator mode (/gamemode spectator)",
+        "Csak néző módban (/gamemode spectator)",
+    ),
     // Containers
     ("gui.inventory", "Inventory", "Tárgylista"),
     ("gui.crafting", "Crafting", "Barkácsolás"),

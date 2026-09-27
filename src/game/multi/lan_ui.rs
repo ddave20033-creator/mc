@@ -10,7 +10,7 @@ impl Game {
         let time = self.time;
         for r in &self.remotes {
             let p = r.pose;
-            if !r.shown() {
+            if !r.shown() || Some(r.id) == self.spectating {
                 continue;
             }
             let top = p.pos + Vec3::Y * (2.1 - 0.3 * p.crouch);

@@ -364,7 +364,10 @@ impl Game {
             }
         }
 
-        if matches!(self.screen, Screen::Playing | Screen::Chat) && self.sleep.is_none() {
+        if matches!(self.screen, Screen::Playing | Screen::Chat)
+            && self.sleep.is_none()
+            && !self.spectator()
+        {
             self.draw_gun_hud();
         }
 
@@ -390,7 +393,12 @@ impl Game {
         let total = 9.0 * slot + 8.0 * gap + 2.0 * pad;
         let x0 = ((w - total) * 0.5).round();
         let y0 = (h - slot - 2.0 * pad - 4.0 * s).round();
-        let show_bars = !matches!(self.screen, Screen::Container(_) | Screen::Dead);
+        // A spectator has no hotbar, health or hunger: a hint takes their place.
+        let spectator = self.spectator();
+        if spectator && matches!(self.screen, Screen::Playing | Screen::Chat) {
+            self.draw_spectator_hud();
+        }
+        let show_bars = !matches!(self.screen, Screen::Container(_) | Screen::Dead) && !spectator;
         if show_bars {
             let ui = &mut self.ui;
             ui.rect_full(
@@ -523,7 +531,7 @@ impl Game {
 
         let held = self.held();
         let ui = &mut self.ui;
-        if self.slot_name_timer > 0.0 && playing && held != NONE {
+        if self.slot_name_timer > 0.0 && playing && held != NONE && !spectator {
             let a = self.slot_name_timer.min(0.5) / 0.5;
             let name_y = if creative {
                 y0 - 14.0 * s
