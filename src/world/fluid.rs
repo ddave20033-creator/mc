@@ -9,6 +9,8 @@ const WATER_DELAY: u64 = 5;
 const LAVA_DELAY: u64 = 20;
 const BUDGET: usize = 3000;
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
+/// Recomputed level of flowing fluid that no longer has anything feeding it.
+const DRY: u8 = u8::MAX;
 
 pub struct Fluids {
     tick: u64,
@@ -184,10 +186,17 @@ impl Fluids {
                 if !lava && sources >= 2 && (is_solid(below) || below == WATER) {
                     0
                 } else {
-                    best.saturating_add(drop)
+                    // Past level 7 the fluid dries up, even at exactly 8: that is FALLING,
+                    // which would feed the neighbours back up and never let the stream die.
+                    let l = best.saturating_add(drop);
+                    if l > 7 {
+                        DRY
+                    } else {
+                        l
+                    }
                 }
             };
-            if new > 7 && new != FALLING {
+            if new == DRY {
                 self.set(w, p, AIR, changed);
                 return;
             }
@@ -327,5 +336,63 @@ mod tests {
             is_water(world.get(8, 1, 11)),
             "water did not spread far enough"
         );
+    }
+
+    fn run(fluids: &mut Fluids, world: &mut World, ticks: usize) {
+        let mut changed = Vec::new();
+        for i in 0..ticks {
+            fluids.update(TICK, i as f32 * TICK, world, &mut changed);
+        }
+    }
+
+    fn fluid_left(world: &World) -> usize {
+        let mut n = 0;
+        for y in 0..16 {
+            for z in 0..CHUNK {
+                for x in 0..CHUNK {
+                    if is_fluid(world.get(x as i32, y, z as i32)) {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        n
+    }
+
+    /// A stone floor with a 4 high ledge on the -X side, so fluid poured on the ledge
+    /// runs off it and falls down.
+    fn ledge_world() -> World {
+        let mut world = World::new();
+        let mut chunk = ChunkData::new();
+        for z in 0..CHUNK {
+            for x in 0..CHUNK {
+                chunk.set(x, 0, z, STONE);
+                if x < 6 {
+                    for y in 1..5 {
+                        chunk.set(x, y, z, STONE);
+                    }
+                }
+            }
+        }
+        world.chunks.insert((0, 0), Arc::new(chunk));
+        world
+    }
+
+    #[test]
+    fn flowing_fluid_dries_up_without_source() {
+        for fluid in [WATER, LAVA] {
+            for src in [IVec3::new(4, 5, 8), IVec3::new(11, 1, 8)] {
+                let mut world = ledge_world();
+                let mut fluids = Fluids::new();
+                world.seti(src, fluid);
+                fluids.notify(&world, src);
+                run(&mut fluids, &mut world, 1000);
+                assert!(fluid_left(&world) > 5, "{fluid} at {src}: did not spread");
+                world.seti(src, AIR);
+                fluids.notify(&world, src);
+                run(&mut fluids, &mut world, 4000);
+                assert_eq!(fluid_left(&world), 0, "{fluid} at {src}: flowing fluid stayed");
+            }
+        }
     }
 }
