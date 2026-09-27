@@ -236,7 +236,9 @@ pub mod tex {
     /// Muzzle flash: the star seen from the front, and a flame tongue seen from the side.
     pub const MUZZLE_FLASH: u32 = ADV_VENT_TOP + 1;
     pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
-    pub const LAYERS: usize = (MUZZLE_FLASH_SIDE + 1) as usize;
+    /// A bullet hole, multiplied onto the block it is in.
+    pub const BULLET_HOLE: u32 = MUZZLE_FLASH_SIDE + 1;
+    pub const LAYERS: usize = (BULLET_HOLE + 1) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -391,6 +393,7 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::FLAME_PARTICLE
         || l == tex::MUZZLE_FLASH
         || l == tex::MUZZLE_FLASH_SIDE
+        || l == tex::BULLET_HOLE
         || l == tex::SLOT_GLOW
         || l == tex::FURNACE_FRONT_CUT
         || l == tex::BLAST_FRONT_CUT
