@@ -10,9 +10,6 @@ fn table_msg(p: IVec3, grid: &[Slot; 9]) -> Msg {
         p,
         kind: container::TABLE,
         slots: grid.to_vec(),
-        burn: 0.0,
-        burn_total: 0.0,
-        cook: 0.0,
     }
 }
 impl Game {
@@ -100,6 +97,7 @@ impl Game {
                     tick: 0.0,
                     time_tick: 0.0,
                     tables_sent: FastMap::default(),
+                    furnaces_sent: FastMap::default(),
                     address,
                 }));
                 self.resume();
@@ -266,6 +264,7 @@ impl Game {
             }
         }
         self.sync_tables(&peers);
+        self.sync_furnaces();
         // Keep the world loaded (and running) around the other players.
         self.terrain.extra_centers = peers
             .iter()
@@ -312,6 +311,30 @@ impl Game {
                 if *open != Some(p) {
                     self.send_to(*id, &msg);
                 }
+            }
+        }
+    }
+
+    /// Host: sends the furnaces that changed to everyone (the meat on top cooks and turns
+    /// over in front of all players).
+    pub(super) fn sync_furnaces(&mut self) {
+        let now: FastMap<IVec3, Vec<u8>> = self
+            .block_entities
+            .furnaces
+            .iter()
+            .map(|(p, f)| (*p, Self::furnace_msg(*p, f).encode()))
+            .collect();
+        let Some(host) = self.host() else { return };
+        let changed: Vec<IVec3> = now
+            .iter()
+            .filter(|(p, m)| host.furnaces_sent.get(p) != Some(m))
+            .map(|(p, _)| *p)
+            .collect();
+        host.furnaces_sent = now;
+        for p in changed {
+            if let Some(f) = self.block_entities.furnaces.get(&p) {
+                let msg = Self::furnace_msg(p, f);
+                self.broadcast(&msg, None);
             }
         }
     }
@@ -438,8 +461,6 @@ impl Game {
                                 .entry(q)
                                 .or_insert_with(|| Box::new([None; 27]));
                         }
-                    } else if is_furnace(b) {
-                        self.block_entities.furnaces.entry(p).or_default();
                     }
                     Some(p)
                 };
@@ -448,8 +469,14 @@ impl Game {
                     peer.sent_container = None;
                 }
             }
-            Msg::Container { p, kind, slots, .. } => {
-                self.apply_container(p, kind, &slots, None);
+            Msg::FurnaceUse {
+                p,
+                part,
+                take,
+                offered,
+            } => self.remote_use_furnace(id, p, part, take, offered),
+            Msg::Container { p, kind, slots } => {
+                self.apply_container(p, kind, &slots);
                 // What the player has now; no need to send it back.
                 let bytes = self.container_msg(p).map(|m| m.encode());
                 if let Some(peer) = self.peer(id) {
@@ -543,11 +570,17 @@ impl Game {
             id,
             png: png.clone(),
         }));
-        // Items lying on crafting tables.
+        // Items lying on crafting tables, and the furnaces.
         others.extend(
             self.table_grids()
                 .into_iter()
                 .map(|(p, grid)| table_msg(p, &grid)),
+        );
+        others.extend(
+            self.block_entities
+                .furnaces
+                .iter()
+                .map(|(p, f)| Self::furnace_msg(*p, f)),
         );
         let Some(peer) = self.peer(id) else { return };
         peer.conn.send(&welcome);

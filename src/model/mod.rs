@@ -33,6 +33,41 @@ pub fn emit_held(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], f
     }
 }
 
+/// Like `emit_held`, but a flat item is only its front and back (no edge walls): for items
+/// lying flat and seen from above, where the edges hardly show, so a chest full of them
+/// stays cheap.
+pub fn emit_lying(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], fl: u8) {
+    let Icon::Flat(layer) = icon(item) else {
+        emit_held(out, m, item, light, fl);
+        return;
+    };
+    if item == TORCH as ItemId {
+        emit_held(out, m, item, light, fl);
+        return;
+    }
+    let t = 1.0 / 32.0;
+    for (z, normal) in [(t, 4u8), (-t, 5u8)] {
+        let v = [
+            (Vec3::new(-0.5, -0.5, z), [0.0, 1.0]),
+            (Vec3::new(0.5, -0.5, z), [1.0, 1.0]),
+            (Vec3::new(0.5, 0.5, z), [1.0, 0.0]),
+            (Vec3::new(-0.5, 0.5, z), [0.0, 0.0]),
+        ]
+        .map(|(p, uv)| Vertex {
+            pos: m.transform_point3(p).to_array(),
+            uv,
+            layer: layer as f32,
+            light: [light[0], light[1], light[2], normal],
+            tint: [255, 255, 255, fl],
+        });
+        if normal == 5 {
+            out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+        } else {
+            out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
+        }
+    }
+}
+
 /// Wooden torch with a charcoal tip and two crossed, frame-animated flame planes.
 pub fn emit_torch(out: &mut Vec<Vertex>, m: Mat4, light: [u8; 4], fl: u8, seed: u8) {
     emit_box(
@@ -95,6 +130,33 @@ pub fn emit_torch(out: &mut Vec<Vertex>, m: Mat4, light: [u8; 4], fl: u8, seed: 
     }
 }
 
+/// A flame: two crossed planes from the origin up to y = 1 (width 1), frame-animated in the
+/// shader like a torch's flame; `seed` gives it its own phase. Drawn blended (see
+/// `build_scene`), glowing.
+pub fn emit_flame(out: &mut Vec<Vertex>, m: Mat4, fl: u8, seed: u8) {
+    for (a, b) in [
+        (Vec3::new(-0.5, 0.0, -0.5), Vec3::new(0.5, 0.0, 0.5)),
+        (Vec3::new(0.5, 0.0, -0.5), Vec3::new(-0.5, 0.0, 0.5)),
+    ] {
+        let pts = [
+            (a, [0.0, 1.0]),
+            (b, [1.0, 1.0]),
+            (b + Vec3::Y, [1.0, 0.0]),
+            (a + Vec3::Y, [0.0, 0.0]),
+        ];
+        let v = pts.map(|(p, uv)| Vertex {
+            pos: m.transform_point3(p).to_array(),
+            uv,
+            layer: tex::TORCH_FLAME as f32,
+            light: [255, 255, 255, 6],
+            tint: [seed, 255, 255, fl | flags::EMISSIVE],
+        });
+        out.extend_from_slice(&[
+            v[0], v[1], v[2], v[0], v[2], v[3], v[0], v[2], v[1], v[0], v[3], v[2],
+        ]);
+    }
+}
+
 /// Item entity / third-person rendering: `size` is the edge length of a block item.
 pub fn emit_item_flat_or_block(
     out: &mut Vec<Vertex>,
@@ -123,15 +185,31 @@ pub fn emit_item_flat_or_block(
 /// back, one texture pixel apart, plus a side wall along every edge of its opaque pixels,
 /// colored like the pixel it belongs to.
 fn emit_sprite(out: &mut Vec<Vertex>, m: Mat4, layer: u32, light: [u8; 4], fl: u8) {
+    emit_sprite_sides(out, m, layer, layer, light, fl);
+}
+
+/// A flat item model with a different texture on its back (+Z shows `layer`), like a piece of
+/// meat cooked on one side. The edges follow the front's shape.
+pub fn emit_sprite_sides(
+    out: &mut Vec<Vertex>,
+    m: Mat4,
+    layer: u32,
+    back: u32,
+    light: [u8; 4],
+    fl: u8,
+) {
     let t = 1.0 / 32.0;
-    let vert = |p: Vec3, uv: [f32; 2], normal: u8| Vertex {
+    let vert_on = |l: u32, p: Vec3, uv: [f32; 2], normal: u8| Vertex {
         pos: m.transform_point3(p).to_array(),
         uv,
-        layer: layer as f32,
+        layer: l as f32,
         light: [light[0], light[1], light[2], normal],
         tint: [255, 255, 255, fl],
     };
+    let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(layer, p, uv, normal);
     for (z, flip) in [(t, false), (-t, true)] {
+        let l = if flip { back } else { layer };
+        let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(l, p, uv, normal);
         let v = [
             vert(
                 Vec3::new(-0.5, -0.5, z),

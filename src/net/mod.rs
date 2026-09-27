@@ -12,11 +12,12 @@ mod conn;
 
 pub use conn::{local_ip, Conn, Finder, Server, DEFAULT_PORT};
 
+use crate::entity::Grilled;
 use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 12;
+pub const PROTOCOL: u16 = 14;
 
 // ---------------------------------------------------------------------------- data
 
@@ -101,7 +102,6 @@ pub struct PlayerState {
 pub mod container {
     pub const CHEST: u8 = 0;
     pub const TABLE: u8 = 1;
-    pub const FURNACE: u8 = 2;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -154,6 +154,15 @@ pub enum Msg {
     },
     Command(String),
     Save(PlayerState),
+    /// Used a part of a furnace (`block_entity::part`): a left click (`take`) takes out
+    /// what is there, a right click puts in or turns meat over. The player already took
+    /// `offered` from their hand; the host gives back what did not go in, and what came out.
+    FurnaceUse {
+        p: IVec3,
+        part: u8,
+        take: bool,
+        offered: Slot,
+    },
 
     // Host -> player
     Welcome {
@@ -202,14 +211,24 @@ pub enum Msg {
     },
 
     // Both ways
-    /// Contents of a chest, crafting table or furnace (plus the furnace's progress).
+    /// Contents of a chest or crafting table.
     Container {
         p: IVec3,
         kind: u8,
         slots: Vec<Slot>,
+    },
+    /// What everyone sees of a furnace: its fire, the meat on top (by corner) and what was
+    /// put into the front.
+    Furnace {
+        p: IVec3,
         burn: f32,
-        burn_total: f32,
+        /// Seconds spent smelting the item in its mouth.
         cook: f32,
+        input: Slot,
+        fuel: Slot,
+        /// What is smelted (it stays in the mouth).
+        output: Slot,
+        grill: Vec<(u8, Grilled)>,
     },
     Chat {
         text: String,
@@ -485,6 +504,18 @@ impl Msg {
                 w.u8(11);
                 w.u32(*id);
             }
+            Msg::FurnaceUse {
+                p,
+                part,
+                take,
+                offered,
+            } => {
+                w.u8(12);
+                w.ivec3(*p);
+                w.u8(*part);
+                w.bool(*take);
+                w.slot(*offered);
+            }
             Msg::DropItem {
                 pos,
                 vel,
@@ -622,21 +653,37 @@ impl Msg {
                 w.vec3(*from);
                 w.f32(*knock);
             }
-            Msg::Container {
-                p,
-                kind,
-                slots,
-                burn,
-                burn_total,
-                cook,
-            } => {
+            Msg::Container { p, kind, slots } => {
                 w.u8(40);
                 w.ivec3(*p);
                 w.u8(*kind);
                 w.slots(slots);
+            }
+            Msg::Furnace {
+                p,
+                burn,
+                cook,
+                input,
+                fuel,
+                output,
+                grill,
+            } => {
+                w.u8(43);
+                w.ivec3(*p);
                 w.f32(*burn);
-                w.f32(*burn_total);
                 w.f32(*cook);
+                w.slot(*input);
+                w.slot(*fuel);
+                w.slot(*output);
+                w.u32(grill.len() as u32);
+                for (corner, g) in grill {
+                    w.u8(*corner);
+                    w.u16(g.raw);
+                    w.f32(g.cook[0]);
+                    w.f32(g.cook[1]);
+                    w.u8(g.down);
+                    w.f32(g.flip);
+                }
             }
             Msg::Chat { text, color } => {
                 w.u8(41);
@@ -693,6 +740,12 @@ impl Msg {
             9 => Msg::Command(r.str()?),
             10 => Msg::Save(r.state()?),
             11 => Msg::Shear { id: r.u32()? },
+            12 => Msg::FurnaceUse {
+                p: r.ivec3()?,
+                part: r.u8()?,
+                take: r.bool()?,
+                offered: r.slot()?,
+            },
             20 => Msg::Welcome {
                 id: r.u8()?,
                 seed: r.u32()?,
@@ -757,9 +810,24 @@ impl Msg {
                 p: r.ivec3()?,
                 kind: r.u8()?,
                 slots: r.slots()?,
+            },
+            43 => Msg::Furnace {
+                p: r.ivec3()?,
                 burn: r.f32()?,
-                burn_total: r.f32()?,
                 cook: r.f32()?,
+                input: r.slot()?,
+                fuel: r.slot()?,
+                output: r.slot()?,
+                grill: r.list(|r| {
+                    let corner = r.u8()?;
+                    let g = Grilled {
+                        raw: r.u16()?,
+                        cook: [r.f32()?, r.f32()?],
+                        down: r.u8()? & 1,
+                        flip: r.f32()?,
+                    };
+                    (corner < 4).then_some((corner, g))
+                })?,
             },
             41 => Msg::Chat {
                 text: r.str()?,
@@ -868,11 +936,31 @@ mod tests {
         });
         roundtrip(Msg::Container {
             p: IVec3::new(3, 4, 5),
-            kind: container::FURNACE,
+            kind: container::CHEST,
             slots: vec![None, Some(stack), None],
-            burn: 1.0,
-            burn_total: 10.0,
-            cook: 2.0,
+        });
+        roundtrip(Msg::Furnace {
+            p: IVec3::new(-3, 64, 9),
+            burn: 12.5,
+            cook: 4.0,
+            input: None,
+            fuel: Some(Stack::new(257, 7)),
+            output: Some(Stack::new(259, 3)),
+            grill: vec![(
+                2,
+                Grilled {
+                    raw: 268,
+                    cook: [10.5, 3.0],
+                    down: 1,
+                    flip: 0.2,
+                },
+            )],
+        });
+        roundtrip(Msg::FurnaceUse {
+            p: IVec3::new(1, 2, 3),
+            part: 3,
+            take: true,
+            offered: Some(Stack::one(268)),
         });
         roundtrip(Msg::Chat {
             text: "<Albi> szia".into(),

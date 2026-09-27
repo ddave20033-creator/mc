@@ -81,6 +81,14 @@ pub const FACE_V: [[i32; 3]; 6] = [
 ];
 pub const CORNERS: [(i32, i32); 4] = [(-1, -1), (1, -1), (1, 1), (-1, 1)];
 
+/// Height of the top of a chest's base, drawn as its inside (what is in it lies there).
+pub const CHEST_FLOOR: f32 = 10.0 / 16.0;
+/// The hollows behind a furnace's front openings: (bottom, top, depth) of the mouth above
+/// and the firebox below, and their half width. A little bigger than the openings in the
+/// texture, so their edges stay hidden behind the front.
+pub const FURNACE_HOLLOWS: &[(f32, f32, f32)] = &[(0.53, 0.84, 0.5), (0.02, 0.31, 0.45)];
+pub const FURNACE_HOLLOW_HALF: f32 = 0.39;
+
 /// Unit-cube corner (0..1) for a face corner.
 pub fn corner_pos(face: usize, su: i32, sv: i32) -> [f32; 3] {
     let (n, u, v) = (FACE_N[face], FACE_U[face], FACE_V[face]);
@@ -518,6 +526,78 @@ impl Builder {
         self.opaque.extend(base..self.verts.len() as u32);
     }
 
+    /// One face (`face`: its outward direction) of the box `lo`..`hi` in the block at (x, y,
+    /// z), moved to `plane` along its own axis: a wall of a hollow, facing into it. `shade`
+    /// darkens it (like the corner shadows: 255 is none). The texture is squeezed toward its
+    /// middle by `uv_scale` (1: the block's own spot of it).
+    #[allow(clippy::too_many_arguments)]
+    fn plane_face(
+        &mut self,
+        (x, y, z): (i32, i32, i32),
+        face: usize,
+        lo: [f32; 3],
+        hi: [f32; 3],
+        plane: f32,
+        layer: u32,
+        (s, bl): (u32, u32),
+        shade: u8,
+        uv_scale: f32,
+    ) {
+        let axis = FACE_N[face].iter().position(|&c| c != 0).unwrap();
+        let base = self.verts.len() as u32;
+        for &(su, sv) in &CORNERS {
+            let c = corner_pos(face, su, sv);
+            let mut p: [f32; 3] = std::array::from_fn(|k| lo[k] + (hi[k] - lo[k]) * c[k]);
+            p[axis] = plane;
+            self.push(Vertex {
+                pos: [
+                    (x + self.ox) as f32 + p[0],
+                    y as f32 + p[1],
+                    (z + self.oz) as f32 + p[2],
+                ],
+                uv: box_uv(face, p).map(|t| 0.5 + (t - 0.5) * uv_scale),
+                layer: layer as f32,
+                light: [shade, (s * 17) as u8, (bl * 17) as u8, face as u8],
+                tint: [255, 255, 255, 0],
+            });
+        }
+        self.opaque
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    /// The hollow of the box `lo`..`hi`: its floor, ceiling (if `ceiling`) and walls facing
+    /// inward, except the sides in `open` (outward directions: the way into it). `uv_scale`
+    /// as in `plane_face`.
+    #[allow(clippy::too_many_arguments)]
+    fn hollow(
+        &mut self,
+        at: (i32, i32, i32),
+        lo: [f32; 3],
+        hi: [f32; 3],
+        open: &[[i32; 3]],
+        ceiling: bool,
+        layer: u32,
+        light: (u32, u32),
+        uv_scale: f32,
+    ) {
+        for n in &FACE_N {
+            // The wall on side `n` of the hollow faces the other way, into it.
+            if open.contains(n) || (n[1] > 0 && !ceiling) {
+                continue;
+            }
+            let inward = FACE_N.iter().position(|m| *m == n.map(|c| -c)).unwrap();
+            let axis = n.iter().position(|&c| c != 0).unwrap();
+            let plane = if n[axis] > 0 { hi[axis] } else { lo[axis] };
+            // Floor lighter than the walls, the ceiling darkest: it looks deep.
+            let shade = match n[1] {
+                -1 => 235,
+                1 => 150,
+                _ => 195,
+            };
+            self.plane_face(at, inward, lo, hi, plane, layer, light, shade, uv_scale);
+        }
+    }
+
     /// Chest base; the lid is drawn separately every frame so it can open. A double chest
     /// half reaches the other half, with no wall between them.
     fn chest(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
@@ -567,6 +647,51 @@ impl Builder {
             }
             self.opaque
                 .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+
+    /// Furnace: a cube whose front has two openings (the mouth above, for things to smelt,
+    /// and the firebox below), each with a hollow behind it.
+    fn furnace(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+        let f = facing(b).unwrap_or(0);
+        let front = front_face(f);
+        for (face, n) in FACE_N.iter().enumerate() {
+            if is_opaque(r.get(x + n[0], y + n[1], z + n[2])) {
+                continue;
+            }
+            let layer = if face == front {
+                tex::FURNACE_FRONT_CUT
+            } else {
+                face_texture(b, face)
+            };
+            let from = self.opaque.len();
+            self.cube_face(r, x, y, z, face, layer, [255; 3], 0, face_rotated(b, face));
+            let quad = self.opaque.split_off(from);
+            self.dirs[face].extend(quad);
+        }
+        let d = FACE_N[front];
+        if is_opaque(r.get(x + d[0], y + d[1], z + d[2])) {
+            return;
+        }
+        // Lit from the front, and warmly by the fire while it burns.
+        let (ls, lb) = r.light(x + d[0], y + d[1], z + d[2]);
+        let lit = (FURNACE_LIT..FURNACE_LIT + 4).contains(&b);
+        let light = (ls, if lit { lb.max(13) } else { lb });
+        let across = if d[0] != 0 { 2 } else { 0 };
+        let along = 2 - across;
+        for &(y0, y1, depth) in FURNACE_HOLLOWS {
+            let mut lo = [0.0; 3];
+            let mut hi = [0.0; 3];
+            lo[across] = 0.5 - FURNACE_HOLLOW_HALF;
+            hi[across] = 0.5 + FURNACE_HOLLOW_HALF;
+            (lo[1], hi[1]) = (y0, y1);
+            if d[along] > 0 {
+                (lo[along], hi[along]) = (1.0 - depth, 1.0);
+            } else {
+                (lo[along], hi[along]) = (0.0, depth);
+            }
+            let inside = tex::FURNACE_INSIDE;
+            self.hollow((x, y, z), lo, hi, &[d], true, inside, light, 1.0);
         }
     }
 
@@ -997,6 +1122,10 @@ pub fn mesh_chunk(
                 }
                 if is_chest(b) {
                     m.chest(&r, x, y, z, b);
+                    continue;
+                }
+                if is_furnace(b) {
+                    m.furnace(&r, x, y, z, b);
                     continue;
                 }
                 if is_door(b) {

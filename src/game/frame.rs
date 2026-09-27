@@ -2,7 +2,10 @@
 //! the geometry built on the CPU (entities, particles, the hand), the UI, and rendering.
 
 use super::*;
-use crate::entity::block_entity::{build_chest_lid, build_door, build_table_items};
+use crate::entity::block_entity::{
+    build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow,
+    build_table_items, build_table_made, chest_side,
+};
 use crate::render::MAX_HELD_LIGHTS;
 use crate::world::textures::tex;
 
@@ -169,7 +172,12 @@ impl Game {
         let action = self.draw_ui(w, h, dt, view.in_world, medium);
         self.apply(action);
 
-        let outline = if self.screen == Screen::Playing {
+        // Not while the camera is still gliding back from a chest or table, nor where a
+        // furnace part is marked with a frame instead.
+        let outline = if self.screen == Screen::Playing
+            && !self.in_station()
+            && self.furnace_frame().is_none()
+        {
             self.target.map(|(p, _)| {
                 let w = &self.terrain.world;
                 let (lo, hi) = block_boxes(w.geti(p), |d| w.geti(p + d)).bounds();
@@ -296,6 +304,7 @@ impl Game {
             _ => {}
         }
         self.particles.update(dt, &self.terrain.world);
+        self.update_craft_fx(dt);
         let mining = self.mining.is_some();
         self.hand.update(
             dt,
@@ -343,8 +352,6 @@ impl Game {
         } else {
             1.0
         };
-        let right = fwd.cross(Vec3::Y).normalize();
-        let up = right.cross(fwd);
         // Zoom key held: a narrow view, like OptiFine's zoom.
         let zooming = self.screen == Screen::Playing && self.bind_down(Bind::Zoom);
         // Aiming a gun narrows the view too (a lot through a scope).
@@ -368,8 +375,17 @@ impl Game {
             self.fov_current
         } else {
             self.settings.fov
-        }
-        .to_radians();
+        };
+        // An open chest or crafting table: the camera glides over it (and back).
+        let (cam, fwd, fov) = if in_world {
+            self.station_camera(cam, fwd, fov, w / h, dt)
+        } else {
+            (cam, fwd, fov)
+        };
+        let station = self.in_station();
+        let fov = fov.to_radians();
+        let right = fwd.cross(Vec3::Y).normalize();
+        let up = right.cross(fwd);
 
         // Camera-space effects: hurt shake and view bobbing (applied to world and hand alike).
         let mut cam_fx = Mat4::IDENTITY;
@@ -385,7 +401,12 @@ impl Game {
                 * Mat4::from_rotation_y((t * 0.9).sin() * 3f32.to_radians() * k)
                 * Mat4::from_rotation_x((t * 1.7).cos() * 2f32.to_radians() * k);
         }
-        if in_world && !third_person && self.settings.view_bobbing && !self.player.flying {
+        if in_world
+            && !third_person
+            && !station
+            && self.settings.view_bobbing
+            && !self.player.flying
+        {
             cam_fx *= self.hand.bob_matrix();
         }
         let view = cam_fx * Mat4::look_to_rh(cam, fwd, Vec3::Y);
@@ -582,7 +603,8 @@ impl Game {
         let fp_body = in_world
             && !third_person
             && self.settings.first_person_body
-            && self.sleep.is_none();
+            && self.sleep.is_none()
+            && !self.in_station();
         let torch = self.held() == TORCH as ItemId;
         // Where the held torch burns (for its flame particles), from whichever model shows it.
         let mut held_torch_tip = None;
@@ -605,6 +627,7 @@ impl Game {
             && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol)))
             && self.screen != Screen::Dead
             && self.sleep.is_none()
+            && !self.in_station()
         {
             let f = look_dir(self.yaw, self.pitch);
             let r = f.cross(Vec3::Y).normalize();
@@ -802,9 +825,27 @@ impl Game {
                 let partner = chest_partner_offset(b);
                 let lid = |q: IVec3| self.chest_open.get(&q).copied().unwrap_or(0.0);
                 let open = lid(*p).max(partner.map_or(0.0, |d| lid(*p + d)));
-                let side = partner.map_or(0, |d| d.dot(chest_right(facing)));
+                let side = chest_side(b, facing);
                 let (sky, blk) = light(*p);
                 build_chest_lid(target, *p, facing, side, open, sky, blk);
+                if open > 0.0 {
+                    // What is inside shows while it is open (lifted: under the mouse).
+                    let lift = match (self.station_hover, &self.station) {
+                        (Some(gui::SlotRef::Chest(i)), Some(st)) => {
+                            let (a, b) = self.chest_halves(st.pos);
+                            if *p == a && i < 27 {
+                                Some(i)
+                            } else if Some(*p) == b && i >= 27 {
+                                Some(i - 27)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    let slots = &self.block_entities.chests[p][..];
+                    build_chest_items(target, *p, facing, side, slots, lift, sky, blk);
+                }
             }
         }
         // Doors swing open and shut over a fifth of a second.
@@ -826,18 +867,52 @@ impl Game {
             build_door(target, *p, b, *s, sky, blk);
         }
         self.door_swing.retain(|p, _| is_door(world.geti(*p)));
+        // Meat on the furnaces, and what was put into their fronts.
+        for (p, f) in self.block_entities.furnaces.iter().filter(|(p, _)| near(p)) {
+            let b = world.geti(*p);
+            if let Some(facing) = facing(b).filter(|_| is_furnace(b)) {
+                let (sky, blk) = light(*p);
+                // Inside it, the light in front of it (and its own fire's).
+                let front = *p + facing_dir(facing);
+                let (fs, fb) = world.light_estimate(front.as_vec3() + Vec3::splat(0.5));
+                let inside = crate::util::vertex_light(fs, fb);
+                let planes = !self.torch_particles;
+                build_furnace_items(target, *p, facing, f, self.time, sky, blk, inside, planes);
+            }
+        }
         let open_table = match self.screen {
             Screen::Container(Container::Crafting(p)) => Some(p),
             _ => None,
         };
         for (p, grid) in self.block_entities.tables.iter().filter(|(p, _)| near(p)) {
-            let grid = if open_table == Some(*p) {
-                &self.craft
-            } else {
-                grid
+            if open_table != Some(*p) {
+                let (sky, blk) = light(*p);
+                build_table_items(target, *p, self.table_side(*p), grid, None, sky, blk);
+            }
+        }
+        if let Some(p) = open_table {
+            // The open table: its grid (lifted under the mouse), and what was crafted.
+            let lift = match self.station_hover {
+                Some(gui::SlotRef::Craft(i)) => Some(i),
+                _ => None,
             };
-            let (sky, blk) = light(*p);
-            build_table_items(target, *p, grid, sky, blk);
+            let (sky, blk) = light(p);
+            let side = self.table_side(p);
+            build_table_items(target, p, side, &self.craft, lift, sky, blk);
+            if let Some(made) = &self.craft_out {
+                let (t, used) = self.craft_fx.unwrap_or((10.0, [None; 9]));
+                let hovered = self.station_hover == Some(gui::SlotRef::CraftOut);
+                build_table_made(target, p, side, made, &used, t, hovered, sky, blk);
+            }
+        }
+        // The highlighted slot in an open chest or on a table, or spot of a furnace.
+        let glow = match self.screen {
+            Screen::Container(_) if self.in_station() => self.station_frame,
+            Screen::Playing if !self.in_station() => self.furnace_frame(),
+            _ => None,
+        };
+        if let Some(corners) = glow {
+            build_glow(&mut scene.overlay, corners);
         }
         if !third_person {
             scene.particles.extend_from_slice(&mob_verts);

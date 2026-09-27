@@ -7,5 +7,5 @@ pub mod mob;
 pub mod player;
 pub mod survival;
 
-pub use block_entity::{BlockEntities, Furnace, SMELT_TIME};
+pub use block_entity::{BlockEntities, Furnace, Grilled};
 pub use dropped::{FallingBlock, ItemEntity};

@@ -81,6 +81,8 @@ pub(super) struct Host {
     time_tick: f32,
     /// Crafting table grids as the players last got them (items lie on the tables).
     tables_sent: FastMap<IVec3, [Slot; 9]>,
+    /// Furnaces as the players last got them (encoded `Msg::Furnace`).
+    furnaces_sent: FastMap<IVec3, Vec<u8>>,
     /// "192.168.1.20:25565", shown in the pause menu.
     pub address: String,
 }
@@ -505,19 +507,10 @@ impl Game {
     fn container_msg(&self, p: IVec3) -> Option<Msg> {
         let b = self.terrain.world.geti(p);
         let table_open = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
-        let (kind, slots, burn, burn_total, cook) = if is_chest(b) {
+        let (kind, slots) = if is_chest(b) {
             // A double chest sends both halves (54 slots).
             self.block_entities.chests.get(&p)?;
-            (container::CHEST, self.chest_slots(p), 0.0, 0.0, 0.0)
-        } else if is_furnace(b) {
-            let f = self.block_entities.furnaces.get(&p)?;
-            (
-                container::FURNACE,
-                vec![f.input, f.fuel, f.output],
-                f.burn,
-                f.burn_total,
-                f.cook,
-            )
+            (container::CHEST, self.chest_slots(p))
         } else if b == CRAFTING_TABLE {
             let grid = if table_open && self.is_client() {
                 self.craft
@@ -528,29 +521,15 @@ impl Game {
                     .copied()
                     .unwrap_or([None; 9])
             };
-            (container::TABLE, grid.to_vec(), 0.0, 0.0, 0.0)
+            (container::TABLE, grid.to_vec())
         } else {
             return None;
         };
-        Some(Msg::Container {
-            p,
-            kind,
-            slots,
-            burn,
-            burn_total,
-            cook,
-        })
+        Some(Msg::Container { p, kind, slots })
     }
 
-    /// Stores received contents. `progress`: also take the furnace's burn/cook times (from the
-    /// host; a player's copy of them is only for display).
-    fn apply_container(
-        &mut self,
-        p: IVec3,
-        kind: u8,
-        slots: &[Slot],
-        progress: Option<(f32, f32, f32)>,
-    ) {
+    /// Stores received contents.
+    fn apply_container(&mut self, p: IVec3, kind: u8, slots: &[Slot]) {
         let get = |i: usize| slots.get(i).copied().flatten();
         match kind {
             container::CHEST => {
@@ -561,15 +540,6 @@ impl Game {
                 };
                 let all: Vec<Slot> = (0..n).map(get).collect();
                 self.set_chest_slots(p, &all);
-            }
-            container::FURNACE => {
-                let f = self.block_entities.furnaces.entry(p).or_default();
-                f.input = get(0);
-                f.fuel = get(1);
-                f.output = get(2);
-                if let Some((burn, total, cook)) = progress {
-                    (f.burn, f.burn_total, f.cook) = (burn, total, cook);
-                }
             }
             container::TABLE => {
                 let grid: [Slot; 9] = std::array::from_fn(get);
@@ -584,6 +554,46 @@ impl Game {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A furnace as everyone sees it.
+    pub(super) fn furnace_msg(p: IVec3, f: &crate::entity::Furnace) -> Msg {
+        Msg::Furnace {
+            p,
+            burn: f.burn,
+            cook: f.cook,
+            input: f.input,
+            fuel: f.fuel,
+            output: f.output,
+            grill: f
+                .grill
+                .iter()
+                .enumerate()
+                .filter_map(|(i, g)| g.map(|g| (i as u8, g)))
+                .collect(),
+        }
+    }
+
+    /// LAN player: the host's furnace (only for showing it; the host runs it).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_furnace(
+        &mut self,
+        p: IVec3,
+        burn: f32,
+        cook: f32,
+        [input, fuel, output]: [Slot; 3],
+        grill: Vec<(u8, crate::entity::Grilled)>,
+    ) {
+        let f = self.block_entities.furnaces.entry(p).or_default();
+        f.burn = burn;
+        f.cook = cook;
+        f.input = input;
+        f.fuel = fuel;
+        f.output = output;
+        f.grill = [None; 4];
+        for (i, g) in grill {
+            f.grill[i as usize & 3] = Some(g);
         }
     }
 

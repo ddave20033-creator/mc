@@ -117,11 +117,36 @@ impl Particles {
         });
     }
 
+    /// A lick of fire in a furnace: a bigger flame than a torch's, rising a little.
+    pub fn fire(&mut self, pos: Vec3) {
+        let life = 0.35 + self.rand() * 0.35;
+        let jitter = Vec3::new(self.rand() - 0.5, 0.0, self.rand() - 0.5) * 0.04;
+        let size = 0.08 + self.rand() * 0.06;
+        let rise = 0.12 + self.rand() * 0.12;
+        self.list.push(Particle {
+            kind: Kind::Flame,
+            pos: pos + jitter,
+            vel: Vec3::Y * rise,
+            life,
+            max_life: life,
+            layer: tex::FLAME_PARTICLE,
+            uv0: [0.0, 0.0],
+            size,
+            tint: [255; 3],
+            light: [15, 15],
+        });
+    }
+
     /// Minecraft's smoke particle: dark gray, rising and drifting, sprites from large to small.
     pub fn smoke(&mut self, pos: Vec3, sky: u8, blk: u8) {
+        let gray = (40.0 + self.rand() * 50.0) as u8;
+        self.smoke_shaded(pos, gray, sky, blk);
+    }
+
+    /// Smoke of a given gray: light steam off meat on the fire, dark when it burns.
+    pub fn smoke_shaded(&mut self, pos: Vec3, gray: u8, sky: u8, blk: u8) {
         let life = 0.7 + self.rand() * 0.8;
         let drift = Vec3::new(self.rand() - 0.5, 0.0, self.rand() - 0.5) * 0.12;
-        let gray = (40.0 + self.rand() * 50.0) as u8;
         let size = 0.05 + self.rand() * 0.03;
         let vel = drift + Vec3::Y * (0.35 + self.rand() * 0.2);
         self.list.push(Particle {

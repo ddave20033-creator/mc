@@ -178,23 +178,22 @@ impl Game {
             Msg::Give(stack) => self.give(stack),
             Msg::Hurt { dmg, from, knock } => self.hit_by_player(dmg, from, knock),
             Msg::BreakFx { p, block } => self.break_fx(p, block, true, None),
-            Msg::Container {
+            Msg::Furnace {
                 p,
-                kind,
-                slots,
                 burn,
-                burn_total,
                 cook,
-            } => {
+                input,
+                fuel,
+                output,
+                grill,
+            } => self.apply_furnace(p, burn, cook, [input, fuel, output], grill),
+            Msg::Container { p, kind, slots } => {
                 let msg = Msg::Container {
                     p,
                     kind,
                     slots: slots.clone(),
-                    burn,
-                    burn_total,
-                    cook,
                 };
-                self.apply_container(p, kind, &slots, Some((burn, burn_total, cook)));
+                self.apply_container(p, kind, &slots);
                 let open_here = matches!(self.screen, Screen::Container(c) if Self::container_pos(c) == Some(p));
                 if let (true, Some(Net::Client(c))) = (open_here, &mut self.net) {
                     c.container_known = Some(msg.encode());

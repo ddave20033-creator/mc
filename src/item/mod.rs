@@ -42,15 +42,21 @@ pub const COOKED_MUTTON: ItemId = 275;
 /// Shear sheep, and mine leaves, grass and dead bushes so they drop themselves.
 pub const SHEARS: ItemId = 276;
 pub const SHEEP_SPAWN_EGG: ItemId = 277;
+/// Meat grilled on one side only (on top of a furnace): half as filling as cooked.
+pub const HALF_COOKED_PORKCHOP: ItemId = 278;
+pub const HALF_COOKED_MUTTON: ItemId = 279;
+/// Meat left on the fire too long.
+pub const BURNT_PORKCHOP: ItemId = 280;
+pub const BURNT_MUTTON: ItemId = 281;
 /// Pistol ammunition: one is used up per shot.
-pub const BULLET: ItemId = 278;
+pub const BULLET: ItemId = 282;
 /// The five pistol parts, in the order they go together at the gun station: frame (with the
 /// grip and trigger), barrel, recoil spring, slide and magazine.
-pub const PISTOL_FRAME: ItemId = 279;
-pub const PISTOL_BARREL: ItemId = 280;
-pub const PISTOL_SPRING: ItemId = 281;
-pub const PISTOL_SLIDE: ItemId = 282;
-pub const PISTOL_MAGAZINE: ItemId = 283;
+pub const PISTOL_FRAME: ItemId = 283;
+pub const PISTOL_BARREL: ItemId = 284;
+pub const PISTOL_SPRING: ItemId = 285;
+pub const PISTOL_SLIDE: ItemId = 286;
+pub const PISTOL_MAGAZINE: ItemId = 287;
 pub const PISTOL_PARTS: [ItemId; 5] = [
     PISTOL_FRAME,
     PISTOL_BARREL,
@@ -60,15 +66,15 @@ pub const PISTOL_PARTS: [ItemId; 5] = [
 ];
 /// Assembled at the gun station; shoots bullets with the right mouse button. Its `damage` is
 /// how dirty it is (one per shot); cleaned at the gun station.
-pub const PISTOL: ItemId = 284;
+pub const PISTOL: ItemId = 288;
 /// Shots until a pistol is too dirty to fire.
 pub const PISTOL_DIRT_MAX: u16 = 40;
 /// Pistol attachments, fitted at the gun station: a scope (zooms in far when aiming), a
 /// silencer (no muzzle flash), an extended magazine and a laser sight (steadier from the hip).
-pub const SCOPE: ItemId = 285;
-pub const SILENCER: ItemId = 286;
-pub const EXTENDED_MAGAZINE: ItemId = 287;
-pub const LASER_SIGHT: ItemId = 288;
+pub const SCOPE: ItemId = 289;
+pub const SILENCER: ItemId = 290;
+pub const EXTENDED_MAGAZINE: ItemId = 291;
+pub const LASER_SIGHT: ItemId = 292;
 
 /// A pistol's attachments as bits of `gun_mods`, with their items.
 pub mod gun_mod {
@@ -264,10 +270,26 @@ pub fn consumable(id: ItemId) -> Option<crate::entity::survival::Consumable> {
         COOKED_PORKCHOP => food(8.0, 12.8),
         MUTTON => food(2.0, 1.2),
         COOKED_MUTTON => food(6.0, 9.6),
+        HALF_COOKED_PORKCHOP => food(4.0, 6.4),
+        HALF_COOKED_MUTTON => food(3.0, 4.8),
+        BURNT_PORKCHOP => food(2.0, 1.0),
+        BURNT_MUTTON => food(1.0, 0.6),
         WATER_BOTTLE => drink(6.0, true),
         PURIFIED_WATER => drink(10.0, false),
         _ => return None,
     })
+}
+
+/// Meat that is grilled on top of a furnace: (raw, one side cooked, cooked, burnt).
+pub fn meat(id: ItemId) -> Option<[ItemId; 4]> {
+    const PORK: [ItemId; 4] = [
+        PORKCHOP,
+        HALF_COOKED_PORKCHOP,
+        COOKED_PORKCHOP,
+        BURNT_PORKCHOP,
+    ];
+    const LAMB: [ItemId; 4] = [MUTTON, HALF_COOKED_MUTTON, COOKED_MUTTON, BURNT_MUTTON];
+    [PORK, LAMB].into_iter().find(|m| m.contains(&id))
 }
 
 /// Damage dealt when hitting a mob with this item (Minecraft 1.8 values; 1 = bare hand).
@@ -462,6 +484,34 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Cooked Mutton",
         "Sült ürühús",
         tex::COOKED_MUTTON,
+    ),
+    (
+        HALF_COOKED_PORKCHOP,
+        "half_cooked_porkchop",
+        "Half-Cooked Porkchop",
+        "Félig sült disznóhús",
+        tex::HALF_COOKED_PORKCHOP,
+    ),
+    (
+        HALF_COOKED_MUTTON,
+        "half_cooked_mutton",
+        "Half-Cooked Mutton",
+        "Félig sült ürühús",
+        tex::HALF_COOKED_MUTTON,
+    ),
+    (
+        BURNT_PORKCHOP,
+        "burnt_porkchop",
+        "Burnt Porkchop",
+        "Szenes disznóhús",
+        tex::BURNT_PORKCHOP,
+    ),
+    (
+        BURNT_MUTTON,
+        "burnt_mutton",
+        "Burnt Mutton",
+        "Szenes ürühús",
+        tex::BURNT_MUTTON,
     ),
     (SHEARS, "shears", "Shears", "Olló", tex::SHEARS),
     (
