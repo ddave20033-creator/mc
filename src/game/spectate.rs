@@ -138,6 +138,9 @@ impl Game {
         self.air = MAX_AIR;
         self.hurt_time = 0.0;
         self.fall_peak = self.player.pos.y;
+        // Bullets, cases and grenades in the world go on (the host's blow up here).
+        self.update_guns(dt, false);
+        self.update_grenades(dt);
 
         if let Some(id) = self.spectating {
             if control && self.sneaking() {

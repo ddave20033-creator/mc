@@ -335,7 +335,8 @@ impl Game {
     /// Aiming, reloading, the bolt or pump, recoil coming back, bullets, spent cases and the
     /// laser, every frame.
     pub(super) fn update_guns(&mut self, dt: f32, control: bool) {
-        let held = self.held_gun();
+        // A spectator's hands are empty; the shots, cases and holes around still go on.
+        let held = self.held_gun().filter(|_| !self.spectator());
         let mods = held.map_or(0, |(s, _)| gun_mods(&s));
         let reload_pressed = std::mem::take(&mut self.guns.reload_pressed);
         if held.is_none() {
