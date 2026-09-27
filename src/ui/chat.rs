@@ -39,14 +39,15 @@ pub struct Chat {
 /// Every chat command and its full syntax, shown while typing it and listed by /help.
 pub const COMMANDS: &[(&str, &str)] = &[
     ("effect", "/effect give <poison|nausea> [seconds]  |  /effect clear"),
-    ("gamemode", "/gamemode <survival|creative>  (/gm s, /gm c)"),
+    ("gamemode", "/gamemode <survival|creative|spectator>  (/gm s, /gm c, /gm sp)"),
     ("give", "/give <item> [count]"),
-    ("gm", "/gm <survival|creative>"),
+    ("gm", "/gm <survival|creative|spectator>"),
     ("help", "/help"),
     ("kill", "/kill"),
     ("save", "/save"),
     ("seed", "/seed"),
     ("spawn", "/spawn"),
+    ("spectate", "/spectate [player]   (spectator mode; no name: stop watching)"),
     ("summon", "/summon <pig|sheep> [x y z]   (~ = your current position)"),
     (
         "time",
@@ -93,7 +94,7 @@ fn suggest(input: &str) -> Option<Suggest> {
         ["time"] => (vec!["add", "query", "set"], None),
         ["time", "set"] => (TIMES.to_vec(), Some("<time>")),
         ["time", "add"] => (vec![], Some("<ticks>")),
-        ["gamemode" | "gm"] => (vec!["creative", "survival"], None),
+        ["gamemode" | "gm"] => (vec!["creative", "spectator", "survival"], None),
         ["summon"] => (vec!["pig", "sheep"], None),
         ["summon", _] => (vec!["~"], Some("[x]")),
         ["summon", _, _] => (vec!["~"], Some("[y]")),

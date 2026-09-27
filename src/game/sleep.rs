@@ -115,7 +115,8 @@ impl Game {
             return;
         }
         let (remotes, remotes_asleep) = self.remotes_asleep();
-        let here = self.player.spawned && self.screen != Screen::Dead;
+        // A spectator does not need to sleep for the night to pass.
+        let here = self.player.spawned && self.screen != Screen::Dead && !self.spectator();
         let players = remotes + here as usize;
         let asleep = remotes_asleep + (here && self.sleep.is_some()) as usize;
         if players == 0 || asleep < players || !is_night(self.time_of_day) {

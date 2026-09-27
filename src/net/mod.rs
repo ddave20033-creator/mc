@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 18;
+pub const PROTOCOL: u16 = 19;
 
 // ---------------------------------------------------------------------------- data
 
@@ -53,6 +53,8 @@ pub struct Pose {
     pub book: u8,
     /// The spread it is open at (its left page / 2), and `book::HUNGARIAN`.
     pub book_page: u8,
+    /// In spectator mode: flies through blocks, and only other spectators see them.
+    pub spectator: bool,
 }
 
 /// `Pose::book`: the book is held open; the last page turn went back; the number of page
@@ -123,12 +125,20 @@ pub struct PlayerState {
     pub pitch: f32,
     pub health: f32,
     pub needs: [f32; 7],
-    pub creative: bool,
+    /// Game mode (`mode`): survival, creative or spectator.
+    pub mode: u8,
     pub flying: bool,
     pub slot: u8,
     pub inventory: Vec<Slot>,
     /// The head of the bed the player last used (where they come back to life).
     pub bed: Option<IVec3>,
+}
+
+/// `PlayerState::mode` (a saved state's old creative flag reads as 0 or 1).
+pub mod mode {
+    pub const SURVIVAL: u8 = 0;
+    pub const CREATIVE: u8 = 1;
+    pub const SPECTATOR: u8 = 2;
 }
 
 /// Block entity kinds in `Msg::Container`.
@@ -369,6 +379,7 @@ impl W {
         self.u8(p.gun_mods);
         self.u8(p.book);
         self.u8(p.book_page);
+        self.bool(p.spectator);
     }
     fn state(&mut self, s: &PlayerState) {
         self.vec3(s.pos);
@@ -378,7 +389,7 @@ impl W {
         for v in s.needs {
             self.f32(v);
         }
-        self.bool(s.creative);
+        self.u8(s.mode);
         self.bool(s.flying);
         self.u8(s.slot);
         self.slots(&s.inventory);
@@ -485,6 +496,7 @@ impl R<'_> {
             gun_mods: self.u8()?,
             book: self.u8()?,
             book_page: self.u8()?,
+            spectator: self.bool()?,
         })
     }
     fn state(&mut self) -> Option<PlayerState> {
@@ -502,7 +514,7 @@ impl R<'_> {
                 self.f32()?,
                 self.f32()?,
             ],
-            creative: self.bool()?,
+            mode: self.u8()?,
             flying: self.bool()?,
             slot: self.u8()?,
             inventory: self.slots()?,
@@ -960,7 +972,7 @@ mod tests {
             pitch: -0.2,
             health: 17.0,
             needs: [20.0, 5.0, 0.0, 18.0, 1.0, 0.0, 3.0],
-            creative: false,
+            mode: mode::SPECTATOR,
             flying: false,
             slot: 3,
             inventory: vec![Some(stack), None, Some(Stack::new(3, 64))],
@@ -979,6 +991,7 @@ mod tests {
             gun_mods: 0b1001,
             book: book::OPEN | 5,
             book_page: book::HUNGARIAN | 7,
+            spectator: true,
             ..Default::default()
         }));
         roundtrip(Msg::Shot {

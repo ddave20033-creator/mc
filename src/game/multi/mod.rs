@@ -52,14 +52,20 @@ pub(super) struct RemotePlayer {
 }
 
 impl RemotePlayer {
-    /// Alive according to the latest pose received.
-    fn alive(&self) -> bool {
-        self.has_pose && self.target.flags & pose_flags::DEAD == 0
+    /// Alive and in the world according to the latest pose received (a spectator is not:
+    /// mobs, items, beds and weapons leave them alone).
+    pub(in crate::game) fn alive(&self) -> bool {
+        self.has_pose && self.target.flags & pose_flags::DEAD == 0 && !self.target.spectator
     }
 
-    /// Drawn: alive in the smoothed pose that is shown.
-    fn shown(&self) -> bool {
-        self.has_pose && self.pose.flags & pose_flags::DEAD == 0
+    /// Dead for now (not a spectator): they come back.
+    pub(in crate::game) fn dead(&self) -> bool {
+        self.has_pose && self.target.flags & pose_flags::DEAD != 0 && !self.target.spectator
+    }
+
+    /// Drawn: alive in the smoothed pose that is shown (spectators are invisible).
+    pub(in crate::game) fn shown(&self) -> bool {
+        self.has_pose && self.pose.flags & pose_flags::DEAD == 0 && !self.pose.spectator
     }
 }
 
@@ -178,7 +184,7 @@ impl Game {
     /// Feet of all living players: this one and the others on the LAN.
     pub(super) fn player_positions(&self) -> Vec<Vec3> {
         let mut v = Vec::new();
-        if self.player.spawned && self.screen != Screen::Dead {
+        if self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
             v.push(self.player.pos);
         }
         v.extend(
@@ -265,6 +271,7 @@ impl Game {
             gun_mods: self.held_gun_mods(),
             book: self.book_pose().0,
             book_page: self.book_pose().1,
+            spectator: self.spectator(),
         }
     }
 
@@ -280,6 +287,7 @@ impl Game {
         match self.screen {
             Screen::Chat => status::TYPING,
             Screen::Container(_) => status::INVENTORY,
+            Screen::Spectate => status::MENU,
             Screen::Paused
             | Screen::Options { in_game: true }
             | Screen::ResourcePacks { in_game: true }
@@ -393,6 +401,7 @@ impl Game {
             p.status = t.status;
             p.gun_mods = t.gun_mods;
             p.book = t.book;
+            p.spectator = t.spectator;
         }
     }
 
@@ -479,17 +488,19 @@ impl Game {
     }
 }
 
+/// `inside`: the player a spectator watches through their eyes (not drawn).
 pub(super) fn build_remote_players(
     remotes: &mut [RemotePlayer],
     world: &World,
     time: f32,
     out: &mut Vec<Vertex>,
     dt: f32,
+    inside: Option<u8>,
 ) {
     {
         for r in remotes.iter_mut() {
             let p = r.pose;
-            if !r.shown() {
+            if !r.shown() || Some(r.id) == inside {
                 continue;
             }
             // In a bed: the pose's position is on top of the head half, and the body faces

@@ -57,6 +57,7 @@ impl Game {
                         name: String::new(),
                         seed: 12345,
                         creative: true,
+                        spectator: false,
                         cheats: true,
                         last_played: 0,
                         time_of_day: 0.25,
