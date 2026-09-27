@@ -4,7 +4,8 @@
 
 use crate::item::inventory::{add_to, take};
 use crate::item::{
-    fuel_time, icon, meat, smelt, Icon, ItemId, Slot, Stack, BUCKET, COAL, LAVA_BUCKET,
+    fuel_time, icon, meat, meat_with_sides, smelt, Icon, ItemId, Slot, Stack, BUCKET, COAL,
+    LAVA_BUCKET, MEAT_SIDES,
 };
 use crate::util::vertex_light;
 use crate::world::mesh::{box_uv, corner_pos, flags, Vertex, CORNERS, FACE_N, FURNACE_HOLLOWS};
@@ -51,48 +52,40 @@ pub fn doneness(t: f32) -> Doneness {
 }
 
 impl Grilled {
-    /// Meat put on the fire: a half-cooked piece goes on with its raw side down.
+    /// Meat put on the fire, its sides as the item says (see `item::MEAT_SIDES`), with the
+    /// less done side down. Fully burnt meat does not go back on.
     pub fn new(item: ItemId) -> Option<Self> {
         let m = meat(item)?;
-        let cook = match m.iter().position(|&i| i == item)? {
-            0 => [0.0, 0.0],
-            1 => [GRILL_TIME, 0.0],
-            2 => [GRILL_TIME, GRILL_TIME],
-            _ => return None,
-        };
+        let sides = MEAT_SIDES[m.iter().position(|&i| i == item)?];
+        if sides == [2, 2] {
+            return None;
+        }
+        let time = |d: u8| [0.0, GRILL_TIME, BURN_TIME][d as usize];
         Some(Self {
             raw: m[0],
-            cook,
+            cook: sides.map(time),
             down: 1,
             flip: 0.0,
         })
     }
 
-    /// The item it is when taken off: burnt if either side burnt, cooked if both sides are
-    /// done, half cooked with one.
+    /// The item it is when taken off: the variant with its two sides as they are.
     pub fn item(&self) -> ItemId {
-        let m = meat(self.raw).unwrap_or([self.raw; 4]);
-        let sides = self.cook.map(doneness);
-        if sides.contains(&Doneness::Burnt) {
-            m[3]
-        } else {
-            m[sides.iter().filter(|&&d| d == Doneness::Cooked).count()]
-        }
+        meat_with_sides(self.raw, self.cook.map(|t| doneness(t) as u8))
     }
 
-    /// The texture of one side for how done it is: all in the raw meat's shape, so both
-    /// sides of the piece match.
+    /// The texture of one side for how done it is: the raw, cooked or burnt meat's own (they
+    /// have the same shape, so both sides of the piece match).
     pub fn side_layer(&self, side: usize) -> u32 {
-        let pork = meat(self.raw).is_some_and(|m| m[0] == crate::item::PORKCHOP);
-        match (doneness(self.cook[side]), pork) {
-            (Doneness::Raw, _) => match icon(self.raw) {
-                Icon::Flat(l) => l,
-                Icon::Block(_) => tex::STONE,
-            },
-            (Doneness::Cooked, true) => tex::GRILL_COOKED_PORKCHOP,
-            (Doneness::Cooked, false) => tex::GRILL_COOKED_MUTTON,
-            (Doneness::Burnt, true) => tex::GRILL_BURNT_PORKCHOP,
-            (Doneness::Burnt, false) => tex::GRILL_BURNT_MUTTON,
+        let m = meat(self.raw).unwrap_or([self.raw; 6]);
+        let item = match doneness(self.cook[side]) {
+            Doneness::Raw => m[0],
+            Doneness::Cooked => m[2],
+            Doneness::Burnt => m[4],
+        };
+        match icon(item) {
+            Icon::Flat(l) => l,
+            Icon::Block(_) => tex::STONE,
         }
     }
 }
@@ -753,19 +746,20 @@ pub fn build_furnace_items(
         // Side 0 (the sprite's front) faces up when side 1 is down.
         let lying = if g.down == 1 { -FRAC_PI_2 } else { FRAC_PI_2 };
         let turn = ((p.x * 13 + p.z * 29 + i as i32 * 11).rem_euclid(7)) as f32 * 0.09 - 0.27;
-        let size = 0.4;
+        // A thick piece: its rim shows how the side on the fire is doing.
+        let (size, thick) = (0.4, 3.0);
         let m = Mat4::from_translation(Vec3::new(
             c.x,
-            base.y + 1.0 + size / 32.0 + 0.004 + lift,
+            base.y + 1.0 + size * thick / 32.0 + 0.004 + lift,
             c.z,
         )) * Mat4::from_rotation_y(turn)
             * Mat4::from_rotation_x(lying + PI * (1.0 - ease))
-            * Mat4::from_scale(Vec3::splat(size));
+            * Mat4::from_scale(Vec3::new(size, size, size * thick));
         crate::model::emit_sprite_sides(
             out,
             m,
-            g.side_layer(0),
-            g.side_layer(1),
+            [g.side_layer(0), g.side_layer(1)],
+            g.side_layer(g.down as usize),
             light,
             flags::ENTITY,
         );
@@ -1010,7 +1004,8 @@ fn build_furnace_inside(
 mod tests {
     use super::*;
     use crate::item::{
-        BURNT_PORKCHOP, COAL, COOKED_PORKCHOP, HALF_COOKED_PORKCHOP, IRON_INGOT, PORKCHOP,
+        BURNT_PORKCHOP, COAL, COOKED_PORKCHOP, HALF_BURNT_PORKCHOP, HALF_COOKED_PORKCHOP,
+        IRON_INGOT, PORKCHOP, RAW_BURNT_PORKCHOP,
     };
 
     fn lit_furnace() -> Furnace {
@@ -1043,10 +1038,41 @@ mod tests {
         assert!(g.cook.iter().all(|&t| (10.0..20.0).contains(&t)), "{g:?}");
         // Left on too long, it burns. A left click takes it off.
         run(&mut f, 10.0);
+        assert_eq!(f.grill[0].unwrap().item(), HALF_BURNT_PORKCHOP);
+        // Turned over again and left on: both sides burn.
+        f.use_part(0, None, false);
+        run(&mut f, 10.8);
         assert_eq!(f.grill[0].unwrap().item(), BURNT_PORKCHOP);
         let r = f.use_part(0, None, true);
         assert_eq!(r.give, vec![Stack::one(BURNT_PORKCHOP)]);
         assert!(f.grill[0].is_none());
+    }
+
+    #[test]
+    fn every_way_meat_comes_off_is_its_own_item() {
+        // One side left on until it burns, the other never cooked: burnt and raw.
+        let mut f = lit_furnace();
+        f.use_part(2, Some(Stack::one(PORKCHOP)), false);
+        run(&mut f, 20.5);
+        assert_eq!(f.grill[2].unwrap().item(), RAW_BURNT_PORKCHOP);
+        // It goes back on as it was, and every variant does but the fully burnt one.
+        for id in crate::item::meat(PORKCHOP).unwrap() {
+            let g = Grilled::new(id);
+            if id == BURNT_PORKCHOP {
+                assert!(g.is_none());
+            } else {
+                assert_eq!(g.unwrap().item(), id);
+            }
+        }
+    }
+
+    #[test]
+    fn half_burnt_meat_goes_back_on_cooked_side_down() {
+        let mut f = lit_furnace();
+        f.use_part(1, Some(Stack::one(HALF_BURNT_PORKCHOP)), false);
+        assert_eq!(f.grill[1].unwrap().item(), HALF_BURNT_PORKCHOP);
+        run(&mut f, 10.2);
+        assert_eq!(f.grill[1].unwrap().item(), BURNT_PORKCHOP);
     }
 
     #[test]

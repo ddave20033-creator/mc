@@ -48,6 +48,12 @@ pub const HALF_COOKED_MUTTON: ItemId = 279;
 /// Meat left on the fire too long.
 pub const BURNT_PORKCHOP: ItemId = 280;
 pub const BURNT_MUTTON: ItemId = 281;
+/// Meat burnt on one side only.
+pub const HALF_BURNT_PORKCHOP: ItemId = 293;
+pub const HALF_BURNT_MUTTON: ItemId = 294;
+/// Meat burnt on one side and still raw on the other.
+pub const RAW_BURNT_PORKCHOP: ItemId = 295;
+pub const RAW_BURNT_MUTTON: ItemId = 296;
 /// Pistol ammunition: one is used up per shot.
 pub const BULLET: ItemId = 282;
 /// The five pistol parts, in the order they go together at the gun station: frame (with the
@@ -248,48 +254,109 @@ pub fn max_stack(id: ItemId) -> u8 {
     }
 }
 
-/// Food and drink: what eating or drinking this restores (Minecraft's food values).
+/// Food and drink: what eating or drinking this restores (Minecraft's food values), and
+/// what it can do to you.
 pub fn consumable(id: ItemId) -> Option<crate::entity::survival::Consumable> {
-    use crate::entity::survival::Consumable;
-    let food = |food, saturation| Consumable {
-        food,
-        saturation,
-        thirst: 0.0,
-        dirty: false,
-        drink: false,
-    };
-    let drink = |thirst, dirty| Consumable {
+    use crate::entity::survival::{Consumable, Sickness};
+    if let Some(c) = meat_food(id) {
+        return Some(c);
+    }
+    let drink = |thirst, sick| Consumable {
         food: 0.0,
         saturation: 0.0,
         thirst,
-        dirty,
+        sick,
         drink: true,
     };
+    let bug = Sickness {
+        chance: 0.7,
+        poison: 5.0,
+        nausea: 12.0,
+    };
     Some(match id {
-        PORKCHOP => food(3.0, 1.8),
-        COOKED_PORKCHOP => food(8.0, 12.8),
-        MUTTON => food(2.0, 1.2),
-        COOKED_MUTTON => food(6.0, 9.6),
-        HALF_COOKED_PORKCHOP => food(4.0, 6.4),
-        HALF_COOKED_MUTTON => food(3.0, 4.8),
-        BURNT_PORKCHOP => food(2.0, 1.0),
-        BURNT_MUTTON => food(1.0, 0.6),
-        WATER_BOTTLE => drink(6.0, true),
-        PURIFIED_WATER => drink(10.0, false),
+        WATER_BOTTLE => drink(6.0, Some(bug)),
+        PURIFIED_WATER => drink(10.0, None),
         _ => return None,
     })
 }
 
-/// Meat that is grilled on top of a furnace: (raw, one side cooked, cooked, burnt).
-pub fn meat(id: ItemId) -> Option<[ItemId; 4]> {
-    const PORK: [ItemId; 4] = [
+/// How done each side of a piece of meat is (0 raw, 1 cooked, 2 burnt; the more done side
+/// first), for the meat variants in `meat`'s order.
+pub const MEAT_SIDES: [[u8; 2]; 6] = [[0, 0], [1, 0], [1, 1], [2, 1], [2, 2], [2, 0]];
+
+/// Meat in every way it can come off the grill, each side raw, cooked or burnt (see
+/// `MEAT_SIDES`): raw, one side cooked, cooked, one side cooked and one burnt, burnt, one
+/// side raw and one burnt.
+pub fn meat(id: ItemId) -> Option<[ItemId; 6]> {
+    const PORK: [ItemId; 6] = [
         PORKCHOP,
         HALF_COOKED_PORKCHOP,
         COOKED_PORKCHOP,
+        HALF_BURNT_PORKCHOP,
         BURNT_PORKCHOP,
+        RAW_BURNT_PORKCHOP,
     ];
-    const LAMB: [ItemId; 4] = [MUTTON, HALF_COOKED_MUTTON, COOKED_MUTTON, BURNT_MUTTON];
+    const LAMB: [ItemId; 6] = [
+        MUTTON,
+        HALF_COOKED_MUTTON,
+        COOKED_MUTTON,
+        HALF_BURNT_MUTTON,
+        BURNT_MUTTON,
+        RAW_BURNT_MUTTON,
+    ];
     [PORK, LAMB].into_iter().find(|m| m.contains(&id))
+}
+
+/// The meat variant with these sides (in any order).
+pub fn meat_with_sides(raw: ItemId, sides: [u8; 2]) -> ItemId {
+    let key = [sides[0].max(sides[1]), sides[0].min(sides[1])];
+    match (meat(raw), MEAT_SIDES.iter().position(|s| *s == key)) {
+        (Some(m), Some(i)) => m[i],
+        _ => raw,
+    }
+}
+
+/// Eating meat: each side counts for itself (raw, cooked or burnt), and together they
+/// make what it does. A burnt side spoils the taste of the rest (it fills you for less
+/// long); raw and burnt parts can upset your stomach, the more so the worse they are.
+fn meat_food(id: ItemId) -> Option<crate::entity::survival::Consumable> {
+    use crate::entity::survival::{Consumable, Sickness};
+    let m = meat(id)?;
+    let sides = MEAT_SIDES[m.iter().position(|&i| i == id)?];
+    // (food, saturation) of one side: raw, cooked, burnt (a whole piece is two sides,
+    // matching Minecraft's raw and cooked values).
+    let per = if m[0] == PORKCHOP {
+        [(1.5, 0.9), (4.0, 6.4), (1.0, 0.5)]
+    } else {
+        [(1.0, 0.6), (3.0, 4.8), (0.5, 0.3)]
+    };
+    let food = per[sides[0] as usize].0 + per[sides[1] as usize].0;
+    let mut saturation = per[sides[0] as usize].1 + per[sides[1] as usize].1;
+    if sides[0] == 2 && sides[1] != 2 {
+        saturation *= 0.5;
+    }
+    let sick = |chance, poison, nausea| {
+        Some(Sickness {
+            chance,
+            poison,
+            nausea,
+        })
+    };
+    let sick = match sides {
+        [0, 0] => sick(0.3, 0.0, 6.0),
+        [1, 0] => sick(0.15, 0.0, 5.0),
+        [1, 1] => None,
+        [2, 1] => sick(0.3, 0.0, 6.0),
+        [2, 0] => sick(0.5, 3.0, 8.0),
+        _ => sick(0.7, 4.0, 10.0),
+    };
+    Some(Consumable {
+        food,
+        saturation,
+        thirst: 0.0,
+        sick,
+        drink: false,
+    })
 }
 
 /// Damage dealt when hitting a mob with this item (Minecraft 1.8 values; 1 = bare hand).
@@ -512,6 +579,34 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Burnt Mutton",
         "Szenes ürühús",
         tex::BURNT_MUTTON,
+    ),
+    (
+        HALF_BURNT_PORKCHOP,
+        "half_burnt_porkchop",
+        "Half-Burnt Porkchop",
+        "Félig szenes disznóhús",
+        tex::HALF_BURNT_PORKCHOP,
+    ),
+    (
+        HALF_BURNT_MUTTON,
+        "half_burnt_mutton",
+        "Half-Burnt Mutton",
+        "Félig szenes ürühús",
+        tex::HALF_BURNT_MUTTON,
+    ),
+    (
+        RAW_BURNT_PORKCHOP,
+        "raw_burnt_porkchop",
+        "Burnt-Raw Porkchop",
+        "Szenes-nyers disznóhús",
+        tex::RAW_BURNT_PORKCHOP,
+    ),
+    (
+        RAW_BURNT_MUTTON,
+        "raw_burnt_mutton",
+        "Burnt-Raw Mutton",
+        "Szenes-nyers ürühús",
+        tex::RAW_BURNT_MUTTON,
     ),
     (SHEARS, "shears", "Shears", "Olló", tex::SHEARS),
     (

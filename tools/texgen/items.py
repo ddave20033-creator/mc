@@ -659,56 +659,48 @@ def slab(cx, cy, hl, hw, deg, r, thick):
     return top, side, u, v
 
 
-def porkchop(seed):
-    img = Img()
-    top = smooth_poly([(16, 78), (22, 64), (36, 52), (52, 48), (64, 34), (80, 22), (98, 18),
-                       (112, 23), (119, 37), (116, 56), (104, 76), (84, 92), (62, 104),
-                       (46, 108), (30, 104), (18, 94)], 2)
-    side = (shift(top, 8, 0) | shift(top, 4, 0)) & ~top
-    whole = top | side
-    col = np.zeros((S, S, 3), np.float32)
-    col[:] = C("ef7070")
-    col[(XX - 70) * 0.5 + (YY - 60) < -4] = C("ff7777")
-    col[lit(top, 3)] = C("ff8c8c")
-    # marbling: pale curling fat bands
-    for pts, w in [([(30, 96), (40, 84), (46, 70), (58, 62), (72, 64), (80, 74), (78, 86)],
-                    [6, 8, 10, 10, 9, 7, 4]),
-                   ([(66, 44), (82, 38), (98, 42), (106, 54), (102, 66)], [4, 7, 8, 6, 4]),
-                   ([(56, 84), (64, 78), (70, 82)], [4, 4, 3])]:
-        s_, sd, _ = stroke(pts, w)
-        s_ &= shrink(top, 3)
-        col[s_] = C("ff8c8c")
-        col[s_ & (sd > 0) & ~band(s_, -1, -1, 2)] = C("ffadad")
-        col[s_ & band(s_, -1, -1, 1) & (sd > 0)] = C("ffc6c6")
-    col[dark(top, 2)] = C("a75353")
-    img.put(side, C("a75353"))
-    img.put(band(side, 1, 0, 3) & side, C("853e3e"))
-    img.put(drop(whole), C("512626"))
-    img.put(top, col)
-    return img.a
+PORK_RAW = {"main": "ef7070", "warm": "ff7777", "lit": "ff8c8c", "fat": "ffadad",
+            "fat2": "ffc6c6", "dark": "a75353", "side": "a75353", "side2": "853e3e",
+            "o": "512626"}
+# Roasted: the same chop, browned; the fat caramelized to a light golden brown.
+PORK_COOKED = {"main": "a4582f", "warm": "b3643a", "lit": "c47a47", "fat": "d89a62",
+               "fat2": "e8b682", "dark": "6e3a1f", "side": "7a4022", "side2": "5a2e18",
+               "o": "3a1d10"}
 
 
-def cooked_porkchop(seed):
-    img = Img()
-    top, u, v = rrect(67, 68, 54, 23, 40, 22)
-    side = (shift(top, 6, 0) | shift(top, 3, 0)) & ~top
-    whole = top | side
-    col = np.zeros((S, S, 3), np.float32)
-    col[:] = C("d3c088")
-    col[v < -8] = C("cfba81")
-    col[v < -18] = C("c5ad77")
-    ph = (u + 204) % 14
-    inner = shrink(top, 4)
-    col[(ph < 3) & inner] = C("e2d3ac")
-    col[(ph >= 3) & (ph < 5) & inner] = C("bca474")
-    col[lit(top, 3)] = C("dacba4")
-    col[dark(top, 3)] = C("997942")
-    img.put(side, C("8c6932"))
-    img.put(band(side, 1, 0, 2) & side, C("81602b"))
-    img.put(drop(whole), C("5f4f27"))
-    img.put(ring(whole, 1) & ~drop(whole), C("997942"))
-    img.put(top, col)
-    return img.a
+def porkchop_like(c):
+    def fn(seed):
+        img = Img()
+        top = smooth_poly([(16, 78), (22, 64), (36, 52), (52, 48), (64, 34), (80, 22),
+                           (98, 18), (112, 23), (119, 37), (116, 56), (104, 76), (84, 92),
+                           (62, 104), (46, 108), (30, 104), (18, 94)], 2)
+        side = (shift(top, 8, 0) | shift(top, 4, 0)) & ~top
+        whole = top | side
+        col = np.zeros((S, S, 3), np.float32)
+        col[:] = C(c["main"])
+        col[(XX - 70) * 0.5 + (YY - 60) < -4] = C(c["warm"])
+        col[lit(top, 3)] = C(c["lit"])
+        # marbling: pale curling fat bands
+        for pts, w in [([(30, 96), (40, 84), (46, 70), (58, 62), (72, 64), (80, 74), (78, 86)],
+                        [6, 8, 10, 10, 9, 7, 4]),
+                       ([(66, 44), (82, 38), (98, 42), (106, 54), (102, 66)], [4, 7, 8, 6, 4]),
+                       ([(56, 84), (64, 78), (70, 82)], [4, 4, 3])]:
+            s_, sd, _ = stroke(pts, w)
+            s_ &= shrink(top, 3)
+            col[s_] = C(c["lit"])
+            col[s_ & (sd > 0) & ~band(s_, -1, -1, 2)] = C(c["fat"])
+            col[s_ & band(s_, -1, -1, 1) & (sd > 0)] = C(c["fat2"])
+        col[dark(top, 2)] = C(c["dark"])
+        img.put(side, C(c["side"]))
+        img.put(band(side, 1, 0, 3) & side, C(c["side2"]))
+        img.put(drop(whole), C(c["o"]))
+        img.put(top, col)
+        return img.a
+    return fn
+
+
+porkchop = porkchop_like(PORK_RAW)
+cooked_porkchop = porkchop_like(PORK_COOKED)
 
 
 MUTTON_PTS = [(98, 8), (104, 20), (107, 40), (107, 66), (103, 90), (92, 108), (72, 119),

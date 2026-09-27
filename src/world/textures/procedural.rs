@@ -2224,6 +2224,8 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
             255,
         ),
         tex::SHEEP => col([214.0, 178.0, 150.0], 0.92 + 0.08 * grain(l, x, y, 562), 255),
+        // Made in `synth_grilled`.
+        tex::HALF_BURNT_PORKCHOP..=tex::RAW_BURNT_MUTTON => [0, 0, 0, 0],
         _ if is_item_icon(l) => item_icon(l, x, y),
         _ => {
             // Break cracks, stage 0..9

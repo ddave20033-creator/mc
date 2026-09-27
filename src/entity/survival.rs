@@ -81,13 +81,22 @@ pub struct Effect {
     pub total: f32,
 }
 
+/// What eating or drinking something can do to you: with this chance, poison and nausea
+/// for so many seconds (0: none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sickness {
+    pub chance: f32,
+    pub poison: f32,
+    pub nausea: f32,
+}
+
 /// Food or drink.
 pub struct Consumable {
     pub food: f32,
     pub saturation: f32,
     pub thirst: f32,
-    /// Unboiled water: can make you sick.
-    pub dirty: bool,
+    /// Unboiled water, meat raw or burnt: it can make you sick.
+    pub sick: Option<Sickness>,
     /// Drunk (bottle comes back empty) rather than eaten.
     pub drink: bool,
 }

@@ -185,19 +185,21 @@ pub fn emit_item_flat_or_block(
 /// back, one texture pixel apart, plus a side wall along every edge of its opaque pixels,
 /// colored like the pixel it belongs to.
 fn emit_sprite(out: &mut Vec<Vertex>, m: Mat4, layer: u32, light: [u8; 4], fl: u8) {
-    emit_sprite_sides(out, m, layer, layer, light, fl);
+    emit_sprite_sides(out, m, [layer, layer], layer, light, fl);
 }
 
-/// A flat item model with a different texture on its back (+Z shows `layer`), like a piece of
-/// meat cooked on one side. The edges follow the front's shape.
+/// A flat item model with its own texture on each face (+Z shows `faces[0]`, -Z
+/// `faces[1]`) and on its edges (`wall`), like a piece of meat cooked on one side. The edges
+/// follow the front's shape.
 pub fn emit_sprite_sides(
     out: &mut Vec<Vertex>,
     m: Mat4,
-    layer: u32,
-    back: u32,
+    faces: [u32; 2],
+    wall: u32,
     light: [u8; 4],
     fl: u8,
 ) {
+    let [layer, back] = faces;
     let t = 1.0 / 32.0;
     let vert_on = |l: u32, p: Vec3, uv: [f32; 2], normal: u8| Vertex {
         pos: m.transform_point3(p).to_array(),
@@ -206,7 +208,7 @@ pub fn emit_sprite_sides(
         light: [light[0], light[1], light[2], normal],
         tint: [255, 255, 255, fl],
     };
-    let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(layer, p, uv, normal);
+    let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(wall, p, uv, normal);
     for (z, flip) in [(t, false), (-t, true)] {
         let l = if flip { back } else { layer };
         let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(l, p, uv, normal);
