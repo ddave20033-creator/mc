@@ -6,6 +6,8 @@
 //! A stack can also be dragged out of a slot and let go over another one.
 
 mod gun_station;
+mod jei;
+pub(super) use jei::Jei;
 
 use super::*;
 use crate::item::inventory::{add_to, click, take};
@@ -144,30 +146,35 @@ fn search_fold(s: &str) -> String {
 pub(super) enum Tab {
     Blocks,
     Functional,
+    /// Tools and weapons (guns, their ammunition and parts, grenades) together.
     Tools,
-    Weapons,
+    /// Armor and the bulletproof vest.
+    Armor,
     Food,
     Mobs,
     Materials,
+    /// Every item, the other tabs one after the other.
+    All,
     Inventory,
 }
 
-pub(super) const TABS: [Tab; 8] = [
+pub(super) const TABS: [Tab; 9] = [
     Tab::Blocks,
     Tab::Functional,
     Tab::Tools,
-    Tab::Weapons,
+    Tab::Armor,
     Tab::Food,
     Tab::Mobs,
     Tab::Materials,
+    Tab::All,
     Tab::Inventory,
 ];
 
 /// Tab size in GUI pixels (the open one is taller and joins the window), and the distance
 /// between the category tabs.
-const TAB_W: f32 = 23.0;
+const TAB_W: f32 = 21.0;
 const TAB_H: f32 = 24.0;
-const TAB_STEP: f32 = 24.0;
+const TAB_STEP: f32 = 21.5;
 
 impl Tab {
     fn name(self) -> &'static str {
@@ -175,7 +182,8 @@ impl Tab {
             Tab::Blocks => "gui.tab.blocks",
             Tab::Functional => "gui.tab.functional",
             Tab::Tools => "gui.tab.tools",
-            Tab::Weapons => "gui.tab.weapons",
+            Tab::Armor => "gui.tab.armor",
+            Tab::All => "gui.tab.all",
             Tab::Food => "gui.tab.food",
             Tab::Mobs => "gui.tab.mobs",
             Tab::Materials => "gui.tab.materials",
@@ -187,8 +195,9 @@ impl Tab {
         match self {
             Tab::Blocks => GRASS as ItemId,
             Tab::Functional => CRAFTING_TABLE as ItemId,
-            Tab::Tools => tool_id(ToolKind::Pickaxe, Tier::Iron),
-            Tab::Weapons => PISTOL,
+            Tab::Tools => M16,
+            Tab::Armor => armor_id(2, 1),
+            Tab::All => GUIDE_BOOK,
             Tab::Food => COOKED_PORKCHOP,
             Tab::Mobs => PIG_SPAWN_EGG,
             Tab::Materials => IRON_INGOT,
@@ -216,23 +225,25 @@ impl Tab {
             } else {
                 Tab::Blocks
             }
+        } else if armor_of(id).is_some() {
+            Tab::Armor
         } else if tool_of(id).is_some()
             || matches!(
                 id,
-                BUCKET | WATER_BUCKET | LAVA_BUCKET | SHEARS | GLASS_BOTTLE
+                BUCKET | WATER_BUCKET | LAVA_BUCKET | SHEARS | GLASS_BOTTLE | GUIDE_BOOK
             )
-        {
-            Tab::Tools
-        } else if GunKind::of(id).is_some()
+            || GunKind::of(id).is_some()
             || matches!(
                 id,
                 BULLET
                     | PISTOL_FRAME..=PISTOL_MAGAZINE
                     | SCOPE..=LASER_SIGHT
                     | RIFLE_ROUND..=SHOTGUN_SHELL
+                    | FRAG_GRENADE
+                    | SMOKE_GRENADE
             )
         {
-            Tab::Weapons
+            Tab::Tools
         } else if consumable(id).is_some() || meat(id).is_some() {
             Tab::Food
         } else if key(id).ends_with("_spawn_egg") {
@@ -291,12 +302,12 @@ impl Tab {
                 tools(ToolKind::Axe),
                 tools(ToolKind::Shovel),
                 tools(ToolKind::Sword),
-                vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE],
-            ],
-            // The guns, then their ammunition in the same order, attachments and pistol parts.
-            Tab::Weapons => vec![
+                vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE, GUIDE_BOOK],
+                // The guns, then their ammunition in the same order, grenades, attachments
+                // and pistol parts.
                 vec![PISTOL, DESERT_EAGLE, M16, SHOTGUN, SNIPER_RIFLE],
                 vec![BULLET, MAGNUM_ROUND, RIFLE_ROUND, SHOTGUN_SHELL, BMG_ROUND],
+                vec![FRAG_GRENADE, SMOKE_GRENADE],
                 vec![SCOPE, SILENCER, EXTENDED_MAGAZINE, LASER_SIGHT],
                 vec![
                     PISTOL_FRAME,
@@ -306,6 +317,14 @@ impl Tab {
                     PISTOL_MAGAZINE,
                 ],
             ],
+            // A row per material, then the vest.
+            Tab::Armor => {
+                let mut rows: Vec<Vec<ItemId>> = (0..MATERIALS)
+                    .map(|m| (0..4).map(|p| armor_id(m, p)).collect())
+                    .collect();
+                rows.push(vec![BULLETPROOF_VEST]);
+                rows
+            }
             Tab::Food => vec![
                 meat(PORKCHOP).unwrap().to_vec(),
                 meat(MUTTON).unwrap().to_vec(),
@@ -315,8 +334,9 @@ impl Tab {
             Tab::Materials => vec![
                 vec![STICK, COAL, CHARCOAL, CLAY_BALL, BRICK],
                 vec![COPPER_INGOT, IRON_NUGGET, IRON_INGOT, GOLD_INGOT, DIAMOND],
+                vec![STEEL_INGOT, CERAMIC_PLATE],
             ],
-            Tab::Inventory => Vec::new(),
+            Tab::All | Tab::Inventory => Vec::new(),
         }
     }
 }
@@ -332,6 +352,15 @@ fn creative_items(tab: Tab, query: &str) -> Vec<Option<ItemId>> {
             .filter(|&id| search_fold(&name(id)).contains(&q) || search_fold(&key(id)).contains(&q))
             .map(Some)
             .collect();
+    }
+    if tab == Tab::All {
+        // Every tab's grid, one after the other.
+        let mut grid = Vec::new();
+        for t in TABS.into_iter().filter(|&t| !matches!(t, Tab::All | Tab::Inventory)) {
+            grid.resize(grid.len().next_multiple_of(9), None);
+            grid.extend(creative_items(t, ""));
+        }
+        return grid;
     }
     let listed: Vec<ItemId> = TABS.iter().flat_map(|t| t.groups().concat()).collect();
     let mut groups = tab.groups();
@@ -521,6 +550,7 @@ impl Game {
         self.drag = None;
         self.press_pick = None;
         self.search_focused = false;
+        self.jei.focused = false;
         self.open_station(c);
         self.screen = Screen::Container(c);
         self.set_grab(false);
@@ -697,7 +727,7 @@ impl Game {
     /// Shift-click: move a stack to the "other" section.
     fn quick_move(&mut self, c: Container, r: SlotRef) {
         // In the inventory armor goes on (into its empty slot), and comes off.
-        if let (Container::Inventory, SlotRef::Inv(i)) = (c, r) {
+        if let (Container::Inventory | Container::Creative, SlotRef::Inv(i)) = (c, r) {
             let piece = self.inventory.slots[i].and_then(|s| armor_of(s.item)).map(|a| a.0);
             if let Some(p) = piece.filter(|&p| self.inventory.armor[p].is_none()) {
                 self.inventory.armor[p] = self.inventory.slots[i].take();
@@ -987,6 +1017,24 @@ impl Game {
             let (x, y) = (px + (8.0 + i as f32 * SLOT) * s, py + (oy + 58.0) * s);
             if self.draw_slot(x, y, self.inventory.slots[i]) {
                 *hovered = Some(SlotRef::Inv(i));
+            }
+        }
+    }
+
+    /// The armor slots at these places (helmet, chestplate, leggings, boots, vest), each
+    /// showing a faint picture of what goes there while empty.
+    fn armor_slots(&mut self, spots: [(f32, f32); ARMOR_SLOTS], hovered: &mut Option<SlotRef>) {
+        let s = self.ui.s;
+        for (i, (x, y)) in spots.into_iter().enumerate() {
+            if self.draw_slot(x, y, self.inventory.armor[i]) {
+                *hovered = Some(SlotRef::Armor(i));
+            }
+            if self.inventory.armor[i].is_none() {
+                let hint = if i == VEST_SLOT { BULLETPROOF_VEST } else { armor_id(2, i) };
+                draw_stack(&mut self.ui, x + s, y + s, 16.0 * s, &Stack::one(hint));
+                let th = self.theme();
+                self.ui
+                    .solid(x + s, y + s, 16.0 * s, 16.0 * s, with_alpha(th.slot_inner, 0.8));
             }
         }
     }
@@ -1324,9 +1372,13 @@ impl Game {
             return;
         }
         if matches!(c, Container::Chest(_) | Container::Crafting(_)) {
-            let hovered = self.station_screen(c);
-            let inside = self.station_inside;
-            self.slot_input(c, hovered, None, inside);
+            let mut hovered = self.station_screen(c);
+            // JEI beside the inventory strip, most useful at a crafting table.
+            let mut hovered_stack = None;
+            let strip_right = (self.ui.w + 176.0 * self.ui.s) * 0.5;
+            let over_jei = self.jei_panel(strip_right, &mut hovered, &mut hovered_stack);
+            let inside = self.station_inside || over_jei;
+            self.slot_input(c, hovered, hovered_stack, inside);
             return;
         }
         let s = self.ui.s;
@@ -1364,24 +1416,14 @@ impl Game {
                     let (ax, ay) = at(26.0, 8.0);
                     self.player_preview(ax, ay, 51.0 * s, 70.0 * s);
                     // What is worn: the four pieces down the left, the vest by the figure.
-                    for i in 0..ARMOR_SLOTS {
-                        let (x, y) = if i == VEST_SLOT {
+                    let spots: [(f32, f32); ARMOR_SLOTS] = std::array::from_fn(|i| {
+                        if i == VEST_SLOT {
                             at(77.0, 60.0)
                         } else {
                             at(7.0, 8.0 + i as f32 * SLOT)
-                        };
-                        if self.draw_slot(x, y, self.inventory.armor[i]) {
-                            hovered = Some(SlotRef::Armor(i));
                         }
-                        if self.inventory.armor[i].is_none() {
-                            // A faint picture of what goes there.
-                            let hint = if i == VEST_SLOT { BULLETPROOF_VEST } else { armor_id(2, i) };
-                            draw_stack(&mut self.ui, x + s, y + s, 16.0 * s, &Stack::one(hint));
-                            let th = self.theme();
-                            self.ui
-                                .solid(x + s, y + s, 16.0 * s, 16.0 * s, with_alpha(th.slot_inner, 0.8));
-                        }
-                    }
+                    });
+                    self.armor_slots(spots, &mut hovered);
                 }
                 for i in 0..n * n {
                     let (x, y) = at(
@@ -1411,6 +1453,16 @@ impl Game {
                 self.player_preview(ax, ay, 51.0 * s, 66.0 * s);
                 let (lx, ly) = at(66.0, 6.0);
                 self.label(t("gui.inventory"), lx, ly);
+                // What is worn, beside the figure: helmet, chestplate and the vest over it in
+                // one column, leggings and boots in the next.
+                let spots = [
+                    at(64.0, 17.0),
+                    at(64.0, 35.0),
+                    at(82.0, 17.0),
+                    at(82.0, 35.0),
+                    at(64.0, 53.0),
+                ];
+                self.armor_slots(spots, &mut hovered);
                 for i in 9..36 {
                     let (cx, cy) = ((i - 9) % 9, (i - 9) / 9);
                     let (x, y) = at(9.0 + cx as f32 * SLOT, 76.0 + cy as f32 * SLOT);
@@ -1524,8 +1576,12 @@ impl Game {
             }
         }
 
+        // JEI: every item beside the inventory (and the creative "inventory" tab).
+        let jei = matches!(c, Container::Inventory)
+            || (c == Container::Creative && TABS[self.creative_tab] == Tab::Inventory);
+        let over_jei = jei && self.jei_panel(px + panel_w * s, &mut hovered, &mut hovered_stack);
         let panel = (px, py, panel_w * s, panel_h * s);
-        let inside = over_tabs || self.ui.hit(panel.0, panel.1, panel.2, panel.3);
+        let inside = over_tabs || over_jei || self.ui.hit(panel.0, panel.1, panel.2, panel.3);
         self.slot_input(c, hovered, hovered_stack, inside);
     }
 
@@ -1694,11 +1750,15 @@ mod tests {
         for tab in TABS.into_iter().filter(|&t| t != Tab::Inventory) {
             assert!(!creative_items(tab, "").is_empty(), "{tab:?} is empty");
         }
-        // Every item is in exactly one tab, and the listed ones are in the tab `of` gives.
+        // Every item is in exactly one category tab, and the listed ones are in the tab `of`
+        // gives; the "all" tab has them all.
         let mut shown: Vec<ItemId> = TABS
             .iter()
+            .filter(|&&t| t != Tab::All)
             .flat_map(|&tab| creative_items(tab, "").into_iter().flatten())
             .collect();
+        let mut everything: Vec<ItemId> = creative_items(Tab::All, "").into_iter().flatten().collect();
+        everything.sort();
         for tab in TABS {
             for id in tab.groups().concat() {
                 assert_eq!(Tab::of(id), tab, "{}", key(id));
@@ -1708,7 +1768,10 @@ mod tests {
         let mut all = all_items();
         all.sort();
         assert_eq!(shown, all);
-        assert_eq!(Tab::of(PISTOL), Tab::Weapons);
+        assert_eq!(everything, all);
+        assert_eq!(Tab::of(PISTOL), Tab::Tools);
+        assert_eq!(Tab::of(FRAG_GRENADE), Tab::Tools);
+        assert_eq!(Tab::of(BULLETPROOF_VEST), Tab::Armor);
         assert_eq!(Tab::of(tool_id(ToolKind::Sword, Tier::Iron)), Tab::Tools);
         assert_eq!(Tab::of(tool_id(ToolKind::Pickaxe, Tier::Iron)), Tab::Tools);
         assert_eq!(Tab::of(BURNT_MUTTON), Tab::Food);

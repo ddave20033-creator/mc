@@ -427,6 +427,35 @@ pub fn recipe_results() -> Vec<ItemId> {
 }
 
 /// Result of the items in a crafting grid (`size` x `size`, row-major).
+/// The ways `item` is crafted: each recipe's 3x3 grid (the items a cell takes, empty for
+/// none) and how many it makes.
+pub fn recipes_for(item: ItemId) -> Vec<([Vec<ItemId>; 9], u8)> {
+    recipes()
+        .iter()
+        .filter(|r| r.result.item == item)
+        .map(|r| {
+            let mut grid: [Vec<ItemId>; 9] = Default::default();
+            for (y, row) in r.pattern.iter().enumerate() {
+                for (x, ch) in row.chars().enumerate() {
+                    if let Some((_, ids)) = r.keys.iter().find(|k| k.0 == ch) {
+                        grid[y * 3 + x] = ids.clone();
+                    }
+                }
+            }
+            (grid, r.result.count)
+        })
+        .collect()
+}
+
+/// What smelts into `item`, and the furnace it needs (`smelt_tier`).
+pub fn smelted_from(item: ItemId) -> Vec<(ItemId, u8)> {
+    all_items()
+        .into_iter()
+        .filter(|&i| smelt(i) == Some(item))
+        .map(|i| (i, smelt_tier(i)))
+        .collect()
+}
+
 pub fn craft(grid: &[Slot], size: usize) -> Option<Stack> {
     // Bounding box of the non-empty cells.
     let filled: Vec<(usize, usize)> = (0..size * size)

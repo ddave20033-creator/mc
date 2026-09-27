@@ -215,6 +215,8 @@ pub struct Game {
     /// Creative inventory search text; typing goes to it while it is focused.
     creative_search: String,
     search_focused: bool,
+    /// The JEI panel beside the inventory screens.
+    jei: gui::Jei,
     /// The open tab of the creative inventory (index into `gui::TABS`); kept between openings.
     creative_tab: usize,
     /// Chest lid animation 0..1 per chest position.
@@ -469,6 +471,7 @@ impl Game {
             scroll_drag: false,
             creative_search: String::new(),
             search_focused: false,
+            jei: Default::default(),
             creative_tab: 0,
             chest_open: Default::default(),
             door_swing: Default::default(),
@@ -744,6 +747,10 @@ impl Game {
                                 self.run_command(&line);
                             }
                         }
+                        return;
+                    }
+                    if matches!(self.screen, Screen::Container(_)) && self.jei.focused {
+                        self.jei_key(code, event.text.as_ref().map(|t| t.as_str()));
                         return;
                     }
                     if self.screen == Screen::Container(Container::Creative) && self.search_focused
