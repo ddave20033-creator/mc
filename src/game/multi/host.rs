@@ -150,6 +150,7 @@ impl Game {
                     pose: None,
                     open: None,
                     sent_container: None,
+                    seen_chests: FastMap::default(),
                     leaving: false,
                 });
             }
@@ -264,6 +265,7 @@ impl Game {
             }
         }
         self.sync_tables(&peers);
+        self.sync_open_chests(&peers);
         self.sync_furnaces();
         // Keep the world loaded (and running) around the other players.
         self.terrain.extra_centers = peers
@@ -316,25 +318,83 @@ impl Game {
     }
 
     /// Host: sends the furnaces that changed to everyone (the meat on top cooks and turns
-    /// over in front of all players).
+    /// over in front of all players): at once when something is put in, taken out, turned,
+    /// done or burnt; the seconds ticking on (which the players count themselves) only every
+    /// second.
     pub(super) fn sync_furnaces(&mut self) {
-        let now: FastMap<IVec3, Vec<u8>> = self
-            .block_entities
-            .furnaces
-            .iter()
-            .map(|(p, f)| (*p, Self::furnace_msg(*p, f).encode()))
-            .collect();
-        let Some(host) = self.host() else { return };
-        let changed: Vec<IVec3> = now
-            .iter()
-            .filter(|(p, m)| host.furnaces_sent.get(p) != Some(m))
-            .map(|(p, _)| *p)
-            .collect();
-        host.furnaces_sent = now;
-        for p in changed {
+        let now = self.time;
+        let mut send = Vec::new();
+        let mut sent = FastMap::default();
+        {
+            let Some(host) = self.host_ref() else { return };
+            for (p, f) in &self.block_entities.furnaces {
+                let key = Self::furnace_key(f);
+                let full = Self::furnace_msg(*p, f).encode();
+                let entry = match host.furnaces_sent.get(p) {
+                    Some((k, m, t)) if *k == key && (now - t < 1.0 || *m == full) => {
+                        (k.clone(), m.clone(), *t)
+                    }
+                    _ => {
+                        send.push(*p);
+                        (key, full, now)
+                    }
+                };
+                sent.insert(*p, entry);
+            }
+        }
+        if let Some(host) = self.host() {
+            host.furnaces_sent = sent;
+        }
+        for p in send {
             if let Some(f) = self.block_entities.furnaces.get(&p) {
                 let msg = Self::furnace_msg(p, f);
                 self.broadcast(&msg, None);
+            }
+        }
+    }
+
+    /// Host: the contents of chests someone has open show in them for everyone, so players
+    /// looking at a chest another player (or the host) has open see it change as they go.
+    /// (Whoever has it open gets it as their container.)
+    pub(super) fn sync_open_chests(&mut self, peers: &[(u8, Option<Pose>, Option<IVec3>)]) {
+        let mut open: Vec<IVec3> = peers.iter().filter_map(|(_, _, o)| *o).collect();
+        if let Screen::Container(Container::Chest(p)) = self.screen {
+            open.push(p);
+        }
+        let mut chests: Vec<(IVec3, Msg)> = Vec::new();
+        for p in open {
+            if !is_chest(self.terrain.world.geti(p)) {
+                continue;
+            }
+            // Both halves of a double chest come in one message, keyed by its first half.
+            let first = self.chest_halves(p).0;
+            if chests.iter().any(|(q, _)| self.chest_halves(*q).0 == first) {
+                continue;
+            }
+            if let Some(msg) = self.container_msg(p) {
+                chests.push((p, msg));
+            }
+        }
+        let encoded: Vec<(IVec3, Vec<u8>, &Msg)> = chests
+            .iter()
+            .map(|(p, m)| (self.chest_halves(*p).0, m.encode(), m))
+            .collect();
+        for (id, _, own) in peers {
+            let own_first = own
+                .filter(|q| is_chest(self.terrain.world.geti(*q)))
+                .map(|q| self.chest_halves(q).0);
+            let Some(peer) = self.peer(*id) else { continue };
+            // Forget chests that were closed, so opening them again sends them again.
+            peer.seen_chests
+                .retain(|q, _| encoded.iter().any(|(f, _, _)| f == q));
+            for (first, bytes, msg) in &encoded {
+                if own_first == Some(*first) {
+                    continue;
+                }
+                if peer.seen_chests.get(first) != Some(bytes) {
+                    peer.conn.send(msg);
+                    peer.seen_chests.insert(*first, bytes.clone());
+                }
             }
         }
     }
@@ -476,11 +536,32 @@ impl Game {
                 offered,
             } => self.remote_use_furnace(id, p, part, take, offered),
             Msg::Container { p, kind, slots } => {
-                self.apply_container(p, kind, &slots);
-                // What the player has now; no need to send it back.
-                let bytes = self.container_msg(p).map(|m| m.encode());
+                // Only the slots this player changed (from what they last got) are taken, so
+                // two players working in the same chest do not undo each other.
+                let base = self
+                    .peer(id)
+                    .and_then(|peer| peer.sent_container.as_deref().and_then(Msg::decode));
+                let merged = match (base, self.container_msg(p)) {
+                    (
+                        Some(Msg::Container {
+                            p: bp,
+                            kind: bk,
+                            slots: before,
+                        }),
+                        Some(Msg::Container { slots: now, .. }),
+                    ) if bp == p && bk == kind && before.len() == slots.len() => now
+                        .iter()
+                        .zip(&before)
+                        .zip(&slots)
+                        .map(|((cur, was), theirs)| if theirs != was { *theirs } else { *cur })
+                        .collect(),
+                    _ => slots.clone(),
+                };
+                self.apply_container(p, kind, &merged);
+                // What the player has now: if the merge differs, the next tick sends it.
+                let theirs = Msg::Container { p, kind, slots }.encode();
                 if let Some(peer) = self.peer(id) {
-                    peer.sent_container = bytes;
+                    peer.sent_container = Some(theirs);
                 }
             }
             Msg::Chat { text, .. } => {

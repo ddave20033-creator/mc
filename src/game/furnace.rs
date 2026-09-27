@@ -188,13 +188,23 @@ impl Game {
     /// more once the side on the fire is done, dark and thick when it burns.
     pub(super) fn furnace_fx(&mut self, dt: f32) {
         if self.is_client() {
-            // Flips turn and smelting goes on smoothly between the host's updates.
+            // Between the host's updates (every second, or when something changes) the
+            // furnaces go on here as they do there: flips turn, fuel burns, meat cooks on
+            // the side on the fire, smelting goes on.
             for f in self.block_entities.furnaces.values_mut() {
                 for g in f.grill.iter_mut().flatten() {
                     g.flip = (g.flip - dt).max(0.0);
                 }
-                if f.burn > 0.0 && f.input.is_some_and(|i| smelt(i.item).is_some()) {
-                    f.cook = (f.cook + dt).min(SMELT_TIME);
+                if f.burn > 0.0 {
+                    f.burn = (f.burn - dt).max(0.0);
+                    for g in f.grill.iter_mut().flatten() {
+                        if g.flip <= 0.0 {
+                            g.cook[g.down as usize] += dt;
+                        }
+                    }
+                    if f.input.is_some_and(|i| smelt(i.item).is_some()) {
+                        f.cook = (f.cook + dt).min(SMELT_TIME);
+                    }
                 }
             }
         }

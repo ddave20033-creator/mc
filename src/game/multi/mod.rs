@@ -71,6 +71,8 @@ struct Peer {
     /// Block entity the player has open, and what was last sent of it.
     open: Option<IVec3>,
     sent_container: Option<Vec<u8>>,
+    /// Chests others have open (their contents show in them), as this player last got them.
+    seen_chests: FastMap<IVec3, Vec<u8>>,
     leaving: bool,
 }
 
@@ -81,8 +83,9 @@ pub(super) struct Host {
     time_tick: f32,
     /// Crafting table grids as the players last got them (items lie on the tables).
     tables_sent: FastMap<IVec3, [Slot; 9]>,
-    /// Furnaces as the players last got them (encoded `Msg::Furnace`).
-    furnaces_sent: FastMap<IVec3, Vec<u8>>,
+    /// Furnaces as the players last got them: what changes at once (`furnace_key`), the
+    /// whole message, and when it was sent.
+    furnaces_sent: FastMap<IVec3, (Vec<u8>, Vec<u8>, f32)>,
     /// "192.168.1.20:25565", shown in the pause menu.
     pub address: String,
 }
@@ -111,6 +114,14 @@ fn color_from(b: [u8; 4]) -> Color {
 }
 
 impl Game {
+    /// The host's state (read only), when hosting.
+    fn host_ref(&self) -> Option<&Host> {
+        match &self.net {
+            Some(Net::Host(h)) => Some(h),
+            _ => None,
+        }
+    }
+
     pub(super) fn is_client(&self) -> bool {
         matches!(self.net, Some(Net::Client(_)))
     }
@@ -241,6 +252,15 @@ impl Game {
                 _ => NO_BLOCK,
             },
         }
+    }
+
+    /// What the other players have open, and where they stand.
+    pub(super) fn remote_open_blocks(&self) -> Vec<(IVec3, Vec3)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
+            .map(|r| (r.target.open, r.target.pos))
+            .collect()
     }
 
     /// Chests the other players have open (their lids open here too).
@@ -506,13 +526,14 @@ impl Game {
     /// uses its live grid).
     fn container_msg(&self, p: IVec3) -> Option<Msg> {
         let b = self.terrain.world.geti(p);
+        // Whoever has the table open here (host or player) works on the live grid.
         let table_open = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
         let (kind, slots) = if is_chest(b) {
             // A double chest sends both halves (54 slots).
             self.block_entities.chests.get(&p)?;
             (container::CHEST, self.chest_slots(p))
         } else if b == CRAFTING_TABLE {
-            let grid = if table_open && self.is_client() {
+            let grid = if table_open {
                 self.craft
             } else {
                 self.block_entities
@@ -545,7 +566,7 @@ impl Game {
                 let grid: [Slot; 9] = std::array::from_fn(get);
                 let open_here =
                     matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
-                if open_here && self.is_client() {
+                if open_here {
                     self.craft = grid;
                 } else if grid.iter().any(|s| s.is_some()) {
                     self.block_entities.tables.insert(p, grid);
@@ -555,6 +576,31 @@ impl Game {
             }
             _ => {}
         }
+    }
+
+    /// What of a furnace changes all at once and must reach the players right away: its
+    /// contents, whether it burns, how done each side of the meat is and whether it is being
+    /// turned over. (The seconds in between go out now and then; players count them on.)
+    fn furnace_key(f: &crate::entity::Furnace) -> Vec<u8> {
+        use crate::entity::block_entity::doneness;
+        let contents = crate::entity::Furnace {
+            burn: 0.0,
+            cook: 0.0,
+            grill: [None; 4],
+            ..f.clone()
+        };
+        let mut key = Self::furnace_msg(IVec3::ZERO, &contents).encode();
+        key.push((f.burn > 0.0) as u8);
+        for g in &f.grill {
+            key.push(match g {
+                None => 255,
+                Some(g) => {
+                    let side = |t: f32| doneness(t) as u8;
+                    side(g.cook[0]) * 16 + side(g.cook[1]) * 4 + g.down * 2 + (g.flip > 0.0) as u8
+                }
+            });
+        }
+        key
     }
 
     /// A furnace as everyone sees it.

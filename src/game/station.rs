@@ -102,6 +102,27 @@ impl Game {
         });
     }
 
+    /// Keeps the chest and table views right: one whose block is gone (mined by someone
+    /// else) closes, and a table another player has open faces them, as it does for them.
+    pub(super) fn check_stations(&mut self) {
+        if let Screen::Container(c @ (Container::Chest(p) | Container::Crafting(p))) = self.screen {
+            let b = self.terrain.world.geti(p);
+            let there = match c {
+                Container::Chest(_) => is_chest(b),
+                _ => b == CRAFTING_TABLE,
+            };
+            if !there {
+                self.close_container();
+            }
+        }
+        for (p, at) in self.remote_open_blocks() {
+            if self.terrain.world.geti(p) == CRAFTING_TABLE {
+                let d = at - (p.as_vec3() + Vec3::splat(0.5));
+                self.table_sides.insert(p, facing_of(d.x, d.z));
+            }
+        }
+    }
+
     /// Which way a crafting table's grid faces (toward who last used it).
     pub(super) fn table_side(&self, p: IVec3) -> u8 {
         self.table_sides.get(&p).copied().unwrap_or(2)

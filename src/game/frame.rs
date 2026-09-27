@@ -305,6 +305,9 @@ impl Game {
         }
         self.particles.update(dt, &self.terrain.world);
         self.update_craft_fx(dt);
+        if self.in_world_view() {
+            self.check_stations();
+        }
         let mining = self.mining.is_some();
         self.hand.update(
             dt,
