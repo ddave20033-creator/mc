@@ -580,6 +580,26 @@ impl Game {
                     p.state = Some(state);
                 }
             }
+            Msg::Shot {
+                kind,
+                mods,
+                eye,
+                seed,
+                bullets,
+                ..
+            } => {
+                // Shown here, and to everyone else as this player's.
+                self.remote_shot(id, kind, mods, eye, seed, &bullets);
+                let shot = Msg::Shot {
+                    id,
+                    kind,
+                    mods,
+                    eye,
+                    seed,
+                    bullets,
+                };
+                self.broadcast(&shot, Some(id));
+            }
             Msg::Skin { png, .. } if self.set_skin_png(id, png.clone()).is_ok() => {
                 self.broadcast(&Msg::Skin { id, png }, Some(id));
             }

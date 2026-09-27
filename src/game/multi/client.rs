@@ -200,6 +200,14 @@ impl Game {
                 }
             }
             Msg::Chat { text, color } => self.say(text, color_from(color)),
+            Msg::Shot {
+                id,
+                kind,
+                mods,
+                eye,
+                seed,
+                bullets,
+            } => self.remote_shot(id, kind, mods, eye, seed, &bullets),
             Msg::Skin { id, png } => {
                 let own = matches!(&self.net, Some(Net::Client(c)) if c.id == id);
                 if !own {

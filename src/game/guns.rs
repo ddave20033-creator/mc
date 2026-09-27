@@ -9,7 +9,7 @@ use crate::entity::player::{ray_boxes, raycast_solid};
 use crate::item::*;
 use crate::lang::tf;
 use crate::model::ballistics::{self, CaseKind, Cases};
-use crate::model::gun::PARTS;
+use crate::model::gun::{self, PARTS};
 
 /// Seconds to raise the gun to the eye.
 const AIM_TIME: f32 = 0.16;
@@ -38,6 +38,8 @@ struct Bullet {
     gravity: f32,
     damage: f32,
     knockback: f32,
+    /// Another player's, only to be seen: what it hits is up to them.
+    visual: bool,
 }
 
 #[derive(Default)]
@@ -81,6 +83,8 @@ pub(super) struct Guns {
     pub(super) cases: Cases,
     /// Where the laser sight's dot is.
     laser_dot: Option<Vec3>,
+    /// Muzzle flashes of the other players' shots (as `flash`).
+    remote_flashes: Vec<(f32, Vec3, Vec3, f32, f32)>,
 }
 
 pub(super) struct Bench {
@@ -219,6 +223,17 @@ impl Guns {
     }
 }
 
+/// The case a gun throws out.
+fn case_kind(kind: GunKind) -> CaseKind {
+    match kind {
+        GunKind::Pistol => CaseKind::Pistol,
+        GunKind::DesertEagle => CaseKind::Magnum,
+        GunKind::M16 => CaseKind::Rifle,
+        GunKind::Sniper => CaseKind::Bmg,
+        GunKind::Shotgun => CaseKind::Shell,
+    }
+}
+
 /// A random direction within `deg` degrees of `dir` (more often near the middle).
 fn scatter(dir: Vec3, deg: f32, r1: f32, r2: f32) -> Vec3 {
     let right = dir.cross(Vec3::Y).normalize_or_zero();
@@ -329,6 +344,10 @@ impl Game {
         if self.guns.flash.is_some_and(|f| f.0 <= 0.0) {
             self.guns.flash = None;
         }
+        for f in &mut self.guns.remote_flashes {
+            f.0 -= dt / 0.06;
+        }
+        self.guns.remote_flashes.retain(|f| f.0 > 0.0);
         self.guns.flash_light.0 = (self.guns.flash_light.0 - dt / 0.08).max(0.0);
         self.guns.heat = (self.guns.heat - dt * 0.5).max(0.0);
         self.guns.wisp -= dt;
@@ -346,18 +365,7 @@ impl Game {
             let range = kind.stats().range.min(120.0);
             let eye = self.player.eye();
             let dir = look_dir(self.yaw, self.pitch);
-            let world = &self.terrain.world;
-            let block = raycast_solid(world, eye, dir, range)
-                .and_then(|(hit, _)| ray_boxes(world, eye, dir, hit, range))
-                .map(|(d, _)| d);
-            let mob = self
-                .mobs
-                .iter()
-                .filter_map(|m| m.ray_hit(eye, dir, block.unwrap_or(range)))
-                .fold(None, |a: Option<f32>, d| Some(a.map_or(d, |a| a.min(d))));
-            if let Some(d) = mob.or(block) {
-                self.guns.laser_dot = Some(eye + dir * (d - 0.03));
-            }
+            self.guns.laser_dot = self.laser_hit(eye, dir, range, None);
         }
     }
 
@@ -455,11 +463,13 @@ impl Game {
         self.guns.bloom = (self.guns.bloom + BLOOM_PER_SHOT).min(BLOOM_MAX);
 
         let muzzle = self.muzzle_now().unwrap_or(eye + look * 0.9);
+        let mut sent = Vec::new();
         for _ in 0..stats.pellets {
             let (r1, r2) = (self.random(), self.random());
             let dir = scatter(look, spread, r1, r2);
             // A silencer slows the bullet a little.
             let speed = stats.speed * if mods & gun_mod::SILENCER != 0 { 0.9 } else { 1.0 };
+            sent.push(dir * speed);
             self.guns.bullets.push(Bullet {
                 pos: eye,
                 vel: dir * speed,
@@ -470,7 +480,22 @@ impl Game {
                 gravity: stats.gravity,
                 damage: stats.damage,
                 knockback: stats.knockback,
+                visual: false,
             });
+        }
+        // The others see the shot too.
+        let shot = crate::net::Msg::Shot {
+            id: super::multi::HOST_ID,
+            kind: kind as u8,
+            mods,
+            eye,
+            seed,
+            bullets: sent,
+        };
+        if self.is_client() {
+            self.send(shot);
+        } else {
+            self.broadcast(&shot, None);
         }
 
         // Recoil: the view kicks up (and a little to the side); most of it comes back.
@@ -525,14 +550,81 @@ impl Game {
         let r = |g: &mut Self| g.random() - 0.5;
         let vel = right * (2.4 + r(self)) + up * (2.6 + r(self)) - look * 0.6 + self.player.vel * 0.8;
         let spin = Vec3::new(r(self), r(self), r(self)) * 40.0;
-        let case = match kind {
-            GunKind::Pistol => CaseKind::Pistol,
-            GunKind::DesertEagle => CaseKind::Magnum,
-            GunKind::M16 => CaseKind::Rifle,
-            GunKind::Sniper => CaseKind::Bmg,
-            GunKind::Shotgun => CaseKind::Shell,
+        self.guns.cases.eject(port, vel, spin, case_kind(kind));
+    }
+
+    /// Another player fired (`kind` is the gun's index in GUN_KINDS): their bullets fly
+    /// (only to be seen), the muzzle flashes on the gun in their hands and the case comes
+    /// out of it.
+    pub(super) fn remote_shot(&mut self, id: u8, kind: u8, mods: u8, eye: Vec3, seed: f32, bullets: &[Vec3]) {
+        let Some(&kind) = GUN_KINDS.get(kind as usize) else {
+            return;
         };
-        self.guns.cases.eject(port, vel, spin, case);
+        if eye.distance(self.player.pos) > 192.0 || bullets.is_empty() {
+            return;
+        }
+        let stats = kind.stats();
+        let look = bullets[0].normalize_or(Vec3::X);
+        let muzzle = self
+            .remote_gun_point(id, kind, gun::muzzle(kind, mods))
+            .unwrap_or(eye + look * 0.9);
+        for &vel in bullets.iter().take(32) {
+            self.guns.bullets.push(Bullet {
+                pos: eye,
+                vel,
+                from: eye,
+                offset: muzzle - eye,
+                traveled: 0.0,
+                range: stats.range,
+                gravity: stats.gravity,
+                damage: 0.0,
+                knockback: 0.0,
+                visual: true,
+            });
+        }
+        let (sky, blk) = self.terrain.world.light_estimate(muzzle);
+        let size = stats.flash;
+        if mods & gun_mod::SILENCER == 0 {
+            self.guns.remote_flashes.push((1.0, muzzle, look, 0.1 * size, seed));
+            self.guns.flash_light = ((0.6 + 0.2 * size).min(1.0), muzzle + look * 0.3);
+            self.particles.sparks(muzzle, look, 3 + (size * 3.0) as usize);
+        }
+        let puff = if size > 1.5 { 2 } else { 1 };
+        self.particles.gun_smoke(muzzle, look, puff, sky, blk);
+        if let Some(port) = self.remote_gun_point(id, kind, gun::spec(kind).eject) {
+            let right = look.cross(Vec3::Y).normalize_or(Vec3::X);
+            let up = right.cross(look);
+            let r = |g: &mut Self| g.random() - 0.5;
+            let vel = right * (2.4 + r(self)) + up * (2.6 + r(self)) - look * 0.6;
+            let spin = Vec3::new(r(self), r(self), r(self)) * 40.0;
+            self.guns.cases.eject(port, vel, spin, case_kind(kind));
+        }
+    }
+
+    /// Where a laser from `eye` along `dir` makes its dot: on the first block, mob or player
+    /// in the way (not `owner`, who holds it; this player counts when someone else does).
+    fn laser_hit(&self, eye: Vec3, dir: Vec3, range: f32, owner: Option<u8>) -> Option<Vec3> {
+        let world = &self.terrain.world;
+        let block = raycast_solid(world, eye, dir, range)
+            .and_then(|(hit, _)| ray_boxes(world, eye, dir, hit, range))
+            .map(|(d, _)| d);
+        let reach = block.unwrap_or(range);
+        let mob = self
+            .mobs
+            .iter()
+            .filter_map(|m| m.ray_hit(eye, dir, reach))
+            .fold(None, |a: Option<f32>, d| Some(a.map_or(d, |a| a.min(d))));
+        let player = self.pick_other_player(eye, dir, reach, owner).map(|(_, d)| d);
+        let me = owner.and_then(|_| {
+            let p = self.player.pos;
+            let half = Vec3::new(0.3, 0.0, 0.3);
+            crate::util::ray_box(eye, dir, p - half, p + half + Vec3::Y * 1.8, reach)
+        });
+        [block, mob, player, me]
+            .into_iter()
+            .flatten()
+            .fold(None, |a: Option<f32>, d| Some(a.map_or(d, |a| a.min(d))))
+            .map(|d| eye + dir * (d - 0.03))
     }
 
     /// Bullets fly on (falling a little) and hit the first block, mob or player in their way.
@@ -565,7 +657,13 @@ impl Game {
 
             use crate::net::Msg;
             let (dmg, knock, from) = (b.damage, b.knockback, b.from);
-            if let Some((id, _)) = player {
+            if b.visual {
+                // Someone else's: it stops at the first mob but does nothing to it (the
+                // shooter's game hits it), and passes the players.
+                if mob.is_some() {
+                    return false;
+                }
+            } else if let Some((id, _)) = player {
                 if self.is_client() {
                     self.send(Msg::AttackPlayer { id, dmg, knock });
                 } else {
@@ -573,7 +671,7 @@ impl Game {
                 }
                 return false;
             }
-            if let Some((i, _)) = mob {
+            if let Some((i, _)) = mob.filter(|_| !b.visual) {
                 if self.is_client() {
                     let id = self.mobs[i].id;
                     self.send(Msg::AttackMob { id, dmg, knock });
@@ -614,6 +712,24 @@ impl Game {
         // The first-person view draws the flash on its own gun.
         if let (Some((k, pos, dir, size, seed)), true) = (self.guns.flash, self.camera.mode != 0) {
             ballistics::emit_muzzle_flash(out, pos, dir, cam, size, seed, k);
+        }
+        for &(k, pos, dir, size, seed) in &self.guns.remote_flashes {
+            ballistics::emit_muzzle_flash(out, pos, dir, cam, size, seed, k);
+        }
+        // The other players' laser sights: the dot where they point, and the faint beam.
+        for (id, kind, mods, eye, look) in self.remote_guns() {
+            if mods & gun_mod::LASER == 0 {
+                continue;
+            }
+            let range = kind.stats().range.min(120.0);
+            let Some(p) = self.laser_hit(eye, look, range, Some(id)) else {
+                continue;
+            };
+            let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
+            ballistics::emit_laser_dot(out, p, right, up, size);
+            if let Some(from) = self.remote_gun_point(id, kind, gun::spec(kind).laser) {
+                ballistics::emit_tracer(out, from, p, cam, 0.004, true);
+            }
         }
         if let Some(p) = self.guns.laser_dot {
             // A small dot near by, still visible far away.

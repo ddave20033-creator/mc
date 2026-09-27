@@ -12,6 +12,7 @@ mod lan_ui;
 
 use super::*;
 
+use crate::item::GunKind;
 use crate::lang::tf;
 use crate::model::player::{hand_pivot, limb_targets};
 use crate::net::{
@@ -32,7 +33,7 @@ const CLOSED_Y: i32 = i32::MIN;
 /// How far away other players' names show.
 const NAME_RANGE: f32 = 48.0;
 /// The host's player id.
-const HOST_ID: u8 = 0;
+pub(super) const HOST_ID: u8 = 0;
 
 /// Another player, as drawn here.
 pub(super) struct RemotePlayer {
@@ -230,6 +231,9 @@ impl Game {
         if self.sleep.is_some() {
             flags |= pose_flags::SLEEPING;
         }
+        if self.holding_gun() && self.guns.aim > 0.5 {
+            flags |= pose_flags::AIMING;
+        }
         Pose {
             pos: self.player.pos,
             yaw: self.visual_head_yaw(),
@@ -252,6 +256,7 @@ impl Game {
                 _ => NO_BLOCK,
             },
             status: self.my_status(),
+            gun_mods: self.held_gun_mods(),
         }
     }
 
@@ -375,6 +380,7 @@ impl Game {
             p.held = t.held;
             p.flags = t.flags;
             p.status = t.status;
+            p.gun_mods = t.gun_mods;
         }
     }
 
@@ -410,6 +416,54 @@ impl Game {
 }
 
 /// Other players' models (into the entity and particle ranges, like mobs).
+/// Another player's model, standing as their pose says.
+fn standing_pose(p: &Pose, time: f32) -> PlayerPose {
+    PlayerPose {
+        pos: p.pos,
+        body_yaw: p.body_yaw,
+        head_yaw: p.yaw,
+        pitch: p.pitch,
+        limb_swing: p.limb_swing,
+        limb_amount: p.limb_amount,
+        attack: p.attack,
+        crouch: p.crouch,
+        held: p.held,
+        skin: p.skin,
+        time,
+        hurt: p.flags & pose_flags::HURT != 0,
+        first_person: false,
+        burning: p.flags & pose_flags::BURNING != 0,
+        blocking: p.flags & pose_flags::BLOCKING != 0,
+        hide_arms: false,
+        hide_right_arm: false,
+        lantern: None,
+        gun_mods: p.gun_mods,
+    }
+}
+
+impl Game {
+    /// The other players holding a gun (and not in bed): id, the gun, its attachments,
+    /// their eye and where they look.
+    pub(super) fn remote_guns(&self) -> Vec<(u8, GunKind, u8, Vec3, Vec3)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.shown() && r.pose.flags & pose_flags::SLEEPING == 0)
+            .filter_map(|r| {
+                let kind = GunKind::of(r.pose.held)?;
+                let eye = r.pose.pos + Vec3::Y * (1.62 - 0.35 * r.pose.crouch);
+                Some((r.id, kind, r.pose.gun_mods, eye, look_dir(r.pose.yaw, r.pose.pitch)))
+            })
+            .collect()
+    }
+
+    /// Where a point of another player's gun (gun space) is on their model.
+    pub(super) fn remote_gun_point(&self, id: u8, kind: GunKind, point: Vec3) -> Option<Vec3> {
+        let r = self.remotes.iter().find(|r| r.id == id && r.shown())?;
+        let pose = standing_pose(&r.pose, self.time);
+        Some(crate::model::player::gun_point(&pose, kind, point))
+    }
+}
+
 pub(super) fn build_remote_players(
     remotes: &mut [RemotePlayer],
     world: &World,
@@ -430,30 +484,17 @@ pub(super) fn build_remote_players(
                 let head = facing_dir(facing_of(d.x, d.z)).as_vec3();
                 crate::model::player::lying(p.pos, head)
             });
-            let (pos, body_yaw, head_yaw, pitch) = match bed {
-                Some((feet, yaw, _)) => (feet, yaw, yaw, 0.0),
-                None => (p.pos, p.body_yaw, p.yaw, p.pitch),
-            };
-            let pose = PlayerPose {
-                pos,
-                body_yaw,
-                head_yaw,
-                pitch,
-                limb_swing: p.limb_swing,
-                limb_amount: if bed.is_some() { 0.0 } else { p.limb_amount },
-                attack: p.attack,
-                crouch: p.crouch,
-                held: p.held,
-                skin: p.skin,
-                time,
-                hurt: p.flags & pose_flags::HURT != 0,
-                first_person: false,
-                burning: p.flags & pose_flags::BURNING != 0,
-                blocking: p.flags & pose_flags::BLOCKING != 0,
-                hide_arms: false,
-                hide_right_arm: false,
-                lantern: None,
-                gun_mods: 0,
+            let standing = standing_pose(&p, time);
+            let pose = match bed {
+                Some((feet, yaw, _)) => PlayerPose {
+                    pos: feet,
+                    body_yaw: yaw,
+                    head_yaw: yaw,
+                    pitch: 0.0,
+                    limb_amount: 0.0,
+                    ..standing
+                },
+                None => standing,
             };
             let limbs = r.limbs.update(limb_targets(&pose), dt);
             let lantern = if pose.held == LANTERN as ItemId {
@@ -486,9 +527,20 @@ pub(super) fn build_remote_players(
 impl Game {
     /// The other player the crosshair is on, and how far away.
     pub(super) fn pick_player(&self, eye: Vec3, dir: Vec3, reach: f32) -> Option<(u8, f32)> {
+        self.pick_other_player(eye, dir, reach, None)
+    }
+
+    /// `pick_player`, leaving out `except` (the one the ray starts from).
+    pub(super) fn pick_other_player(
+        &self,
+        eye: Vec3,
+        dir: Vec3,
+        reach: f32,
+        except: Option<u8>,
+    ) -> Option<(u8, f32)> {
         self.remotes
             .iter()
-            .filter(|r| r.alive())
+            .filter(|r| r.alive() && Some(r.id) != except)
             .filter_map(|r| {
                 let p = r.pose.pos;
                 let half = Vec3::new(0.4, 0.0, 0.4);

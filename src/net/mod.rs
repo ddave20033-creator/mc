@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 16;
+pub const PROTOCOL: u16 = 17;
 
 // ---------------------------------------------------------------------------- data
 
@@ -47,6 +47,8 @@ pub struct Pose {
     pub open: IVec3,
     /// What the player is busy with (`status`), shown in a bubble above their head.
     pub status: u8,
+    /// The attachments on the held gun (`gun_mod` bits).
+    pub gun_mods: u8,
 }
 
 /// `Pose::status`: typing in the chat, in the pause menu, away (the game window is not in
@@ -67,6 +69,8 @@ pub mod pose_flags {
     pub const CREATIVE: u8 = 16;
     /// Lying in a bed (the pose's position is on top of the bed's head half).
     pub const SLEEPING: u8 = 32;
+    /// Aiming a gun down its sights.
+    pub const AIMING: u8 = 64;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -149,6 +153,17 @@ pub enum Msg {
     SpawnMob {
         kind: u8,
         pos: Vec3,
+    },
+    /// A shot from a gun, for the others to see: the bullets (their speed and direction)
+    /// leaving `eye`, the muzzle flash and the case. From a player the host sends it on to
+    /// the rest with `id` set to the shooter.
+    Shot {
+        id: u8,
+        kind: u8,
+        mods: u8,
+        eye: Vec3,
+        seed: f32,
+        bullets: Vec<Vec3>,
     },
     /// Used shears on a mob (the host drops its wool).
     Shear {
@@ -334,6 +349,7 @@ impl W {
         self.f32(p.mine_progress);
         self.ivec3(p.open);
         self.u8(p.status);
+        self.u8(p.gun_mods);
     }
     fn state(&mut self, s: &PlayerState) {
         self.vec3(s.pos);
@@ -447,6 +463,7 @@ impl R<'_> {
             mine_progress: self.f32()?,
             open: self.ivec3()?,
             status: self.u8()?,
+            gun_mods: self.u8()?,
         })
     }
     fn state(&mut self) -> Option<PlayerState> {
@@ -709,6 +726,25 @@ impl Msg {
                 w.u8(*id);
                 w.bytes(png);
             }
+            Msg::Shot {
+                id,
+                kind,
+                mods,
+                eye,
+                seed,
+                bullets,
+            } => {
+                w.u8(44);
+                w.u8(*id);
+                w.u8(*kind);
+                w.u8(*mods);
+                w.vec3(*eye);
+                w.f32(*seed);
+                w.u32(bullets.len() as u32);
+                for v in bullets {
+                    w.vec3(*v);
+                }
+            }
         }
         w.0
     }
@@ -855,6 +891,20 @@ impl Msg {
                 }
                 Msg::Skin { id, png }
             }
+            44 => Msg::Shot {
+                id: r.u8()?,
+                kind: r.u8()?,
+                mods: r.u8()?,
+                eye: r.vec3()?,
+                seed: r.f32()?,
+                bullets: {
+                    let v = r.list(|r| r.vec3())?;
+                    if v.len() > 32 {
+                        return None;
+                    }
+                    v
+                },
+            },
             _ => return None,
         };
         // Trailing bytes mean a version mismatch or corruption.
@@ -905,8 +955,17 @@ mod tests {
             skin: 2,
             flags: pose_flags::HURT,
             status: status::TYPING,
+            gun_mods: 0b1001,
             ..Default::default()
         }));
+        roundtrip(Msg::Shot {
+            id: 3,
+            kind: 4,
+            mods: 2,
+            eye: Vec3::new(1.0, 70.5, -3.0),
+            seed: 0.25,
+            bullets: vec![Vec3::X * 120.0, Vec3::new(0.1, 0.2, 119.0)],
+        });
         roundtrip(Msg::Skin {
             id: 2,
             png: vec![137, 80, 78, 71, 0, 255],
