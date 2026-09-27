@@ -222,6 +222,27 @@ fn recipes() -> &'static Vec<Recipe> {
                 keys: vec![('N', vec![IRON_NUGGET]), ('T', b(TORCH)), ('G', b(GLASS))],
                 result: Stack::one(LASER_SIGHT),
             },
+            // Ammunition of the other guns.
+            Recipe {
+                pattern: &["N", "N", "C"],
+                keys: vec![('N', vec![IRON_NUGGET]), ('C', vec![COAL, CHARCOAL])],
+                result: Stack::new(RIFLE_ROUND, 6),
+            },
+            Recipe {
+                pattern: &["I", "C"],
+                keys: vec![('I', vec![IRON_INGOT]), ('C', vec![COAL, CHARCOAL])],
+                result: Stack::new(MAGNUM_ROUND, 3),
+            },
+            Recipe {
+                pattern: &["I", "I", "C"],
+                keys: vec![('I', vec![IRON_INGOT]), ('C', vec![COAL, CHARCOAL])],
+                result: Stack::new(BMG_ROUND, 2),
+            },
+            Recipe {
+                pattern: &["NCN"],
+                keys: vec![('N', vec![IRON_NUGGET]), ('C', vec![COAL, CHARCOAL])],
+                result: Stack::new(SHOTGUN_SHELL, 4),
+            },
             Recipe {
                 pattern: &["N", "C"],
                 keys: vec![('N', vec![IRON_NUGGET]), ('C', vec![COAL, CHARCOAL])],

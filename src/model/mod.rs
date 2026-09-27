@@ -23,8 +23,8 @@ pub fn emit_held(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], f
         emit_torch(out, m, light, fl, 94);
         return;
     }
-    if item == crate::item::PISTOL {
-        gun::emit_pistol(out, m * gun::gun_to_unit(), light, fl, 0);
+    if let Some(kind) = crate::item::GunKind::of(item) {
+        gun::emit_gun(out, kind, m * gun::gun_to_unit(kind), light, fl, 0);
         return;
     }
     match icon(item) {

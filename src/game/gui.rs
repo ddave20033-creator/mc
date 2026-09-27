@@ -502,7 +502,7 @@ impl Game {
                 left
             }
             (Container::GunStation(_), SlotRef::Inv(_))
-                if stack.item == PISTOL && self.guns.bench.gun.is_none() =>
+                if GunKind::of(stack.item).is_some() && self.guns.bench.gun.is_none() =>
             {
                 self.guns.bench.gun = Some(stack);
                 None
@@ -513,7 +513,11 @@ impl Game {
                     && self.guns.bench.gun.is_some_and(|g| {
                         ATTACHMENTS
                             .iter()
-                            .any(|&(bit, item)| item == stack.item && gun_mods(&g) & bit == 0)
+                            .any(|&(bit, item)| {
+                                item == stack.item
+                                    && gun_mods(&g) & bit == 0
+                                    && GunKind::of(g.item).is_some_and(|k| k.fits(bit))
+                            })
                     }) =>
             {
                 let (bit, _) = *ATTACHMENTS.iter().find(|a| a.1 == stack.item).unwrap();
@@ -595,7 +599,7 @@ impl Game {
             }
             SlotRef::Trash => self.cursor = None,
             // Only a pistol goes in.
-            SlotRef::GunSlot if self.cursor.is_some_and(|c| c.item != PISTOL) => {}
+            SlotRef::GunSlot if self.cursor.is_some_and(|c| GunKind::of(c.item).is_none()) => {}
             SlotRef::GunMod(i) => self.click_gun_mod(i, shift),
             _ => {
                 if shift {
@@ -713,9 +717,14 @@ impl Game {
     fn tooltip_for(&mut self, st: &Stack) {
         let mut text = name(st.item);
         let max = max_damage(st.item);
-        if st.item == PISTOL {
+        if let Some(kind) = GunKind::of(st.item) {
             let clean = 100 - st.damage as u32 * 100 / max as u32;
-            text = format!("{text}  ({})", tf("gun.cleanliness", &[&clean]));
+            let size = kind.magazine_size(gun_mods(st));
+            text = format!(
+                "{text}  ({}, {})",
+                tf("gun.cleanliness", &[&clean]),
+                tf("gun.magazine", &[&gun_rounds(st), &size])
+            );
         } else if max > 0 && st.damage > 0 {
             text = format!(
                 "{text}  ({})",

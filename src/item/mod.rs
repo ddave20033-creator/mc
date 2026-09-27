@@ -4,10 +4,12 @@
 //! Block items share the block's id (0..=255); other items start at 256.
 
 pub mod crafting;
+pub mod firearm;
 pub mod inventory;
 pub mod mining;
 
 pub use crafting::*;
+pub use firearm::*;
 pub use mining::*;
 
 use crate::lang::is_hungarian;
@@ -48,7 +50,7 @@ pub const HALF_COOKED_MUTTON: ItemId = 279;
 /// Meat left on the fire too long.
 pub const BURNT_PORKCHOP: ItemId = 280;
 pub const BURNT_MUTTON: ItemId = 281;
-/// Pistol ammunition: one is used up per shot.
+/// Pistol ammunition (9 mm): one is used up per shot.
 pub const BULLET: ItemId = 282;
 /// The five pistol parts, in the order they go together at the gun station: frame (with the
 /// grip and trigger), barrel, recoil spring, slide and magazine.
@@ -57,18 +59,20 @@ pub const PISTOL_BARREL: ItemId = 284;
 pub const PISTOL_SPRING: ItemId = 285;
 pub const PISTOL_SLIDE: ItemId = 286;
 pub const PISTOL_MAGAZINE: ItemId = 287;
-pub const PISTOL_PARTS: [ItemId; 5] = [
-    PISTOL_FRAME,
-    PISTOL_BARREL,
-    PISTOL_SPRING,
-    PISTOL_SLIDE,
-    PISTOL_MAGAZINE,
-];
-/// Assembled at the gun station; shoots bullets with the right mouse button. Its `damage` is
-/// how dirty it is (one per shot); cleaned at the gun station.
+/// The guns (see `firearm`), put together at the gun station. A gun's `damage` is how dirty
+/// it is (one per shot; cleaned at the gun station), its `data` holds the rounds in its
+/// magazine and its attachments.
 pub const PISTOL: ItemId = 288;
-/// Shots until a pistol is too dirty to fire.
-pub const PISTOL_DIRT_MAX: u16 = 40;
+pub const DESERT_EAGLE: ItemId = 324;
+pub const M16: ItemId = 325;
+pub const SNIPER_RIFLE: ItemId = 326;
+pub const SHOTGUN: ItemId = 327;
+/// Ammunition of the other guns: 5.56 mm (M16), .50 AE (Desert Eagle), .50 BMG (sniper
+/// rifle) and 12 gauge shells (shotgun).
+pub const RIFLE_ROUND: ItemId = 320;
+pub const MAGNUM_ROUND: ItemId = 321;
+pub const BMG_ROUND: ItemId = 322;
+pub const SHOTGUN_SHELL: ItemId = 323;
 /// Pistol attachments, fitted at the gun station: a scope (zooms in far when aiming), a
 /// silencer (no muzzle flash), an extended magazine and a laser sight (steadier from the hip).
 pub const SCOPE: ItemId = 289;
@@ -76,7 +80,7 @@ pub const SILENCER: ItemId = 290;
 pub const EXTENDED_MAGAZINE: ItemId = 291;
 pub const LASER_SIGHT: ItemId = 292;
 
-/// A pistol's attachments as bits of `gun_mods`, with their items.
+/// A gun's attachments as bits of `gun_mods`, with their items.
 pub mod gun_mod {
     pub const SCOPE: u8 = 1;
     pub const SILENCER: u8 = 2;
@@ -90,27 +94,19 @@ pub const ATTACHMENTS: [(u8, ItemId); 4] = [
     (gun_mod::LASER, LASER_SIGHT),
 ];
 
-/// Rounds in a pistol's magazine (the low 6 bits of its data).
+/// Rounds in a gun's magazine (the low 6 bits of its data).
 pub fn gun_rounds(s: &Stack) -> u8 {
     (s.data & 0x3f) as u8
 }
 pub fn set_gun_rounds(s: &mut Stack, n: u8) {
     s.data = (s.data & !0x3f) | (n as u16 & 0x3f);
 }
-/// A pistol's attachments (`gun_mod` bits, in the data's high byte).
+/// A gun's attachments (`gun_mod` bits, in the data's high byte).
 pub fn gun_mods(s: &Stack) -> u8 {
     (s.data >> 8) as u8
 }
 pub fn set_gun_mods(s: &mut Stack, mods: u8) {
     s.data = (s.data & 0xff) | ((mods as u16) << 8);
-}
-/// Rounds a pistol's magazine holds.
-pub fn magazine_size(mods: u8) -> u8 {
-    if mods & gun_mod::EXTENDED_MAGAZINE != 0 {
-        20
-    } else {
-        12
-    }
 }
 /// Minecraft's shears durability.
 const SHEARS_DURABILITY: u16 = 238;
@@ -241,7 +237,8 @@ pub type Slot = Option<Stack>;
 pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
-        WATER_BUCKET | LAVA_BUCKET | SHEARS | PISTOL => 1,
+        WATER_BUCKET | LAVA_BUCKET | SHEARS => 1,
+        _ if GunKind::of(id).is_some() => 1,
         _ if id == BED as ItemId => 1,
         BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
         _ => 64,
@@ -316,8 +313,8 @@ pub fn max_damage(id: ItemId) -> u16 {
     if id == SHEARS {
         return SHEARS_DURABILITY;
     }
-    if id == PISTOL {
-        return PISTOL_DIRT_MAX;
+    if let Some(k) = GunKind::of(id) {
+        return k.stats().dirt_max;
     }
     tool_of(id).map(|(_, t)| t.durability()).unwrap_or(0)
 }
@@ -585,6 +582,50 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Pistol Magazine",
         "Pisztolytár",
         tex::PISTOL_PARTS + 4,
+    ),
+    (
+        DESERT_EAGLE,
+        "desert_eagle",
+        "Desert Eagle",
+        "Desert Eagle",
+        tex::GUN_ICONS,
+    ),
+    (M16, "m16", "M16 Rifle", "M16 gépkarabély", tex::GUN_ICONS + 1),
+    (
+        SNIPER_RIFLE,
+        "sniper_rifle",
+        "Sniper Rifle",
+        "Mesterlövész puska",
+        tex::GUN_ICONS + 2,
+    ),
+    (SHOTGUN, "shotgun", "Shotgun", "Sörétes puska", tex::GUN_ICONS + 3),
+    (
+        MAGNUM_ROUND,
+        "magnum_round",
+        ".50 AE Round",
+        ".50 AE töltény",
+        tex::AMMO_ICONS,
+    ),
+    (
+        RIFLE_ROUND,
+        "rifle_round",
+        "5.56 mm Round",
+        "5.56 mm-es töltény",
+        tex::AMMO_ICONS + 1,
+    ),
+    (
+        BMG_ROUND,
+        "bmg_round",
+        ".50 BMG Round",
+        ".50 BMG töltény",
+        tex::AMMO_ICONS + 2,
+    ),
+    (
+        SHOTGUN_SHELL,
+        "shotgun_shell",
+        "Shotgun Shell",
+        "Sörétes patron",
+        tex::AMMO_ICONS + 3,
     ),
     (SCOPE, "scope", "Scope", "Távcső", tex::GUN_ATTACHMENTS),
     (

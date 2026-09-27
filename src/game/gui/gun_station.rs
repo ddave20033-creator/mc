@@ -1,6 +1,6 @@
-//! The gun station's screen: a 3D view of the pistol on the left, the three modes on the
-//! right (putting a pistol together part by part, cleaning one and fitting attachments) and
-//! the inventory below.
+//! The gun station's screen: a 3D view of the gun on the left, the three modes on the right
+//! (putting a gun together part by part, cleaning one and fitting attachments) and the
+//! inventory below.
 
 use super::super::guns::BenchMode;
 use super::*;
@@ -17,15 +17,7 @@ const INSTALL_TIME: f32 = 0.45;
 /// Seconds of scrubbing that clean a completely dirty part.
 const SCRUB_TIME: f32 = 1.2;
 
-const PART_NAMES: [&str; PARTS] = [
-    "gun.part.frame",
-    "gun.part.barrel",
-    "gun.part.spring",
-    "gun.part.slide",
-    "gun.part.magazine",
-];
-
-/// A face of the pistol model as drawn in the view.
+/// A face of the gun model as drawn in the view.
 struct Face {
     quad: [Vec2; 4],
     depth: f32,
@@ -111,14 +103,14 @@ impl Game {
         let hovered_part = self.gun_view(px, py);
         match self.guns.bench.mode {
             BenchMode::Assemble => {
+                self.gun_selector(px, py);
                 self.parts_list(px, py);
                 if self.ui.pressed {
                     let bench = &self.guns.bench;
                     if bench.finished {
                         let (vx, vy) = at(VIEW.0, VIEW.1);
                         if self.ui.hit(vx, vy, VIEW.2 * s, VIEW.3 * s) {
-                            self.guns.bench.finished = false;
-                            self.guns.bench.installed = 0;
+                            self.guns.bench.reset_assembly();
                         }
                     } else if hovered_part == Some(bench.installed) {
                         self.install_next_part();
@@ -140,7 +132,7 @@ impl Game {
     }
 
     fn set_bench_mode(&mut self, mode: BenchMode) {
-        // Parts already put in go back when switching away from assembling (the pistol being
+        // Parts already put in go back when switching away from assembling (the gun being
         // cleaned or tuned stays).
         let parts = self.guns.bench.parts();
         self.guns.bench.reset_assembly();
@@ -151,16 +143,32 @@ impl Game {
         self.guns.bench.frame = None;
     }
 
-    /// Tuning: the pistol's slot and a slot for each attachment.
-    fn tune_column(&mut self, px: f32, py: f32, hovered: &mut Option<SlotRef>) {
+    /// The gun slot (cleaning and tuning) with the gun's name beside it.
+    fn gun_slot(&mut self, x0: f32, y0: f32, hovered: &mut Option<SlotRef>) {
         let s = self.ui.s;
-        let (x0, y0) = (px + COLUMN.0 * s, py + 90.0 * s);
         if self.draw_slot(x0, y0, self.guns.bench.gun) {
             *hovered = Some(SlotRef::GunSlot);
         }
-        self.label(t("gun.pistol"), x0 + 22.0 * s, y0 + 5.5 * s);
+        let label = match self.guns.bench.gun {
+            Some(g) => name(g.item),
+            None => t("gun.gun").to_string(),
+        };
+        let fs = (s * 0.75).round().max(1.0);
+        let th = self.theme();
+        self.ui
+            .text(&label, x0 + 21.0 * s, y0 + 6.0 * s, fs, th.label, th.label_shadow);
+    }
+
+    /// Tuning: the gun's slot and a slot for each attachment (crossed out where it does not
+    /// fit, like a scope on a gun that has one built in).
+    fn tune_column(&mut self, px: f32, py: f32, hovered: &mut Option<SlotRef>) {
+        let s = self.ui.s;
+        let (x0, y0) = (px + COLUMN.0 * s, py + 90.0 * s);
+        self.gun_slot(x0, y0, hovered);
         self.label(t("gun.attachments"), x0, y0 + 24.0 * s);
-        let mods = self.guns.bench.gun.map_or(0, |g| gun_mods(&g));
+        let gun = self.guns.bench.gun;
+        let mods = gun.map_or(0, |g| gun_mods(&g));
+        let kind = gun.and_then(|g| GunKind::of(g.item));
         let names = ["gun.mod.scope", "gun.mod.silencer", "gun.mod.extended", "gun.mod.laser"];
         for (i, (bit, item)) in ATTACHMENTS.into_iter().enumerate() {
             let (x, y) = (x0 + i as f32 * 21.0 * s, y0 + 34.0 * s);
@@ -169,6 +177,15 @@ impl Game {
             if self.draw_slot(x, y, content) {
                 *hovered = Some(SlotRef::GunMod(i));
                 self.ui.set_tooltip(t(names[i]));
+            }
+            if kind.is_some_and(|k| !k.fits(bit)) {
+                let red = rgba(220, 70, 60, 220);
+                for d in 0..14 {
+                    let o = 2.0 + d as f32;
+                    self.ui.solid(x + o * s, y + o * s, 2.0 * s, 2.0 * s, red);
+                    self.ui.solid(x + (15.0 - d as f32) * s, y + o * s, 2.0 * s, 2.0 * s, red);
+                }
+                continue;
             }
             if !fitted {
                 // A faint picture of what goes there.
@@ -188,6 +205,9 @@ impl Game {
         let Some(mut gun) = self.guns.bench.gun else {
             return;
         };
+        let Some(kind) = GunKind::of(gun.item).filter(|k| k.fits(bit)) else {
+            return;
+        };
         let mods = gun_mods(&gun);
         if mods & bit != 0 {
             if self.cursor.is_some() && !shift {
@@ -195,11 +215,11 @@ impl Game {
             }
             set_gun_mods(&mut gun, mods & !bit);
             // Off with the extended magazine: the rounds that no longer fit come out.
-            let size = magazine_size(mods & !bit);
+            let size = kind.magazine_size(mods & !bit);
             let extra = gun_rounds(&gun).saturating_sub(size);
             if extra > 0 {
                 set_gun_rounds(&mut gun, size);
-                self.give(Stack::new(BULLET, extra));
+                self.give(Stack::new(kind.ammo(), extra));
             }
             self.guns.bench.gun = Some(gun);
             if shift {
@@ -214,23 +234,48 @@ impl Game {
         }
     }
 
-    /// Puts the next part in (from the inventory; free in creative). The last one finishes
-    /// the pistol, which goes into the inventory.
+    /// Whether the player has what a part is made of (its item, or its materials).
+    fn can_make(&self, part: &crate::item::Part) -> bool {
+        self.creative()
+            || match part.item {
+                Some(item) => self.inventory.count(item) > 0,
+                None => part
+                    .cost
+                    .iter()
+                    .all(|&(item, n)| self.inventory.count(item) >= n as u32),
+            }
+    }
+
+    /// Puts the next part in: the pistol's from its part item, the others made from their
+    /// materials (free in creative). The last one finishes the gun, which goes into the
+    /// inventory.
     fn install_next_part(&mut self) {
         let n = self.guns.bench.installed;
+        let kind = self.guns.bench.kind;
         let since = self.time - self.guns.bench.installed_at;
         if n >= PARTS || since < INSTALL_TIME {
             return;
         }
-        let item = PISTOL_PARTS[n];
-        let taken = if self.creative() {
-            false
-        } else if self.inventory.remove_one(item) {
-            true
-        } else {
+        let part = &kind.parts()[n];
+        if !self.can_make(part) {
             self.guns.bench.missing_at = self.time;
             return;
-        };
+        }
+        let taken = !self.creative();
+        if taken {
+            match part.item {
+                Some(item) => {
+                    self.inventory.remove_one(item);
+                }
+                None => {
+                    for &(item, count) in part.cost {
+                        for _ in 0..count {
+                            self.inventory.remove_one(item);
+                        }
+                    }
+                }
+            }
+        }
         let bench = &mut self.guns.bench;
         bench.taken[n] = taken;
         bench.installed = n + 1;
@@ -238,7 +283,7 @@ impl Game {
         if bench.installed == PARTS {
             bench.finished = true;
             bench.taken = [false; PARTS];
-            self.give(Stack::one(PISTOL));
+            self.give(Stack::one(kind.item()));
         }
     }
 
@@ -252,11 +297,12 @@ impl Game {
             bench.dirt_of = None;
             return;
         };
-        if bench.dirt_of != Some(gun.damage) {
-            // A pistol was put in: all its parts are as dirty as it is.
-            let d = gun.damage as f32 / PISTOL_DIRT_MAX as f32;
+        let dirt_max = max_damage(gun.item).max(1);
+        if bench.dirt_of != Some((gun.item, gun.damage)) {
+            // A gun was put in: all its parts are as dirty as it is.
+            let d = gun.damage as f32 / dirt_max as f32;
             bench.dirt = [d; PARTS];
-            bench.dirt_of = Some(gun.damage);
+            bench.dirt_of = Some((gun.item, gun.damage));
         }
         let Some(p) = part.filter(|_| self.left_down) else {
             return;
@@ -266,18 +312,18 @@ impl Game {
         }
         bench.dirt[p] = (bench.dirt[p] - dt / SCRUB_TIME).max(0.0);
         let mean = bench.dirt.iter().sum::<f32>() / PARTS as f32;
-        let damage = (mean * PISTOL_DIRT_MAX as f32).ceil() as u16;
+        let damage = (mean * dirt_max as f32).ceil() as u16;
         if let Some(g) = &mut bench.gun {
             g.damage = damage;
         }
-        bench.dirt_of = Some(damage);
+        bench.dirt_of = Some((gun.item, damage));
         if bench.bubbles.last().is_none_or(|b| time - b.1 > 0.05) {
             let jitter = Vec2::new(self.rng.next() - 0.5, self.rng.next() - 0.5) * 10.0 * self.ui.s;
             bench.bubbles.push((self.ui.mouse + jitter, time));
         }
     }
 
-    /// The 3D view of the pistol. Returns the part under the mouse.
+    /// The 3D view of the gun. Returns the part under the mouse.
     fn gun_view(&mut self, px: f32, py: f32) -> Option<usize> {
         let s = self.ui.s;
         let (vx, vy, vw, vh) = (px + VIEW.0 * s, py + VIEW.1 * s, VIEW.2 * s, VIEW.3 * s);
@@ -304,8 +350,13 @@ impl Game {
         let sway = if bench.turned { 0.0 } else { (time * 0.6).sin() * 0.45 };
         let rot = Mat3::from_rotation_x(bench.pitch) * Mat3::from_rotation_y(bench.yaw + sway);
 
-        // Where each part is and how it is tinted (None: not shown).
+        // Which gun is shown: the one being put together, or the one on the bench.
         let mode = bench.mode;
+        let kind = match (mode, bench.gun.and_then(|g| GunKind::of(g.item))) {
+            (BenchMode::Assemble, _) | (_, None) => bench.kind,
+            (_, Some(k)) => k,
+        };
+        // Where each part is and how it is tinted (None: not shown).
         let creative = self.game_mode == GameMode::Creative;
         let placement = |part: usize| -> Option<(Vec3, [u8; 3])> {
             match mode {
@@ -317,9 +368,14 @@ impl Game {
                         } else {
                             0.0
                         };
-                        Some((gun::assembly_offset(part) * k, [255; 3]))
+                        Some((gun::assembly_offset(kind, part) * k, [255; 3]))
                     } else if part == n && !bench.finished {
-                        let have = creative || self.inventory.count(PISTOL_PARTS[part]) > 0;
+                        let p = &kind.parts()[part];
+                        let have = creative
+                            || match p.item {
+                                Some(item) => self.inventory.count(item) > 0,
+                                None => p.cost.iter().all(|&(i, c)| self.inventory.count(i) >= c as u32),
+                            };
                         let bob = Vec3::Y * (time * 3.0).sin() * 0.3;
                         let tint = if have {
                             let glow = 0.5 + 0.5 * (time * 5.0).sin();
@@ -327,7 +383,7 @@ impl Game {
                         } else {
                             [80, 80, 90]
                         };
-                        Some((gun::assembly_offset(part) + bob, tint))
+                        Some((gun::assembly_offset(kind, part) + bob, tint))
                     } else {
                         None
                     }
@@ -335,23 +391,23 @@ impl Game {
                 BenchMode::Clean => {
                     bench.gun?;
                     let dirt = bench.dirt[part];
-                    Some((gun::exploded_offset(part), lerp_rgb([255; 3], [200, 160, 115], dirt)))
+                    Some((gun::exploded_offset(kind, part), lerp_rgb([255; 3], [200, 160, 115], dirt)))
                 }
                 BenchMode::Tune => bench.gun.map(|_| (Vec3::ZERO, [255; 3])),
             }
         };
-        // The pistol on the bench shows its attachments (a new one has none yet).
-        let mods = match mode {
+        // The gun on the bench shows its attachments (a new one has none yet).
+        let mods = kind.shown_mods(match mode {
             BenchMode::Assemble => 0,
             _ => bench.gun.map_or(0, |g| gun_mods(&g)),
-        };
+        });
 
         // Project every visible face; the view frames what is shown and eases toward it.
         let light = Vec3::new(-0.35, 0.6, 0.75).normalize();
         let mut faces: Vec<Face> = Vec::new();
         let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
         let shown: [bool; PARTS] = std::array::from_fn(|p| placement(p).is_some());
-        for b in gun::boxes().iter().filter(|b| b.shown(mods)) {
+        for b in gun::boxes(kind).iter().filter(|b| b.shown(mods)) {
             let Some((offset, tint)) = placement(b.part) else {
                 continue;
             };
@@ -455,8 +511,9 @@ impl Game {
             ),
             BenchMode::Assemble => {
                 let n = bench.installed.min(PARTS - 1);
-                let part = t(PART_NAMES[n]);
-                if creative || self.inventory.count(PISTOL_PARTS[n]) > 0 {
+                let p = &bench.kind.parts()[n];
+                let part = t(p.name);
+                if self.can_make(p) {
                     (tf("gun.next", &[&part]), rgba(230, 230, 235, 255))
                 } else {
                     (tf("gun.missing", &[&part]), rgba(255, 130, 110, 255))
@@ -497,71 +554,111 @@ impl Game {
         hovered
     }
 
-    /// Assembling: the parts in order, with how many of each you have.
+    /// Assembling: which gun, with arrows to pick another (this returns what was put in).
+    fn gun_selector(&mut self, px: f32, py: f32) {
+        let s = self.ui.s;
+        let (x0, y0) = (px + COLUMN.0 * s, py + 88.0 * s);
+        let (bw, bh) = (10.0 * s, 10.0 * s);
+        let current = GUN_KINDS.iter().position(|&k| k == self.guns.bench.kind).unwrap_or(0);
+        let mut next = None;
+        if self.ui.button("<", x0, y0, bw, bh, true) {
+            next = Some((current + GUN_KINDS.len() - 1) % GUN_KINDS.len());
+        }
+        if self.ui.button(">", x0 + (COLUMN.1 - 10.0) * s, y0, bw, bh, true) {
+            next = Some((current + 1) % GUN_KINDS.len());
+        }
+        let fs = (s * 0.75).round().max(1.0);
+        let title = name(self.guns.bench.kind.item());
+        let th = self.theme();
+        self.ui.text_centered(
+            &title,
+            x0 + COLUMN.1 * 0.5 * s,
+            y0 + 2.5 * s,
+            fs,
+            th.label,
+            th.label_shadow,
+        );
+        if let Some(i) = next {
+            let parts = self.guns.bench.parts();
+            self.guns.bench.reset_assembly();
+            for st in parts {
+                self.give(st);
+            }
+            self.guns.bench.kind = GUN_KINDS[i];
+            self.guns.bench.frame = None;
+        }
+    }
+
+    /// Assembling: the parts in order, with what each takes (the pistol's parts are items of
+    /// their own, the others are made from materials).
     fn parts_list(&mut self, px: f32, py: f32) {
         let s = self.ui.s;
         let fs = (s * 0.75).round().max(1.0);
-        let (x0, y0) = (px + COLUMN.0 * s, py + 88.0 * s);
-        self.label(t("gun.parts"), x0, y0);
+        let (x0, y0) = (px + COLUMN.0 * s, py + 101.0 * s);
         let bench = &self.guns.bench;
-        let (installed, finished, missing_at) = (bench.installed, bench.finished, bench.missing_at);
+        let (kind, installed, finished, missing_at) =
+            (bench.kind, bench.installed, bench.finished, bench.missing_at);
         let creative = self.creative();
-        for (i, &item) in PISTOL_PARTS.iter().enumerate() {
-            let y = y0 + (9.0 + i as f32 * 11.0) * s;
+        for (i, part) in kind.parts().iter().enumerate() {
+            let y = y0 + i as f32 * 10.0 * s;
             let done = i < installed || finished;
             let current = i == installed && !finished;
-            let have = self.inventory.count(item);
+            let ready = self.can_make(part);
             if current {
                 self.ui
-                    .solid(x0 - s, y - s, COLUMN.1 * s, 11.0 * s, rgba(255, 255, 255, 40));
+                    .solid(x0 - s, y - s, COLUMN.1 * s, 10.0 * s, rgba(255, 255, 255, 40));
             }
-            draw_stack(&mut self.ui, x0, y, 9.0 * s, &Stack::one(item));
             let flash = current && self.time - missing_at < 0.6;
             let color = if done {
                 rgba(120, 230, 140, 255)
-            } else if flash || (current && have == 0 && !creative) {
+            } else if flash || (current && !ready) {
                 rgba(255, 120, 100, 255)
             } else {
                 self.theme().label
             };
-            let name = t(PART_NAMES[i]);
-            self.ui
-                .text(name, x0 + 12.0 * s, y + 1.5 * s, fs, color, self.theme().label_shadow);
-            let right = if done {
-                "OK".to_string()
-            } else if creative {
-                String::new()
-            } else {
-                format!("x{have}")
-            };
-            let rw = self.ui.text_width(&right, fs);
-            self.ui.text(
-                &right,
-                x0 + (COLUMN.1 - 3.0) * s - rw,
-                y + 1.5 * s,
-                fs,
-                color,
-                self.theme().label_shadow,
-            );
+            let shadow = self.theme().label_shadow;
+            self.ui.text(t(part.name), x0, y + 1.0 * s, fs, color, shadow);
+            // What it takes, right-aligned: the part item, or the materials with their counts.
+            let mut x = x0 + (COLUMN.1 - 2.0) * s;
+            if done {
+                let w = self.ui.text_width("OK", fs);
+                self.ui.text("OK", x - w, y + 1.0 * s, fs, color, shadow);
+            } else if !creative {
+                let needs: Vec<(ItemId, u8)> = match part.item {
+                    Some(item) => vec![(item, 1)],
+                    None => part.cost.to_vec(),
+                };
+                for &(item, n) in needs.iter().rev() {
+                    let have = self.inventory.count(item) >= n as u32;
+                    let num = format!("{n}");
+                    let w = self.ui.text_width(&num, fs);
+                    x -= w;
+                    let c = if have { color } else { rgba(255, 120, 100, 255) };
+                    self.ui.text(&num, x, y + 1.0 * s, fs, c, shadow);
+                    x -= 9.0 * s;
+                    draw_stack(&mut self.ui, x, y - 0.5 * s, 8.0 * s, &Stack::one(item));
+                    if self.ui.hit(x, y, 8.0 * s, 8.0 * s) {
+                        self.ui.set_tooltip(&name(item));
+                    }
+                    x -= 2.0 * s;
+                }
+            }
             // Clicking the current part's line puts it in too.
-            if current && self.ui.pressed && self.ui.hit(x0 - s, y - s, COLUMN.1 * s, 11.0 * s) {
+            if current && self.ui.pressed && self.ui.hit(x0 - s, y - s, COLUMN.1 * s, 10.0 * s) {
                 self.install_next_part();
             }
         }
     }
 
-    /// Cleaning: the pistol's slot and how clean it is.
+    /// Cleaning: the gun's slot and how clean it is.
     fn clean_column(&mut self, px: f32, py: f32, hovered: &mut Option<SlotRef>) {
         let s = self.ui.s;
         let (x0, y0) = (px + COLUMN.0 * s, py + 90.0 * s);
-        if self.draw_slot(x0, y0, self.guns.bench.gun) {
-            *hovered = Some(SlotRef::GunSlot);
-        }
-        self.label(t("gun.pistol"), x0 + 22.0 * s, y0 + 5.5 * s);
+        self.gun_slot(x0, y0, hovered);
         let Some(g) = self.guns.bench.gun else {
             return;
         };
-        let clean = 1.0 - g.damage as f32 / PISTOL_DIRT_MAX as f32;
+        let clean = 1.0 - g.damage as f32 / max_damage(g.item).max(1) as f32;
         let (bx, by, bw) = (x0, y0 + 26.0 * s, COLUMN.1 * s - 2.0 * s);
         self.ui.solid(bx, by, bw, 6.0 * s, rgba(0, 0, 0, 255));
         let color = [(1.0 - clean) * 2.0, clean * 2.0, 0.2, 1.0].map(|v: f32| v.min(1.0));

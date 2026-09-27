@@ -827,6 +827,13 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
             })
         }
         _ if (tex::PISTOL..tex::GUN_GLASS).contains(&l) => gun_icon(l, x, y),
+        _ if (tex::GUN_ICONS..tex::AMMO_ICONS).contains(&l) => {
+            // Drawn from the gun's 3D model.
+            let kind = crate::item::GUN_KINDS[(l - tex::GUN_ICONS) as usize + 1];
+            let p = crate::model::gun::icon(kind)[y as usize * TILE + x as usize];
+            (p[3] > 0).then_some(p)
+        }
+        _ if (tex::AMMO_ICONS..tex::AMMO_ICONS + 4).contains(&l) => ammo_icon(l - tex::AMMO_ICONS, x, y),
         _ => Some(tool_icon(l, x, y)).filter(|p| p[3] > 0),
     };
     out.unwrap_or([0, 0, 0, 0])
@@ -1576,11 +1583,58 @@ fn gun_surface(l: u32, x: i32, y: i32) -> [u8; 4] {
             let shine = ((fx - fy).abs() < 14.0) as i32 as f32 * 0.5;
             ([60.0, 110.0, 170.0], 0.8 + shine + 0.2 * (1.0 - fy / 128.0))
         }
+        // Walnut: dark grain lines running along the stock.
+        tex::GUN_WOOD => {
+            let grain = vn2(l, x, y, 64, 3, 623);
+            let line = ((grain * 9.0).fract() - 0.5).abs() < 0.08;
+            ([150.0, 98.0, 54.0], 0.85 + 0.25 * grain - if line { 0.18 } else { 0.0 })
+        }
         tex::GUN_BLUED => (GUN_BLUED_C, brushed(l, x, y, 620)),
         tex::GUN_STEEL => (GUN_STEEL_C, brushed(l, x, y, 621)),
         _ => (GUN_POLYMER_C, 0.82 + 0.3 * grain(l, x, y, 622)),
     };
     col(c, v * edge, 255)
+}
+
+/// Ammunition icons: a .50 AE round (short and fat), a 5.56 mm round (long and slim), a
+/// .50 BMG round (very long, black tip) and a red 12 gauge shell with a brass head.
+fn ammo_icon(i: u32, x: i32, y: i32) -> Option<[u8; 4]> {
+    let (fx, fy) = (d(x), d(y));
+    let round = |a: (f32, f32), b: (f32, f32), r: f32| {
+        let c = cartridge(fx, fy, a, b, r)?;
+        shape(x, y, c, |fx, fy| cartridge(fx, fy, a, b, r).is_some())
+    };
+    match i {
+        0 => round((10.0, 23.0), (22.0, 10.0), 4.0),
+        1 => round((8.0, 26.0), (25.0, 6.0), 2.2),
+        2 => {
+            let (a, b) = ((5.0, 28.0), (28.0, 4.0));
+            let p = round(a, b, 3.0)?;
+            // The black armour-piercing tip.
+            let t = ((fx - a.0) * (b.0 - a.0) + (fy - a.1) * (b.1 - a.1)) / ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2));
+            Some(if t > 0.86 && p[0] > 60 { [40, 40, 44, 255] } else { p })
+        }
+        _ => {
+            // A capsule from (9,24) to (23,9): the head is brass, the hull red plastic.
+            let (a, b) = ((9.0, 24.0), (23.0, 9.0));
+            let inside = |fx: f32, fy: f32| {
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let len2 = dx * dx + dy * dy;
+                let t = ((fx - a.0) * dx + (fy - a.1) * dy) / len2;
+                let dist = ((fx - a.0 - t * dx).powi(2) + (fy - a.1 - t * dy).powi(2)).sqrt();
+                (0.0..=1.0).contains(&t) && dist < 4.2
+            };
+            let t = ((fx - a.0) * (b.0 - a.0) + (fy - a.1) * (b.1 - a.1)) / ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2));
+            let c = if t < 0.28 {
+                BRASS
+            } else if t > 0.95 {
+                [150.0, 30.0, 28.0]
+            } else {
+                [205.0, 42.0, 36.0]
+            };
+            shape(x, y, c, inside)
+        }
+    }
 }
 
 /// Pistol, part and bullet icons (the pistol faces right).
@@ -2214,7 +2268,9 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         tex::GUN_STATION_TOP | tex::GUN_STATION_SIDE | tex::GUN_STATION_BOTTOM => {
             gun_station(l, x, y)
         }
-        tex::GUN_BLUED | tex::GUN_STEEL | tex::GUN_POLYMER | tex::GUN_GLASS => gun_surface(l, x, y),
+        tex::GUN_BLUED | tex::GUN_STEEL | tex::GUN_POLYMER | tex::GUN_GLASS | tex::GUN_WOOD => {
+            gun_surface(l, x, y)
+        }
         // Filled from the packs' animations, or copies of the still texture.
         _ if (tex::WATER_ANIM..tex::GUN_STATION_TOP).contains(&l) => [0, 0, 0, 0],
         // Wool: soft white fibres. The sheep atlases are plain: skin and a white coat.

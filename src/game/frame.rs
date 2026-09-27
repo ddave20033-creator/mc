@@ -614,7 +614,7 @@ impl Game {
         // A lantern is always held by the first-person hand (hanging with the body shown), and
         // so is a pistol (the body's arm would point it at the ground when looking down).
         let lantern = self.held() == LANTERN as ItemId;
-        let pistol = self.held() == crate::item::PISTOL;
+        let pistol = self.holding_gun();
         let down = -self.pitch.to_degrees();
         let lower = &mut self.hand.lower;
         if !fp_body || torch || lantern || pistol || down <= 15.0 {

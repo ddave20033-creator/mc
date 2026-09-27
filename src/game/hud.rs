@@ -348,13 +348,14 @@ impl Game {
         if self.hide_hud && self.screen == Screen::Playing {
             return;
         }
+        let gun = self.holding_gun();
         {
             let ui = &mut self.ui;
 
-            // Crosshair (a pistol draws its own)
+            // Crosshair (a gun draws its own)
             if self.screen == Screen::Playing
                 && self.camera.mode != 2
-                && self.inventory.slots[self.hotbar_slot].is_none_or(|s| s.item != item::PISTOL)
+                && !gun
             {
                 let center = Vec2::new((w * 0.5).round(), (h * 0.5).round());
                 // Keep the aiming circle small even when the GUI scale is high.

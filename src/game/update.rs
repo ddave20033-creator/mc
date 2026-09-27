@@ -132,7 +132,7 @@ impl Game {
         // A sword does not break blocks at all (it only fights); with a pistol the left mouse
         // button shoots instead (one shot per click, no hitting).
         let sword = is_sword(self.held());
-        let gun = self.held() == PISTOL;
+        let gun = self.holding_gun();
         if sword || gun {
             self.mining = None;
         }
@@ -192,7 +192,9 @@ impl Game {
             }
             self.hand.swing();
         }
-        if control && gun && self.left_pressed {
+        // One shot per click; an automatic gun keeps firing while the button is held.
+        let auto = GunKind::of(self.held()).is_some_and(|k| k.stats().auto);
+        if control && gun && (self.left_pressed || (auto && self.left_down)) {
             self.shoot();
         }
         if let Some(p) = breaking {

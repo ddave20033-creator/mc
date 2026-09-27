@@ -62,8 +62,8 @@ impl Game {
 
     pub(super) fn use_item(&mut self) {
         let held = self.held();
-        // With a pistol the right mouse button aims: no opening or placing with it.
-        if held == PISTOL {
+        // With a gun the right mouse button aims: no opening or placing with it.
+        if GunKind::of(held).is_some() {
             return;
         }
         let sneaking = self.sneaking();

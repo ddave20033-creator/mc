@@ -15,7 +15,32 @@ const MAX_CASES: usize = 64;
 const CASE_HALF: Vec3 = Vec3::new(0.032, 0.013, 0.013);
 const BRASS: [u8; 3] = [236, 182, 72];
 
+/// What kind of case: sizes and colours differ.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CaseKind {
+    Pistol,
+    Magnum,
+    Rifle,
+    Bmg,
+    /// A shotgun shell's red plastic hull.
+    Shell,
+}
+
+impl CaseKind {
+    /// Half its size (a case lies along x) and its colour.
+    fn look(self) -> (Vec3, [u8; 3]) {
+        match self {
+            CaseKind::Pistol => (CASE_HALF, BRASS),
+            CaseKind::Magnum => (Vec3::new(0.036, 0.017, 0.017), BRASS),
+            CaseKind::Rifle => (Vec3::new(0.05, 0.012, 0.012), BRASS),
+            CaseKind::Bmg => (Vec3::new(0.08, 0.02, 0.02), BRASS),
+            CaseKind::Shell => (Vec3::new(0.05, 0.022, 0.022), [200, 40, 36]),
+        }
+    }
+}
+
 struct Case {
+    kind: CaseKind,
     pos: Vec3,
     vel: Vec3,
     rot: Quat,
@@ -32,11 +57,12 @@ pub struct Cases {
 
 impl Cases {
     /// A spent case thrown out at `pos` with velocity `vel`, tumbling by `spin`.
-    pub fn eject(&mut self, pos: Vec3, vel: Vec3, spin: Vec3) {
+    pub fn eject(&mut self, pos: Vec3, vel: Vec3, spin: Vec3, kind: CaseKind) {
         if self.list.len() >= MAX_CASES {
             self.list.remove(0);
         }
         self.list.push(Case {
+            kind,
             pos,
             vel,
             rot: Quat::IDENTITY,
@@ -59,7 +85,7 @@ impl Cases {
             c.age += dt;
             if c.resting {
                 // The block under it was broken: fall again.
-                if !solid(c.pos - Vec3::Y * (CASE_HALF.y + 0.02)) {
+                if !solid(c.pos - Vec3::Y * (c.kind.look().0.y + 0.02)) {
                     c.resting = false;
                 }
                 continue;
@@ -75,7 +101,7 @@ impl Cases {
                 }
                 if axis == 1 && c.vel.y < 0.0 {
                     // Landed: bounce a little, lose speed, spin slower.
-                    p.y = q.y.floor() + 1.0 + CASE_HALF.y;
+                    p.y = q.y.floor() + 1.0 + c.kind.look().0.y;
                     c.vel.y *= -0.3;
                     c.vel.x *= 0.55;
                     c.vel.z *= 0.55;
@@ -105,16 +131,15 @@ impl Cases {
         for c in &self.list {
             let (sky, blk) = world.light_estimate(c.pos + Vec3::Y * 0.1);
             let m = Mat4::from_rotation_translation(c.rot, c.pos);
-            emit_box(
-                out,
-                m,
-                -CASE_HALF,
-                CASE_HALF,
-                [tex::WOOL; 6],
-                [BRASS; 6],
-                vertex_light(sky, blk),
-                flags::ENTITY,
-            );
+            let (half, tint) = c.kind.look();
+            let light = vertex_light(sky, blk);
+            emit_box(out, m, -half, half, [tex::WOOL; 6], [tint; 6], light, flags::ENTITY);
+            if c.kind == CaseKind::Shell {
+                // The shell's brass head.
+                let head = Vec3::new(-half.x, -half.y - 0.002, -half.z - 0.002);
+                let top = Vec3::new(-half.x * 0.5, half.y + 0.002, half.z + 0.002);
+                emit_box(out, m, head, top, [tex::WOOL; 6], [BRASS; 6], light, flags::ENTITY);
+            }
         }
     }
 }
@@ -171,7 +196,12 @@ mod tests {
         }
         world.chunks.insert((0, 0), Arc::new(chunk));
         let mut cases = Cases::default();
-        cases.eject(Vec3::new(8.0, 2.5, 8.0), Vec3::new(2.0, 2.5, 0.3), Vec3::new(0.0, 6.0, 20.0));
+        cases.eject(
+            Vec3::new(8.0, 2.5, 8.0),
+            Vec3::new(2.0, 2.5, 0.3),
+            Vec3::new(0.0, 6.0, 20.0),
+            CaseKind::Pistol,
+        );
         for _ in 0..300 {
             cases.update(1.0 / 60.0, &world);
         }

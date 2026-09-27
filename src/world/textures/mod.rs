@@ -199,7 +199,13 @@ pub mod tex {
     pub const GUN_ATTACHMENTS: u32 = BULLET + 1;
     /// The scope's glass (the model's lenses).
     pub const GUN_GLASS: u32 = GUN_ATTACHMENTS + 4;
-    pub const LAYERS: usize = (GUN_GLASS + 1) as usize;
+    /// Wood of the gun stocks.
+    pub const GUN_WOOD: u32 = GUN_GLASS + 1;
+    /// Icons of the Desert Eagle, the M16, the sniper rifle and the shotgun (drawn from their
+    /// 3D models), and of their ammunition (.50 AE, 5.56 mm, .50 BMG, 12 gauge).
+    pub const GUN_ICONS: u32 = GUN_WOOD + 1;
+    pub const AMMO_ICONS: u32 = GUN_ICONS + 4;
+    pub const LAYERS: usize = (AMMO_ICONS + 4) as usize;
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -278,6 +284,7 @@ fn is_item_icon(l: u32) -> bool {
         || (tex::HALF_COOKED_PORKCHOP..=tex::BURNT_MUTTON).contains(&l)
         || (tex::GRILL_COOKED_PORKCHOP..=tex::GRILL_BURNT_MUTTON).contains(&l)
         || (tex::PISTOL..tex::GUN_GLASS).contains(&l)
+        || (tex::GUN_ICONS..tex::AMMO_ICONS + 4).contains(&l)
 }
 
 fn is_crack(l: u32) -> bool {

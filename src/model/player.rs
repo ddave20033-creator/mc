@@ -168,14 +168,17 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
             -(0.1 + head_yaw).clamp(-0.2, 0.2),
             0.1,
         );
-    } else if p.held == crate::item::PISTOL && !swinging && !p.blocking {
-        // Aiming: the arm points where the head looks.
+    } else if let (Some(kind), false, false) =
+        (crate::item::GunKind::of(p.held), swinging, p.blocking)
+    {
+        // Aiming: the arm points where the head looks; with a long gun the left hand reaches
+        // across to hold it too.
         let head_yaw = p.head_yaw - p.body_yaw;
-        l.right_arm = Vec3::new(
-            (PI / 2.0 + p.pitch).clamp(0.2, 3.0),
-            -(0.1 + head_yaw).clamp(-0.7, 0.7),
-            0.0,
-        );
+        let up = (PI / 2.0 + p.pitch).clamp(0.2, 3.0);
+        l.right_arm = Vec3::new(up, -(0.1 + head_yaw).clamp(-0.7, 0.7), 0.0);
+        if super::gun::spec(kind).support.is_some() {
+            l.left_arm = Vec3::new(up, -(head_yaw - 0.55).clamp(-0.2, 1.1), 0.0);
+        }
     }
     if p.first_person && !held_up(p.held) {
         // First Person Model's dynamic hands: just past the angle where the body's arms take
@@ -283,8 +286,8 @@ pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u
         let dir = p.lantern.unwrap_or(Vec3::NEG_Y);
         let style = crate::model::lantern::ON_MODEL;
         crate::model::lantern::emit_held_lantern(out, style, pivot, dir, p.body_yaw, light, fl);
-    } else if p.held == crate::item::PISTOL && show_right {
-        super::gun::emit_pistol(out, right * super::gun::in_arm(), light, fl, p.gun_mods);
+    } else if let (Some(kind), true) = (crate::item::GunKind::of(p.held), show_right) {
+        super::gun::emit_gun(out, kind, right * super::gun::in_arm(kind), light, fl, p.gun_mods);
     } else if p.held != NONE && show_right {
         emit_held(out, held_item(p, right), p.held, light, fl);
     }
