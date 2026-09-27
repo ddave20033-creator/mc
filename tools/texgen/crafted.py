@@ -24,6 +24,8 @@ BRICK = Ramp("733f31", "7c4536", "8f503f", "9b5643", "b1624d", "c66851")
 MORTAR = Ramp("8b6e67", "a2867d", "a9948d")
 IRON = Ramp("b1b0b0", "b9b9b9", "c1c1c1", "d1cfcf", "d6d6d6", "dcdcdc", "e0e0e0", "e6e6e6",
             "eaeaea", "ececec", "f2f2f2")
+COPPER = Ramp("9c4e2e", "a85634", "b45f3a", "c26b44", "c9724a", "d07b52", "d6845a", "dc8f64",
+              "e39a70", "e8a57c", "f0b890")
 GOLD = Ramp("cc8e27", "d39632", "f9bd23", "f5cc27", "ffd83e", "fee048", "ffec4f", "fffd90",
             "feffbd")
 DIAMOND = Ramp("0ebabd", "15c2c6", "3de0e5", "4bede6", "65f5e3", "70fbf0", "9efeeb", "d5fff6",
@@ -519,6 +521,15 @@ def paint_furnace_front_on(seed):
 
 
 def paint_iron_block(seed):
+    return metal_plates(seed, IRON)
+
+
+def paint_copper_block(seed):
+    return metal_plates(seed, COPPER)
+
+
+def metal_plates(seed, IRON):
+    """Iron-style storage block in the colors of `IRON` (a Ramp)."""
     yy, xx = ints()
     t = np.full((S, S), level(IRON, 7), np.float32)
     t = np.where(pix(seed, 2) > 0.9, level(IRON, 6), t)
@@ -1047,6 +1058,7 @@ TEXTURES = {
     "block/furnace_side": paint_furnace_side,
     "block/furnace_top": paint_furnace_top,
     "block/iron_block": paint_iron_block,
+    "block/copper_block": paint_copper_block,
     "block/gold_block": paint_gold_block,
     "block/diamond_block": paint_diamond_block,
     "block/coal_block": paint_coal_block,

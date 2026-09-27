@@ -28,7 +28,7 @@ import importlib  # noqa: E402
 
 import common  # noqa: E402
 
-MODULES = ["terrain", "crafted", "items", "entities"]
+MODULES = ["terrain", "crafted", "items", "entities", "furnaces"]
 MODULE_OF: dict[str, str] = {}
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,7 +43,7 @@ REQUIRED: list[tuple[str, tuple[int, int] | None]] = [
     *[(f"block/{n}", None) for n in [
         "grass_block_top", "grass_block_side", "grass_block_side_overlay", "grass_block_snow",
         "dirt", "stone", "sand", "gravel", "clay", "snow", "ice", "bedrock", "obsidian",
-        "sandstone", "sandstone_top", "cobblestone", "coal_ore", "iron_ore", "gold_ore",
+        "sandstone", "sandstone_top", "cobblestone", "coal_ore", "iron_ore", "copper_ore", "gold_ore",
         "diamond_ore", "glowstone", "water_still", "lava_still",
         "oak_log", "oak_log_top", "spruce_log", "spruce_log_top", "birch_log", "birch_log_top",
         "oak_leaves", "spruce_leaves", "birch_leaves", "cactus_side", "cactus_top",
@@ -54,21 +54,31 @@ REQUIRED: list[tuple[str, tuple[int, int] | None]] = [
     *[(f"block/{n}", None) for n in [
         "oak_planks", "glass", "bricks", "stone_bricks", "crafting_table_top",
         "crafting_table_side", "crafting_table_front", "furnace_front", "furnace_front_on",
-        "furnace_side", "furnace_top", "iron_block", "gold_block", "diamond_block",
+        "furnace_side", "furnace_top", "iron_block", "copper_block", "gold_block", "diamond_block",
         "coal_block", "torch", "lantern", "iron_chain", "oak_door_top", "oak_door_bottom",
         "white_wool", "red_bed_head_up", "red_bed_foot_up", "red_bed_head_east",
         "red_bed_head_west", "red_bed_foot_east", "red_bed_foot_west", "bed_head_north",
         "red_bed_foot_south", "bed_down",
     ]],
     *[(f"block/destroy_stage_{i}", None) for i in range(10)],
+    # furnaces.py
+    *[(f"block/{n}", None) for n in [
+        "rc_blast_furnace_front", "rc_blast_furnace_side", "rc_blast_furnace_top",
+        "rc_chimney_side", "rc_chimney_top", "rc_advanced_furnace_front",
+        "rc_advanced_furnace_side", "rc_advanced_furnace_top", "rc_advanced_furnace_panel",
+        "rc_advanced_furnace_hood_left", "rc_advanced_furnace_hood_right",
+        "rc_advanced_furnace_hood_left_on", "rc_advanced_furnace_hood_right_on",
+        "rc_advanced_furnace_vent_top",
+    ]],
     # items.py
     *[(f"item/{n}", None) for n in [
         "stick", "coal", "charcoal", "iron_ingot", "gold_ingot", "diamond", "iron_nugget",
-        "clay_ball", "brick", "bucket", "water_bucket", "lava_bucket", "glass_bottle",
+        "copper_ingot", "clay_ball", "brick", "bucket", "water_bucket", "lava_bucket", "glass_bottle",
         "potion", "potion_overlay", "porkchop", "cooked_porkchop", "mutton", "cooked_mutton",
         "pig_spawn_egg", "sheep_spawn_egg", "lantern", "oak_door", "red_bed", "shears",
     ]],
-    *[(f"item/{t}_{k}", None) for t in ["wooden", "stone", "iron", "golden", "diamond"]
+    *[(f"item/{t}_{k}", None) for t in ["wooden", "stone", "iron", "golden", "diamond",
+                                         "copper"]
       for k in ["pickaxe", "axe", "shovel", "sword"]],
     # entities.py
     ("entity/chest/normal", (512, 512)),

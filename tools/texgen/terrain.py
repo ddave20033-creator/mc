@@ -217,6 +217,15 @@ def paint_iron_ore(seed):
                p=1.4)
 
 
+def paint_copper_ore(seed):
+    # Orange copper with a few green (patina) flecks, like Minecraft's.
+    nug = [(24, 16, 40, 16, 0.1), (86, 14, 46, 18, -0.12), (58, 44, 36, 18), (112, 46, 26, 12),
+           (30, 62, 44, 18, -0.1), (90, 78, 50, 20, 0.12), (50, 100, 42, 18, -0.1),
+           (110, 108, 28, 12), (16, 112, 24, 10)]
+    return ore(seed, nug, ("#7c3a1e", "#c15a36", "#e0804e", "#6fc59a"), "#6e6358", "#80746a",
+               p=1.3, hi=(0.7, 0.93))
+
+
 def paint_gold_ore(seed):
     nug = [(35, 13, 10, 10), (56, 42, 40, 52, 0.6), (108, 29, 24, 22), (112, 60, 16, 8),
            (25, 73, 22, 16), (92, 94, 46, 32, -0.25), (32, 107, 34, 24, 0.2), (57, 100, 10, 8),
@@ -1193,6 +1202,7 @@ TEXTURES = {
     "block/cobblestone": paint_cobblestone,
     "block/coal_ore": paint_coal_ore,
     "block/iron_ore": paint_iron_ore,
+    "block/copper_ore": paint_copper_ore,
     "block/gold_ore": paint_gold_ore,
     "block/diamond_ore": paint_diamond_ore,
     "block/sand": paint_sand,

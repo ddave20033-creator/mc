@@ -148,6 +148,17 @@ impl Rng {
     }
 }
 
+/// A value in lo..hi, most often near `peak` and ever rarer toward the ends (a triangular
+/// distribution); `u` is uniform in 0..1.
+fn triangular(u: f32, lo: f32, peak: f32, hi: f32) -> f32 {
+    let (w, c) = (hi - lo, peak - lo);
+    if u * w < c {
+        lo + (u * w * c).sqrt()
+    } else {
+        hi - ((1.0 - u) * w * (hi - peak)).sqrt()
+    }
+}
+
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
     [
@@ -502,7 +513,12 @@ impl Generator {
         // Spaghetti tunnels: intersection of two noise "zero sheets".
         let a = self.cave_a.noise3(fx / 72.0, fy / 44.0, fz / 72.0);
         let b = self.cave_b.noise3(fx / 72.0, fy / 44.0, fz / 72.0);
-        let width = if y > surface - 5 { 0.0025 } else { 0.0045 };
+        // Thin near the surface, a little wider deep down where the rarer ores are.
+        let width = if y > surface - 5 {
+            0.0025
+        } else {
+            0.0045 + 0.0015 * ((40 - y) as f64 / 30.0).clamp(0.0, 1.0)
+        };
         if a * a + b * b < width {
             return true;
         }
@@ -638,16 +654,27 @@ impl Generator {
 
     fn place_ores(&self, c: &mut ChunkData, cx: i32, cz: i32) {
         let mut rng = Rng(((hash(self.seed ^ 0x0E5, cx, 0, cz) * 1e9) as u64) | 1);
-        let ores: [(u8, u32, i32, i32, u32); 4] = [
-            (COAL_ORE, 20, 5, 130, 9),
-            (IRON_ORE, 14, 5, 64, 7),
-            (GOLD_ORE, 3, 5, 32, 6),
-            (DIAMOND_ORE, 2, 5, 16, 5),
+        // (ore, veins per chunk (on average), lowest y, highest y, most common y, blocks per
+        // vein). Tuned to about coal 100 : copper 55 : iron 22 : gold 8 : diamond 3. The
+        // deeper the tier, the deeper and rarer the ore: coal all over, copper around sea
+        // level, iron below it (and up in the mountains), gold deep, diamond at the bottom
+        // among the lava lakes (y <= 10).
+        let ores: [(u8, f32, i32, i32, i32, (u32, u32)); 6] = [
+            (COAL_ORE, 30.0, 12, 130, 55, (5, 14)),
+            (COPPER_ORE, 17.0, 22, 100, 52, (4, 9)),
+            (IRON_ORE, 4.5, 8, 70, 36, (3, 7)),
+            (IRON_ORE, 2.0, 80, 200, 130, (3, 7)),
+            (GOLD_ORE, 2.0, 4, 40, 18, (2, 5)),
+            (DIAMOND_ORE, 1.2, 3, 22, 9, (1, 3)),
         ];
-        for (ore, tries, ymin, ymax, size) in ores {
-            for _ in 0..tries {
-                let (mut x, mut y, mut z) =
-                    (rng.range(0, 16), rng.range(ymin, ymax), rng.range(0, 16));
+        for (ore, veins, ymin, ymax, peak, (smin, smax)) in ores {
+            // The fraction of `veins` is the chance of one more.
+            let extra = ((rng.next() % 1000) as f32) < veins.fract() * 1000.0;
+            for _ in 0..veins as u32 + extra as u32 {
+                let u = (rng.next() % 1_000_000) as f32 / 1_000_000.0;
+                let y = triangular(u, ymin as f32, peak as f32, ymax as f32) as i32;
+                let (mut x, mut y, mut z) = (rng.range(0, 16), y, rng.range(0, 16));
+                let size = smin + rng.next() % (smax - smin + 1);
                 for _ in 0..size {
                     if (0..16).contains(&x)
                         && (0..16).contains(&z)
@@ -903,6 +930,35 @@ impl Generator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The ores by rarity: coal most, then copper, iron, gold and diamond fewest; and by
+    /// depth: from copper down, each tier deeper on average than the one before.
+    #[test]
+    fn ores_by_rarity_and_depth() {
+        let gen = Generator::new(12345);
+        let ores = [COAL_ORE, COPPER_ORE, IRON_ORE, GOLD_ORE, DIAMOND_ORE];
+        let mut count = [0usize; 5];
+        let mut ysum = [0usize; 5];
+        for i in 0..36 {
+            let c = gen.generate_chunk(i % 6, i / 6);
+            for y in 0..HEIGHT {
+                for z in 0..16 {
+                    for x in 0..16 {
+                        if let Some(k) = ores.iter().position(|&o| o == c.get(x, y, z)) {
+                            count[k] += 1;
+                            ysum[k] += y;
+                        }
+                    }
+                }
+            }
+        }
+        let depth: Vec<usize> = (0..5).map(|k| ysum[k] / count[k].max(1)).collect();
+        println!("coal, copper, iron, gold, diamond: {count:?}, mean y {depth:?}");
+        assert!(count.windows(2).all(|w| w[0] > w[1]), "{count:?}");
+        // Coal is everywhere; from copper down each tier lies deeper.
+        assert!(depth[1] > depth[2] && depth[2] > depth[3] && depth[3] > depth[4], "{depth:?}");
+        assert!(depth[4] < 15, "diamonds too high: {depth:?}");
+    }
 
     /// Prints the chunk generation speed (`cargo test --release gen_speed -- --nocapture`).
     #[test]

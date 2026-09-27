@@ -660,7 +660,7 @@ impl Builder {
                 continue;
             }
             let layer = if face == front {
-                tex::FURNACE_FRONT_CUT
+                furnace_front_cut(b)
             } else {
                 face_texture(b, face)
             };
@@ -675,7 +675,7 @@ impl Builder {
         }
         // Lit from the front, and warmly by the fire while it burns.
         let (ls, lb) = r.light(x + d[0], y + d[1], z + d[2]);
-        let lit = (FURNACE_LIT..FURNACE_LIT + 4).contains(&b);
+        let lit = is_lit_furnace(b);
         let light = (ls, if lit { lb.max(13) } else { lb });
         let across = if d[0] != 0 { 2 } else { 0 };
         let along = 2 - across;
@@ -692,6 +692,45 @@ impl Builder {
             }
             let inside = tex::FURNACE_INSIDE;
             self.hollow((x, y, z), lo, hi, &[d], true, inside, light, 1.0);
+        }
+    }
+
+    /// Blast furnace chimney (`CHIMNEY_BOXES`): the slab, the stack on it and the rim round
+    /// its top, without the faces hidden under each other or against solid neighbours.
+    fn chimney(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+        let (s, bl) = r.light(x, y, z);
+        for (i, &(lo, hi)) in CHIMNEY_BOXES.iter().enumerate() {
+            for (face, &n) in FACE_N.iter().enumerate() {
+                let hidden = match (i, face) {
+                    (0, 2) => false,
+                    (0, _) => is_opaque(r.get(x + n[0], y + n[1], z + n[2])),
+                    // The stack's ends lie against the slab and the rim.
+                    (1, 2 | 3) => true,
+                    _ => false,
+                };
+                if hidden {
+                    continue;
+                }
+                let layer = face_texture(b, face);
+                let base = self.verts.len() as u32;
+                for &(su, sv) in &CORNERS {
+                    let c = corner_pos(face, su, sv);
+                    let p: [f32; 3] = std::array::from_fn(|k| lo[k] + (hi[k] - lo[k]) * c[k]);
+                    self.push(Vertex {
+                        pos: [
+                            (x + self.ox) as f32 + p[0],
+                            y as f32 + p[1],
+                            (z + self.oz) as f32 + p[2],
+                        ],
+                        uv: box_uv(face, p),
+                        layer: layer as f32,
+                        light: [255, (s * 17) as u8, (bl * 17) as u8, face as u8],
+                        tint: [255, 255, 255, 0],
+                    });
+                }
+                self.opaque
+                    .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            }
         }
     }
 
@@ -1126,6 +1165,10 @@ pub fn mesh_chunk(
                 }
                 if is_furnace(b) {
                     m.furnace(&r, x, y, z, b);
+                    continue;
+                }
+                if is_chimney(b) {
+                    m.chimney(&r, x, y, z, b);
                     continue;
                 }
                 if is_door(b) {

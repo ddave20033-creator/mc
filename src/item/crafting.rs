@@ -38,6 +38,18 @@ pub fn fuel_time(id: ItemId) -> Option<f32> {
     })
 }
 
+/// The furnace tier `smelt(id)` needs: 1 the furnace (food, charcoal, bricks, copper,
+/// stone), 2 the blast furnace (iron, glass), 3 the advanced furnace (gold, diamond).
+pub fn smelt_tier(id: ItemId) -> u8 {
+    match id as u8 {
+        _ if id >= 256 => 1,
+        IRON_ORE | SAND => 2,
+        GOLD_ORE | DIAMOND_ORE => 3,
+        _ => 1,
+    }
+}
+
+/// What `id` smelts into, whatever the furnace (see `smelt_tier`).
 pub fn smelt(id: ItemId) -> Option<ItemId> {
     Some(match id {
         CLAY_BALL => BRICK,
@@ -46,8 +58,10 @@ pub fn smelt(id: ItemId) -> Option<ItemId> {
         WATER_BOTTLE => PURIFIED_WATER,
         _ => match id as u8 {
             _ if id >= 256 => return None,
+            COPPER_ORE => COPPER_INGOT,
             IRON_ORE => IRON_INGOT,
             GOLD_ORE => GOLD_INGOT,
+            DIAMOND_ORE => DIAMOND,
             SAND => GLASS as ItemId,
             COBBLE => STONE as ItemId,
             OAK_LOG | BIRCH_LOG | SPRUCE_LOG => CHARCOAL,
@@ -94,6 +108,25 @@ fn recipes() -> &'static Vec<Recipe> {
                 pattern: &["CCC", "C C", "CCC"],
                 keys: vec![('C', b(COBBLE))],
                 result: Stack::one(FURNACE as ItemId),
+            },
+            // The blast furnace takes copper, the advanced furnace iron.
+            Recipe {
+                pattern: &["CCC", "CFC", "BBB"],
+                keys: vec![
+                    ('C', vec![COPPER_INGOT]),
+                    ('F', b(FURNACE)),
+                    ('B', b(BRICKS)),
+                ],
+                result: Stack::one(BLAST_FURNACE as ItemId),
+            },
+            Recipe {
+                pattern: &["III", "IFI", "SSS"],
+                keys: vec![
+                    ('I', vec![IRON_INGOT]),
+                    ('F', b(BLAST_FURNACE)),
+                    ('S', b(STONE_BRICKS)),
+                ],
+                result: Stack::one(ADV_FURNACE as ItemId),
             },
             Recipe {
                 pattern: &["PPP", "P P", "PPP"],
@@ -252,6 +285,7 @@ fn recipes() -> &'static Vec<Recipe> {
         // Storage blocks and back.
         for (block, item) in [
             (COAL_BLOCK, COAL),
+            (COPPER_BLOCK, COPPER_INGOT),
             (IRON_BLOCK, IRON_INGOT),
             (GOLD_BLOCK, GOLD_INGOT),
             (DIAMOND_BLOCK, DIAMOND),

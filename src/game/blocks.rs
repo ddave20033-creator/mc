@@ -43,9 +43,9 @@ impl Game {
     /// around it. On a LAN, the host runs this for everyone.
     pub(super) fn break_world(&mut self, p: IVec3, held: ItemId, creative: bool) {
         let b = self.terrain.world.geti(p);
-        let contents = self.block_entities.remove(p);
+        let mut contents = self.block_entities.remove(p);
         self.split_chest(p, b);
-        self.remove_other_half(p, b);
+        contents.extend(self.remove_other_half(p, b));
         let replacement = self.left_after_mining(p, b, creative);
         self.set_block(p, replacement);
         let center = p.as_vec3() + Vec3::splat(0.5);
@@ -207,27 +207,44 @@ impl Game {
     }
 
     /// A door or bed half is going away: the other half goes with it (without a second drop).
-    pub(super) fn remove_other_half(&mut self, p: IVec3, b: u8) {
+    /// So do the other blocks of a big furnace; what was in it is returned.
+    pub(super) fn remove_other_half(&mut self, p: IVec3, b: u8) -> Vec<Stack> {
+        if let (Some(base), Some(f)) = (furnace_base(b).filter(|&k| k != FURNACE), facing(b)) {
+            let origin = furnace_origin(p, b);
+            let contents = if origin != p {
+                self.block_entities.remove(origin)
+            } else {
+                Vec::new()
+            };
+            for (o, _) in furnace_cells(base, f, false) {
+                let q = origin + o;
+                if q != p && furnace_base(self.terrain.world.geti(q)) == Some(base) {
+                    self.set_block(q, AIR);
+                }
+            }
+            return contents;
+        }
         let q = if is_door(b) {
             p + door_other_half(b)
         } else if is_bed(b) {
             p + bed_other_half(b)
         } else {
-            return;
+            return Vec::new();
         };
         let other = self.terrain.world.geti(q);
         if (is_door(b) && is_door(other)) || (is_bed(b) && is_bed(other)) {
             self.set_block(q, AIR);
         }
+        Vec::new()
     }
 
     /// Broken by the world (lost support): always drops like a hand-mined block.
     pub(super) fn break_naturally(&mut self, p: IVec3) {
         let b = self.terrain.world.geti(p);
-        self.remove_other_half(p, b);
+        let contents = self.remove_other_half(p, b);
         self.set_block(p, AIR);
         let r = self.random();
-        for s in drops(b, NONE, r) {
+        for s in drops(b, NONE, r).into_iter().chain(contents) {
             self.spawn_drop(p.as_vec3() + Vec3::splat(0.5), s);
         }
         self.saplings.retain(|(q, _)| *q != p);

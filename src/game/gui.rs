@@ -199,7 +199,16 @@ impl Tab {
             // Blocks that do something: stations, storage, lights, beds and doors.
             if matches!(
                 b,
-                CRAFTING_TABLE | FURNACE | CHEST | GUN_STATION | BED | OAK_DOOR | TORCH | LANTERN
+                CRAFTING_TABLE
+                    | FURNACE
+                    | BLAST_FURNACE
+                    | ADV_FURNACE
+                    | CHEST
+                    | GUN_STATION
+                    | BED
+                    | OAK_DOOR
+                    | TORCH
+                    | LANTERN
             ) {
                 Tab::Functional
             } else {
@@ -236,9 +245,7 @@ impl Tab {
     fn groups(self) -> Vec<Vec<ItemId>> {
         let b = |ids: &[u8]| ids.iter().map(|&b| b as ItemId).collect::<Vec<_>>();
         let tools = |kind| {
-            [Tier::Wood, Tier::Stone, Tier::Iron, Tier::Gold, Tier::Diamond]
-                .map(|tier| tool_id(kind, tier))
-                .to_vec()
+            TIER_ORDER.map(|tier| tool_id(kind, tier)).to_vec()
         };
         match self {
             Tab::Blocks => vec![
@@ -260,25 +267,23 @@ impl Tab {
                 ]),
                 b(&[
                     COAL_ORE,
+                    COPPER_ORE,
                     IRON_ORE,
                     GOLD_ORE,
                     DIAMOND_ORE,
+                ]),
+                b(&[
                     COAL_BLOCK,
+                    COPPER_BLOCK,
                     IRON_BLOCK,
                     GOLD_BLOCK,
                     DIAMOND_BLOCK,
                 ]),
             ],
-            Tab::Functional => vec![b(&[
-                CRAFTING_TABLE,
-                FURNACE,
-                CHEST,
-                GUN_STATION,
-                BED,
-                OAK_DOOR,
-                TORCH,
-                LANTERN,
-            ])],
+            Tab::Functional => vec![
+                b(&[CRAFTING_TABLE, FURNACE, BLAST_FURNACE, ADV_FURNACE, GUN_STATION]),
+                b(&[CHEST, BED, OAK_DOOR, TORCH, LANTERN]),
+            ],
             Tab::Tools => vec![
                 tools(ToolKind::Pickaxe),
                 tools(ToolKind::Axe),
@@ -305,17 +310,10 @@ impl Tab {
                 vec![WATER_BOTTLE, PURIFIED_WATER],
             ],
             Tab::Mobs => vec![vec![PIG_SPAWN_EGG, SHEEP_SPAWN_EGG]],
-            Tab::Materials => vec![vec![
-                STICK,
-                COAL,
-                CHARCOAL,
-                IRON_NUGGET,
-                IRON_INGOT,
-                GOLD_INGOT,
-                DIAMOND,
-                CLAY_BALL,
-                BRICK,
-            ]],
+            Tab::Materials => vec![
+                vec![STICK, COAL, CHARCOAL, CLAY_BALL, BRICK],
+                vec![COPPER_INGOT, IRON_NUGGET, IRON_INGOT, GOLD_INGOT, DIAMOND],
+            ],
             Tab::Inventory => Vec::new(),
         }
     }

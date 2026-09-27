@@ -366,7 +366,15 @@ fn ingot_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
         return [0, 0, 0, 0];
     }
     let gold = l == tex::GOLD_INGOT;
-    let (rim, top, highlight, side, end) = if gold {
+    let (rim, top, highlight, side, end) = if l == tex::COPPER_INGOT {
+        (
+            [92.0, 38.0, 20.0],
+            [228.0, 132.0, 84.0],
+            [255.0, 196.0, 150.0],
+            [184.0, 94.0, 56.0],
+            [140.0, 66.0, 38.0],
+        )
+    } else if gold {
         (
             [111.0, 74.0, 12.0],
             [246.0, 193.0, 44.0],
@@ -531,7 +539,11 @@ fn tool_part(kind: u32, u: f32, v: f32) -> u8 {
 /// outline, bevelled edges lit from the top left, wood grain on the handle and a soft
 /// sheen on the head.
 fn tool_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
-    let i = l - tex::TOOLS;
+    let i = if l >= tex::MORE_TOOLS {
+        20 + l - tex::MORE_TOOLS
+    } else {
+        l - tex::TOOLS
+    };
     let (tier, kind) = ((i / 4) as usize, i % 4);
     // [outline, dark, mid, light] per tier; handles use dark oak colors.
     const HANDLE: [[f32; 3]; 4] = [
@@ -540,7 +552,7 @@ fn tool_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
         [104.0, 78.0, 30.0],
         [137.0, 103.0, 39.0],
     ];
-    const TIERS: [[[f32; 3]; 4]; 5] = [
+    const TIERS: [[[f32; 3]; 4]; 6] = [
         [
             [45.0, 30.0, 12.0],
             [104.0, 78.0, 40.0],
@@ -570,6 +582,13 @@ fn tool_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
             [36.0, 168.0, 160.0],
             [76.0, 226.0, 212.0],
             [184.0, 255.0, 246.0],
+        ],
+        // Copper
+        [
+            [70.0, 30.0, 14.0],
+            [170.0, 84.0, 48.0],
+            [222.0, 128.0, 80.0],
+            [255.0, 190.0, 146.0],
         ],
     ];
     let k = 16.0 / TILE as f32;
@@ -655,7 +674,7 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
                 }
             })
         }
-        tex::IRON_INGOT | tex::GOLD_INGOT => Some(ingot_icon(l, x, y)),
+        tex::IRON_INGOT | tex::GOLD_INGOT | tex::COPPER_INGOT => Some(ingot_icon(l, x, y)),
         tex::DIAMOND => Some(diamond_icon(x, y)),
         tex::CLAY_BALL => shape(x, y, [160.0, 166.0, 182.0], |fx, fy| {
             ((fx - 16.0).powi(2) + (fy - 16.0).powi(2)).sqrt() < 8.5
@@ -2132,6 +2151,8 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         }
         tex::COAL_ORE => ore(l, x, y, [40.0, 40.0, 44.0]),
         tex::IRON_ORE => ore(l, x, y, [216.0, 176.0, 146.0]),
+        tex::COPPER_ORE => ore(l, x, y, [226.0, 124.0, 74.0]),
+        tex::COPPER_BLOCK => metal_block(l, x, y, [200.0, 112.0, 70.0]),
         tex::GOLD_ORE => ore(l, x, y, [250.0, 214.0, 64.0]),
         tex::DIAMOND_ORE => ore(l, x, y, [98.0, 234.0, 226.0]),
         tex::OBSIDIAN => {
@@ -2227,6 +2248,20 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
             }
         }
         tex::HEAD_BACK => character(tex::HAIR, x, y),
+        // The new furnaces' looks come from the built-in pack; these stand in without it.
+        tex::BLAST_FRONT | tex::ADV_FRONT => pixel(tex::FURNACE_FRONT, x, y, crack),
+        tex::BLAST_FRONT_CUT | tex::ADV_FRONT_CUT => [0, 0, 0, 0],
+        tex::BLAST_SIDE
+        | tex::ADV_SIDE
+        | tex::ADV_PANEL
+        | tex::ADV_HOOD_L
+        | tex::ADV_HOOD_R
+        | tex::ADV_HOOD_L_LIT
+        | tex::ADV_HOOD_R_LIT => pixel(tex::FURNACE_SIDE, x, y, crack),
+        tex::BLAST_TOP | tex::ADV_TOP | tex::ADV_VENT_TOP | tex::CHIMNEY_TOP => {
+            pixel(tex::FURNACE_TOP, x, y, crack)
+        }
+        tex::CHIMNEY_SIDE => pixel(tex::BRICKS, x, y, crack),
         _ if (tex::FURNACE_ANIM..tex::FLAME_PARTICLE).contains(&l) => {
             pixel(tex::FURNACE_FRONT_LIT, x, y, crack)
         }

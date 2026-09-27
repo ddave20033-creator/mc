@@ -356,8 +356,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "tip.4",
-        "Tip: iron ore needs at least a stone pickaxe",
-        "Tipp: a vasérchez legalább kőcsákány kell",
+        "Tip: iron ore needs at least a copper pickaxe",
+        "Tipp: a vasérchez legalább rézcsákány kell",
     ),
     (
         "tip.5",

@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 15;
+pub const PROTOCOL: u16 = 16;
 
 // ---------------------------------------------------------------------------- data
 

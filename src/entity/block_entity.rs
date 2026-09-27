@@ -4,7 +4,7 @@
 
 use crate::item::inventory::{add_to, take};
 use crate::item::{
-    fuel_time, icon, meat, meat_with_sides, smelt, Icon, ItemId, Slot, Stack, BUCKET, COAL,
+    fuel_time, icon, meat, meat_with_sides, smelt, smelt_tier, Icon, ItemId, Slot, Stack, BUCKET, COAL,
     LAVA_BUCKET, MEAT_SIDES,
 };
 use crate::util::vertex_light;
@@ -13,6 +13,8 @@ use crate::world::textures::tex;
 use crate::world::*;
 use glam::{IVec3, Mat4, Vec3};
 use std::f32::consts::{FRAC_PI_2, PI};
+/// Seconds an item takes to smelt in a furnace (the better ones are faster, see
+/// `Furnace::smelt_time`).
 pub const SMELT_TIME: f32 = 10.0;
 /// Seconds a side of meat needs on the fire, and after how long it burns.
 pub const GRILL_TIME: f32 = 10.0;
@@ -117,6 +119,9 @@ pub struct Furnace {
     pub cook: f32,
     /// Meat on the four corners of the top.
     pub grill: [Option<Grilled>; 4],
+    /// 1 furnace, 2 blast furnace, 3 advanced furnace (`furnace_tier` of its block, kept
+    /// up to date by the game; 0 counts as 1).
+    pub tier: u8,
 }
 
 /// What a player did at a furnace: how many of the offered items went in, and what they
@@ -128,8 +133,22 @@ pub struct UseResult {
 }
 
 impl Furnace {
+    /// What `item` smelts into here: a furnace of too low a tier does not smelt it.
+    pub fn smelts(&self, item: ItemId) -> Option<ItemId> {
+        smelt(item).filter(|_| smelt_tier(item) <= self.tier.max(1))
+    }
+
+    /// Seconds one item takes: 10 in a furnace, 7 in a blast furnace, 4 in an advanced one.
+    pub fn smelt_time(&self) -> f32 {
+        match self.tier {
+            3 => 4.0,
+            2 => 7.0,
+            _ => SMELT_TIME,
+        }
+    }
+
     fn can_smelt(&self) -> bool {
-        let Some(out) = self.input.and_then(|s| smelt(s.item)) else {
+        let Some(out) = self.input.and_then(|s| self.smelts(s.item)) else {
             return false;
         };
         match self.output {
@@ -170,9 +189,9 @@ impl Furnace {
             }
             if smeltable {
                 self.cook += dt;
-                if self.cook >= SMELT_TIME {
+                if self.cook >= self.smelt_time() {
                     self.cook = 0.0;
-                    let out = smelt(self.input.unwrap().item).unwrap();
+                    let out = self.smelts(self.input.unwrap().item).unwrap();
                     take(&mut self.input, 1);
                     match &mut self.output {
                         Some(o) => o.count += 1,
@@ -198,7 +217,7 @@ impl Furnace {
         };
         match part {
             0..=3 => self.grill[part as usize].is_none() && Grilled::new(item).is_some(),
-            part::INPUT => meat(item).is_none() && smelt(item).is_some() && fits(self.input),
+            part::INPUT => meat(item).is_none() && self.smelts(item).is_some() && fits(self.input),
             part::FUEL => fuel_time(item).is_some() && fits(self.fuel),
             _ => false,
         }
@@ -893,10 +912,10 @@ fn build_furnace_inside(
             finished = finished.min(n - 1);
         }
         let raw_item = f.input.map(|s| s.item);
-        let smelts_into = raw_item.and_then(smelt);
+        let smelts_into = raw_item.and_then(|i| f.smelts(i));
         let done_item = f.output.map(|s| s.item).or(smelts_into);
-        let progress = (f.cook / SMELT_TIME).clamp(0.0, 1.0);
-        let smelting = raw_item.and_then(smelt).is_some() && (lit || f.cook > 0.0);
+        let progress = (f.cook / f.smelt_time()).clamp(0.0, 1.0);
+        let smelting = smelts_into.is_some() && (lit || f.cook > 0.0);
         // The front pieces are the ones still to smelt (the first of them is being smelted),
         // the finished ones lie behind.
         let first_done = n - finished;
@@ -1084,8 +1103,36 @@ mod tests {
     }
 
     #[test]
+    fn furnace_tiers() {
+        let tier = |t| Furnace {
+            tier: t,
+            ..Default::default()
+        };
+        // The furnace: copper, not iron (it does not even go in), gold or diamond.
+        assert!(tier(1).accepts(part::INPUT, COPPER_ORE as ItemId));
+        assert!(!tier(1).accepts(part::INPUT, IRON_ORE as ItemId));
+        assert!(!tier(1).accepts(part::INPUT, SAND as ItemId));
+        // The blast furnace: iron and glass, not gold or diamond.
+        assert!(tier(2).accepts(part::INPUT, IRON_ORE as ItemId));
+        assert!(tier(2).accepts(part::INPUT, SAND as ItemId));
+        assert!(!tier(2).accepts(part::INPUT, GOLD_ORE as ItemId));
+        // The advanced furnace: all of it, fastest.
+        for ore in [IRON_ORE, GOLD_ORE, DIAMOND_ORE] {
+            assert!(tier(3).accepts(part::INPUT, ore as ItemId));
+        }
+        let mut f = lit_furnace();
+        f.tier = 3;
+        f.use_part(part::INPUT, Some(Stack::one(DIAMOND_ORE as ItemId)), false);
+        run(&mut f, 4.2);
+        assert_eq!(f.output, Some(Stack::one(crate::item::DIAMOND)));
+    }
+
+    #[test]
     fn front_takes_smeltables_and_fuel_but_not_meat() {
-        let mut f = Furnace::default();
+        let mut f = Furnace {
+            tier: 2,
+            ..Default::default()
+        };
         assert!(!f.accepts(part::INPUT, PORKCHOP));
         assert!(!f.accepts(part::FUEL, PORKCHOP));
         assert!(f.accepts(0, PORKCHOP));

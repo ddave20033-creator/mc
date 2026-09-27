@@ -206,7 +206,44 @@ pub mod tex {
     /// 3D models), and of their ammunition (.50 AE, 5.56 mm, .50 BMG, 12 gauge).
     pub const GUN_ICONS: u32 = GUN_WOOD + 1;
     pub const AMMO_ICONS: u32 = GUN_ICONS + 4;
-    pub const LAYERS: usize = (AMMO_ICONS + 4) as usize;
+    /// Copper: the ore, the storage block and the ingot.
+    pub const COPPER_ORE: u32 = AMMO_ICONS + 4;
+    pub const COPPER_BLOCK: u32 = COPPER_ORE + 1;
+    pub const COPPER_INGOT: u32 = COPPER_ORE + 2;
+    /// The tools of the tiers added after the first five (copper): 4 each, like `TOOLS`
+    /// (see `tool_layer`).
+    pub const MORE_TOOLS: u32 = COPPER_INGOT + 1;
+    /// Blast furnace: front (and with its openings cut out), sides, top; its chimney.
+    pub const BLAST_FRONT: u32 = MORE_TOOLS + 4;
+    pub const BLAST_FRONT_CUT: u32 = BLAST_FRONT + 1;
+    pub const BLAST_SIDE: u32 = BLAST_FRONT + 2;
+    pub const BLAST_TOP: u32 = BLAST_FRONT + 3;
+    pub const CHIMNEY_SIDE: u32 = BLAST_FRONT + 4;
+    pub const CHIMNEY_TOP: u32 = BLAST_FRONT + 5;
+    /// Advanced furnace: the furnace's front (and cut), sides and top; the fronts of its
+    /// other parts (the panel beside the furnace, the hood above it, glowing while it burns)
+    /// and the vents on top.
+    pub const ADV_FRONT: u32 = BLAST_FRONT + 6;
+    pub const ADV_FRONT_CUT: u32 = ADV_FRONT + 1;
+    pub const ADV_SIDE: u32 = ADV_FRONT + 2;
+    pub const ADV_TOP: u32 = ADV_FRONT + 3;
+    pub const ADV_PANEL: u32 = ADV_FRONT + 4;
+    pub const ADV_HOOD_L: u32 = ADV_FRONT + 5;
+    pub const ADV_HOOD_R: u32 = ADV_FRONT + 6;
+    pub const ADV_HOOD_L_LIT: u32 = ADV_FRONT + 7;
+    pub const ADV_HOOD_R_LIT: u32 = ADV_FRONT + 8;
+    pub const ADV_VENT_TOP: u32 = ADV_FRONT + 9;
+    pub const LAYERS: usize = (ADV_VENT_TOP + 1) as usize;
+}
+
+/// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
+pub fn tool_layer(tier: usize, kind: usize) -> u32 {
+    let i = (tier * 4 + kind) as u32;
+    if i < 20 {
+        tex::TOOLS + i
+    } else {
+        tex::MORE_TOOLS + i - 20
+    }
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
@@ -286,6 +323,8 @@ fn is_item_icon(l: u32) -> bool {
         || (tex::HALF_BURNT_PORKCHOP..=tex::RAW_BURNT_MUTTON).contains(&l)
         || (tex::PISTOL..tex::GUN_GLASS).contains(&l)
         || (tex::GUN_ICONS..tex::AMMO_ICONS + 4).contains(&l)
+        || l == tex::COPPER_INGOT
+        || (tex::MORE_TOOLS..tex::MORE_TOOLS + 4).contains(&l)
 }
 
 fn is_crack(l: u32) -> bool {
@@ -349,6 +388,8 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::FLAME_PARTICLE
         || l == tex::SLOT_GLOW
         || l == tex::FURNACE_FRONT_CUT
+        || l == tex::BLAST_FRONT_CUT
+        || l == tex::ADV_FRONT_CUT
         || (tex::SMOKE..tex::SMOKE + SMOKE_FRAMES).contains(&l)
 }
 
@@ -422,7 +463,13 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
     synth_doors(&mut base);
     synth_grilled(&mut base);
     synth_glow(&mut base);
-    synth_furnace_cut(&mut base);
+    for (front, cut) in [
+        (tex::FURNACE_FRONT, tex::FURNACE_FRONT_CUT),
+        (tex::BLAST_FRONT, tex::BLAST_FRONT_CUT),
+        (tex::ADV_FRONT, tex::ADV_FRONT_CUT),
+    ] {
+        synth_furnace_cut(&mut base, front, cut);
+    }
     synth_furnace_inside(&mut base);
     // Fluids without animation frames: every frame is the still texture (it still scrolls).
     for (still, anim) in [(tex::WATER, tex::WATER_ANIM), (tex::LAVA, tex::LAVA_ANIM)] {
@@ -662,13 +709,13 @@ fn synth_glow(base: &mut [u8]) {
     }
 }
 
-/// The furnace front with its two openings cut out (the mouth above, the firebox below), for
-/// the furnace model with real hollows behind them: in each row, everything between the
-/// dark outline of an opening is made clear.
-fn synth_furnace_cut(base: &mut [u8]) {
+/// A furnace front (`front`) with its two openings cut out (the mouth above, the firebox
+/// below) into `cut`, for the furnace model with real hollows behind them: in each row,
+/// everything between the dark outline of an opening is made clear.
+fn synth_furnace_cut(base: &mut [u8], front: u32, cut: u32) {
     let layer_bytes = TILE * TILE * 4;
-    let src = base[tex::FURNACE_FRONT as usize * layer_bytes..][..layer_bytes].to_vec();
-    let o = tex::FURNACE_FRONT_CUT as usize * layer_bytes;
+    let src = base[front as usize * layer_bytes..][..layer_bytes].to_vec();
+    let o = cut as usize * layer_bytes;
     let dark = |x: usize, y: usize| {
         let i = (y * TILE + x) * 4;
         (src[i] as u32 + src[i + 1] as u32 + src[i + 2] as u32) < 60

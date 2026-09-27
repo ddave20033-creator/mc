@@ -6,7 +6,7 @@
 //! crosshair is lit up a little.
 
 use super::*;
-use crate::entity::block_entity::{doneness, grill_box, part, Doneness, BURN_TIME, SMELT_TIME};
+use crate::entity::block_entity::{doneness, grill_box, part, Doneness, BURN_TIME};
 use crate::entity::Furnace;
 use crate::item::inventory;
 use crate::item::*;
@@ -94,7 +94,9 @@ impl Game {
     pub(super) fn use_furnace(&mut self, p: IVec3, k: u8, take: bool) -> bool {
         let slot = self.hotbar_slot;
         let held = self.inventory.slots[slot];
+        let tier = furnace_tier(self.terrain.world.geti(p));
         let f = self.block_entities.furnaces.entry(p).or_default();
+        f.tier = tier;
         let puts = held.is_some_and(|h| f.accepts(k, h.item));
         let able = if take {
             f.has(k)
@@ -145,7 +147,9 @@ impl Game {
             }
             return;
         }
+        let tier = furnace_tier(self.terrain.world.geti(p));
         let f = self.block_entities.furnaces.entry(p).or_default();
+        f.tier = tier;
         let r = f.use_part(k, offered, take);
         let mut back = r.give;
         if let Some(o) = offered {
@@ -169,16 +173,17 @@ impl Game {
     pub(super) fn update_furnaces(&mut self, dt: f32) {
         let mut relight = Vec::new();
         for (p, f) in self.block_entities.furnaces.iter_mut() {
-            let lit = f.update(dt);
             let b = self.terrain.world.geti(*p);
-            if let (true, Some(fac)) = (is_furnace(b), facing(b)) {
-                let want = if lit {
-                    FURNACE_LIT + fac
-                } else {
-                    FURNACE + fac
-                };
-                if want != b {
-                    relight.push((*p, want));
+            f.tier = furnace_tier(b);
+            let lit = f.update(dt);
+            if let (true, Some(base), Some(fac)) = (is_furnace(b), furnace_base(b), facing(b)) {
+                // All of a big furnace glows while it burns.
+                for (o, want) in furnace_cells(base, fac, lit) {
+                    let q = *p + o;
+                    let cur = self.terrain.world.geti(q);
+                    if cur != want && furnace_base(cur) == Some(base) {
+                        relight.push((q, want));
+                    }
                 }
             }
         }
@@ -190,6 +195,9 @@ impl Game {
     /// Steam and smoke off the meat on lit furnaces near the player: light while it cooks,
     /// more once the side on the fire is done, dark and thick when it burns.
     pub(super) fn furnace_fx(&mut self, dt: f32) {
+        for (p, f) in self.block_entities.furnaces.iter_mut() {
+            f.tier = furnace_tier(self.terrain.world.geti(*p));
+        }
         if self.is_client() {
             // Between the host's updates (every second, or when something changes) the
             // furnaces go on here as they do there: flips turn, fuel burns, meat cooks on
@@ -205,8 +213,8 @@ impl Game {
                             g.cook[g.down as usize] += dt;
                         }
                     }
-                    if f.input.is_some_and(|i| smelt(i.item).is_some()) {
-                        f.cook = (f.cook + dt).min(SMELT_TIME);
+                    if f.input.is_some_and(|i| f.smelts(i.item).is_some()) {
+                        f.cook = (f.cook + dt).min(f.smelt_time());
                     }
                 }
             }
@@ -215,14 +223,28 @@ impl Game {
         let mut puffs = Vec::new();
         let mut sparks = Vec::new();
         let mut fires = Vec::new();
+        let mut chimneys = Vec::new();
         for (p, f) in &self.block_entities.furnaces {
             if f.burn <= 0.0 || p.as_vec3().distance_squared(near) > 40.0 * 40.0 {
                 continue;
             }
             // Sparks fly out of the mouth while the piece in it is red hot.
-            let heating = f.input.is_some_and(|i| smelt(i.item).is_some())
-                && (0.3..0.7).contains(&(f.cook / SMELT_TIME));
+            let heating = f.input.is_some_and(|i| f.smelts(i.item).is_some())
+                && (0.3..0.7).contains(&(f.cook / f.smelt_time()));
             let b = self.terrain.world.geti(*p);
+            // Smoke out of a blast furnace's chimney, and the vents on an advanced furnace.
+            match (furnace_base(b), facing(b)) {
+                (Some(BLAST_FURNACE), _) if is_chimney(self.terrain.world.geti(*p + IVec3::Y)) => {
+                    chimneys.push(p.as_vec3() + Vec3::new(0.5, 2.0, 0.5));
+                }
+                (Some(ADV_FURNACE), Some(fac)) => {
+                    let r = furnace_right(fac).as_vec3();
+                    for k in [0.3, 0.7, 1.3, 1.7] {
+                        chimneys.push(p.as_vec3() + Vec3::new(0.5, 2.02, 0.5) + r * (k - 0.5));
+                    }
+                }
+                _ => {}
+            }
             // The resource pack's flame particles burn in the firebox, like on its torches.
             if let (true, Some(fac)) = (self.torch_particles, facing(b)) {
                 // Bigger with more fuel: embers, a fire, a blaze.
@@ -268,6 +290,15 @@ impl Game {
                     }
                 }
                 due -= 1.0;
+            }
+        }
+        for top in chimneys {
+            if self.random() < dt * 4.0 {
+                let jitter = Vec3::new(self.random() - 0.5, 0.0, self.random() - 0.5) * 0.2;
+                let w = &self.terrain.world;
+                let (sky, blk) = (w.sky_estimate(top), w.block_light_estimate(top));
+                let gray = 60 + (self.random() * 50.0) as u8;
+                self.particles.smoke_shaded(top + jitter, gray, sky, blk);
             }
         }
         for (mouth, right) in sparks {

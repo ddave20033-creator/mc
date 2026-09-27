@@ -54,6 +54,22 @@ const PACK_TEXTURES: &[(u32, &str)] = &[
     (tex::FURNACE_FRONT_LIT, "block/furnace_front_on"),
     (tex::FURNACE_SIDE, "block/furnace_side"),
     (tex::FURNACE_TOP, "block/furnace_top"),
+    // RustCraft's own furnaces (not Minecraft's blast furnace: the openings must fit the
+    // model's hollows).
+    (tex::BLAST_FRONT, "block/rc_blast_furnace_front"),
+    (tex::BLAST_SIDE, "block/rc_blast_furnace_side"),
+    (tex::BLAST_TOP, "block/rc_blast_furnace_top"),
+    (tex::CHIMNEY_SIDE, "block/rc_chimney_side"),
+    (tex::CHIMNEY_TOP, "block/rc_chimney_top"),
+    (tex::ADV_FRONT, "block/rc_advanced_furnace_front"),
+    (tex::ADV_SIDE, "block/rc_advanced_furnace_side"),
+    (tex::ADV_TOP, "block/rc_advanced_furnace_top"),
+    (tex::ADV_PANEL, "block/rc_advanced_furnace_panel"),
+    (tex::ADV_HOOD_L, "block/rc_advanced_furnace_hood_left"),
+    (tex::ADV_HOOD_R, "block/rc_advanced_furnace_hood_right"),
+    (tex::ADV_HOOD_L_LIT, "block/rc_advanced_furnace_hood_left_on"),
+    (tex::ADV_HOOD_R_LIT, "block/rc_advanced_furnace_hood_right_on"),
+    (tex::ADV_VENT_TOP, "block/rc_advanced_furnace_vent_top"),
     (tex::TORCH, "block/torch"),
     (tex::OAK_SAPLING, "block/oak_sapling"),
     (tex::BIRCH_SAPLING, "block/birch_sapling"),
@@ -80,6 +96,9 @@ const PACK_TEXTURES: &[(u32, &str)] = &[
     (tex::GLASS_BOTTLE, "item/glass_bottle"),
     (tex::LANTERN_ITEM, "item/lantern"),
     (tex::IRON_NUGGET, "item/iron_nugget"),
+    (tex::COPPER_ORE, "block/copper_ore"),
+    (tex::COPPER_BLOCK, "block/copper_block"),
+    (tex::COPPER_INGOT, "item/copper_ingot"),
     (tex::LANTERN, "block/lantern"),
     (tex::CHAIN, "block/iron_chain|block/chain"),
     (tex::DOOR_TOP, "block/oak_door_top"),
@@ -280,12 +299,13 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
             put(tex::CRACK + stage, &img);
         }
     }
-    let tiers = ["wooden", "stone", "iron", "golden", "diamond"];
+    // In `Tier` order.
+    let tiers = ["wooden", "stone", "iron", "golden", "diamond", "copper"];
     let kinds = ["pickaxe", "axe", "shovel", "sword"];
     for (t, tier) in tiers.iter().enumerate() {
         for (k, kind) in kinds.iter().enumerate() {
             if let Some(img) = pack.texture(&format!("item/{tier}_{kind}")) {
-                put(tex::TOOLS + (t * 4 + k) as u32, &img);
+                put(super::tool_layer(t, k), &img);
             }
         }
     }

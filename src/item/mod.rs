@@ -56,6 +56,7 @@ pub const HALF_BURNT_MUTTON: ItemId = 294;
 /// Meat burnt on one side and still raw on the other.
 pub const RAW_BURNT_PORKCHOP: ItemId = 295;
 pub const RAW_BURNT_MUTTON: ItemId = 296;
+pub const COPPER_INGOT: ItemId = 297;
 /// Pistol ammunition (9 mm): one is used up per shot.
 pub const BULLET: ItemId = 282;
 /// The five pistol parts, in the order they go together at the gun station: frame (with the
@@ -117,6 +118,8 @@ pub fn set_gun_mods(s: &mut Stack, mods: u8) {
 /// Minecraft's shears durability.
 const SHEARS_DURABILITY: u16 = 238;
 const TOOL_BASE: ItemId = 300;
+/// Tools of the tiers after the first five (the ids after the first 20 tools are taken).
+const MORE_TOOLS_BASE: ItemId = 330;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolKind {
@@ -133,11 +136,25 @@ pub enum Tier {
     Iron,
     Gold,
     Diamond,
+    // Added later, so its tool ids and texture layers come after the others'.
+    Copper,
 }
 
-const TIERS: [Tier; 5] = [
+/// In `Tier` order (tool ids and texture layers follow it).
+const TIERS: [Tier; 6] = [
     Tier::Wood,
     Tier::Stone,
+    Tier::Iron,
+    Tier::Gold,
+    Tier::Diamond,
+    Tier::Copper,
+];
+
+/// From the first tool to the last.
+pub const TIER_ORDER: [Tier; 6] = [
+    Tier::Wood,
+    Tier::Stone,
+    Tier::Copper,
     Tier::Iron,
     Tier::Gold,
     Tier::Diamond,
@@ -155,27 +172,31 @@ impl Tier {
         match self {
             Tier::Wood => 2.0,
             Tier::Stone => 4.0,
-            Tier::Iron => 6.0,
-            Tier::Gold => 12.0,
-            Tier::Diamond => 8.0,
+            Tier::Copper => 5.0,
+            Tier::Iron => 6.5,
+            Tier::Gold => 11.0,
+            Tier::Diamond => 8.5,
         }
     }
-    /// Harvest level: which ores this tier can mine.
+    /// Harvest level: which ores this tier can mine (see `mining`): wood mines coal, stone
+    /// copper, copper iron, iron (or gold) gold and diamond, diamond obsidian.
     pub fn level(self) -> u8 {
         match self {
-            Tier::Wood | Tier::Gold => 0,
+            Tier::Wood => 0,
             Tier::Stone => 1,
-            Tier::Iron => 2,
-            Tier::Diamond => 3,
+            Tier::Copper => 2,
+            Tier::Iron | Tier::Gold => 3,
+            Tier::Diamond => 4,
         }
     }
     pub fn durability(self) -> u16 {
         match self {
             Tier::Wood => 59,
             Tier::Stone => 131,
-            Tier::Iron => 250,
-            Tier::Gold => 32,
-            Tier::Diamond => 1561,
+            Tier::Copper => 190,
+            Tier::Iron => 350,
+            Tier::Gold => 40,
+            Tier::Diamond => 1500,
         }
     }
     /// The material crafted into the tool head.
@@ -186,12 +207,18 @@ impl Tier {
             Tier::Iron => IRON_INGOT,
             Tier::Gold => GOLD_INGOT,
             Tier::Diamond => DIAMOND,
+            Tier::Copper => COPPER_INGOT,
         }
     }
 }
 
 pub fn tool_id(kind: ToolKind, tier: Tier) -> ItemId {
-    TOOL_BASE + tier as ItemId * 4 + kind as ItemId
+    let i = tier as ItemId * 4 + kind as ItemId;
+    if i < 20 {
+        TOOL_BASE + i
+    } else {
+        MORE_TOOLS_BASE + i - 20
+    }
 }
 
 /// Swords can block (right mouse button held), like in Minecraft 1.8.
@@ -200,12 +227,14 @@ pub fn is_sword(id: ItemId) -> bool {
 }
 
 pub fn tool_of(id: ItemId) -> Option<(ToolKind, Tier)> {
-    if (TOOL_BASE..TOOL_BASE + 20).contains(&id) {
-        let i = id - TOOL_BASE;
-        Some((KINDS[(i % 4) as usize], TIERS[(i / 4) as usize]))
+    let i = if (TOOL_BASE..TOOL_BASE + 20).contains(&id) {
+        id - TOOL_BASE
+    } else if (MORE_TOOLS_BASE..MORE_TOOLS_BASE + 4 * (TIERS.len() as ItemId - 5)).contains(&id) {
+        20 + id - MORE_TOOLS_BASE
     } else {
-        None
-    }
+        return None;
+    };
+    Some((KINDS[(i % 4) as usize], TIERS[(i / 4) as usize]))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -370,6 +399,7 @@ pub fn attack_damage(id: ItemId) -> f32 {
     let bonus = match tier {
         Tier::Wood | Tier::Gold => 0.0,
         Tier::Stone => 1.0,
+        Tier::Copper => 1.5,
         Tier::Iron => 2.0,
         Tier::Diamond => 3.0,
     };
@@ -447,10 +477,12 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
     (DANDELION, "dandelion", "Dandelion", "Pitypang"),
     (DEAD_BUSH, "dead_bush", "Dead Bush", "Elszáradt bokor"),
     (COAL_ORE, "coal_ore", "Coal Ore", "Szénérc"),
+    (COPPER_ORE, "copper_ore", "Copper Ore", "Rézérc"),
     (IRON_ORE, "iron_ore", "Iron Ore", "Vasérc"),
     (GOLD_ORE, "gold_ore", "Gold Ore", "Aranyérc"),
     (DIAMOND_ORE, "diamond_ore", "Diamond Ore", "Gyémántérc"),
     (COAL_BLOCK, "coal_block", "Block of Coal", "Szénblokk"),
+    (COPPER_BLOCK, "copper_block", "Block of Copper", "Rézblokk"),
     (IRON_BLOCK, "iron_block", "Block of Iron", "Vasblokk"),
     (GOLD_BLOCK, "gold_block", "Block of Gold", "Aranyblokk"),
     (
@@ -468,6 +500,8 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
         "Barkácsasztal",
     ),
     (FURNACE, "furnace", "Furnace", "Kemence"),
+    (BLAST_FURNACE, "blast_furnace", "Blast Furnace", "Kohó"),
+    (ADV_FURNACE, "advanced_furnace", "Advanced Furnace", "Fejlett kohó"),
     (CHEST, "chest", "Chest", "Láda"),
     (TORCH, "torch", "Torch", "Fáklya"),
     (LANTERN, "lantern", "Lantern", "Lámpás"),
@@ -495,6 +529,13 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Iron Nugget",
         "Vasrög",
         tex::IRON_NUGGET,
+    ),
+    (
+        COPPER_INGOT,
+        "copper_ingot",
+        "Copper Ingot",
+        "Rézrúd",
+        tex::COPPER_INGOT,
     ),
     (
         GOLD_INGOT,
@@ -750,7 +791,7 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
 pub fn all_items() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = BLOCK_ITEMS.iter().map(|e| e.0 as ItemId).collect();
     v.extend(ITEMS.iter().map(|e| e.0));
-    for tier in TIERS {
+    for tier in TIER_ORDER {
         for kind in KINDS {
             v.push(tool_id(kind, tier));
         }
@@ -776,7 +817,7 @@ pub fn block_of(id: ItemId) -> Option<u8> {
 /// The item a placed block counts as (pick block / creative).
 pub fn item_of_block(b: u8) -> Option<ItemId> {
     let base = match b {
-        _ if is_furnace(b) => FURNACE,
+        _ if furnace_base(b).is_some() => furnace_base(b).unwrap(),
         _ if is_chest(b) => CHEST,
         _ if is_torch(b) => TORCH,
         _ if is_lantern(b) => LANTERN,
@@ -816,7 +857,7 @@ pub fn icon(id: ItemId) -> Icon {
     }
     Icon::Flat(match (item_entry(id), tool_of(id)) {
         (Some(e), _) => e.4,
-        (None, Some((k, t))) => tex::TOOLS + t as u32 * 4 + k as u32,
+        (None, Some((k, t))) => crate::world::textures::tool_layer(t as usize, k as usize),
         (None, None) => tex::STONE,
     })
 }
@@ -824,7 +865,7 @@ pub fn icon(id: ItemId) -> Icon {
 /// Stable identifier used by /give and save files.
 pub fn key(id: ItemId) -> String {
     if let Some((k, t)) = tool_of(id) {
-        let tier = ["wooden", "stone", "iron", "golden", "diamond"][t as usize];
+        let tier = ["wooden", "stone", "iron", "golden", "diamond", "copper"][t as usize];
         let kind = ["pickaxe", "axe", "shovel", "sword"][k as usize];
         return format!("{tier}_{kind}");
     }
@@ -846,11 +887,11 @@ pub fn name(id: ItemId) -> String {
     let hu = is_hungarian();
     if let Some((k, t)) = tool_of(id) {
         if hu {
-            let tier = ["Fa", "Kő", "Vas", "Arany", "Gyémánt"][t as usize];
+            let tier = ["Fa", "Kő", "Vas", "Arany", "Gyémánt", "Réz"][t as usize];
             let kind = ["csákány", "balta", "ásó", "kard"][k as usize];
             return format!("{tier}{kind}");
         }
-        let tier = ["Wooden", "Stone", "Iron", "Golden", "Diamond"][t as usize];
+        let tier = ["Wooden", "Stone", "Iron", "Golden", "Diamond", "Copper"][t as usize];
         let kind = ["Pickaxe", "Axe", "Shovel", "Sword"][k as usize];
         return format!("{tier} {kind}");
     }
@@ -887,7 +928,7 @@ mod tests {
             assert_eq!(from_key(&k), Some(id));
             assert_ne!(name(id), "Unknown", "item {id} has no name");
         }
-        assert_eq!(all.len(), BLOCK_ITEMS.len() + ITEMS.len() + 20);
+        assert_eq!(all.len(), BLOCK_ITEMS.len() + ITEMS.len() + 4 * TIERS.len());
         // Keys stored in save files must not change.
         assert_eq!(key(GRASS as ItemId), "grass_block");
         assert_eq!(key(PURIFIED_WATER), "purified_water");

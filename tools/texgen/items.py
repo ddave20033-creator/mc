@@ -187,6 +187,8 @@ TIER = {
     # Clear light cyan (a greener teal looked murky green in the hand).
     "diamond": dict(o="0a2c38", d="13586a", s="36b4cc", b="55d6ea", l="55d6ea", h="a8f4fc",
                     m="2a8fa6"),
+    "copper": dict(o="2e1408", d="6a2f16", s="c66a40", b="e0875a", l="e0875a", h="ffc4a0",
+                   m="a4522e"),
 }
 # sword blades: light half, blade, fuller, guard, guard light, guard highlight, outline
 SWORD = {
@@ -195,6 +197,7 @@ SWORD = {
     "iron": ("ffffff", "d8d8d8", "bebebe", "444444", "6b6b6b", "969696", "181818"),
     "golden": ("ffffff", "fdff76", "eaee57", "825d16", "dc9613", "e9b115", "3f2e0e"),
     "diamond": ("c8f8fe", "5fdcee", "40c0d8", "13586a", "2a8fa6", "36b4cc", "0a2c38"),
+    "copper": ("ffd2b4", "e0875a", "c66a40", "6a2f16", "a4522e", "c66a40", "2e1408"),
 }
 
 
@@ -946,6 +949,8 @@ TEXTURES = {
                               "752802")),
     "item/diamond": diamond,
     "item/iron_nugget": iron_nugget,
+    "item/copper_ingot": ingot(("e39468", "c0683e", "8a4424", "ffc9a6", "a4522e", "70341a",
+                                "3a1a0c")),
     "item/clay_ball": clay_ball,
     "item/brick": brick,
     "item/bucket": bucket(None),

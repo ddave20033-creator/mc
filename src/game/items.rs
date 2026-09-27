@@ -308,6 +308,10 @@ impl Game {
             self.place_bed(at, look);
             return;
         }
+        if base == BLAST_FURNACE || base == ADV_FURNACE {
+            self.place_big_furnace(at, base, facing);
+            return;
+        }
         let b = if base == TORCH {
             let support = hit - at;
             if at == hit || support == IVec3::NEG_Y {
@@ -359,6 +363,30 @@ impl Game {
             return;
         }
         self.edit_block(at, b);
+        if !self.creative() {
+            let slot = self.hotbar_slot;
+            take(&mut self.inventory.slots[slot], 1);
+        }
+        self.hand.swing();
+        self.action_cooldown = 0.2;
+    }
+
+    /// A blast furnace (with its chimney) or an advanced furnace (two wide, two tall), its
+    /// furnace block at `at` facing the player: where there is room for all of it.
+    fn place_big_furnace(&mut self, at: IVec3, base: u8, facing: u8) {
+        let cells = furnace_cells(base, facing, false);
+        let w = &self.terrain.world;
+        let room = cells.iter().all(|&(o, _)| {
+            let q = at + o;
+            q.y < HEIGHT as i32 && is_replaceable(w.geti(q)) && !self.player.intersects(q)
+        });
+        if !room {
+            return;
+        }
+        // The furnace block first: it gets the furnace's contents.
+        for (o, b) in cells {
+            self.edit_block(at + o, b);
+        }
         if !self.creative() {
             let slot = self.hotbar_slot;
             take(&mut self.inventory.slots[slot], 1);

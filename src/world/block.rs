@@ -57,6 +57,8 @@ pub const LANTERN_HANGING: u8 = 60;
 pub const WOOL: u8 = 61;
 /// Metal workbench for assembling and cleaning guns.
 pub const GUN_STATION: u8 = 62;
+/// Copper ore (smelts into copper ingots) and the copper storage block.
+pub const COPPER_ORE: u8 = 63;
 
 /// Fluids: base id + level. Level 0 = source, 1..7 = flowing, 8 = falling.
 pub const WATER: u8 = 64;
@@ -84,6 +86,27 @@ pub const BIRCH_LOG_Z: u8 = 181;
 /// Red bed halves: base id + facing (bits 0-1, from the foot toward the head: the way the
 /// player looked when placing it) + head half (bit 2).
 pub const BED: u8 = 184;
+pub const COPPER_BLOCK: u8 = 192;
+/// Blast furnace (smelts iron too): base id + facing, lit + facing, and the chimney standing
+/// on it (+ facing).
+pub const BLAST_FURNACE: u8 = 194;
+pub const BLAST_FURNACE_LIT: u8 = 198;
+pub const CHIMNEY: u8 = 202;
+/// Advanced furnace (smelts gold and diamond too), two wide and two tall: the furnace itself
+/// (lower left, seen from the front) + facing, lit + facing, and its other parts,
+/// `ADV_PART + (part - 1) * 4 + facing` (part 1 lower right, 2 upper left, 3 upper right),
+/// glowing ones from `ADV_PART_LIT`.
+pub const ADV_FURNACE: u8 = 206;
+pub const ADV_FURNACE_LIT: u8 = 210;
+pub const ADV_PART: u8 = 214;
+pub const ADV_PART_LIT: u8 = 226;
+/// The chimney's boxes (block-local): a slab over the furnace, the stack and a rim round
+/// its top.
+pub const CHIMNEY_BOXES: [([f32; 3], [f32; 3]); 3] = [
+    ([0.0, 0.0, 0.0], [1.0, 5.0 / 16.0, 1.0]),
+    ([4.0 / 16.0, 5.0 / 16.0, 4.0 / 16.0], [12.0 / 16.0, 14.0 / 16.0, 12.0 / 16.0]),
+    ([3.0 / 16.0, 14.0 / 16.0, 3.0 / 16.0], [13.0 / 16.0, 1.0, 13.0 / 16.0]),
+];
 /// Height of a bed's top (Minecraft: 9 pixels).
 pub const BED_HEIGHT: f32 = 9.0 / 16.0;
 
@@ -390,6 +413,14 @@ pub fn block_boxes(b: u8, get: impl Fn(IVec3) -> u8) -> Boxes {
     if is_bed(b) {
         return Boxes::one([0.0; 3], [1.0, BED_HEIGHT, 1.0]);
     }
+    if is_chimney(b) {
+        let mut out = Boxes::one(CHIMNEY_BOXES[0].0, CHIMNEY_BOXES[0].1);
+        for &bx in &CHIMNEY_BOXES[1..] {
+            out.b[out.n] = bx;
+            out.n += 1;
+        }
+        return out;
+    }
     Boxes::one([0.0; 3], [1.0; 3])
 }
 
@@ -458,9 +489,109 @@ pub fn wall_torch_for_support(offset: IVec3) -> Option<u8> {
 pub fn is_plant(b: u8) -> bool {
     matches!(b, TALL_GRASS | POPPY | DANDELION | DEAD_BUSH) || is_sapling(b)
 }
+/// A furnace of any kind (the block with the openings, not the other parts of a big one).
 #[inline]
 pub fn is_furnace(b: u8) -> bool {
     (FURNACE..FURNACE_LIT + 4).contains(&b)
+        || (BLAST_FURNACE..BLAST_FURNACE_LIT + 4).contains(&b)
+        || (ADV_FURNACE..ADV_FURNACE_LIT + 4).contains(&b)
+}
+#[inline]
+pub fn is_chimney(b: u8) -> bool {
+    (CHIMNEY..CHIMNEY + 4).contains(&b)
+}
+#[inline]
+pub fn is_adv_part(b: u8) -> bool {
+    (ADV_PART..ADV_PART_LIT + 12).contains(&b)
+}
+/// The kind of furnace (FURNACE, BLAST_FURNACE or ADV_FURNACE) a block belongs to, its
+/// other parts included.
+pub fn furnace_base(b: u8) -> Option<u8> {
+    match b {
+        _ if (FURNACE..FURNACE_LIT + 4).contains(&b) => Some(FURNACE),
+        _ if (BLAST_FURNACE..BLAST_FURNACE_LIT + 4).contains(&b) || is_chimney(b) => {
+            Some(BLAST_FURNACE)
+        }
+        _ if (ADV_FURNACE..ADV_FURNACE_LIT + 4).contains(&b) || is_adv_part(b) => {
+            Some(ADV_FURNACE)
+        }
+        _ => None,
+    }
+}
+/// What a furnace can smelt (`item::smelt_tier`): 1 the furnace, 2 the blast furnace, 3 the
+/// advanced furnace.
+pub fn furnace_tier(b: u8) -> u8 {
+    match furnace_base(b) {
+        Some(BLAST_FURNACE) => 2,
+        Some(ADV_FURNACE) => 3,
+        _ => 1,
+    }
+}
+/// A burning furnace.
+pub fn is_lit_furnace(b: u8) -> bool {
+    is_furnace(b) && furnace_base(b).is_some_and(|base| b - base >= 4)
+}
+/// A furnace of kind `base` facing `facing`, burning or not.
+pub fn furnace_id(base: u8, facing: u8, lit: bool) -> u8 {
+    base + if lit { 4 } else { 0 } + (facing & 3)
+}
+/// Which part of an advanced furnace a block is (1 lower right, 2 upper left, 3 upper
+/// right) and whether it glows.
+pub fn adv_part(b: u8) -> Option<(u8, bool)> {
+    is_adv_part(b).then(|| {
+        let i = b - ADV_PART;
+        ((i % 12) / 4 + 1, i >= 12)
+    })
+}
+pub fn adv_part_id(part: u8, facing: u8, lit: bool) -> u8 {
+    (if lit { ADV_PART_LIT } else { ADV_PART }) + (part - 1) * 4 + (facing & 3)
+}
+/// To the right of a furnace facing `facing`, as seen from in front of it.
+pub fn furnace_right(facing: u8) -> IVec3 {
+    let n = facing_dir(facing);
+    IVec3::new(n.z, 0, -n.x)
+}
+/// The blocks of a furnace of kind `base` with its furnace block at the origin: (offset,
+/// block). A blast furnace has its chimney on top; an advanced furnace is two wide (to its
+/// right) and two tall.
+pub fn furnace_cells(base: u8, facing: u8, lit: bool) -> Vec<(IVec3, u8)> {
+    let f = furnace_id(base, facing, lit);
+    match base {
+        BLAST_FURNACE => vec![(IVec3::ZERO, f), (IVec3::Y, CHIMNEY + (facing & 3))],
+        ADV_FURNACE => {
+            let r = furnace_right(facing);
+            vec![
+                (IVec3::ZERO, f),
+                (r, adv_part_id(1, facing, lit)),
+                (IVec3::Y, adv_part_id(2, facing, lit)),
+                (r + IVec3::Y, adv_part_id(3, facing, lit)),
+            ]
+        }
+        _ => vec![(IVec3::ZERO, f)],
+    }
+}
+/// Where the furnace block of the big furnace that the block `b` at `p` is part of is.
+pub fn furnace_origin(p: IVec3, b: u8) -> IVec3 {
+    if is_chimney(b) {
+        return p - IVec3::Y;
+    }
+    if let (Some((part, _)), Some(f)) = (adv_part(b), facing(b)) {
+        let r = furnace_right(f);
+        return p - match part {
+            1 => r,
+            2 => IVec3::Y,
+            _ => r + IVec3::Y,
+        };
+    }
+    p
+}
+/// The front of a furnace with its openings cut out (the model has hollows behind them).
+pub fn furnace_front_cut(b: u8) -> u32 {
+    match furnace_base(b) {
+        Some(BLAST_FURNACE) => tex::BLAST_FRONT_CUT,
+        Some(ADV_FURNACE) => tex::ADV_FRONT_CUT,
+        _ => tex::FURNACE_FRONT_CUT,
+    }
 }
 #[inline]
 pub fn is_chest(b: u8) -> bool {
@@ -469,8 +600,9 @@ pub fn is_chest(b: u8) -> bool {
 /// Facing of a directional block.
 pub fn facing(b: u8) -> Option<u8> {
     match b {
-        _ if (FURNACE..FURNACE + 4).contains(&b) => Some(b - FURNACE),
-        _ if (FURNACE_LIT..FURNACE_LIT + 4).contains(&b) => Some(b - FURNACE_LIT),
+        _ if is_furnace(b) => furnace_base(b).map(|base| (b - base) & 3),
+        _ if is_chimney(b) => Some(b - CHIMNEY),
+        _ if is_adv_part(b) => Some((b - ADV_PART) & 3),
         _ if (CHEST..CHEST + 4).contains(&b) => Some(b - CHEST),
         _ if (CHEST_LEFT..CHEST_RIGHT + 4).contains(&b) => Some((b - CHEST_LEFT) & 3),
         _ => None,
@@ -533,7 +665,8 @@ pub fn is_opaque(b: u8) -> bool {
         || is_chest(b)
         || is_door(b)
         || is_stairs(b)
-        || is_bed(b))
+        || is_bed(b)
+        || is_chimney(b))
 }
 /// Blocks player movement.
 #[inline]
@@ -562,7 +695,7 @@ pub fn emission(b: u8) -> u8 {
         GLOWSTONE => 15,
         _ if is_torch(b) => 14,
         _ if is_lantern(b) => 15,
-        _ if (FURNACE_LIT..FURNACE_LIT + 4).contains(&b) => 13,
+        _ if is_lit_furnace(b) => 13,
         _ => 0,
     }
 }
@@ -670,6 +803,7 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
         DEAD_BUSH => tex::DEAD_BUSH,
         COAL_ORE => tex::COAL_ORE,
         IRON_ORE => tex::IRON_ORE,
+        COPPER_ORE => tex::COPPER_ORE,
         GOLD_ORE => tex::GOLD_ORE,
         DIAMOND_ORE => tex::DIAMOND_ORE,
         OBSIDIAN => tex::OBSIDIAN,
@@ -684,16 +818,46 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
         },
         _ if is_furnace(b) => {
             let f = facing(b).unwrap();
+            let (top, front, side) = match furnace_base(b) {
+                Some(BLAST_FURNACE) => (tex::BLAST_TOP, tex::BLAST_FRONT, tex::BLAST_SIDE),
+                Some(ADV_FURNACE) => (tex::ADV_TOP, tex::ADV_FRONT, tex::ADV_SIDE),
+                _ if is_lit_furnace(b) => (
+                    tex::FURNACE_TOP,
+                    tex::FURNACE_FRONT_LIT,
+                    tex::FURNACE_SIDE,
+                ),
+                _ => (tex::FURNACE_TOP, tex::FURNACE_FRONT, tex::FURNACE_SIDE),
+            };
             if ends {
-                tex::FURNACE_TOP
+                top
             } else if face == front_face(f) {
-                if b >= FURNACE_LIT {
-                    tex::FURNACE_FRONT_LIT
-                } else {
-                    tex::FURNACE_FRONT
+                front
+            } else {
+                side
+            }
+        }
+        _ if is_chimney(b) => match face {
+            2 => tex::CHIMNEY_TOP,
+            3 => tex::BLAST_TOP,
+            _ => tex::CHIMNEY_SIDE,
+        },
+        _ if is_adv_part(b) => {
+            let (part, lit) = adv_part(b).unwrap();
+            let f = facing(b).unwrap();
+            if top && part >= 2 {
+                tex::ADV_VENT_TOP
+            } else if ends {
+                tex::ADV_TOP
+            } else if face == front_face(f) {
+                match (part, lit) {
+                    (1, _) => tex::ADV_PANEL,
+                    (2, false) => tex::ADV_HOOD_L,
+                    (2, true) => tex::ADV_HOOD_L_LIT,
+                    (_, false) => tex::ADV_HOOD_R,
+                    _ => tex::ADV_HOOD_R_LIT,
                 }
             } else {
-                tex::FURNACE_SIDE
+                tex::ADV_SIDE
             }
         }
         _ if is_chest(b) => {
@@ -711,6 +875,7 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
         BIRCH_SAPLING => tex::BIRCH_SAPLING,
         SPRUCE_SAPLING => tex::SPRUCE_SAPLING,
         IRON_BLOCK => tex::IRON_BLOCK,
+        COPPER_BLOCK => tex::COPPER_BLOCK,
         GOLD_BLOCK => tex::GOLD_BLOCK,
         DIAMOND_BLOCK => tex::DIAMOND_BLOCK,
         COAL_BLOCK => tex::COAL_BLOCK,

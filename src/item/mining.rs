@@ -42,16 +42,19 @@ fn mining(b: u8) -> Option<Mining> {
         STONE | STONE_BRICKS => m(1.5, Some(Pickaxe), Some(0)),
         COBBLE | BRICKS => m(2.0, Some(Pickaxe), Some(0)),
         SANDSTONE => m(0.8, Some(Pickaxe), Some(0)),
-        _ if is_furnace(b) => m(3.5, Some(Pickaxe), Some(0)),
+        _ if furnace_base(b).is_some() => m(3.5, Some(Pickaxe), Some(0)),
+        // Harvest levels (`Tier::level`): 0 wood, 1 stone, 2 copper, 3 iron, 4 diamond.
         COAL_ORE => m(3.0, Some(Pickaxe), Some(0)),
-        IRON_ORE => m(3.0, Some(Pickaxe), Some(1)),
-        GOLD_ORE | DIAMOND_ORE => m(3.0, Some(Pickaxe), Some(2)),
+        COPPER_ORE => m(3.0, Some(Pickaxe), Some(1)),
+        IRON_ORE => m(3.0, Some(Pickaxe), Some(2)),
+        GOLD_ORE | DIAMOND_ORE => m(3.0, Some(Pickaxe), Some(3)),
         COAL_BLOCK => m(5.0, Some(Pickaxe), Some(0)),
-        IRON_BLOCK => m(5.0, Some(Pickaxe), Some(1)),
+        COPPER_BLOCK => m(5.0, Some(Pickaxe), Some(1)),
+        IRON_BLOCK => m(5.0, Some(Pickaxe), Some(2)),
         GUN_STATION => m(3.5, Some(Pickaxe), Some(0)),
-        GOLD_BLOCK => m(3.0, Some(Pickaxe), Some(2)),
-        DIAMOND_BLOCK => m(5.0, Some(Pickaxe), Some(2)),
-        OBSIDIAN => m(50.0, Some(Pickaxe), Some(3)),
+        GOLD_BLOCK => m(3.0, Some(Pickaxe), Some(3)),
+        DIAMOND_BLOCK => m(5.0, Some(Pickaxe), Some(3)),
+        OBSIDIAN => m(50.0, Some(Pickaxe), Some(4)),
         _ => m(1.0, None, None),
     }
 }
@@ -107,7 +110,6 @@ pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
         GRASS | SNOWY_GRASS => one(DIRT as ItemId),
         STONE => one(COBBLE as ItemId),
         COAL_ORE => one(COAL),
-        DIAMOND_ORE => one(DIAMOND),
         CLAY => vec![Stack::new(CLAY_BALL, 4)],
         GLASS | ICE | TALL_GRASS => Vec::new(),
         DEAD_BUSH => {
@@ -149,5 +151,32 @@ pub fn wear(held: ItemId, b: u8) -> u16 {
         Some((ToolKind::Sword, _)) => 2,
         Some(_) if mining(b).is_some_and(|m| m.hardness > 0.0) => 1,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The tier ladder: wood mines coal, stone copper, copper iron, iron gold and diamond,
+    /// diamond obsidian.
+    #[test]
+    fn tier_ladder() {
+        let pick = |t| tool_id(ToolKind::Pickaxe, t);
+        let ok = |b: u8, t| can_harvest(b, pick(t));
+        assert!(ok(COAL_ORE, Tier::Wood) && !ok(COPPER_ORE, Tier::Wood));
+        assert!(ok(COPPER_ORE, Tier::Stone) && !ok(IRON_ORE, Tier::Stone));
+        assert!(ok(IRON_ORE, Tier::Copper));
+        for ore in [GOLD_ORE, DIAMOND_ORE] {
+            assert!(!ok(ore, Tier::Copper));
+            assert!(ok(ore, Tier::Iron) && ok(ore, Tier::Diamond));
+        }
+        assert!(!ok(OBSIDIAN, Tier::Iron) && ok(OBSIDIAN, Tier::Diamond));
+        // The copper tools have their own ids: the rounds after the first 20 tools are not
+        // tools.
+        assert_eq!(tool_of(RIFLE_ROUND), None);
+        for t in TIER_ORDER {
+            assert_eq!(tool_of(pick(t)), Some((ToolKind::Pickaxe, t)));
+        }
     }
 }
