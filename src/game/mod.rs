@@ -1,4 +1,5 @@
 mod bench;
+mod book;
 mod blocks;
 mod camera;
 mod commands;
@@ -252,6 +253,8 @@ pub struct Game {
     audio: crate::audio::Audio,
     furnace_heard: std::collections::HashMap<IVec3, u32>,
     grenades: grenades::Grenades,
+    /// The guide book in the hands: its open page, and its pages' textures.
+    book: book::Book,
     items: Vec<ItemEntity>,
     falling: Vec<FallingBlock>,
     mobs: Vec<Mob>,
@@ -485,6 +488,7 @@ impl Game {
             audio: crate::audio::Audio::new(),
             furnace_heard: Default::default(),
             grenades: Default::default(),
+            book: Default::default(),
             items: Vec::new(),
             falling: Vec::new(),
             mobs: Vec::new(),
@@ -645,6 +649,7 @@ impl Game {
     fn refresh_skin_textures(&mut self) {
         let levels = textures::with_skins(&self.texture_base, &self.custom_skins);
         self.renderer.replace_block_textures(&self.gpu, &levels);
+        self.book.textures_remade();
     }
 
     fn set_skin_png(&mut self, slot: u8, png: Vec<u8>) -> Result<(), &'static str> {
@@ -877,6 +882,9 @@ impl Game {
         if self.screen != Screen::Playing {
             return;
         }
+        self.book_key(code);
+        // Reading the book, the number keys open its chapters.
+        let digit = digit.filter(|&i| !self.book_digit(i));
         if let Some(i) = digit {
             self.hotbar_slot = i;
             self.slot_name_timer = 2.0;

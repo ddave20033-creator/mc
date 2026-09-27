@@ -248,7 +248,19 @@ pub mod tex {
     pub const ARMOR_WOOL: u32 = ARMOR_ICONS + 17;
     pub const ARMOR_METAL: u32 = ARMOR_WOOL + 1;
     pub const VEST: u32 = ARMOR_METAL + 1;
-    pub const LAYERS: usize = (VEST + 1) as usize;
+    /// The guide book: its icon, and the leather, the page edges and a written page of the
+    /// open book in a player's hands.
+    pub const BOOK: u32 = VEST + 1;
+    pub const BOOK_COVER: u32 = BOOK + 1;
+    pub const BOOK_EDGE: u32 = BOOK + 2;
+    pub const BOOK_PAGE: u32 = BOOK + 3;
+    /// Pages of the guide book open in players' hands, drawn while the game runs
+    /// (`game::book`): `BOOK_SHEET_COUNT` pages of `model::book::SHEET_LAYERS` layers each.
+    pub const BOOK_SHEETS: u32 = BOOK_PAGE + 1;
+    pub const BOOK_SHEET_COUNT: u32 = 12;
+    /// The chapter tabs along the top of this player's guide book (`model::book::TAB_LAYERS`).
+    pub const BOOK_TABS: u32 = BOOK_SHEETS + BOOK_SHEET_COUNT * 6;
+    pub const LAYERS: usize = (BOOK_TABS + 4) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -341,6 +353,7 @@ fn is_item_icon(l: u32) -> bool {
         || l == tex::COPPER_INGOT
         || (tex::STEEL_INGOT..=tex::SMOKE_GRENADE).contains(&l)
         || (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l)
+        || l == tex::BOOK
         || (tex::MORE_TOOLS..tex::MORE_TOOLS + 4).contains(&l)
 }
 

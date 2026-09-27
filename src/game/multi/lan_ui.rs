@@ -340,6 +340,7 @@ fn status_bubble(ui: &mut Ui, x: f32, bottom: f32, u: f32, status: u8, time: f32
         status::MENU => rgba(255, 181, 71, 255),
         status::AFK => rgba(167, 139, 250, 255),
         status::INVENTORY => rgba(74, 222, 128, 255),
+        status::READING => rgba(251, 191, 36, 255),
         _ => return,
     };
     // The inactive slots of the grid: the accent sunk into the bubble.
@@ -398,6 +399,32 @@ fn status_bubble(ui: &mut Ui, x: f32, bottom: f32, u: f32, status: u8, time: f32
                 ui.quad([v(px, py - r), v(px + n, py), v(px, py + r), v(px - n, py)], accent);
                 ui.quad([v(px - r, py), v(px, py - n), v(px + r, py), v(px, py + n)], accent);
             }
+        }
+        status::READING => {
+            // An open book; a page turns over from the right to the left.
+            let v = Vec2::new;
+            let (pw, ph, sag) = (15.0 * u, 18.0 * u, 3.0 * u);
+            let top = cy - ph * 0.5;
+            for side in [-1.0, 1.0] {
+                let edge = cx + side * pw;
+                ui.quad(
+                    [v(cx, top + sag), v(edge, top), v(edge, top + ph), v(cx, top + ph + sag)],
+                    dim,
+                );
+            }
+            // The turning page: flat on the right, standing up, flat on the left.
+            let k = ease(t * 0.5);
+            let edge = cx + pw * (1.0 - 2.0 * k);
+            let lift = (k * std::f32::consts::PI).sin() * 5.0 * u;
+            ui.quad(
+                [
+                    v(cx, top + sag),
+                    v(edge, top - lift),
+                    v(edge, top + ph - lift),
+                    v(cx, top + ph + sag),
+                ],
+                accent,
+            );
         }
         _ => {
             // A 3x3 grid of slots; the lit one goes along them.

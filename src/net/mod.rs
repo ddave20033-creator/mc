@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 19;
+pub const PROTOCOL: u16 = 20;
 
 // ---------------------------------------------------------------------------- data
 
@@ -51,6 +51,20 @@ pub struct Pose {
     pub gun_mods: u8,
     /// What they wear (`item::armor_code`).
     pub armor: u16,
+    /// Holding the guide book open (`book` bits): open, and the page turns so far.
+    pub book: u8,
+    /// The spread it is open at (its left page / 2), and `book::HUNGARIAN`.
+    pub book_page: u8,
+}
+
+/// `Pose::book`: the book is held open; the last page turn went back; the number of page
+/// turns so far (low 6 bits, wrapping), so the others turn a page when it changes.
+/// `Pose::book_page`: the book is read in Hungarian (the rest is the spread).
+pub mod book {
+    pub const OPEN: u8 = 0x80;
+    pub const BACK: u8 = 0x40;
+    pub const TURNS: u8 = 0x3f;
+    pub const HUNGARIAN: u8 = 0x80;
 }
 
 /// `Pose::status`: typing in the chat, in the pause menu, away (the game window is not in
@@ -61,6 +75,7 @@ pub mod status {
     pub const MENU: u8 = 2;
     pub const AFK: u8 = 3;
     pub const INVENTORY: u8 = 4;
+    pub const READING: u8 = 5;
 }
 
 pub mod pose_flags {
@@ -73,6 +88,8 @@ pub mod pose_flags {
     pub const SLEEPING: u8 = 32;
     /// Aiming a gun down its sights.
     pub const AIMING: u8 = 64;
+    /// Holding the guide book turned around to show it.
+    pub const SHOWING: u8 = 128;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -375,6 +392,8 @@ impl W {
         self.u8(p.status);
         self.u8(p.gun_mods);
         self.u16(p.armor);
+        self.u8(p.book);
+        self.u8(p.book_page);
     }
     fn state(&mut self, s: &PlayerState) {
         self.vec3(s.pos);
@@ -490,6 +509,8 @@ impl R<'_> {
             status: self.u8()?,
             gun_mods: self.u8()?,
             armor: self.u16()?,
+            book: self.u8()?,
+            book_page: self.u8()?,
         })
     }
     fn state(&mut self) -> Option<PlayerState> {
@@ -1022,6 +1043,8 @@ mod tests {
             status: status::TYPING,
             gun_mods: 0b1001,
             armor: 0x1234,
+            book: book::OPEN | 5,
+            book_page: book::HUNGARIAN | 7,
             ..Default::default()
         }));
         roundtrip(Msg::Grenade {

@@ -212,6 +212,12 @@ fn recipes() -> &'static Vec<Recipe> {
                 keys: vec![('C', vec![CLAY_BALL])],
                 result: Stack::one(CLAY as ItemId),
             },
+            // The guide book: wool bound on a plank.
+            Recipe {
+                pattern: &["W", "P"],
+                keys: vec![('W', b(WOOL)), ('P', b(PLANKS))],
+                result: Stack::one(GUIDE_BOOK),
+            },
             // Guns: the station, the pistol's parts (put together at the station) and bullets.
             Recipe {
                 pattern: &["III", "N N"],
@@ -385,6 +391,39 @@ fn recipes() -> &'static Vec<Recipe> {
         }
         v
     })
+}
+
+/// How `result` is crafted (its first recipe), for the guide book: the pattern's rows, each
+/// cell with the items that can go there (none: empty), and what comes out.
+pub fn recipe_view(result: ItemId) -> Option<(Vec<Vec<Vec<ItemId>>>, Stack)> {
+    let r = recipes().iter().find(|r| r.result.item == result)?;
+    let rows = r
+        .pattern
+        .iter()
+        .map(|row| {
+            row.chars()
+                .map(|ch| {
+                    r.keys
+                        .iter()
+                        .find(|(k, _)| *k == ch)
+                        .map(|(_, items)| items.clone())
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .collect();
+    Some((rows, r.result))
+}
+
+/// Everything that can be crafted, once each, in the order of the recipes.
+pub fn recipe_results() -> Vec<ItemId> {
+    let mut out: Vec<ItemId> = Vec::new();
+    for r in recipes() {
+        if !out.contains(&r.result.item) {
+            out.push(r.result.item);
+        }
+    }
+    out
 }
 
 /// Result of the items in a crafting grid (`size` x `size`, row-major).

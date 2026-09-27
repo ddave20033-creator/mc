@@ -696,6 +696,7 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
         }
         tex::FRAG_GRENADE | tex::SMOKE_GRENADE => grenade_icon(l == tex::SMOKE_GRENADE, x, y),
         _ if (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l) => armor_icon(l, x, y),
+        tex::BOOK => book_icon(x, y),
         tex::DIAMOND => Some(diamond_icon(x, y)),
         tex::CLAY_BALL => shape(x, y, [160.0, 166.0, 182.0], |fx, fy| {
             ((fx - 16.0).powi(2) + (fy - 16.0).powi(2)).sqrt() < 8.5
@@ -1572,6 +1573,96 @@ fn gun_surface(l: u32, x: i32, y: i32) -> [u8; 4] {
         _ => (GUN_POLYMER_C, 0.82 + 0.3 * grain(l, x, y, 622)),
     };
     col(c, v * edge, 255)
+}
+
+const BOOK_LEATHER: [f32; 3] = [128.0, 46.0, 34.0];
+const BOOK_GOLD: [f32; 3] = [226.0, 180.0, 74.0];
+const BOOK_PAPER: [f32; 3] = [238.0, 228.0, 198.0];
+
+/// The guide book's icon: a red leather cover with gold bands and a gold diamond on it,
+/// its spine darker, and the pages showing along the right and bottom.
+fn book_icon(x: i32, y: i32) -> Option<[u8; 4]> {
+    let l = tex::BOOK;
+    let (fx, fy) = (d(x), d(y));
+    let cover = |fx: f32, fy: f32| fx > 5.5 && fx < 24.5 && fy > 3.5 && fy < 27.0;
+    let pages = |fx: f32, fy: f32| fx > 8.0 && fx < 26.5 && fy > 5.5 && fy < 28.8;
+    if cover(fx, fy) {
+        let band = ((8.0..9.6).contains(&fy) || (21.0..22.6).contains(&fy)) && fx > 11.0 && fx < 22.5;
+        let emblem = (fx - 16.8).abs() + (fy - 15.3).abs() < 3.4;
+        let spine = fx < 9.5;
+        let seam = (9.5..10.3).contains(&fx);
+        let n = 0.9 + 0.16 * fbm(l, x, y, 790);
+        return shape(x, y, BOOK_LEATHER, cover).map(|p| {
+            if p[0] < 80 && !band && !emblem {
+                // The outline stays.
+                p
+            } else if band || emblem {
+                col(BOOK_GOLD, 0.95 + 0.1 * grain(l, x, y, 791), 255)
+            } else if seam {
+                col(BOOK_LEATHER, 0.55, 255)
+            } else if spine {
+                col(BOOK_LEATHER, 0.75 * n, 255)
+            } else {
+                col(BOOK_LEATHER, n, 255)
+            }
+        });
+    }
+    shape(x, y, BOOK_PAPER, pages).map(|p| {
+        // The edges of the sheets.
+        let sheet = if fx > 24.5 { (y % 4 == 0) as u8 } else { (x % 4 == 0) as u8 };
+        if p[0] < 150 {
+            p
+        } else {
+            col(BOOK_PAPER, 1.0 - 0.14 * sheet as f32, 255)
+        }
+    })
+}
+
+/// The open book in a player's hands: its leather (with a gold line near the edge), the edges
+/// of its sheets, and a written page (lines of words, a heading and a small picture).
+fn book_surface(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let t = TILE as i32;
+    match l {
+        tex::BOOK_COVER => {
+            let edge = x.min(y).min(t - 1 - x).min(t - 1 - y);
+            if (10..14).contains(&edge) {
+                col(BOOK_GOLD, 0.9 + 0.1 * grain(l, x, y, 792), 255)
+            } else {
+                col(BOOK_LEATHER, 0.86 + 0.2 * fbm(l, x, y, 793), 255)
+            }
+        }
+        tex::BOOK_EDGE => {
+            let sheet = (y % 6 == 0) || (x % 6 == 0);
+            col(BOOK_PAPER, if sheet { 0.8 } else { 0.97 + 0.05 * grain(l, x, y, 794) }, 255)
+        }
+        _ => {
+            let paper = col(BOOK_PAPER, 0.96 + 0.06 * fbm(l, x, y, 795), 255);
+            let ink = col([70.0, 58.0, 48.0], 1.0, 255);
+            let (m, top) = (14, 14);
+            if x < m || x >= t - m || y < top || y >= t - 14 {
+                return paper;
+            }
+            // A heading, a picture in the upper right, then lines of words.
+            if y < top + 8 {
+                return if x < 70 && (y - top) % 8 < 5 { col([140.0, 40.0, 30.0], 1.0, 255) } else { paper };
+            }
+            if (74..t - m).contains(&x) && (top + 14..top + 46).contains(&y) {
+                let frame = x == 74 || x == t - m - 1 || y == top + 14 || y == top + 45;
+                return if frame { ink } else { col([180.0, 160.0, 120.0], 0.9 + 0.2 * vn(l, x, y, 8, 796), 255) };
+            }
+            let row = (y - top - 14) / 8;
+            let in_row = (y - top - 14) % 8 < 4;
+            let right = if (top + 14..top + 46).contains(&y) { 68 } else { t - m };
+            // Each line ends somewhere, the last of a paragraph early.
+            let end = if row % 5 == 4 { 30 + (hash(l, row, 0, 797) * 50.0) as i32 } else { right };
+            let word = (x + row * 37) % 17 < 3;
+            if in_row && x < end.min(right) && !word {
+                ink
+            } else {
+                paper
+            }
+        }
+    }
 }
 
 /// Muzzle flash sprites (drawn glowing, tinted): a star of uneven spikes around a white-hot
@@ -2468,6 +2559,9 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         tex::MUZZLE_FLASH | tex::MUZZLE_FLASH_SIDE => muzzle_flash(l, x, y),
         tex::BULLET_HOLE => bullet_hole(l, x, y),
         tex::ARMOR_WOOL | tex::ARMOR_METAL | tex::VEST => armor_surface(l, x, y),
+        tex::BOOK_COVER | tex::BOOK_EDGE | tex::BOOK_PAGE => book_surface(l, x, y),
+        // Blank until a page is drawn onto them.
+        _ if l >= tex::BOOK_SHEETS => col(BOOK_PAPER, 1.0, 255),
         // Filled from the packs' animations, or copies of the still texture.
         _ if (tex::WATER_ANIM..tex::GUN_STATION_TOP).contains(&l) => [0, 0, 0, 0],
         // Wool: soft white fibres. The sheep atlases are plain: skin and a white coat.

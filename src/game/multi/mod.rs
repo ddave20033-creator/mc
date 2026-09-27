@@ -46,6 +46,9 @@ pub(super) struct RemotePlayer {
     limbs: LimbSmoother,
     /// Swing of a lantern in their hand.
     lantern: crate::model::lantern::SmoothSwing,
+    /// The guide book in their hands: its page turning, and how it is shown here.
+    pub(in crate::game) book: crate::model::book::TurnAnim,
+    pub(in crate::game) book_view: Option<crate::model::book::BookView>,
 }
 
 impl RemotePlayer {
@@ -243,6 +246,9 @@ impl Game {
         if self.holding_gun() && self.guns.aim > 0.5 {
             flags |= pose_flags::AIMING;
         }
+        if self.book_showing() {
+            flags |= pose_flags::SHOWING;
+        }
         Pose {
             pos: self.player.pos,
             yaw: self.visual_head_yaw(),
@@ -267,6 +273,8 @@ impl Game {
             status: self.my_status(),
             gun_mods: self.held_gun_mods(),
             armor: armor_code(&self.inventory.armor),
+            book: self.book_pose().0,
+            book_page: self.book_pose().1,
         }
     }
 
@@ -275,6 +283,9 @@ impl Game {
         use crate::net::status;
         if !self.focused {
             return status::AFK;
+        }
+        if self.screen == Screen::Playing && self.book_status() {
+            return status::READING;
         }
         match self.screen {
             Screen::Chat => status::TYPING,
@@ -397,6 +408,7 @@ impl Game {
             p.status = t.status;
             p.gun_mods = t.gun_mods;
             p.armor = t.armor;
+            p.book = t.book;
         }
     }
 
@@ -427,6 +439,8 @@ impl Game {
             has_pose: false,
             limbs: LimbSmoother::default(),
             lantern: Default::default(),
+            book: Default::default(),
+            book_view: None,
         });
     }
 }
@@ -455,6 +469,7 @@ fn standing_pose(p: &Pose, time: f32) -> PlayerPose {
         lantern: None,
         gun_mods: p.gun_mods,
         armor: p.armor,
+        book: None,
     }
 }
 
@@ -512,6 +527,11 @@ pub(super) fn build_remote_players(
                     ..standing
                 },
                 None => standing,
+            };
+            // Their open book, at their page (see `update_book_views`).
+            let pose = PlayerPose {
+                book: r.book_view.filter(|_| bed.is_none()),
+                ..pose
             };
             let limbs = r.limbs.update(limb_targets(&pose), dt);
             let lantern = if pose.held == LANTERN as ItemId {

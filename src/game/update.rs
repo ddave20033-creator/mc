@@ -134,12 +134,19 @@ impl Game {
         // button shoots instead (one shot per click, no hitting).
         let sword = is_sword(self.held());
         let gun = self.holding_gun();
-        if sword || gun {
+        // Holding the guide book: the buttons turn its pages (they never hit blocks).
+        let reading = control && self.book_in_hand();
+        if reading {
+            let (left, right) = (self.left_pressed, self.right_down);
+            self.book_buttons(dt, left, right);
+        }
+        if sword || gun || reading {
             self.mining = None;
         }
         // A left click on what is in a furnace takes it out instead of mining (a pistol shoots).
-        let furnace_hold = control && !gun && self.furnace_left_click();
+        let furnace_hold = control && !gun && !reading && self.furnace_left_click();
         if control
+            && !reading
             && self.left_down
             && self.action_cooldown <= 0.0
             && !sword
@@ -180,6 +187,7 @@ impl Game {
         }
         // Hitting: either block with the sword or strike, not both.
         if control
+            && !reading
             && self.left_pressed
             && (self.target.is_none() || sword)
             && !self.blocking
@@ -201,7 +209,10 @@ impl Game {
         if let Some(p) = breaking {
             self.break_block(p);
         }
-        if control && (self.right_pressed || (self.right_down && self.action_cooldown <= 0.0)) {
+        if control
+            && !reading
+            && (self.right_pressed || (self.right_down && self.action_cooldown <= 0.0))
+        {
             self.use_item();
         }
         // Pick block (creative).

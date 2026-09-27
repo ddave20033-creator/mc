@@ -80,6 +80,12 @@ pub struct HandAnim {
     pub cycle: Option<f32>,
     /// A shotgun being loaded: how far it is turned over (eases in and out around the shells).
     shell_tilt: f32,
+    /// The held guide book: how far it is lifted up to read (0 held low .. 1 in front of the
+    /// eyes) and how it looks. Set by the game each frame.
+    pub book: Option<(f32, super::book::BookView)>,
+    /// Where the view's middle falls on the book's pages (see `book::page_hit`), from the
+    /// last build.
+    pub book_hit: Option<super::book::BookHit>,
 }
 
 impl HandAnim {
@@ -116,6 +122,8 @@ impl HandAnim {
             reload_empty: false,
             cycle: None,
             shell_tilt: 0.0,
+            book: None,
+            book_hit: None,
         }
     }
 
@@ -272,6 +280,18 @@ impl HandAnim {
         self.muzzle_tip = None;
         self.eject_tip = None;
         self.laser_tip = None;
+        self.book_hit = None;
+        if let (crate::item::GUIDE_BOOK, Some((read, view))) = (self.held, self.book) {
+            // A little light to read by, even at night.
+            let light = vertex_light(sky, blk.max(9));
+            let base = cam_to_world * rx(self.sway.y) * ry(self.sway.x);
+            let eq = {
+                let e = self.equip;
+                e * e * (3.0 - 2.0 * e)
+            };
+            self.build_book(out, base, read, &view, eq, light, fl, skin);
+            return;
+        }
         let s = self.attack();
         let sq = s.sqrt();
         let eq = {
@@ -408,6 +428,67 @@ impl HandAnim {
 }
 
 impl HandAnim {
+    /// The guide book held open in both hands, like a map: low in the view while looking
+    /// ahead, lifted up in front of the eyes (`read` 1) when looking down, both arms holding
+    /// it by its sides. Also finds where the middle of the view falls on its pages.
+    #[allow(clippy::too_many_arguments)]
+    fn build_book(
+        &mut self,
+        out: &mut Vec<Vertex>,
+        base: Mat4,
+        read: f32,
+        view: &super::book::BookView,
+        eq: f32,
+        light: [u8; 4],
+        fl: u8,
+        skin: u8,
+    ) {
+        use super::book::{book_hit, emit_open_book, PAGE_H, PAGE_W};
+        let r = read * read * (3.0 - 2.0 * read);
+        // Camera space (blocks): below the view, lying back; read, upright in front of it.
+        let pos = Vec3::new(0.0, -0.64 + 0.62 * r - (1.0 - eq) * 0.5, -0.66 + 0.06 * r);
+        // Shown to someone: pushed out and turned away to the side (still readable from
+        // here, at a slant), as the others see it turned right around to them.
+        let s = view.show * view.show * (3.0 - 2.0 * view.show);
+        let pos = pos + Vec3::new(0.18 * s, 0.1 * s, -0.25 * s);
+        let book = t(pos.x, pos.y, pos.z)
+            * Mat4::from_rotation_y((-58.0 * s).to_radians())
+            * Mat4::from_rotation_x((30.0 + 52.0 * r + 10.0 * s).to_radians())
+            * Mat4::from_scale(Vec3::splat(0.074));
+        emit_open_book(out, base * book, view, light, fl);
+        // The hands under the cover, out past the pages' outer edges; shown to someone, they
+        // move in to hold its lower edge (which stays toward this player as it turns). Each
+        // arm takes the hand on its own side of the view, coming up from below and outside
+        // it, so it never covers the pages.
+        let grip = |side: f32| {
+            let hold = Vec3::new(side * (PAGE_W + 2.2), -2.6, PAGE_H * 0.3);
+            let shown = Vec3::new(side * 3.2, -1.4, PAGE_H * 0.5 + 0.5);
+            book.transform_point3(hold.lerp(shown, s))
+        };
+        let (a, b) = (grip(1.0), grip(-1.0));
+        let (right, left) = if a.x >= b.x { (a, b) } else { (b, a) };
+        for (side, hand) in [(1.0f32, right), (-1.0, left)] {
+            let shoulder = Vec3::new(side * 0.75, -1.3, 0.2);
+            let along = (shoulder - hand).normalize_or(Vec3::Y);
+            let arm = base
+                * Mat4::from_translation(hand)
+                * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, along))
+                * Mat4::from_scale(Vec3::splat(1.0 / 20.0));
+            emit_box(
+                out,
+                arm,
+                Vec3::new(-2.0, -1.0, -2.0),
+                Vec3::new(2.0, 13.0, 2.0),
+                ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
+                [[255; 3]; 6],
+                light,
+                fl,
+            );
+        }
+        // The middle of the view is straight ahead in camera space.
+        self.book_hit = book_hit(book, Vec3::ZERO, Vec3::NEG_Z, view.tabs.is_some());
+    }
+
     /// The held gun. From the hip a pistol is held out in the lower right, a long gun against
     /// the shoulder with the left hand under its handguard; aimed, the sight line lies on the
     /// view's axis with the rear sight (or the scope's eyepiece) just in front of the eye. A

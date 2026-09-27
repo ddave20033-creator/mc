@@ -49,6 +49,8 @@ pub struct PlayerPose {
     pub gun_mods: u8,
     /// What is worn (`item::armor_code`).
     pub armor: u16,
+    /// Holding the guide book open: its pages (see `book::BookView`).
+    pub book: Option<super::book::BookView>,
 }
 
 // Face order for layers: +X, -X, +Y, -Y, +Z (back), -Z (front)
@@ -170,6 +172,18 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
             -(0.1 + head_yaw).clamp(-0.2, 0.2),
             0.1,
         );
+    } else if let (Some(_), false) = (p.book, swinging) {
+        // Holding the open book: both hands hold it by its sides in front of the chest (each
+        // hand the side on its own side, also when it is turned around to show it).
+        let shoulder_y = 22.0 - 3.2 * c;
+        let at = book_on_model(p);
+        let (a, b) = (
+            at.transform_point3(Vec3::new(5.5, 0.0, 1.5)),
+            at.transform_point3(Vec3::new(-5.5, 0.0, 1.5)),
+        );
+        let (right, left) = if a.x >= b.x { (a, b) } else { (b, a) };
+        l.right_arm = reach(Vec3::new(5.0, shoulder_y, 0.0), right);
+        l.left_arm = reach(Vec3::new(-5.0, shoulder_y, 0.0), left);
     } else if let (Some(kind), false, false) =
         (crate::item::GunKind::of(p.held), swinging, p.blocking)
     {
@@ -341,11 +355,29 @@ pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u
         let dir = p.lantern.unwrap_or(Vec3::NEG_Y);
         let style = crate::model::lantern::ON_MODEL;
         crate::model::lantern::emit_held_lantern(out, style, pivot, dir, p.body_yaw, light, fl);
+    } else if let (Some(view), true) = (&p.book, show_right) {
+        super::book::emit_open_book(out, root * book_on_model(p), view, light, fl);
     } else if let (Some(kind), true) = (crate::item::GunKind::of(p.held), show_right) {
         super::gun::emit_gun(out, kind, root * gun_on_model(p, kind), light, fl, p.gun_mods);
     } else if p.held != NONE && show_right {
         emit_held(out, held_item(p, right), p.held, light, fl);
     }
+}
+
+/// Where the open guide book is on the player model (model pixels from the feet, facing -Z):
+/// held in front of the chest, its far edge tipped up toward the eyes; looking down lifts it
+/// up to read.
+fn book_on_model(p: &PlayerPose) -> Mat4 {
+    let read = ((-p.pitch - 0.2) / 0.6).clamp(0.0, 1.0);
+    // Shown: held out further and higher, turned around to face whoever is in front, and
+    // stood up so they can read it.
+    let show = p.book.map_or(0.0, |b| b.show);
+    let e = show * show * (3.0 - 2.0 * show);
+    let read = read * (1.0 - e);
+    t(0.0, 14.0 + 3.0 * read + 4.0 * e - 3.2 * p.crouch, -6.0 - 1.0 * read - 2.5 * e)
+        * Mat4::from_rotation_y(PI * e)
+        * Mat4::from_rotation_x(0.5 + 0.6 * read + 0.8 * e)
+        * Mat4::from_scale(Vec3::splat(0.8))
 }
 
 /// Where a held gun is on the player model (model pixels from the feet, facing -Z), turned
@@ -496,6 +528,7 @@ mod gun_hold_tests {
             lantern: None,
             gun_mods: 0,
             armor: 0,
+            book: None,
         }
     }
 
