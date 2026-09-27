@@ -127,7 +127,12 @@ impl Game {
         }
         self.action_cooldown -= dt;
         let mut breaking = None;
-        if control && self.left_down && self.action_cooldown <= 0.0 {
+        // A sword does not break blocks at all (it only fights).
+        let sword = is_sword(self.held());
+        if sword {
+            self.mining = None;
+        }
+        if control && self.left_down && self.action_cooldown <= 0.0 && !sword {
             if let Some((hit, _)) = self.target {
                 let b = self.terrain.world.geti(hit);
                 let time =
@@ -160,7 +165,8 @@ impl Game {
             self.mining = None;
             self.dig_timer = 0.0;
         }
-        if control && self.left_pressed && self.target.is_none() {
+        // Hitting: either block with the sword or strike, not both.
+        if control && self.left_pressed && (self.target.is_none() || sword) && !self.blocking {
             if let Some(i) = self.mob_target {
                 self.attack(Some(i), None);
             }
@@ -410,6 +416,25 @@ impl Game {
                 }
             }
         }
+        // Torches in hands burn too: this player's (where it was drawn) and the others'
+        // (about where they hold it up).
+        let mut tips: Vec<Vec3> = self.held_torch_tip.into_iter().collect();
+        tips.extend(
+            self.remote_held_lights()
+                .into_iter()
+                .filter(|&(_, _, item)| item == TORCH as ItemId)
+                .map(|(_, light, _)| light + Vec3::Y * 0.3),
+        );
+        for tip in tips {
+            if self.random() < dt * 3.0 {
+                self.particles.flame(tip);
+            }
+            if self.random() < dt * 1.0 {
+                let w = &self.terrain.world;
+                let (sky, blk) = (w.sky_estimate(tip), w.block_light_estimate(tip));
+                self.particles.smoke(tip + Vec3::Y * 0.08, sky, blk);
+            }
+        }
         for i in 0..self.torches.len() {
             let p = self.torches[i];
             let b = self.terrain.world.geti(p);
@@ -418,7 +443,7 @@ impl Game {
             }
             let base = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
             let tip = crate::world::mesh::torch_transform(base, b)
-                .transform_point3(Vec3::new(0.0, 0.25, 0.0));
+                .transform_point3(Vec3::new(0.0, 0.21, 0.0));
             if self.random() < dt * 3.0 {
                 self.particles.flame(tip);
             }

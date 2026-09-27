@@ -66,6 +66,16 @@ impl Game {
         }
         if let Some((hit, _)) = self.target {
             let hb = self.terrain.world.geti(hit);
+            // Opening things (tables, chests, doors, beds...) takes a fresh click: holding the
+            // button (blocking with a sword, placing blocks) and looking at one does nothing.
+            let opens = hb == CRAFTING_TABLE
+                || is_furnace(hb)
+                || is_door(hb)
+                || is_bed(hb)
+                || is_chest(hb);
+            if !sneaking && opens && !self.right_pressed {
+                return;
+            }
             if !sneaking {
                 if hb == CRAFTING_TABLE {
                     // Whatever was left on the table is still there.

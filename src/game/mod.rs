@@ -265,6 +265,8 @@ pub struct Game {
     /// Torches near the player (rescanned every second) and the rescan timer.
     torches: Vec<IVec3>,
     torch_scan: f32,
+    /// Where the torch in this player's hand burns (seen last frame), for its particles.
+    held_torch_tip: Option<Vec3>,
     show_debug: bool,
     /// `--bench` mode state.
     bench: Option<bench::Bench>,
@@ -466,6 +468,7 @@ impl Game {
             torch_particles,
             torches: Vec::new(),
             torch_scan: 0.0,
+            held_torch_tip: None,
             show_debug: false,
             bench: bench.then(Default::default),
             shots: shots.map(bench::Shots::new),

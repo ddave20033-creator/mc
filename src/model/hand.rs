@@ -53,6 +53,9 @@ pub struct HandAnim {
     lantern_swing: crate::model::lantern::SmoothSwing,
     /// Blend 0..1 from the normal hold to the blocking pose.
     block: f32,
+    /// Where the held torch's fire was drawn last frame (world, but in the hand's own
+    /// projection), for its flame particles.
+    pub torch_tip: Option<Vec3>,
 }
 
 impl HandAnim {
@@ -74,6 +77,7 @@ impl HandAnim {
             eating: None,
             fancy_lantern: false,
             lantern_swing: crate::model::lantern::SmoothSwing::default(),
+            torch_tip: None,
         }
     }
 
@@ -213,6 +217,7 @@ impl HandAnim {
     ) {
         let light = vertex_light(sky, blk);
         let fl = flags::VIEWMODEL;
+        self.torch_tip = None;
         let s = self.attack();
         let sq = s.sqrt();
         let eq = {
@@ -336,6 +341,9 @@ impl HandAnim {
             use crate::model::lantern::{emit_lantern, LanternKind};
             emit_lantern(out, m, light, fl, LanternKind::Standing);
             return;
+        }
+        if self.held == TORCH as ItemId {
+            self.torch_tip = Some(item.transform_point3(super::player::TORCH_TIP));
         }
         emit_held(out, item, self.held, light, fl);
     }

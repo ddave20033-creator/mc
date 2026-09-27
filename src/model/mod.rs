@@ -46,11 +46,12 @@ pub fn emit_torch(out: &mut Vec<Vertex>, m: Mat4, light: [u8; 4], fl: u8, seed: 
         light,
         fl,
     );
+    // The glowing head: as thin as the stick (a hair wider so the faces do not fight).
     emit_box(
         out,
         m,
-        Vec3::new(-0.068, 0.11, -0.068),
-        Vec3::new(0.068, 0.19, 0.068),
+        Vec3::new(-0.053, 0.1, -0.053),
+        Vec3::new(0.053, 0.17, 0.053),
         [
             tex::TORCH_CHAR,
             tex::TORCH_CHAR,

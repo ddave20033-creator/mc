@@ -578,6 +578,8 @@ impl Game {
             && self.settings.first_person_body
             && self.sleep.is_none();
         let torch = self.held() == TORCH as ItemId;
+        // Where the held torch burns (for its flame particles), from whichever model shows it.
+        let mut held_torch_tip = None;
         // A lantern is always held by the first-person hand (hanging with the body shown).
         let lantern = self.held() == LANTERN as ItemId;
         let down = -self.pitch.to_degrees();
@@ -614,6 +616,13 @@ impl Game {
                 dt,
                 self.effective_skin(),
             );
+            // The hand is drawn with its own 70 degree view: move its torch tip to where the
+            // world's view shows the same spot, so the flame sits on the torch.
+            if let Some(tip) = self.hand.torch_tip {
+                let p = cam_to_world.inverse().transform_point3(tip);
+                let k = (self.fov_current.to_radians() * 0.5).tan() / 35f32.to_radians().tan();
+                held_torch_tip = Some(cam_to_world.transform_point3(Vec3::new(p.x * k, p.y * k, p.z)));
+            }
         }
         // The player model (shadow only in first person).
         if in_world && self.player.spawned && self.screen != Screen::Dead {
@@ -671,6 +680,9 @@ impl Game {
                 crate::model::player::lay_down(&mut scene.entity[start..], feet, turn);
             }
             scene.player_vertex_count = scene.entity.len();
+            if torch && third_person {
+                held_torch_tip = Some(crate::model::player::held_torch_tip(&pose, &limbs));
+            }
             // First-person body: a headless copy drawn with the particles (which cast no shadow;
             // the full model above already does). Like the First Person Model mod, it sits
             // 0.25 blocks behind the camera (0.27 while sneaking), so looking down shows the
@@ -686,8 +698,12 @@ impl Game {
                     ..pose
                 };
                 build_player(&mut scene.particles, &fp, &limbs, player_sky, player_blk);
+                if torch {
+                    held_torch_tip = Some(crate::model::player::held_torch_tip(&fp, &limbs));
+                }
             }
         }
+        self.held_torch_tip = held_torch_tip;
         if in_world {
             self.build_world_entities(&mut scene, third_person, dt);
         }

@@ -274,28 +274,42 @@ pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u
         let style = crate::model::lantern::ON_MODEL;
         crate::model::lantern::emit_held_lantern(out, style, pivot, dir, p.body_yaw, light, fl);
     } else if p.held != NONE && show_right {
-        let deg = f32::to_radians;
-        let (tr, r, sc) = if tool_of(p.held).is_some() || p.held == STICK {
-            ([0.0, 4.0, 0.5], [0.0, -90.0, 55.0], 0.85)
-        } else if matches!(icon(p.held), Icon::Block(_)) {
-            ([0.0, 2.5, 0.0], [75.0, 45.0, 0.0], 0.375)
-        } else {
-            ([0.0, 3.0, 1.0], [0.0, 0.0, 0.0], 0.55)
-        };
-        let m = right
-            // Into Minecraft's model space (X and Y flipped), then its hand offset.
-            * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
-            * Mat4::from_rotation_x(deg(-90.0))
-            * Mat4::from_rotation_y(deg(180.0))
-            * t(1.0, 2.0, -10.0)
-            * t(tr[0], tr[1], tr[2])
-            * Mat4::from_rotation_x(deg(r[0]))
-            * Mat4::from_rotation_y(deg(r[1]))
-            * Mat4::from_rotation_z(deg(r[2]))
-            * Mat4::from_scale(Vec3::splat(16.0 * sc));
-        emit_held(out, m, p.held, light, fl);
+        emit_held(out, held_item(p, right), p.held, light, fl);
     }
 }
+
+/// The held item's transform (the unit item of `emit_held`) from the right arm's, placed like
+/// Minecraft's ItemInHandLayer followed by the item model's `thirdperson_righthand` display
+/// transform (handheld tools, flat items, blocks).
+fn held_item(p: &PlayerPose, right: Mat4) -> Mat4 {
+    let deg = f32::to_radians;
+    let (tr, r, sc) = if tool_of(p.held).is_some() || p.held == STICK {
+        ([0.0, 4.0, 0.5], [0.0, -90.0, 55.0], 0.85)
+    } else if matches!(icon(p.held), Icon::Block(_)) {
+        ([0.0, 2.5, 0.0], [75.0, 45.0, 0.0], 0.375)
+    } else {
+        ([0.0, 3.0, 1.0], [0.0, 0.0, 0.0], 0.55)
+    };
+    right
+        // Into Minecraft's model space (X and Y flipped), then its hand offset.
+        * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
+        * Mat4::from_rotation_x(deg(-90.0))
+        * Mat4::from_rotation_y(deg(180.0))
+        * t(1.0, 2.0, -10.0)
+        * t(tr[0], tr[1], tr[2])
+        * Mat4::from_rotation_x(deg(r[0]))
+        * Mat4::from_rotation_y(deg(r[1]))
+        * Mat4::from_rotation_z(deg(r[2]))
+        * Mat4::from_scale(Vec3::splat(16.0 * sc))
+}
+
+/// Where a held torch's fire is (the tip of its glowing head), in the world.
+pub fn held_torch_tip(p: &PlayerPose, limbs: &Limbs) -> Vec3 {
+    held_item(p, right_arm(p, limbs)).transform_point3(TORCH_TIP)
+}
+
+/// The top of a torch's glowing head in the torch model (`emit_torch`).
+pub const TORCH_TIP: Vec3 = Vec3::new(0.0, 0.17, 0.0);
 
 /// Lights held up in front of the eyes (Not Enough Animations' pose for torches; lanterns too).
 pub fn held_up(item: ItemId) -> bool {
