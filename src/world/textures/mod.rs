@@ -206,7 +206,6 @@ pub mod tex {
     /// 3D models), and of their ammunition (.50 AE, 5.56 mm, .50 BMG, 12 gauge).
     pub const GUN_ICONS: u32 = GUN_WOOD + 1;
     pub const AMMO_ICONS: u32 = GUN_ICONS + 4;
-<<<<<<< HEAD
     /// Copper: the ore, the storage block and the ingot.
     pub const COPPER_ORE: u32 = AMMO_ICONS + 4;
     pub const COPPER_BLOCK: u32 = COPPER_ORE + 1;
@@ -234,7 +233,10 @@ pub mod tex {
     pub const ADV_HOOD_L_LIT: u32 = ADV_FRONT + 7;
     pub const ADV_HOOD_R_LIT: u32 = ADV_FRONT + 8;
     pub const ADV_VENT_TOP: u32 = ADV_FRONT + 9;
-    pub const LAYERS: usize = (ADV_VENT_TOP + 1) as usize;
+    /// Muzzle flash: the star seen from the front, and a flame tongue seen from the side.
+    pub const MUZZLE_FLASH: u32 = ADV_VENT_TOP + 1;
+    pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
+    pub const LAYERS: usize = (MUZZLE_FLASH_SIDE + 1) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -245,12 +247,6 @@ pub fn tool_layer(tier: usize, kind: usize) -> u32 {
     } else {
         tex::MORE_TOOLS + i - 20
     }
-=======
-    /// Muzzle flash: the star seen from the front, and a flame tongue seen from the side.
-    pub const MUZZLE_FLASH: u32 = AMMO_ICONS + 4;
-    pub const MUZZLE_FLASH_SIDE: u32 = MUZZLE_FLASH + 1;
-    pub const LAYERS: usize = (MUZZLE_FLASH_SIDE + 1) as usize;
->>>>>>> bbb50fe7188f3b52a28ab9ef57da2c8b3c219260
 }
 
 /// Clothing layers shared by the world model, the hand and the menu preview.
