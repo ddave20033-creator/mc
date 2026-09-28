@@ -225,12 +225,16 @@ impl Game {
             return contents;
         }
         if is_gun_bench(b) {
-            // The other half goes too; what lay on the table (kept by the left half) drops.
-            let q = p + gun_bench_other_half(b);
-            let main = gun_bench_main(p, b);
+            // Its other blocks go too; what lay on the table (kept by its left block) drops.
+            let w = &self.terrain.world;
+            let Some(main) = bench_main(p, b, |q| w.geti(q)) else { return Vec::new() };
+            // (the left block's id says how wide it is; it is gone already when it was broken)
+            let main_b = if main == p { b } else { w.geti(main) };
             let contents = if main != p { self.block_entities.remove(main) } else { Vec::new() };
-            if is_gun_bench(self.terrain.world.geti(q)) {
-                self.set_block(q, AIR);
+            for q in bench_cells(main, main_b) {
+                if q != p && is_gun_bench(self.terrain.world.geti(q)) {
+                    self.set_block(q, AIR);
+                }
             }
             return contents;
         }

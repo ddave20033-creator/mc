@@ -426,6 +426,22 @@ fn make(sound: Sound) -> Vec<f32> {
             echoes: &[(0.42, 0.08)],
             action: Some((0.028, 2700.0, 0.16, false)),
         }),
+        // A rifle round: a louder crack (it is faster), a longer and lower blast, and the
+        // report rolling further.
+        Sound::ShotRifle => gunshot(&Report {
+            seed: 47,
+            crack: 0.55,
+            crack_ms: 0.45,
+            blast_tau: 0.016,
+            blast_hz: 1150.0,
+            boom_hz: 82.0,
+            boom_tau: 0.042,
+            boom: 0.7,
+            tail: 2.2,
+            wet: 0.36,
+            echoes: &[(0.5, 0.12), (0.95, 0.06)],
+            action: Some((0.03, 2100.0, 0.12, false)),
+        }),
         Sound::ShotSilenced => {
             // A suppressed shot is still a sharp crack, only short and without the boom:
             // a quick snap of gas, a dull thud, and the slide working loudly after it.

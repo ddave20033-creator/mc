@@ -569,6 +569,17 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Beakadt a fegyver! Tisztítsd meg a fegyverasztalon.",
     ),
     ("gun.no_ammo", "No ammunition for it!", "Nincs hozzá töltény!"),
+    ("gun.empty_reload", "Empty! Reload: {}", "Kiürült! Újratöltés: {}"),
+    (
+        "gun.loader_rifle_station",
+        "The magazine loader goes into the rifle station's drawer.",
+        "A tárazógép a puskaasztal fiókjába való.",
+    ),
+    (
+        "gun.rifle_station_only",
+        "The long guns are worked on at the rifle station.",
+        "A hosszú fegyvereket a puskaasztalon rakhatod össze.",
+    ),
     (
         "gun.controls_auto",
         "LMB (hold): shoot  |  RMB: aim  |  {}: reload",

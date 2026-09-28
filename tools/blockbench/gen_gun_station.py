@@ -1,18 +1,26 @@
-"""Generates gun_station.bbmodel (+ gun_station.png): the gun station block for Blockbench.
+"""Generates gun_station.bbmodel (+ gun_station.png): the gun station block for Blockbench, or
+with --rifle rifle_station.bbmodel (+ rifle_station.png): the big one, for the rifles.
 
-Run:  python tools/blockbench/gen_gun_station.py
+Run:  python tools/blockbench/gen_gun_station.py [--rifle]
 then: python tools/blockbench/bbmodel_to_rust.py tools/blockbench/gun_station.bbmodel
+      (or rifle_station.bbmodel)
 
-A gunsmith's bench one block big: a steel cabinet under a butcher-block top with a rubber
-cleaning mat on it, a drawer of cleaning tools that slides out while the station is used
-(the "open" animation), and an ammo can and a toolbox on the shelf below.
+A gunsmith's bench two blocks wide (the rifle station three): a steel cabinet under a
+butcher-block top with a rubber cleaning mat on it, a drawer of cleaning tools and boxes of
+rounds that slides out while the station is used (the "open" animation), and ammo cans and
+toolboxes on the shelf below (the rifle station a long rifle case too).
 
-Model space: 1 unit = 1 Blockbench pixel, the block from (-8, 0, -8) to (8, 16, 8), its
-front (the drawer, toward the player using it) facing +Z (south). The worktop's top is at
-y = 16 exactly: the game lays guns and parts on it. Every face gets its own painted spot on
-one texture atlas (D texels per unit).
+Model space: 1 unit = 1 Blockbench pixel, the left block from (-8, 0, -8) to (8, 16, 8), the
+others to its right (+X), its front (the drawer, toward the player using it) facing +Z
+(south). The worktop's top is at y = 16 exactly: the game lays guns and parts on it. Every
+face gets its own painted spot on one texture atlas (D texels per unit).
 """
-import base64, json, math, os, random, struct, uuid, zlib
+import base64, json, math, os, random, struct, sys, uuid, zlib
+
+RIFLE = "--rifle" in sys.argv
+NAME = "rifle_station" if RIFLE else "gun_station"
+# How far right of the small station everything on the right side sits (one more block).
+W = 16 if RIFLE else 0
 
 random.seed(11)
 D = 8                 # texels per model unit
@@ -25,7 +33,12 @@ MATS = {
     "olive": (82, 88, 54), "red": (156, 40, 34), "black": (22, 22, 24), "cardboard": (176, 136, 86),
     "oil": (70, 92, 46), "cap": (190, 40, 30), "bristle": (226, 220, 200), "brass": (190, 150, 62),
     "metal": (130, 134, 140), "rubber": (30, 30, 32),
+    "gunmetal": (50, 52, 58), "copper": (178, 104, 66), "lamp_green": (120, 255, 120),
 }
+
+if RIFLE:
+    # the rifle station's cabinet is painted olive drab
+    MATS.update({"steel": (64, 72, 56), "steel_dark": (42, 48, 38), "drawer": (86, 94, 72)})
 
 def clamp(v): return max(0, min(255, int(v)))
 def shade(c, d): return tuple(clamp(v + d) for v in c)
@@ -90,7 +103,7 @@ def butcher_block(px, w, h, face):
     rect(px, 0, 0, w, 1, lambda c: shade(c, 30))
 
 # The worktop's outline (x0, z0, x1, z1): the mat's tiles paint their part of one pattern.
-TOP = (-8.3, -8.3, 24.3, 8.4)
+TOP = (-8.3, -8.3, 24.3 + W, 8.4)
 
 def mat_tile(x0, z0):
     """A piece of the top from (x0, z0): a rubber gun-cleaning mat on the wood, a thin wood
@@ -223,8 +236,9 @@ def group(name, children, origin=(0, 0, 0), rot=(0, 0, 0)):
     return {"name": name, "uuid": str(uuid.uuid4()), "origin": list(origin), "rotation": list(rot),
             "isOpen": True, "visibility": True, "export": True, "children": children}
 
-# ---- the cabinet: two blocks wide (x -8 .. 24), the left half's middle at x 0 ----
-L, R = -8, 24
+# ---- the cabinet: two blocks wide (x -8 .. 24; the rifle station's three, to 40), the left
+# block's middle at x 0 ----
+L, R = -8, 24 + W
 cabinet = [
     cube("plinth", [L + 0.5, 0.02, -7.5], [R - 0.5, 1, 6.6], "steel_dark", [powder]),
     cube("side_l", [L, 0, -8], [L + 1, 14.5, 8], "steel", [powder, rivets, dark("east")]),
@@ -239,18 +253,22 @@ cabinet = [
     cube("post_l", [L - 0.2, 0.03, 7.6], [L + 1.2, 14.47, 8.2], "steel_dark", [powder]),
     cube("post_r", [R - 1.2, 0.03, 7.6], [R + 0.2, 14.47, 8.2], "steel_dark", [powder]),
     cube("post_mid", [7.3, 0.04, 7.32], [8.7, 9.6, 8.0], "steel_dark", [powder]),
+] + ([cube("post_mid2", [23.3, 0.04, 7.32], [24.7, 9.6, 8.0], "steel_dark", [powder])] if RIFLE else []) + [
     cube("foot_bl", [L + 0.2, -0.01, -7.8], [L + 1.4, 0.4, -6.6], "rubber"),
     cube("foot_br", [R - 1.4, -0.01, -7.8], [R - 0.2, 0.4, -6.6], "rubber"),
 ]
+# the top's face in tiles of about 8 pixels
+TILES = 6 if RIFLE else 4
+TILE_W = 8.15 if not RIFLE else (TOP[2] - TOP[0]) / TILES
 # ---- the worktop: butcher block with a plain gridded rubber mat on top (flush, y = 16) ----
 top = [
     cube("top", [L - 0.3, 14.5, -8.3], [R + 0.3, 15.99, 8.4], "wood", [butcher_block], noise=3,
          only=("north", "south", "east", "west", "down")),
 ] + [
     # its top face in pieces (one texture page each)
-    cube(f"mat_{i}{j}", [TOP[0] + i * 8.15, 15.99, TOP[1] + j * 8.35], [TOP[0] + (i + 1) * 8.15, 16, TOP[1] + (j + 1) * 8.35],
-         "mat", [mat_tile(TOP[0] + i * 8.15, TOP[1] + j * 8.35)], only=("up",))
-    for i in range(4) for j in range(2)
+    cube(f"mat_{i}{j}", [TOP[0] + i * TILE_W, 15.99, TOP[1] + j * 8.35], [TOP[0] + (i + 1) * TILE_W, 16, TOP[1] + (j + 1) * 8.35],
+         "mat", [mat_tile(TOP[0] + i * TILE_W, TOP[1] + j * 8.35)], only=("up",))
+    for i in range(TILES) for j in range(2)
 ] + [
     cube("top_edge_front", [L - 0.3, 14.2, 8.2], [R + 0.3, 14.5, 8.4], "steel_dark"),
 ]
@@ -258,14 +276,14 @@ top = [
 DL, DR = L + 1.3, R - 1.3
 drawer = [
     cube("drawer_front", [DL, 10.6, 7.55], [DR, 13.95, 8.2], "drawer", [powder, drawer_front]),
-    cube("handle_bar", [3.6, 11.7, 8.55], [12.4, 12.2, 8.9], "alu", [brushed]),
-    cube("handle_post_l", [3.62, 11.72, 8.19], [4.1, 12.18, 8.56], "alu"),
-    cube("handle_post_r", [11.9, 11.72, 8.19], [12.38, 12.18, 8.56], "alu"),
+    cube("handle_bar", [3.6 + W / 2, 11.7, 8.55], [12.4 + W / 2, 12.2, 8.9], "alu", [brushed]),
+    cube("handle_post_l", [3.62 + W / 2, 11.72, 8.19], [4.1 + W / 2, 12.18, 8.56], "alu"),
+    cube("handle_post_r", [11.9 + W / 2, 11.72, 8.19], [12.38 + W / 2, 12.18, 8.56], "alu"),
     cube("drawer_floor", [DL + 0.3, 10.62, -6], [DR - 0.3, 10.95, 7.56], "inside"),
     cube("drawer_side_l", [DL + 0.3, 10.95, -6], [DL + 0.65, 13.6, 7.56], "drawer", [dark("east")]),
     cube("drawer_side_r", [DR - 0.65, 10.95, -6], [DR - 0.3, 13.6, 7.56], "drawer", [dark("west")]),
     cube("drawer_back", [DL + 0.65, 10.95, -6], [DR - 0.65, 13.6, -5.65], "drawer", [dark("south")]),
-    cube("drawer_split", [9.1, 10.95, -5.65], [9.3, 12.3, 7.56], "drawer"),
+    cube("drawer_split", [9.1 + W, 10.95, -5.65], [9.3 + W, 12.3, 7.56], "drawer"),
     # the left side: cleaning (a rod, oil, punches, patches; the brush is its own group)
     cube("rod", [-5.6, 10.95, -4.8], [-5.2, 11.35, 5.2], "metal", [brushed]),
     cube("rod_handle", [-5.8, 10.95, 5.2], [-5.0, 11.75, 7.0], "wood", [wood_grain]),
@@ -320,7 +338,7 @@ def can_front(px, w, h, face):
         rect(px, 0, 0, b, h, lambda c: shade(c, -8))
         rect(px, w - b, 0, w, h, lambda c: shade(c, -8))
 
-AMMO_X = [(10.0, 13.6), (14.2, 17.8), (18.4, 22.0)]
+AMMO_X = [(10.0 + W, 13.6 + W), (14.2 + W, 17.8 + W), (18.4 + W, 22.0 + W)]
 AMMO_Z = (-4.4, 3.4)
 AMMO_Y = (10.95, 13.3)
 ammo_boxes = []
@@ -343,6 +361,36 @@ for i, (x0, x1) in enumerate(AMMO_X):
         ], ((x0 + x1) / 2, y1, (z0 + z1) / 2)))
     ammo_boxes.append(group(f"ammo_box_{i}", walls + levels, ((x0 + x1) / 2, y0, z1)))
 
+# The rifle station's magazine loader, in the middle of its drawer (the game shows it once one
+# is put there): a base plate the magazine lies on on its side (the game draws it at
+# `loader_mag`), its lips in the connector at the right end, and a lamp on top. Its "feed"
+# animation blinks the lamp (`loader_round`: lit) while it loads.
+def plate_marks(px, w, h, face):
+    if face == "up":
+        rect(px, U(0.4), U(0.4), w - U(0.4), U(0.4) + 1, lambda c: shade(c, -20))
+        rect(px, U(0.4), h - U(0.4) - 1, w - U(0.4), h - U(0.4), lambda c: shade(c, -20))
+
+if RIFLE:
+    # (out at the front of the drawer, where it comes out from under the top: seen while it
+    # is open)
+    LX0, LX1 = 10.4, 24.6          # the loader across the drawer's middle
+    LZ0, LZ1 = 1.5, 7.35
+    CZ = 4.45                      # its middle, front to back
+    LY = 10.95                     # the drawer's floor
+    MAG_AT = (14.7, LY + 1.15, CZ) # where the magazine lies (its middle)
+    loader = [
+        cube("loader_base", [LX0 + 0.6, LY, LZ0 + 0.4], [21.4, LY + 0.6, LZ1 - 0.4], "gunmetal", [powder, plate_marks]),
+        # the connector the magazine's lips go into, its dark mouth toward the magazine
+        cube("loader_socket", [18.6, LY + 0.59, CZ - 1.9], [21.2, LY + 3.0, CZ + 1.9], "metal", [brushed]),
+        cube("loader_mouth", [18.4, LY + 0.9, CZ - 1.3], [18.62, LY + 2.2, CZ + 1.3], "black"),
+        cube("loader_lamp", [19.6, LY + 2.99, CZ + 0.6], [20.4, LY + 3.2, CZ + 1.4], "black"),
+    ]
+    # the lamp lit (blinking while it loads: the game shows it only then)
+    lamp_on = [cube("loader_lamp_on", [19.65, LY + 3.19, CZ + 0.65], [20.35, LY + 3.25, CZ + 1.35], "lamp_green")]
+    g_feed_round = group("loader_round", lamp_on, (20.0, LY + 3.2, CZ + 1.0))
+    g_loader_mag = group("loader_mag", [], MAG_AT)
+    g_loader = group("loader", loader + [g_feed_round, g_loader_mag], (15.5, LY, CZ))
+
 # The scrubbing brush: a wooden block with a knob to hold it by and bristles under it. The
 # game hides it here while someone holds it, and draws it in their hand.
 brush = [
@@ -360,14 +408,21 @@ shelf = [
     cube("box_lid", [0.1, 5.4, -4.5], [6.7, 6.2, 6.6], "red"),
     cube("box_handle", [2.4, 6.2, 0.3], [4.4, 7.4, 1.3], "black"),
     cube("box_latch", [3.0, 4.6, 6.5], [3.8, 5.8, 6.8], "alu"),
-    cube("kit_body", [10.0, 1.6, -5.0], [21.5, 4.6, 5.5], "black", [toolbox_side]),
-    cube("kit_lid", [9.9, 4.6, -5.1], [21.6, 5.2, 5.6], "black"),
-    cube("kit_label", [13.0, 2.4, 5.5], [18.5, 3.8, 5.65], "cardboard", [cardboard_box]),
-    cube("can2_body", [16.2, 5.2, -4.0], [20.4, 9.2, 4.0], "olive", [ammo_can_side, stencil(2)]),
-]
+    cube("kit_body", [10.0 + W, 1.6, -5.0], [21.5 + W, 4.6, 5.5], "black", [toolbox_side]),
+    cube("kit_lid", [9.9 + W, 4.6, -5.1], [21.6 + W, 5.2, 5.6], "black"),
+    cube("kit_label", [13.0 + W, 2.4, 5.5], [18.5 + W, 3.8, 5.65], "cardboard", [cardboard_box]),
+    cube("can2_body", [16.2 + W, 5.2, -4.0], [20.4 + W, 9.2, 4.0], "olive", [ammo_can_side, stencil(2)]),
+] + ([
+    # a long hard case for a rifle on the shelf in the middle, its latches and handle
+    cube("case_body", [8.2, 1.6, -5.2], [24.8, 4.4, 5.8], "olive", [ammo_can_side]),
+    cube("case_lid", [8.1, 4.4, -5.3], [24.9, 5.0, 5.9], "olive"),
+    cube("case_handle", [14.6, 5.0, 0.2], [18.4, 5.5, 1.4], "black"),
+    cube("case_latch_l", [10.4, 3.6, 5.8], [11.4, 4.9, 6.1], "alu"),
+    cube("case_latch_r", [21.6, 3.6, 5.8], [22.6, 4.9, 6.1], "alu"),
+] if RIFLE else [])
 
 g_brush = group("brush", brush, (0, 12, 1.6))
-g_drawer = group("drawer", drawer + [g_brush] + ammo_boxes, (8, 12, 7.5))
+g_drawer = group("drawer", drawer + [g_brush] + ammo_boxes + ([g_loader] if RIFLE else []), (8 + W // 2, 12, 7.5))
 g_root = group("gun_station", [
     group("cabinet", cabinet), group("top", top), g_drawer, group("shelf", shelf),
 ])
@@ -392,6 +447,12 @@ open_anim = animation("open", 0.5, "hold",
              kf("position", 0.5, z=7.0)),
 )
 open_anim["selected"] = True
+anims = [open_anim]
+if RIFLE:
+    # The loader at work: its lamp blinks, once for each round it pushes in.
+    anims.append(animation("feed", 0.35, "loop",
+        animator(g_feed_round, kf("scale", 0, 1, 1, 1, interp="step"), kf("scale", 0.18, 0, 0, 0, interp="step")),
+    ))
 
 # ---------- checks ----------
 def check_coplanar():
@@ -439,21 +500,21 @@ png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", ATLAS_W, TE
 
 model = {
     "meta": {"format_version": "4.10", "model_format": "free", "box_uv": False},
-    "name": "gun_station",
+    "name": NAME,
     "resolution": {"width": ATLAS_W, "height": TEX_H},
     "elements": elements,
     "outliner": [g_root],
     "textures": [{
-        "name": "gun_station.png", "id": "0", "uuid": str(uuid.uuid4()), "folder": "", "namespace": "",
+        "name": NAME + ".png", "id": "0", "uuid": str(uuid.uuid4()), "folder": "", "namespace": "",
         "width": ATLAS_W, "height": TEX_H, "uv_width": ATLAS_W, "uv_height": TEX_H,
         "particle": False, "render_mode": "default", "visible": True, "saved": False,
         "source": "data:image/png;base64," + base64.b64encode(png).decode(),
     }],
-    "animations": [open_anim],
+    "animations": anims,
 }
-with open(os.path.join(HERE, "gun_station.bbmodel"), "w") as f:
+with open(os.path.join(HERE, NAME + ".bbmodel"), "w") as f:
     json.dump(model, f, indent=1)
-with open(os.path.join(HERE, "gun_station.png"), "wb") as f:
+with open(os.path.join(HERE, NAME + ".png"), "wb") as f:
     f.write(png)
 
 bad = check_coplanar()

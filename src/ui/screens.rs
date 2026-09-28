@@ -413,6 +413,7 @@ fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut Preview
         pitch: 0.0,
         limb_swing: ui.time * 2.1,
         limb_amount: 0.08,
+        sprint: 0.0,
         attack: 0.0,
         crouch: 0.0,
         held: crate::item::NONE,

@@ -48,6 +48,7 @@ impl Rig {
             };
             return Vec3::ZERO;
         }
+        let aim_dir = if self.mode == FIXED_FRONT { Vec3::X } else { aim_dir };
         let desired = desired_local(self.mode);
         let room = clearance(world, eye, world_offset(desired, aim_dir));
         let was_fallback = self.fallback;
@@ -117,12 +118,28 @@ pub(super) fn head_turn(camera_yaw: f32, body_yaw: f32) -> f32 {
 
 /// Local coordinates: right, up, forward. The orbit follows both mouse axes
 /// immediately even while its distance or shoulder side eases.
+/// A camera mode F5 never reaches: the player seen from the right and a little in front
+/// (`--gun-shots`).
+pub const SIDE_VIEW: u8 = 5;
+/// Another (`--gun-shots`): in front of the player, facing it, held still where it is (+X of
+/// the player, looking back at it) whichever way the player turns.
+pub const FIXED_FRONT: u8 = 6;
+
 pub(super) fn desired_local(mode: u8) -> Vec3 {
     match mode {
         1 => Vec3::new(0.0, 0.0, -4.0),
         2 => Vec3::new(0.0, 0.0, 4.0),
         3 => Vec3::new(0.95, 0.2, -3.2),
         4 => Vec3::new(-0.95, 0.2, -3.2),
+        // Only for the pictures of `--gun-shots`: from the right side (a little in front),
+        // looking at the player.
+        FIXED_FRONT => Vec3::new(0.0, -0.3, 3.4),
+        SIDE_VIEW => {
+            // `GUN_SHOTS_LEFT`: from the left instead.
+            static LEFT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let left = *LEFT.get_or_init(|| std::env::var("GUN_SHOTS_LEFT").is_ok());
+            Vec3::new(if left { -2.8 } else { 2.8 }, -0.4, 1.6)
+        }
         _ => Vec3::ZERO,
     }
 }

@@ -10,6 +10,16 @@ impl Game {
     /// (x1.5 for a critical hit while falling), knockback (more while sprinting), and tool
     /// wear like Minecraft (swords 1, tools 2).
     pub(super) fn attack(&mut self, mob: Option<usize>, player: Option<u8>) {
+        // Sneaking, a hit takes a target dummy down (it drops as an item).
+        if let Some(i) = mob.filter(|&i| self.mobs[i].kind == MobKind::Dummy && self.player.sneaking) {
+            if self.is_client() {
+                let id = self.mobs[i].id;
+                self.send(crate::net::Msg::BreakDummy { id });
+            } else {
+                self.break_dummy(i, !self.creative());
+            }
+            return;
+        }
         let held = self.held();
         let mut dmg = attack_damage(held);
         let falling = !self.player.on_ground && !self.player.flying && self.player.vel.y < 0.0;
@@ -122,6 +132,20 @@ impl Game {
         self.spawn_drop(at, Stack::new(WOOL as ItemId, n.min(3)));
     }
 
+    /// Host: takes a target dummy down, dropping it as an item (`drop`).
+    pub(super) fn break_dummy(&mut self, i: usize, drop: bool) {
+        if self.mobs[i].kind != MobKind::Dummy {
+            return;
+        }
+        let m = self.mobs.swap_remove(i);
+        let c = m.center();
+        let (sky, blk) = (self.terrain.world.sky_estimate(c), self.terrain.world.block_light_estimate(c));
+        self.particles.poof(c, sky, blk);
+        if drop {
+            self.spawn_drop(c, Stack::one(TARGET_DUMMY));
+        }
+    }
+
     pub(super) fn spawn_mob(&mut self, kind: MobKind, pos: Vec3) {
         if self.is_client() {
             self.send(crate::net::Msg::SpawnMob {
@@ -130,7 +154,15 @@ impl Game {
             });
             return;
         }
-        let yaw = self.random() * TAU;
+        let mut yaw = self.random() * TAU;
+        if kind == MobKind::Dummy {
+            // A dummy is set up facing whoever is nearest (the one setting it up).
+            let near = self.player_positions().into_iter().min_by(|a, b| a.distance_squared(pos).total_cmp(&b.distance_squared(pos)));
+            if let Some(p) = near {
+                let d = p - pos;
+                yaw = d.z.atan2(d.x);
+            }
+        }
         let seed = (self.random() * 16_777_216.0) as u32;
         let mut m = Mob::new(kind, pos, yaw, seed);
         m.id = self.entity_id();
@@ -157,7 +189,7 @@ impl Game {
         let near = self
             .mobs
             .iter()
-            .filter(|m| Vec2::new(m.pos.x - me.x, m.pos.z - me.z).length() < 96.0)
+            .filter(|m| m.kind != MobKind::Dummy && Vec2::new(m.pos.x - me.x, m.pos.z - me.z).length() < 96.0)
             .count();
         if near >= 10 {
             return;
@@ -249,6 +281,8 @@ impl Game {
                     (MobKind::Pig, true) => (COOKED_PORKCHOP, 3.0),
                     (MobKind::Sheep, false) => (MUTTON, 2.0),
                     (MobKind::Sheep, true) => (COOKED_MUTTON, 2.0),
+                    // (it never dies)
+                    (MobKind::Dummy, _) => continue,
                 };
                 let n = 1 + (self.random() * most) as u8;
                 self.spawn_drop(c, Stack::new(meat, n.min(most as u8)));

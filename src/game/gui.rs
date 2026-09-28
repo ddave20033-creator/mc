@@ -213,6 +213,7 @@ impl Tab {
                     | ADV_FURNACE
                     | CHEST
                     | GUN_STATION
+                    | RIFLE_BENCH
                     | BED
                     | OAK_DOOR
                     | TORCH
@@ -233,9 +234,15 @@ impl Tab {
             || matches!(
                 id,
                 BULLET
+                    | MAGNUM_ROUND
                     | PISTOL_FRAME..=PISTOL_MAGAZINE
                     | SCOPE..=LASER_SIGHT
                     | FLASHLIGHT
+                    | SPEEDLOADER
+                    | REVOLVER_FRAME..=REVOLVER_HAMMER
+                    | RIFLE_ROUND
+                    | AK_MAGAZINE..=AK_COVER
+                    | MAG_LOADER
                     | FRAG_GRENADE
                     | SMOKE_GRENADE
             )
@@ -243,7 +250,7 @@ impl Tab {
             Tab::Tools
         } else if consumable(id).is_some() || meat(id).is_some() {
             Tab::Food
-        } else if key(id).ends_with("_spawn_egg") {
+        } else if key(id).ends_with("_spawn_egg") || id == TARGET_DUMMY {
             Tab::Mobs
         } else {
             Tab::Materials
@@ -291,7 +298,7 @@ impl Tab {
                 ]),
             ],
             Tab::Functional => vec![
-                b(&[CRAFTING_TABLE, FURNACE, BLAST_FURNACE, ADV_FURNACE, GUN_STATION]),
+                b(&[CRAFTING_TABLE, FURNACE, BLAST_FURNACE, ADV_FURNACE, GUN_STATION, RIFLE_BENCH]),
                 b(&[CHEST, BED, OAK_DOOR, TORCH, LANTERN]),
             ],
             Tab::Tools => vec![
@@ -302,7 +309,8 @@ impl Tab {
                 vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE, GUIDE_BOOK],
                 // The pistol, its ammunition and the extended magazine, grenades, attachments
                 // and pistol parts (the last one is the magazine).
-                vec![PISTOL, BULLET, EXTENDED_MAGAZINE],
+                vec![PISTOL, REVOLVER, BULLET, MAGNUM_ROUND, EXTENDED_MAGAZINE, SPEEDLOADER],
+                vec![AK47, RIFLE_ROUND, AK_MAGAZINE, MAG_LOADER],
                 vec![FRAG_GRENADE, SMOKE_GRENADE],
                 vec![SCOPE, SILENCER, LASER_SIGHT, FLASHLIGHT],
                 vec![
@@ -312,6 +320,8 @@ impl Tab {
                     PISTOL_SLIDE,
                     PISTOL_MAGAZINE,
                 ],
+                REVOLVER_PARTS.to_vec(),
+                AK_PARTS[..4].to_vec(),
             ],
             // A row per material, then the vest.
             Tab::Armor => {
@@ -326,7 +336,7 @@ impl Tab {
                 meat(MUTTON).unwrap().to_vec(),
                 vec![WATER_BOTTLE, PURIFIED_WATER],
             ],
-            Tab::Mobs => vec![vec![PIG_SPAWN_EGG, SHEEP_SPAWN_EGG]],
+            Tab::Mobs => vec![vec![PIG_SPAWN_EGG, SHEEP_SPAWN_EGG], vec![TARGET_DUMMY]],
             Tab::Materials => vec![
                 vec![STICK, COAL, CHARCOAL, CLAY_BALL, BRICK],
                 vec![COPPER_INGOT, IRON_NUGGET, IRON_INGOT, GOLD_INGOT, DIAMOND],
@@ -377,7 +387,10 @@ fn creative_items(tab: Tab, query: &str) -> Vec<Option<ItemId>> {
 /// Draws an item icon with its stack count and durability bar. `size` is the icon size in pixels.
 pub fn draw_stack(ui: &mut Ui, x: f32, y: f32, size: f32, st: &Stack) {
     let c = Vec2::new(x + size * 0.5, y + size * 0.5);
+    // A gun, magazine or part as it is (its rounds, attachments, dirt), once drawn.
+    let state = super::icons::state_icon(st);
     match icon(st.item) {
+        _ if state.is_some() => ui.block_sprite(c, size * 0.5, state.unwrap_or(0), [255; 3]),
         Icon::Block(b) if is_stairs(b) => {
             // Two boxes seen from the same corner as the cube icons: the step in front,
             // the tall part behind it.
@@ -431,7 +444,11 @@ pub fn draw_stack(ui: &mut Ui, x: f32, y: f32, size: f32, st: &Stack) {
     let px = (size / 16.0).max(1.0);
     let max = max_damage(st.item);
     // A gun's dirt shows on the gun itself, not as a bar.
-    let dirt = GunKind::of(st.item).is_some() || (PISTOL_FRAME..=PISTOL_MAGAZINE).contains(&st.item) || st.item == EXTENDED_MAGAZINE;
+    let dirt = GunKind::of(st.item).is_some()
+        || (PISTOL_FRAME..=PISTOL_MAGAZINE).contains(&st.item)
+        || st.item == EXTENDED_MAGAZINE
+        || REVOLVER_PARTS.contains(&st.item)
+        || AK_PARTS.contains(&st.item);
     if max > 0 && st.damage > 0 && !dirt {
         let f = 1.0 - st.damage as f32 / max as f32;
         let (bx, by, bw) = (x + 2.0 * px, y + size - 3.0 * px, size - 4.0 * px);
@@ -945,14 +962,22 @@ impl Game {
             };
             text = format!("{text}  ({rounds})");
         } else if st.item == AMMO_BOX {
-            text = format!("{text}  ({}/{})", box_rounds(st), AMMO_BOX_ROUNDS);
+            text = match box_ammo(st.data) {
+                Some(kind) => format!("{text}  ({}/{} {})", box_rounds(st), AMMO_BOX_ROUNDS, name(kind)),
+                None => format!("{text}  (0/{AMMO_BOX_ROUNDS})"),
+            };
         } else if let Some(cap) = magazine_capacity(st.item) {
             text = format!(
                 "{text}  ({}, {})",
                 tf("gun.magazine", &[&gun_rounds(st), &cap]),
                 crate::lang::t("gun.mag_hint")
             );
-        } else if max > 0 && st.damage > 0 && !(PISTOL_FRAME..=PISTOL_SLIDE).contains(&st.item) {
+        } else if max > 0
+            && st.damage > 0
+            && !(PISTOL_FRAME..=PISTOL_SLIDE).contains(&st.item)
+            && !REVOLVER_PARTS.contains(&st.item)
+            && !AK_PARTS.contains(&st.item)
+        {
             text = format!(
                 "{text}  ({})",
                 tf("gui.durability", &[&(max - st.damage), &max])
@@ -1702,7 +1727,10 @@ impl Game {
         // (only what may lie there: anything else stays a picture on the mouse)
         let on_bench = matches!(c, Container::GunStation(_))
             && (self.bench_spot.is_some() || self.bench_drawer_spot.is_some())
-            && self.cursor.is_some_and(|st| gun_station::belongs_on_bench(st.item));
+            && self.cursor.is_some_and(|st| {
+                let rifle = matches!(c, Container::GunStation(p) if is_rifle_bench(self.terrain.world.geti(p)));
+                gun_station::belongs_on_bench(st.item, rifle)
+            });
         if let (Some(st), false) = (self.cursor, on_bench) {
             let m = self.ui.mouse;
             draw_stack(&mut self.ui, m.x - 8.0 * s, m.y - 8.0 * s, 16.0 * s, &st);

@@ -1187,7 +1187,7 @@ pub fn mesh_chunk(
                 }
                 if is_gun_bench(b) {
                     // Drawn every frame from its left half (see `gun_stations`).
-                    if !gun_bench_right(b) {
+                    if is_bench_main(b) {
                         gun_stations.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
                     }
                     continue;

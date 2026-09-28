@@ -11,9 +11,11 @@ mod gui;
 mod guns;
 mod health;
 mod hud;
+pub(crate) mod icons;
 mod items;
 mod mobs;
 mod multi;
+mod revolver;
 mod sleep;
 mod spectate;
 mod station;
@@ -231,6 +233,11 @@ pub struct Game {
     door_swing: crate::world::FastMap<IVec3, f32>,
     /// How far each gun station's drawer is out (0..1): it slides out while one is used.
     bench_drawer: crate::world::FastMap<IVec3, f32>,
+    /// How far into running the player is (0..1, eased: the gun carried across the chest on
+    /// the player model).
+    tp_sprint: f32,
+    /// Host: seconds each rifle station's magazine loader has been feeding the next round.
+    loader_feed: crate::world::FastMap<IVec3, f32>,
     /// At the open gun station: holding its brush, and where it is; the camera's sway with
     /// the mouse (-1 .. 1); something picked up off the table (where the mouse was, to drag
     /// it); what the mouse points at there; scrubbing now, the dirt scrubbed off not yet
@@ -527,6 +534,8 @@ impl Game {
             chest_open: Default::default(),
             door_swing: Default::default(),
             bench_drawer: Default::default(),
+            tp_sprint: 0.0,
+            loader_feed: Default::default(),
             bench_brush: false,
             bench_brush_at: None,
             bench_spot: None,

@@ -47,7 +47,7 @@ impl Game {
     }
 
     /// No solid block between `a` and `b` (checked every fifth of a block).
-    pub(super) fn line_of_sight(&self, a: Vec3, b: Vec3) -> bool {
+    pub(in crate::game) fn line_of_sight(&self, a: Vec3, b: Vec3) -> bool {
         let d = b - a;
         let steps = (d.length() * 5.0).ceil() as i32;
         (1..steps).all(|i| {

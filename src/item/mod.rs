@@ -96,11 +96,119 @@ pub const AMMO_BOX: ItemId = 361;
 /// A weapon light for the pistol's accessory rail (instead of a laser sight): switched on and
 /// off in the hand, it lights up what the gun points at. Only in creative (it is not made).
 pub const FLASHLIGHT: ItemId = 362;
+/// A six-shot revolver, put together at the gun station from its five parts. It is loaded
+/// straight from the bullets carried (one at a time, or six at once from a speedloader). Its
+/// `data` is its cylinder (see `revolver_chamber`), its `damage` how dirty it is.
+pub const REVOLVER: ItemId = 363;
+/// A speedloader: six rounds held in a ring, to load a revolver's cylinder at once. Its `data`
+/// is the rounds in it (loaded at the gun station, like a magazine).
+pub const SPEEDLOADER: ItemId = 364;
+/// The revolver's five parts, in the order of `model::gun::FRAME` ..: the frame (with the
+/// grip, trigger and sights), the barrel, the mainspring, the cylinder (on its crane, with the
+/// ejector) and the hammer.
+pub const REVOLVER_FRAME: ItemId = 365;
+pub const REVOLVER_BARREL: ItemId = 366;
+pub const REVOLVER_SPRING: ItemId = 367;
+pub const REVOLVER_CYLINDER: ItemId = 368;
+pub const REVOLVER_HAMMER: ItemId = 369;
+/// Revolver ammunition (.357 Magnum): longer and heavier than the pistol's 9 mm, which does
+/// not fit the revolver (nor this the pistol).
+pub const MAGNUM_ROUND: ItemId = 370;
+/// A wooden target dummy: set up with a right click, it shows the damage it takes above its
+/// head (see `entity::mob`, `MobKind::Dummy`).
+pub const TARGET_DUMMY: ItemId = 371;
+/// The AK-47, put together at the gun station from its five parts: the receiver (with the
+/// barrel, sights, handguard, grip and stock), the gas tube, the bolt carrier, the dust cover
+/// with the recoil spring, and its curved 30-round magazine. Its data is laid out like the
+/// pistol's (rounds, the magazine in it, the chamber), its `damage` is how dirty it is.
+pub const AK47: ItemId = 372;
+/// Rifle ammunition (7.62x39 mm): only for the AK.
+pub const RIFLE_ROUND: ItemId = 373;
+pub const AK_MAGAZINE: ItemId = 374;
+pub const AK_RECEIVER: ItemId = 375;
+pub const AK_GAS_TUBE: ItemId = 376;
+pub const AK_BOLT: ItemId = 377;
+pub const AK_COVER: ItemId = 378;
+/// An automatic magazine loader for the rifle station's drawer: a magazine put on it is filled
+/// from the boxes of rounds beside it, one round after another.
+pub const MAG_LOADER: ItemId = 379;
+/// The AK's parts, in the order of `model::gun::FRAME` .. (`GunKind::parts`).
+pub const AK_PARTS: [ItemId; 5] = [AK_RECEIVER, AK_GAS_TUBE, AK_BOLT, AK_COVER, AK_MAGAZINE];
+pub const REVOLVER_PARTS: [ItemId; 5] = [REVOLVER_FRAME, REVOLVER_BARREL, REVOLVER_SPRING, REVOLVER_CYLINDER, REVOLVER_HAMMER];
 pub const AMMO_BOX_ROUNDS: u16 = 128;
+
+/// A box of rounds holds one kind: 9 mm bullets, magnum rounds or rifle rounds (these bits of
+/// its `data`, and of the value kept for a box in a gun station's drawer); the rest is how
+/// many. Once rounds are in it only that kind goes in, until it is empty again.
+pub const BOX_MAGNUM: u16 = 0x8000;
+pub const BOX_RIFLE: u16 = 0x4000;
+/// The bits that say what kind of rounds a box holds.
+pub const BOX_KIND: u16 = BOX_MAGNUM | BOX_RIFLE;
+
+/// The rounds that go into a box.
+pub const BOX_AMMO: [ItemId; 3] = [BULLET, MAGNUM_ROUND, RIFLE_ROUND];
 
 /// Rounds in a box of them.
 pub fn box_rounds(st: &Stack) -> u16 {
-    st.data.min(AMMO_BOX_ROUNDS)
+    box_count(st.data)
+}
+
+/// Rounds in a box (its `data`, or a drawer's box).
+pub fn box_count(v: u16) -> u16 {
+    (v & !BOX_KIND).min(AMMO_BOX_ROUNDS)
+}
+
+/// What kind of round a box holds (None: it is empty).
+pub fn box_ammo(v: u16) -> Option<ItemId> {
+    match (box_count(v), v & BOX_KIND) {
+        (0, _) => None,
+        (_, BOX_MAGNUM) => Some(MAGNUM_ROUND),
+        (_, BOX_RIFLE) => Some(RIFLE_ROUND),
+        _ => Some(BULLET),
+    }
+}
+
+/// How many rounds of `item` go into a box still (none of another kind than it holds).
+pub fn box_room(v: u16, item: ItemId) -> u16 {
+    let fits = BOX_AMMO.contains(&item) && box_ammo(v).is_none_or(|a| a == item);
+    if fits { AMMO_BOX_ROUNDS - box_count(v) } else { 0 }
+}
+
+/// A box with `n` more rounds of `item` in it.
+pub fn box_with(v: u16, item: ItemId, n: u16) -> u16 {
+    let kind = match item {
+        MAGNUM_ROUND => BOX_MAGNUM,
+        RIFLE_ROUND => BOX_RIFLE,
+        _ => 0,
+    };
+    (box_count(v) + n).min(AMMO_BOX_ROUNDS) | kind
+}
+
+/// A box with `n` fewer rounds in it (empty, it takes either kind again).
+pub fn box_without(v: u16, n: u16) -> u16 {
+    let left = box_count(v).saturating_sub(n);
+    if left == 0 { 0 } else { left | (v & BOX_KIND) }
+}
+
+#[cfg(test)]
+mod box_tests {
+    use super::*;
+
+    #[test]
+    fn a_box_holds_one_kind_of_round_until_it_is_empty() {
+        let v = box_with(0, MAGNUM_ROUND, 5);
+        assert_eq!((box_count(v), box_ammo(v)), (5, Some(MAGNUM_ROUND)));
+        // The other kind does not go in; more of its own does, up to the top.
+        assert_eq!(box_room(v, BULLET), 0);
+        assert_eq!(box_room(v, MAGNUM_ROUND), AMMO_BOX_ROUNDS - 5);
+        assert_eq!(box_room(v, PISTOL), 0);
+        // Emptied, it takes either again.
+        let empty = box_without(v, 5);
+        assert_eq!(box_ammo(empty), None);
+        assert!(box_room(empty, BULLET) == AMMO_BOX_ROUNDS && box_room(empty, MAGNUM_ROUND) == AMMO_BOX_ROUNDS);
+        // Old boxes (a count only) are 9 mm.
+        assert_eq!(box_ammo(40), Some(BULLET));
+    }
 }
 
 /// A gun's attachments as bits of `gun_mods`, with their items. `EXTENDED_MAGAZINE` is not
@@ -139,44 +247,120 @@ pub mod gun_state {
     pub const LOCKED: u16 = 0x1000;
 }
 pub fn gun_has_mag(s: &Stack) -> bool {
-    s.data & gun_state::NO_MAG == 0
+    s.item == REVOLVER || s.data & gun_state::NO_MAG == 0
 }
+/// A round ready to fire (a revolver: any live round in its cylinder).
 pub fn gun_chambered(s: &Stack) -> bool {
+    if s.item == REVOLVER {
+        return gun_rounds(s) > 0;
+    }
     s.data & gun_state::CHAMBER_EMPTY == 0
 }
 pub fn gun_locked(s: &Stack) -> bool {
-    s.data & gun_state::LOCKED != 0
+    s.item != REVOLVER && s.data & gun_state::LOCKED != 0
 }
 pub fn set_gun_state(s: &mut Stack, bit: u16, on: bool) {
+    if s.item == REVOLVER {
+        return;
+    }
     s.data = if on { s.data | bit } else { s.data & !bit };
 }
-/// Rounds ready to fire: in the magazine and in the chamber.
+
+/// What is in each of a revolver's six chambers: two bits each in its `data` (chamber k in
+/// bits 2k, 2k+1), and the chamber under the hammer in bits 12-14. Chamber k is the one the
+/// model's `chamber{k}` is; the cylinder turns the next one (`revolver_next`) under the hammer
+/// as the trigger is pulled.
+pub mod chamber {
+    pub const EMPTY: u8 = 0;
+    pub const LIVE: u8 = 1;
+    /// A fired case, left in the chamber until the cylinder is emptied.
+    pub const SPENT: u8 = 2;
+}
+pub fn revolver_chamber(s: &Stack, k: usize) -> u8 {
+    ((s.data >> (2 * k)) & 3) as u8
+}
+pub fn set_revolver_chamber(s: &mut Stack, k: usize, v: u8) {
+    s.data = (s.data & !(3 << (2 * k))) | ((v as u16 & 3) << (2 * k));
+}
+pub fn revolver_index(s: &Stack) -> usize {
+    (((s.data >> 12) & 7) as usize).min(5)
+}
+pub fn set_revolver_index(s: &mut Stack, k: usize) {
+    s.data = (s.data & !(7 << 12)) | (((k % 6) as u16) << 12);
+}
+/// The chamber that comes under the hammer after `k` (the cylinder turning a sixth, anticlockwise
+/// seen from behind).
+pub fn revolver_next(k: usize) -> usize {
+    (k + 5) % 6
+}
+/// Rounds ready to fire: in the magazine and in the chamber (a revolver's: live in its
+/// cylinder).
 pub fn gun_ready_rounds(s: &Stack) -> u8 {
+    if s.item == REVOLVER {
+        return gun_rounds(s);
+    }
     (if gun_has_mag(s) { gun_rounds(s) } else { 0 }) + gun_chambered(s) as u8
 }
 
-/// A magazine: how many rounds it holds. Its data is the rounds in it.
+/// A magazine (or a speedloader): how many rounds it holds. Its data is the rounds in it.
 pub fn magazine_capacity(item: ItemId) -> Option<u8> {
     match item {
         PISTOL_MAGAZINE => Some(12),
         EXTENDED_MAGAZINE => Some(20),
+        SPEEDLOADER => Some(6),
+        AK_MAGAZINE => Some(30),
         _ => None,
     }
 }
 
-/// Rounds in a gun's magazine (the low 6 bits of its data), or in a magazine.
+/// A magazine that goes into a gun (not a speedloader): which gun.
+pub fn magazine_gun(item: ItemId) -> Option<GunKind> {
+    match item {
+        PISTOL_MAGAZINE | EXTENDED_MAGAZINE => Some(GunKind::Pistol),
+        AK_MAGAZINE => Some(GunKind::Ak),
+        _ => None,
+    }
+}
+
+/// A magazine that goes into a gun (not a speedloader).
+pub fn is_gun_magazine(item: ItemId) -> bool {
+    magazine_gun(item).is_some()
+}
+
+/// Rounds in a gun's magazine (the low 6 bits of its data), or in a magazine; a revolver's
+/// live rounds.
 pub fn gun_rounds(s: &Stack) -> u8 {
+    if s.item == REVOLVER {
+        return (0..6).filter(|&k| revolver_chamber(s, k) == chamber::LIVE).count() as u8;
+    }
     (s.data & 0x3f) as u8
 }
+/// A revolver: `n` live rounds from the chamber after the one under the hammer on, the others
+/// empty.
 pub fn set_gun_rounds(s: &mut Stack, n: u8) {
+    if s.item == REVOLVER {
+        let mut k = revolver_index(s);
+        for i in 0..6 {
+            k = revolver_next(k);
+            set_revolver_chamber(s, k, if i < n as usize { chamber::LIVE } else { chamber::EMPTY });
+        }
+        return;
+    }
     s.data = (s.data & !0x3f) | (n as u16 & 0x3f);
 }
 /// A gun's attachments (`gun_mod` bits, in the low half of the data's high byte).
-/// (the first four in bits 8-11 of the data, the weapon light and its switch in bits 13-14)
+/// (the first four in bits 8-11 of the data, the weapon light and its switch in bits 13-14;
+/// a revolver takes none)
 pub fn gun_mods(s: &Stack) -> u8 {
+    if s.item == REVOLVER {
+        return 0;
+    }
     ((s.data >> 8) & 0x0f) as u8 | ((s.data >> 9) & 0x30) as u8
 }
 pub fn set_gun_mods(s: &mut Stack, mods: u8) {
+    if s.item == REVOLVER {
+        return;
+    }
     s.data = (s.data & !0x6f00) | ((mods as u16 & 0x0f) << 8) | ((mods as u16 & 0x30) << 9);
 }
 /// Minecraft's shears durability.
@@ -337,7 +521,8 @@ pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
         WATER_BUCKET | LAVA_BUCKET | SHEARS | GUIDE_BOOK => 1,
-        FRAG_GRENADE | SMOKE_GRENADE => 16,
+        FRAG_GRENADE | SMOKE_GRENADE | TARGET_DUMMY => 16,
+        MAG_LOADER => 1,
         AMMO_BOX => 1,
         _ if armor_of(id).is_some() => 1,
         _ if GunKind::of(id).is_some() || magazine_capacity(id).is_some() => 1,
@@ -484,6 +669,12 @@ pub fn max_damage(id: ItemId) -> u16 {
     if (PISTOL_FRAME..=PISTOL_MAGAZINE).contains(&id) || id == EXTENDED_MAGAZINE {
         return GunKind::Pistol.stats().dirt_max;
     }
+    if REVOLVER_PARTS.contains(&id) {
+        return GunKind::Revolver.stats().dirt_max;
+    }
+    if AK_PARTS.contains(&id) {
+        return GunKind::Ak.stats().dirt_max;
+    }
     if armor_of(id).is_some() {
         return armor_durability(id);
     }
@@ -582,6 +773,7 @@ const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
     (WOOL, "white_wool", "White Wool", "Fehér gyapjú"),
     (BED, "red_bed", "Red Bed", "Piros ágy"),
     (GUN_STATION, "gun_station", "Gun Station", "Fegyverasztal"),
+    (RIFLE_BENCH, "rifle_station", "Rifle Station", "Puskaasztal"),
 ];
 
 /// The other items (ids from 256, tools aside), in creative inventory order: the id, key,
@@ -911,6 +1103,23 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         tex::SHEEP_SPAWN_EGG,
     ),
     (PISTOL, "pistol", "Pistol", "Pisztoly", tex::PISTOL),
+    (REVOLVER, "revolver", "Revolver", "Revolver", tex::REVOLVER),
+    (SPEEDLOADER, "speedloader", "Speedloader", "Gyorstöltő", tex::SPEEDLOADER),
+    (MAGNUM_ROUND, "magnum_round", "Magnum Round", "Magnum töltény", tex::MAGNUM_ROUND),
+    (TARGET_DUMMY, "target_dummy", "Target Dummy", "Gyakorlóbábu", tex::TARGET_DUMMY),
+    (AK47, "ak47", "AK-47", "AK-47", tex::AK47),
+    (RIFLE_ROUND, "rifle_round", "7.62 Round", "7,62-es töltény", tex::RIFLE_ROUND),
+    (MAG_LOADER, "magazine_loader", "Magazine Loader", "Tárazógép", tex::MAG_LOADER),
+    (AK_MAGAZINE, "ak_magazine", "AK Magazine", "AK-tár", tex::AK_PARTS + 4),
+    (AK_RECEIVER, "ak_receiver", "AK Receiver", "AK-tok", tex::AK_PARTS),
+    (AK_GAS_TUBE, "ak_gas_tube", "AK Gas Tube", "AK-gázcső", tex::AK_PARTS + 1),
+    (AK_BOLT, "ak_bolt_carrier", "AK Bolt Carrier", "AK-zárkeret", tex::AK_PARTS + 2),
+    (AK_COVER, "ak_dust_cover", "AK Dust Cover", "AK-tokfedél", tex::AK_PARTS + 3),
+    (REVOLVER_FRAME, "revolver_frame", "Revolver Frame", "Revolverváz", tex::REVOLVER_PARTS),
+    (REVOLVER_BARREL, "revolver_barrel", "Revolver Barrel", "Revolvercső", tex::REVOLVER_PARTS + 1),
+    (REVOLVER_SPRING, "revolver_mainspring", "Mainspring", "Kakasrugó", tex::REVOLVER_PARTS + 2),
+    (REVOLVER_CYLINDER, "revolver_cylinder", "Revolver Cylinder", "Forgótár", tex::REVOLVER_PARTS + 3),
+    (REVOLVER_HAMMER, "revolver_hammer", "Hammer", "Kakas", tex::REVOLVER_PARTS + 4),
     (BULLET, "bullet", "Bullet", "Töltény", tex::BULLET),
     (
         PISTOL_FRAME,
@@ -1010,6 +1219,7 @@ pub fn item_of_block(b: u8) -> Option<ItemId> {
         _ if is_door(b) => OAK_DOOR,
         _ if is_stairs(b) => OAK_STAIRS,
         _ if is_bed(b) => BED,
+        _ if is_rifle_bench(b) => RIFLE_BENCH,
         _ if is_gun_bench(b) => GUN_STATION,
         _ if is_log(b) => log_base(b),
         _ if is_water(b) => return Some(WATER_BUCKET),

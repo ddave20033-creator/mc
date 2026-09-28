@@ -285,10 +285,12 @@ impl Game {
             book: self.book_pose().0,
             book_page: self.book_pose().1,
             spectator: self.spectator(),
+            sprint: self.tp_sprint,
             gun_dirt: self.held_gun_dirt(),
             brush: self.bench_brush_pose(),
             drawer: matches!(self.screen, Screen::Container(Container::GunStation(_))) && self.bench_in_drawer,
             held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
+            gun_extra: if self.holding_gun() { self.hand.gun_anim().pack_extra() } else { 0 },
             bench_hold: match (self.screen, self.cursor, self.bench_hold_at) {
                 (Screen::Container(Container::GunStation(_)), Some(st), Some(at)) => Some((st, at)),
                 _ => None,
@@ -456,6 +458,11 @@ impl Game {
             p.status = t.status;
             p.gun_mods = t.gun_mods;
             p.gun_state = t.gun_state;
+            // (the held gun as it is now: its dirt, its magazine's rounds or cylinder, and
+            // what it is doing)
+            p.gun_dirt = t.gun_dirt;
+            p.held_data = t.held_data;
+            p.gun_extra = t.gun_extra;
             p.armor = t.armor;
             p.book = t.book;
             p.book_page = t.book_page;
@@ -497,6 +504,32 @@ impl Game {
     }
 }
 
+/// What another player's held gun is doing, as they sent it: its slide, reload and aim
+/// (`Pose::gun_state`, `gun_extra`), and from the gun itself (`held_data`) the rounds in its
+/// magazine or what is in each chamber of its cylinder.
+fn remote_gun(p: &Pose, time: f32, shot_at: Option<f32>) -> crate::model::pistol_view::GunAnim {
+    let mut g = crate::model::pistol_view::GunAnim::unpack(
+        p.gun_state,
+        shot_at.map(|at| time - at).filter(|&t| (0.0..1.0).contains(&t)),
+    );
+    g.unpack_extra(p.gun_extra);
+    let gun = crate::item::Stack { data: p.held_data, ..crate::item::Stack::one(p.held) };
+    match GunKind::of(p.held) {
+        Some(GunKind::Revolver) => g.cyl = p.held_data,
+        Some(kind) => {
+            g.mag = crate::item::gun_has_mag(&gun)
+                .then(|| (crate::item::gun_rounds(&gun), kind.magazine_size(crate::item::gun_mods(&gun))));
+            // (the magazine a reload brings is sent as the pistol's, 12 or 20: another gun's
+            // holds what its own does)
+            if kind != GunKind::Pistol {
+                g.new_mag = g.new_mag.map(|(n, _)| (n, kind.magazine_size(0)));
+            }
+        }
+        None => {}
+    }
+    g
+}
+
 /// Other players' models (into the entity and particle ranges, like mobs).
 /// Another player's model, standing as their pose says (`shot_at`: when they last fired).
 fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
@@ -509,6 +542,7 @@ fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
         limb_amount: p.limb_amount,
         attack: p.attack,
         crouch: p.crouch,
+        sprint: p.sprint,
         held: p.held,
         skin: p.skin,
         time,
@@ -522,10 +556,7 @@ fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
         gun_mods: p.gun_mods,
         gun_dirt: p.gun_dirt,
         held_data: p.held_data,
-        gun: crate::model::pistol_view::GunAnim::unpack(
-            p.gun_state,
-            shot_at.map(|at| time - at).filter(|&t| (0.0..1.0).contains(&t)),
-        ),
+        gun: remote_gun(p, time, shot_at),
         armor: p.armor,
         book: None,
     }
@@ -551,7 +582,7 @@ impl Game {
     pub(super) fn remote_gun_point(&self, id: u8, kind: GunKind, point: (usize, Vec3)) -> Option<Vec3> {
         let r = self.remotes.iter().find(|r| r.id == id && r.shown())?;
         let pose = standing_pose(&r.pose, self.time, r.shot_at);
-        let point = crate::model::pistol_view::rest_point_in_gun_space(point);
+        let point = crate::model::gun_view::rest_point_in_gun_space(kind, point);
         Some(crate::model::player::gun_point(&pose, kind, point))
     }
 }

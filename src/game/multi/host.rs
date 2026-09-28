@@ -510,6 +510,11 @@ impl Game {
                     self.spawn_mob(kind, pos);
                 }
             }
+            Msg::BreakDummy { id: mob } => {
+                if let Some(i) = self.mobs.iter().position(|m| m.id == mob) {
+                    self.break_dummy(i, true);
+                }
+            }
             Msg::Shear { id: mob } => {
                 if let Some(i) = self.mobs.iter().position(|m| m.id == mob) {
                     self.shear_mob(i);

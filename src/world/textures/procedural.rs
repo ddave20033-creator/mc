@@ -717,6 +717,7 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
         tex::FRAG_GRENADE | tex::SMOKE_GRENADE => grenade_icon(l == tex::SMOKE_GRENADE, x, y),
         // Drawn from its model later (`render_item_icons`).
         tex::FLASHLIGHT => None,
+        _ if (tex::REVOLVER..=tex::TARGET_DUMMY).contains(&l) => None,
         tex::AMMO_BOX => {
             // An olive ammo can seen from the front and a little above: its open top full of
             // brass, its front with a yellow stencilled band.

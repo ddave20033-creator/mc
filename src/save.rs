@@ -378,7 +378,14 @@ pub fn save_entities(
             .map(|i| format!("{}/{}/{}/{}", slot_str(&Some(i.stack)), i.x, i.z, i.turn))
             .collect();
         let boxes: Vec<String> = b.boxes.iter().map(|n| n.map_or("-".to_string(), |n| n.to_string())).collect();
-        s += &format!("bench:{}:{}:{}\n", pos_str(*p), items.join("|"), boxes.join(","));
+        s += &format!(
+            "bench:{}:{}:{}:{}:{}\n",
+            pos_str(*p),
+            items.join("|"),
+            boxes.join(","),
+            b.loader as u8,
+            slot_str(&b.loader_mag)
+        );
     }
     for (p, t) in saplings {
         s += &format!("sapling:{}:{}\n", pos_str(*p), t);
@@ -478,9 +485,13 @@ pub fn load_entities(
                 }
                 if let Some(a) = parts.get(3) {
                     for (i, n) in a.split(',').take(3).enumerate() {
-                        bench.boxes[i] = n.parse::<u16>().ok().map(|n| n.min(crate::item::AMMO_BOX_ROUNDS));
+                        bench.boxes[i] = n.parse::<u16>().ok().map(|n| {
+                            crate::item::box_count(n) | (n & crate::item::BOX_KIND)
+                        });
                     }
                 }
+                bench.loader = parts.get(4) == Some(&"1");
+                bench.loader_mag = parts.get(5).and_then(|s| parse_slot(s));
                 be.benches.insert(p, bench);
             }
             "sapling" if parts.len() >= 3 => saplings.push((p, parts[2].parse().unwrap_or(60.0))),
@@ -598,7 +609,8 @@ mod bench_tests {
         crate::item::set_gun_rounds(&mut mag, 7);
         bench.add(mag, 0.25, -0.1, 0.0);
         bench.add(Stack { data: 40, ..Stack::one(crate::item::AMMO_BOX) }, -0.5, 0.2, 0.3);
-        bench.boxes = [Some(128), None, Some(3)];
+        // (the last a box of magnum rounds: its kind is kept)
+        bench.boxes = [Some(128), None, Some(3 | crate::item::BOX_MAGNUM)];
         be.benches.insert(IVec3::new(4, 70, -9), bench.clone());
         save_entities(folder, &be, &[], &[], &[]);
         let mut back = BlockEntities::default();

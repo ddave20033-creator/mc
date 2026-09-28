@@ -201,7 +201,7 @@ fn pages_shown(spread: usize, turn: f32) -> [Option<usize>; 4] {
 /// A texture `cols` layers wide (a page's 2 x 3, the tabs' 4 x 1) cut into its `n` layers,
 /// with their mip levels (averaged in linear light, like the block textures'; cut-out
 /// alpha kept).
-fn sheet_levels(px: &[[u8; 4]], w: usize, cols: usize, n: usize) -> Vec<Vec<u8>> {
+pub(in crate::game) fn sheet_levels(px: &[[u8; 4]], w: usize, cols: usize, n: usize) -> Vec<Vec<u8>> {
     let mut base = vec![0u8; TILE * TILE * 4 * n];
     for l in 0..n {
         let (cx, cy) = ((l % cols) * TILE, (l / cols) * TILE);

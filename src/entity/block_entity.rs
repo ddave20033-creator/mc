@@ -342,19 +342,22 @@ pub mod bench_event {
 }
 
 /// A gun station: what lies on its table, the boxes of rounds in the three places for them in
-/// its drawer (the rounds in each; None: taken out), and the last change there.
+/// its drawer (the rounds in each; None: taken out), the rifle station's magazine loader in
+/// the middle of its drawer (there or not, and the magazine on it), and the last change there.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GunBench {
     pub items: Vec<BenchItem>,
     pub next_id: u16,
     pub boxes: [Option<u16>; 3],
+    pub loader: bool,
+    pub loader_mag: Option<Stack>,
     pub event: BenchEvent,
 }
 
 impl Default for GunBench {
     /// A new one: three empty boxes in the drawer.
     fn default() -> Self {
-        GunBench { items: Vec::new(), next_id: 0, boxes: [Some(0); 3], event: BenchEvent::default() }
+        GunBench { items: Vec::new(), next_id: 0, boxes: [Some(0); 3], loader: false, loader_mag: None, event: BenchEvent::default() }
     }
 }
 
@@ -404,14 +407,22 @@ impl BlockEntities {
         if let Some(b) = self.benches.remove(&p) {
             // What lies on it (the boxes of rounds belong to it: their rounds drop), and the
             // rounds in the boxes in the drawer.
-            let boxes = b.items.iter().filter(|i| i.stack.item == crate::item::AMMO_BOX);
-            let mut rounds: u32 = boxes.map(|i| crate::item::box_rounds(&i.stack) as u32).sum();
-            rounds += b.boxes.iter().flatten().map(|&n| n as u32).sum::<u32>();
-            out.extend(b.items.iter().filter(|i| i.stack.item != crate::item::AMMO_BOX).map(|i| i.stack));
-            while rounds > 0 {
-                let n = rounds.min(64) as u8;
-                out.push(Stack::new(crate::item::BULLET, n));
-                rounds -= n as u32;
+            use crate::item::{box_ammo, box_count, AMMO_BOX, BOX_AMMO};
+            let boxes = b.items.iter().filter(|i| i.stack.item == AMMO_BOX).map(|i| i.stack.data);
+            let all: Vec<u16> = boxes.chain(b.boxes.iter().flatten().copied()).collect();
+            out.extend(b.items.iter().filter(|i| i.stack.item != AMMO_BOX).map(|i| i.stack));
+            // The loader and the magazine on it.
+            if b.loader {
+                out.push(Stack::one(crate::item::MAG_LOADER));
+            }
+            out.extend(b.loader_mag);
+            for kind in BOX_AMMO {
+                let mut rounds: u32 = all.iter().filter(|&&v| box_ammo(v) == Some(kind)).map(|&v| box_count(v) as u32).sum();
+                while rounds > 0 {
+                    let n = rounds.min(64) as u8;
+                    out.push(Stack::new(kind, n));
+                    rounds -= n as u32;
+                }
             }
         }
         out

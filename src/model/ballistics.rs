@@ -1,7 +1,7 @@
 //! What guns leave in the world: spent cases that fly out to the side, bounce and lie on the
 //! ground for a while, tracer streaks of bullets in flight and the laser sight's dot.
 
-use super::emit_box;
+use crate::item::{ItemId, BULLET, MAGNUM_ROUND, RIFLE_ROUND};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
 use crate::world::textures::tex;
@@ -11,22 +11,35 @@ use glam::{Mat4, Quat, Vec3};
 /// Seconds a spent case stays on the ground.
 const CASE_LIFE: f32 = 10.0;
 const MAX_CASES: usize = 64;
-/// Half the size of a case (exaggerated a little so it can be seen).
-const CASE_HALF: Vec3 = Vec3::new(0.032, 0.013, 0.013);
-const BRASS: [u8; 3] = [236, 182, 72];
+/// Blocks per model unit of a spent case on the ground (the guns' own case, drawn about as big
+/// as a round dropped as an item, so it can be seen).
+const CASE_SCALE: f32 = 0.04;
 
 /// What kind of case: sizes and colours differ.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CaseKind {
+    /// 9x19 mm.
     Pistol,
+    /// .357 Magnum: a case 33 mm long against the pistol's 19, with a rim.
+    Magnum,
+    /// 7.62x39 mm: a bottlenecked case 39 mm long.
+    Rifle,
 }
 
 impl CaseKind {
-    /// Half its size (a case lies along x) and its colour.
-    fn look(self) -> (Vec3, [u8; 3]) {
+    /// The round it is the case of.
+    fn ammo(self) -> ItemId {
         match self {
-            CaseKind::Pistol => (CASE_HALF, BRASS),
+            CaseKind::Pistol => BULLET,
+            CaseKind::Magnum => MAGNUM_ROUND,
+            CaseKind::Rifle => RIFLE_ROUND,
         }
+    }
+
+    /// Half its size (a case lies along x), from the guns' model of it.
+    fn look(self) -> Vec3 {
+        let (len, wide) = super::gun_view::round_size(self.ammo(), true);
+        Vec3::new(len, wide, wide) * CASE_SCALE * 0.5
     }
 }
 
@@ -79,7 +92,7 @@ impl Cases {
             c.age += dt;
             if c.resting {
                 // The block under it was broken: fall again.
-                if !solid(c.pos - Vec3::Y * (c.kind.look().0.y + 0.02)) {
+                if !solid(c.pos - Vec3::Y * (c.kind.look().y + 0.02)) {
                     c.resting = false;
                 }
                 continue;
@@ -99,7 +112,7 @@ impl Cases {
                         clinks.push((p, hard));
                     }
                     // Landed: bounce a little, lose speed, spin slower.
-                    p.y = q.y.floor() + 1.0 + c.kind.look().0.y;
+                    p.y = q.y.floor() + 1.0 + c.kind.look().y;
                     c.vel.y *= -0.3;
                     c.vel.x *= 0.55;
                     c.vel.z *= 0.55;
@@ -129,10 +142,14 @@ impl Cases {
     pub fn build(&self, out: &mut Vec<Vertex>, world: &World) {
         for c in &self.list {
             let (sky, blk) = world.light_estimate(c.pos + Vec3::Y * 0.1);
-            let m = Mat4::from_rotation_translation(c.rot, c.pos);
-            let (half, tint) = c.kind.look();
+            // The case lies along x, its middle at its place: the model's (nose up) turned over.
+            let half = c.kind.look();
+            let m = Mat4::from_rotation_translation(c.rot, c.pos)
+                * Mat4::from_rotation_z(-std::f32::consts::FRAC_PI_2)
+                * Mat4::from_translation(-Vec3::Y * half.x)
+                * Mat4::from_scale(Vec3::splat(CASE_SCALE));
             let light = vertex_light(sky, blk);
-            emit_box(out, m, -half, half, [tex::WOOL; 6], [tint; 6], light, flags::ENTITY);
+            super::gun_view::emit_round(out, c.kind.ammo(), true, m, light, flags::ENTITY);
         }
     }
 }
@@ -250,7 +267,7 @@ mod tests {
         }
         let c = &cases.list[0];
         assert!(c.resting, "the case is still moving at {}", c.pos);
-        assert!((c.pos.y - (1.0 + CASE_HALF.y)).abs() < 1e-3, "it rests at {}", c.pos);
+        assert!((c.pos.y - (1.0 + CaseKind::Pistol.look().y)).abs() < 1e-3, "it rests at {}", c.pos);
         assert!(c.pos.x > 8.5, "it did not fly out to the side: {}", c.pos);
     }
 }

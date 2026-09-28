@@ -23,9 +23,10 @@ use super::super::station::{hit_plane, Screen2};
 use super::*;
 use crate::entity::{bench_event, BenchEvent, BenchItem, GunBench};
 use crate::model::gun::{BARREL, FRAME, MAGAZINE, PARTS, SLIDE, SPRING};
+use crate::model::gun_view;
 use crate::model::pistol_view::bench::{self as rig, Bones};
-use crate::model::pistol_view::{dirt_level, layers};
-use crate::model::pistol_vm as vm;
+use crate::model::pistol_view::{self as pv, dirt_level};
+use crate::model::revolver_view::bench as rrig;
 use crate::model::viewmodel::{bone_matrices, cube_matrix, emit_cube, find_bone, BonePose, Cube};
 use crate::util::{ray_box, vertex_light};
 use crate::world::mesh::flags;
@@ -42,6 +43,34 @@ const FLY: f32 = 0.45;
 const ASSEMBLE_SPEED: f32 = 1.6;
 /// Seconds for each round to go into a magazine: brought over its lips, then pushed down in.
 const ROUND_TIME: f32 = 0.34;
+/// Seconds the rifle station's loader takes to push each round into the magazine on it (its
+/// "feed" animation's length).
+const LOADER_ROUND: f32 = 0.35;
+/// Gun model units to the station model's pixels (the table's `PX`, a pixel a sixteenth).
+const MODEL_TO_STATION: f32 = PX * 16.0;
+
+/// The box the loader takes its next round from (for the magazine on it): which, if any.
+fn loader_source(bench: &GunBench) -> Option<usize> {
+    let mag = bench.loader_mag.filter(|_| bench.loader)?;
+    let kind = magazine_gun(mag.item)?;
+    if gun_rounds(&mag) >= magazine_capacity(mag.item).unwrap_or(0) {
+        return None;
+    }
+    bench.boxes.iter().position(|b| b.and_then(box_ammo) == Some(kind.ammo()))
+}
+
+/// The magazine on the loader as it is drawn, lying in its cradle on its side, its feed lips
+/// toward the feed block (`mount`: the loader's frame there, `loader_mount`).
+fn loader_piece(mount: Mat4, mag: &Stack) -> Option<Piece> {
+    let (kind, bones, pose) = rig_of(mag, 0.0)?;
+    let (lo, hi) = bounds(kind, bones, &pose);
+    // The magazine's up (its lips) along the loader, its side down.
+    let lay = Mat4::from_cols(glam::Vec4::Y, glam::Vec4::X, -glam::Vec4::Z, glam::Vec4::W);
+    let root = mount * lay * Mat4::from_scale(Vec3::splat(MODEL_TO_STATION)) * Mat4::from_translation(-(lo + hi) * 0.5);
+    let mut pc = Piece::new(kind, bones, &pose, root, dirt_of(mag), Some(Pick::Loader));
+    pc.mag = magazine_of(mag);
+    Some(pc)
+}
 /// When the magazine is out in the pistol's strip animation (the table skips that part).
 const MAG_OUT: f32 = 0.5;
 /// Seconds of scrubbing that clean a completely dirty part, and a whole gun.
@@ -88,19 +117,31 @@ pub(in crate::game) struct Table {
     pub(in crate::game) center: Vec3,
     pub(in crate::game) right: Vec3,
     pub(in crate::game) toward: Vec3,
+    /// How many blocks wide the station is (the rifle station three), and how far across
+    /// from its middle things may lie.
+    pub(in crate::game) wide: f32,
+    pub(in crate::game) half_w: f32,
 }
 
 impl Table {
-    /// The table of the station whose left half `p` is (block `b`).
+    /// The table of the station whose left block `p` is (block `b`).
     pub(in crate::game) fn of(p: IVec3, b: u8) -> Option<Table> {
         let f = facing(b).filter(|_| is_gun_bench(b))?;
         let toward = facing_dir(f).as_vec3();
         let right = chest_right(f).as_vec3();
+        let wide = bench_width(b) as f32;
         Some(Table {
-            center: p.as_vec3() + Vec3::new(0.5, 1.0, 0.5) + right * 0.5,
+            center: p.as_vec3() + Vec3::new(0.5, 1.0, 0.5) + right * (wide - 1.0) * 0.5,
             right,
             toward,
+            wide,
+            half_w: HALF_W + (wide - 2.0) * 0.5,
         })
+    }
+
+    /// The rifle station's (not the small one's).
+    pub(in crate::game) fn rifle(&self) -> bool {
+        self.wide > 2.5
     }
 
     /// A point on the table: `x` to the right of its middle, `z` toward its front.
@@ -116,7 +157,7 @@ impl Table {
 
     /// Whether (x, z) is on the table, where things may lie.
     fn on(&self, x: f32, z: f32) -> bool {
-        x.abs() <= HALF_W && z.abs() <= HALF_D
+        x.abs() <= self.half_w && z.abs() <= HALF_D
     }
 
     /// The pistol lying on its left side, turned `turn` about the up axis: at 0 the muzzle
@@ -142,32 +183,88 @@ pub(in crate::game) enum Pick {
     Mag(u16),
     /// The drawer's handle (opens and shuts it).
     Handle,
+    /// The rifle station's magazine loader in its drawer (or the magazine on it).
+    Loader,
 }
 
-/// How a thing lying on the table is drawn: as pieces of the Blockbench pistol, or as an
-/// item lying flat.
+/// How a thing lying on the table is drawn: as pieces of a Blockbench gun (the pistol, the
+/// revolver or the AK), or as an item lying flat.
+#[derive(Clone, Copy)]
 enum Look {
-    Gun,
-    Part(usize),
+    Gun(GunKind),
+    /// A part of a gun (`gun::FRAME` ..; a magazine is its gun's MAGAZINE part).
+    Part(GunKind, usize),
     Attachment(u8),
-    Round,
+    /// A round of a magazine-fed gun (the pistol's, the AK's).
+    Round(GunKind),
+    Magnum,
+    Speedloader,
     Flat,
 }
 
 fn look(item: ItemId) -> Look {
+    if let Some(k) = GunKind::of(item) {
+        return Look::Gun(k);
+    }
+    if let Some(p) = REVOLVER_PARTS.iter().position(|&i| i == item) {
+        return Look::Part(GunKind::Revolver, p);
+    }
+    if let Some(p) = AK_PARTS.iter().position(|&i| i == item) {
+        return Look::Part(GunKind::Ak, p);
+    }
     match item {
-        _ if GunKind::of(item).is_some() => Look::Gun,
-        PISTOL_FRAME => Look::Part(FRAME),
-        PISTOL_BARREL => Look::Part(BARREL),
-        PISTOL_SPRING => Look::Part(SPRING),
-        PISTOL_SLIDE => Look::Part(SLIDE),
-        PISTOL_MAGAZINE | EXTENDED_MAGAZINE => Look::Part(MAGAZINE),
+        PISTOL_FRAME => Look::Part(GunKind::Pistol, FRAME),
+        PISTOL_BARREL => Look::Part(GunKind::Pistol, BARREL),
+        PISTOL_SPRING => Look::Part(GunKind::Pistol, SPRING),
+        PISTOL_SLIDE => Look::Part(GunKind::Pistol, SLIDE),
+        PISTOL_MAGAZINE | EXTENDED_MAGAZINE => Look::Part(GunKind::Pistol, MAGAZINE),
         SCOPE => Look::Attachment(gun_mod::SCOPE),
         SILENCER => Look::Attachment(gun_mod::SILENCER),
         LASER_SIGHT => Look::Attachment(gun_mod::LASER),
         FLASHLIGHT => Look::Attachment(gun_mod::LIGHT),
-        BULLET => Look::Round,
+        BULLET => Look::Round(GunKind::Pistol),
+        RIFLE_ROUND => Look::Round(GunKind::Ak),
+        MAGNUM_ROUND => Look::Magnum,
+        SPEEDLOADER => Look::Speedloader,
         _ => Look::Flat,
+    }
+}
+
+/// The parts a gun lies in taken apart on the table (a magazine is not one of them: it is
+/// laid beside them on its own), and a part's item.
+fn table_parts(kind: GunKind) -> &'static [usize] {
+    match kind {
+        GunKind::Pistol | GunKind::Ak => &[FRAME, BARREL, SPRING, SLIDE],
+        GunKind::Revolver => &[0, 1, 2, 3, 4],
+    }
+}
+
+fn part_item(kind: GunKind, part: usize) -> ItemId {
+    kind.parts()[part]
+}
+
+/// The bones of a gun's part (with the attachments in `mods` on it, the pistol's), and how
+/// long its strip animation is.
+fn part_bones(kind: GunKind, part: usize, mods: u8) -> Bones {
+    match kind {
+        GunKind::Pistol | GunKind::Ak => rig::part(pv::rig(kind), part, mods),
+        GunKind::Revolver => rrig::part(part),
+    }
+}
+
+fn strip_length(kind: GunKind) -> f32 {
+    match kind {
+        GunKind::Pistol | GunKind::Ak => rig::strip_length(pv::rig(kind)),
+        GunKind::Revolver => rrig::strip_length(),
+    }
+}
+
+/// Where putting a gun together starts in its strip animation (played backwards): the
+/// magazine goes in on its own, afterwards.
+fn assemble_from(kind: GunKind) -> f32 {
+    match kind {
+        GunKind::Pistol | GunKind::Ak => MAG_OUT,
+        GunKind::Revolver => 0.0,
     }
 }
 
@@ -181,9 +278,19 @@ fn magazine_of(st: &Stack) -> Option<(u8, u8)> {
 }
 
 /// Whether something may be laid on the table: only what belongs to the guns (a gun, its
-/// parts, magazines, attachments, rounds and boxes of them).
-pub(in crate::game) fn belongs_on_bench(item: ItemId) -> bool {
-    !matches!(look(item), Look::Flat) || item == AMMO_BOX
+/// parts, magazines, attachments, rounds and boxes of them); a long gun's things only on the
+/// rifle station's (`rifle`).
+pub(in crate::game) fn belongs_on_bench(item: ItemId, rifle: bool) -> bool {
+    (!matches!(look(item), Look::Flat) || item == AMMO_BOX) && (rifle || !needs_rifle_station(item))
+}
+
+/// A long gun's thing (the gun, a part, its magazine or rounds): worked on only at the rifle
+/// station, the small one is for the handguns.
+pub(in crate::game) fn needs_rifle_station(item: ItemId) -> bool {
+    match look(item) {
+        Look::Gun(k) | Look::Part(k, _) | Look::Round(k) => k.long(),
+        _ => false,
+    }
 }
 
 /// The attachment an item is (`gun_mod` bit), and back.
@@ -207,43 +314,57 @@ fn attachment_of(part: usize) -> u8 {
 
 /// How dirty a gun or part looks.
 fn dirt_of(st: &Stack) -> u8 {
-    dirt_level(st.damage, GunKind::Pistol.stats().dirt_max)
+    let max = max_damage(st.item);
+    dirt_level(st.damage, if max > 0 { max } else { GunKind::Pistol.stats().dirt_max })
 }
 
-/// The pistol's bones something is, posed as it lies (the strip animation `at` for a gun
-/// coming apart).
-fn rig_of(st: &Stack, at: f32) -> Option<(Bones, Vec<BonePose>)> {
-    let with = |pose: &mut Vec<BonePose>, name: &str, show: bool| {
-        if let (Some(b), false) = (find_bone(vm::BONES, name), show) {
+/// Which gun's model something is, its bones in it, posed as it lies (the strip animation
+/// `at` for a gun coming apart).
+fn rig_of(st: &Stack, at: f32) -> Option<(GunKind, Bones, Vec<BonePose>)> {
+    let with = |pose: &mut Vec<BonePose>, kind: GunKind, name: &str, show: bool| {
+        if let (Some(b), false) = (find_bone(gun_view::bones(kind), name), show) {
             pose[b].scale = Vec3::ZERO;
         }
     };
     match look(st.item) {
-        Look::Gun => {
+        Look::Gun(GunKind::Revolver) => Some((GunKind::Revolver, rrig::gun(), rrig::pose([at; PARTS], st.data))),
+        Look::Gun(kind) => {
+            let r = pv::rig(kind);
             let mods = gun_mods(st);
             let has_mag = gun_has_mag(st);
-            let mut pose = rig::pose([at; PARTS], mods, has_mag && gun_rounds(st) > 0, gun_chambered(st));
-            with(&mut pose, "magazine", has_mag);
-            Some((rig::gun(mods), pose))
+            let mut pose = rig::pose(r, [at; PARTS], mods, has_mag && gun_rounds(st) > 0, gun_chambered(st));
+            with(&mut pose, kind, "magazine", has_mag);
+            Some((kind, rig::gun(r, mods), pose))
         }
-        Look::Part(p) => {
+        // A cylinder on its own is empty.
+        Look::Part(GunKind::Revolver, p) => Some((GunKind::Revolver, rrig::part(p), rrig::pose([0.0; PARTS], 0))),
+        Look::Part(kind, p) => {
+            let r = pv::rig(kind);
             let (ext, mods) = if p == MAGAZINE {
                 ((st.item == EXTENDED_MAGAZINE) as u8 * gun_mod::EXTENDED_MAGAZINE, 0)
             } else {
                 (0, gun_mods(st) & attachment_of(p))
             };
             let rounds = p == MAGAZINE && gun_rounds(st) > 0;
-            Some((rig::part(p, mods), rig::pose([0.0; PARTS], mods | ext, rounds, false)))
+            Some((kind, rig::part(r, p, mods), rig::pose(r, [0.0; PARTS], mods | ext, rounds, false)))
         }
-        Look::Attachment(bit) => Some((rig::attachment(bit), rig::pose([0.0; PARTS], bit, false, false))),
-        Look::Round => Some((rig::round(), rig::pose([0.0; PARTS], 0, false, true))),
+        Look::Attachment(bit) => {
+            let r = &pv::PISTOL;
+            Some((GunKind::Pistol, rig::attachment(r, bit), rig::pose(r, [0.0; PARTS], bit, false, false)))
+        }
+        Look::Round(kind) => {
+            let r = pv::rig(kind);
+            Some((kind, rig::round(r), rig::pose(r, [0.0; PARTS], 0, false, true)))
+        }
+        Look::Speedloader => Some((GunKind::Revolver, rrig::speedloader(), rrig::loader_pose(gun_rounds(st)))),
+        Look::Magnum => Some((GunKind::Revolver, rrig::round(), rrig::round_pose())),
         Look::Flat => None,
     }
 }
 
-/// The cubes of these bones that are shown.
-fn cubes<'a>(bones: Bones, shown: &'a [bool]) -> impl Iterator<Item = &'static Cube> + 'a {
-    vm::CUBES.iter().filter(move |c| bones & (1 << c.bone) != 0 && shown[c.bone])
+/// The cubes of these bones (of this gun's model) that are shown.
+fn cubes<'a>(kind: GunKind, bones: Bones, shown: &'a [bool]) -> impl Iterator<Item = &'static Cube> + 'a {
+    gun_view::cubes(kind).iter().filter(move |c| bones & (1 << c.bone) != 0 && shown[c.bone])
 }
 
 /// A cube's eight corners where its bone's matrix puts them.
@@ -260,10 +381,10 @@ fn corners(c: &Cube, bone: Mat4) -> [Vec3; 8] {
 }
 
 /// Where the cubes of these bones reach (model space) in this pose.
-fn bounds(bones: Bones, pose: &[BonePose]) -> (Vec3, Vec3) {
-    let (mats, shown) = bone_matrices(vm::BONES, pose, Mat4::IDENTITY);
+fn bounds(kind: GunKind, bones: Bones, pose: &[BonePose]) -> (Vec3, Vec3) {
+    let (mats, shown) = bone_matrices(gun_view::bones(kind), pose, Mat4::IDENTITY);
     let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-    for c in cubes(bones, &shown) {
+    for c in cubes(kind, bones, &shown) {
         for p in corners(c, mats[c.bone]) {
             lo = lo.min(p);
             hi = hi.max(p);
@@ -272,9 +393,10 @@ fn bounds(bones: Bones, pose: &[BonePose]) -> (Vec3, Vec3) {
     (lo, hi)
 }
 
-/// Something drawn on the table: bones of the pistol posed where, how dirty, tinted how, and
-/// what it is to the mouse.
+/// Something drawn on the table: bones of a gun's model posed where, how dirty, tinted how,
+/// and what it is to the mouse.
 struct Piece {
+    kind: GunKind,
     pick: Option<Pick>,
     bones: Bones,
     mats: Vec<Mat4>,
@@ -289,20 +411,23 @@ struct Piece {
 }
 
 impl Piece {
-    fn new(bones: Bones, pose: &[BonePose], root: Mat4, dirt: u8, pick: Option<Pick>) -> Self {
-        let (mats, shown) = bone_matrices(vm::BONES, pose, root);
-        Piece { pick, bones, mats, shown, dirt, tint: [255; 3], mag: None, top_round: false }
+    fn new(kind: GunKind, bones: Bones, pose: &[BonePose], root: Mat4, dirt: u8, pick: Option<Pick>) -> Self {
+        let (mats, shown) = bone_matrices(gun_view::bones(kind), pose, root);
+        Piece { kind, pick, bones, mats, shown, dirt, tint: [255; 3], mag: None, top_round: false }
     }
 
     /// Its cubes that are drawn.
     fn visible(&self) -> impl Iterator<Item = &'static Cube> + '_ {
-        cubes(self.bones, &self.shown).filter(move |c| {
+        cubes(self.kind, self.bones, &self.shown).filter(move |c| {
             let name = c.name;
+            if !self.kind.uses_magazine() {
+                return true;
+            }
             if self.top_round {
                 return name.starts_with("mag_round_top");
             }
             let Some((n, cap)) = self.mag else { return true };
-            rig::mag_cube_shown(name, n, cap)
+            rig::mag_cube_shown(pv::rig(self.kind), name, n, cap)
         })
     }
 
@@ -329,6 +454,7 @@ impl Piece {
     /// Only some of its bones (the same pose).
     fn only(&self, bones: Bones, pick: Option<Pick>) -> Piece {
         Piece {
+            kind: self.kind,
             pick,
             bones: self.bones & bones,
             mats: self.mats.clone(),
@@ -350,47 +476,52 @@ impl Piece {
 /// The transform putting these bones (posed) lying on the table at (x, z), turned `turn`,
 /// resting on it: their middle over the spot. A gun's (or part's) attachments do not count,
 /// so it stays where it is as they go on and off.
-fn lying_root(table: &Table, bones: Bones, pose: &[BonePose], x: f32, z: f32, turn: f32) -> Mat4 {
-    let own = pivot_bones(bones);
-    let (lo, hi) = bounds(own, pose);
+fn lying_root(table: &Table, kind: GunKind, bones: Bones, pose: &[BonePose], x: f32, z: f32, turn: f32) -> Mat4 {
+    let own = pivot_bones(kind, bones);
+    let (lo, hi) = bounds(kind, own, pose);
     let root = Mat4::from_scale_rotation_translation(Vec3::splat(PX), table.lying(turn), table.at(x, z))
         * Mat4::from_translation(-(lo + hi) * 0.5);
-    let bottom = Piece::new(own, pose, root, 0, None).bottom();
+    let bottom = Piece::new(kind, own, pose, root, 0, None).bottom();
     Mat4::from_translation(Vec3::Y * (table.center.y + 0.002 - bottom)) * root
 }
 
 /// The bones something lying on the table is placed by: without the attachments on it (they
 /// do not move it as they go on and off).
-fn pivot_bones(bones: Bones) -> Bones {
-    let attachments = ATTACHMENTS.iter().fold(0, |m, a| m | rig::attachment(a.0));
+fn pivot_bones(kind: GunKind, bones: Bones) -> Bones {
+    if !kind.uses_magazine() {
+        return bones;
+    }
+    let r = pv::rig(kind);
+    let attachments = ATTACHMENTS.iter().fold(0, |m, a| m | rig::attachment(r, a.0));
     // Nor a gun's magazine, going in and out.
-    let loose = attachments | rig::part(MAGAZINE, 0);
+    let loose = attachments | rig::part(r, MAGAZINE, 0);
     match bones & !loose {
         0 => bones,
         b => b,
     }
 }
 
-/// Something lying on the table as it is drawn: pieces of the pistol (a gun's attachments
-/// each their own, to be taken off), or None for an item drawn flat.
+/// Something lying on the table as it is drawn: pieces of a gun (a magazine-fed gun's
+/// magazine and attachments each their own, to be taken off), or None for an item drawn flat.
 fn lying_pieces(table: &Table, it: &BenchItem) -> Option<Vec<Piece>> {
-    let (bones, pose) = rig_of(&it.stack, 0.0)?;
-    let root = lying_root(table, bones, &pose, it.x, it.z, it.turn);
+    let (kind, bones, pose) = rig_of(&it.stack, 0.0)?;
+    let root = lying_root(table, kind, bones, &pose, it.x, it.z, it.turn);
     let dirt = dirt_of(&it.stack);
-    let mut whole = Piece::new(bones, &pose, root, dirt, Some(Pick::Item(it.id)));
+    let mut whole = Piece::new(kind, bones, &pose, root, dirt, Some(Pick::Item(it.id)));
     whole.mag = magazine_of(&it.stack);
-    if !matches!(look(it.stack.item), Look::Gun) {
+    if !matches!(look(it.stack.item), Look::Gun(k) if k.uses_magazine()) {
         return Some(vec![whole]);
     }
+    let r = pv::rig(kind);
     let mods = gun_mods(&it.stack);
-    let mag = rig::part(MAGAZINE, 0);
-    let mut out = vec![whole.only(rig::gun(0) & !mag, Some(Pick::Item(it.id)))];
+    let mag = rig::part(r, MAGAZINE, 0);
+    let mut out = vec![whole.only(rig::gun(r, 0) & !mag, Some(Pick::Item(it.id)))];
     if gun_has_mag(&it.stack) {
         out.push(whole.only(mag, Some(Pick::Mag(it.id))));
     }
     for &(bit, _) in &ATTACHMENTS {
         if mods & bit != 0 {
-            out.push(whole.only(rig::attachment(bit), Some(Pick::Mod(it.id, bit))));
+            out.push(whole.only(rig::attachment(r, bit), Some(Pick::Mod(it.id, bit))));
         }
     }
     Some(out)
@@ -411,7 +542,7 @@ fn table_extent(table: &Table, pc: &Piece) -> (Vec2, Vec2) {
 
 /// How far (across, toward the front) something reaching from `lo` to `hi` must move to be
 /// on the table (to its middle, if it is bigger than the table).
-fn onto_table(lo: Vec2, hi: Vec2) -> Vec2 {
+fn onto_table(table: &Table, lo: Vec2, hi: Vec2) -> Vec2 {
     let fit = |lo: f32, hi: f32, half: f32| {
         if hi - lo > 2.0 * half {
             -(lo + hi) * 0.5
@@ -419,7 +550,7 @@ fn onto_table(lo: Vec2, hi: Vec2) -> Vec2 {
             (-half - lo).max(0.0) + (half - hi).min(0.0)
         }
     };
-    Vec2::new(fit(lo.x, hi.x, HALF_W), fit(lo.y, hi.y, HALF_D))
+    Vec2::new(fit(lo.x, hi.x, table.half_w), fit(lo.y, hi.y, HALF_D))
 }
 
 /// Where a stack laid at (x, z) ends up so that all of it is on the table.
@@ -432,7 +563,7 @@ fn fit_spot(table: &Table, stack: Stack, x: f32, z: f32, turn: f32) -> (f32, f32
         } else {
             Vec2::splat(0.1)
         };
-        return ((x).clamp(-HALF_W + half.x, HALF_W - half.x), z.clamp(-HALF_D + half.y, HALF_D - half.y));
+        return ((x).clamp(-table.half_w + half.x, table.half_w - half.x), z.clamp(-HALF_D + half.y, HALF_D - half.y));
     };
     let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
     for pc in &pieces {
@@ -440,7 +571,7 @@ fn fit_spot(table: &Table, stack: Stack, x: f32, z: f32, turn: f32) -> (f32, f32
         lo = lo.min(a);
         hi = hi.max(b);
     }
-    let d = onto_table(lo, hi);
+    let d = onto_table(table, lo, hi);
     (x + d.x, z + d.y)
 }
 
@@ -461,17 +592,75 @@ fn footprint(table: &Table, stack: Stack, turn: f32) -> (Vec2, Vec2) {
     }
 }
 
-/// Where everything lying on the table reaches (across, toward the front), each thing's.
-fn occupied(table: &Table, bench: &GunBench) -> Vec<(Vec2, Vec2)> {
-    bench
-        .items
-        .iter()
-        .map(|it| {
-            let (lo, hi) = footprint(table, it.stack, it.turn);
-            let at = Vec2::new(it.x, it.z);
-            (lo + at, hi + at)
+/// Across the table, how wide the strips are that a thing's shape is made of (`shape`).
+const STRIP: f32 = 0.1;
+/// Longer than this across, a thing lies on the table as its strips (a long gun and its long
+/// parts); anything shorter as its whole outline.
+const LONG: f32 = 0.8;
+
+/// The shape of a thing lying at (0, 0) on the table: for a long one, strips across it, each as
+/// deep as the thing is there (a long gun is deep only where its stock, grip or magazine is,
+/// not along its barrel), so other things may lie beside its thin parts.
+fn shape(table: &Table, stack: Stack, turn: f32) -> Vec<(Vec2, Vec2)> {
+    let it = BenchItem { id: 0, stack, x: 0.0, z: 0.0, turn };
+    let Some(pieces) = lying_pieces(table, &it) else {
+        return vec![footprint(table, stack, turn)];
+    };
+    // Every cube's reach on the table.
+    let mut cubes = Vec::new();
+    for pc in &pieces {
+        for c in pc.visible() {
+            let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+            for q in corners(c, pc.mats[c.bone]) {
+                let (x, z) = table.local(q);
+                lo = lo.min(Vec2::new(x, z));
+                hi = hi.max(Vec2::new(x, z));
+            }
+            cubes.push((lo, hi));
+        }
+    }
+    let (lo, hi) = cubes.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(a, b), (c, d)| (a.min(*c), b.max(*d)));
+    if cubes.is_empty() {
+        return vec![(Vec2::splat(-0.1), Vec2::splat(0.1))];
+    }
+    // Something short keeps its whole outline (things slide round it smoothly).
+    if hi.x - lo.x < LONG {
+        return vec![(lo, hi)];
+    }
+    let n = ((hi.x - lo.x) / STRIP).ceil().clamp(1.0, 32.0) as usize;
+    let w = (hi.x - lo.x) / n as f32;
+    (0..n)
+        .filter_map(|k| {
+            let (x0, x1) = (lo.x + w * k as f32, lo.x + w * (k + 1) as f32);
+            let (z0, z1) = cubes
+                .iter()
+                .filter(|(c, d)| c.x < x1 && d.x > x0)
+                .fold((f32::MAX, f32::MIN), |(a, b), (c, d)| (a.min(c.y), b.max(d.y)));
+            (z0 <= z1).then(|| (Vec2::new(x0, z0), Vec2::new(x1, z1)))
         })
         .collect()
+}
+
+/// Where everything lying on the table reaches (across, toward the front): the strips of each
+/// thing's shape.
+fn occupied(table: &Table, bench: &GunBench) -> Vec<(Vec2, Vec2)> {
+    let mut out = Vec::new();
+    for it in &bench.items {
+        let at = Vec2::new(it.x, it.z);
+        out.extend(shape(table, it.stack, it.turn).into_iter().map(|(lo, hi)| (lo + at, hi + at)));
+    }
+    out
+}
+
+/// The first of `own` (moved by `at`) that is in one of `taken`, and that one.
+fn overlap(own: &[(Vec2, Vec2)], at: Vec2, taken: &[(Vec2, Vec2)], gap: f32) -> Option<((Vec2, Vec2), (Vec2, Vec2))> {
+    own.iter().find_map(|&(lo, hi)| {
+        let (a, b) = (lo + at, hi + at);
+        taken
+            .iter()
+            .find(|(c, d)| !(b.x + gap <= c.x || d.x + gap <= a.x || b.y + gap <= c.y || d.y + gap <= a.y))
+            .map(|&t| ((a, b), t))
+    })
 }
 
 /// Whether `stack` lying at (x, z) is on the table and in nothing already lying there.
@@ -479,11 +668,11 @@ fn is_free(table: &Table, bench: &GunBench, stack: Stack, x: f32, z: f32, turn: 
     let (lo, hi) = footprint(table, stack, turn);
     let (a, b) = (lo + Vec2::new(x, z), hi + Vec2::new(x, z));
     let gap = 0.01 - 1e-3;
-    a.x >= -HALF_W - 1e-3
-        && b.x <= HALF_W + 1e-3
+    a.x >= -table.half_w - 1e-3
+        && b.x <= table.half_w + 1e-3
         && a.y >= -HALF_D - 1e-3
         && b.y <= HALF_D + 1e-3
-        && occupied(table, bench).iter().all(|(c, d)| b.x + gap <= c.x || d.x + gap <= a.x || b.y + gap <= c.y || d.y + gap <= a.y)
+        && overlap(&shape(table, stack, turn), Vec2::new(x, z), &occupied(table, bench), gap).is_none()
 }
 
 /// `free_spot` for something held on the mouse: pushed out of what is in its way on the same
@@ -501,15 +690,16 @@ fn free_spot(table: &Table, bench: &GunBench, stack: Stack, x: f32, z: f32, turn
 
 fn free_spot_from(table: &Table, bench: &GunBench, stack: Stack, x: f32, z: f32, turn: f32, prev: Option<(f32, f32)>) -> (f32, f32) {
     let (lo, hi) = footprint(table, stack, turn);
+    let own = shape(table, stack, turn);
     let taken = occupied(table, bench);
     let gap = 0.01;
     let fits = |x: f32, z: f32| {
         let (a, b) = (lo + Vec2::new(x, z), hi + Vec2::new(x, z));
-        a.x >= -HALF_W - 1e-3
-            && b.x <= HALF_W + 1e-3
+        a.x >= -table.half_w - 1e-3
+            && b.x <= table.half_w + 1e-3
             && a.y >= -HALF_D - 1e-3
             && b.y <= HALF_D + 1e-3
-            && taken.iter().all(|(c, d)| b.x + gap <= c.x || d.x + gap <= a.x || b.y + gap <= c.y || d.y + gap <= a.y)
+            && overlap(&own, Vec2::new(x, z), &taken, gap).is_none()
     };
     let (mut x, mut z) = fit_spot(table, stack, x, z, turn);
     if fits(x, z) {
@@ -518,13 +708,11 @@ fn free_spot_from(table: &Table, bench: &GunBench, stack: Stack, x: f32, z: f32,
     // Pushed out of whatever it is in, the shortest way (so it slides along the edges of
     // things as the mouse moves, without jumping about), and kept on the table.
     for _ in 0..12 {
-        let (a, b) = (lo + Vec2::new(x, z), hi + Vec2::new(x, z));
-        let Some((c, d)) = taken
-            .iter()
-            .find(|(c, d)| !(b.x + gap <= c.x || d.x + gap <= a.x || b.y + gap <= c.y || d.y + gap <= a.y))
-        else {
+        // (the part of it that is in something, pushed out of that; kept on the table whole)
+        let Some(((a, b), (c, d))) = overlap(&own, Vec2::new(x, z), &taken, gap) else {
             break;
         };
+        let (whole_a, whole_b) = (lo + Vec2::new(x, z), hi + Vec2::new(x, z));
         let pushes = [
             Vec2::new(c.x - gap - b.x, 0.0),
             Vec2::new(d.x + gap - a.x, 0.0),
@@ -532,8 +720,8 @@ fn free_spot_from(table: &Table, bench: &GunBench, stack: Stack, x: f32, z: f32,
             Vec2::new(0.0, d.y + gap - a.y),
         ];
         let inside = |v: &Vec2| {
-            let (a, b) = (a + *v, b + *v);
-            a.x >= -HALF_W - 1e-3 && b.x <= HALF_W + 1e-3 && a.y >= -HALF_D - 1e-3 && b.y <= HALF_D + 1e-3
+            let (a, b) = (whole_a + *v, whole_b + *v);
+            a.x >= -table.half_w - 1e-3 && b.x <= table.half_w + 1e-3 && a.y >= -HALF_D - 1e-3 && b.y <= HALF_D + 1e-3
         };
         // The shortest way out; or, near enough to it, the one toward where it was.
         let cost = |v: &Vec2| {
@@ -577,47 +765,45 @@ fn free_spot_from(table: &Table, bench: &GunBench, stack: Stack, x: f32, z: f32,
     (x, z)
 }
 
-/// The pistol's parts that lie on the table taken apart (the magazine is not one of them:
-/// it goes back to the player).
-const TABLE_PARTS: [usize; 4] = [FRAME, BARREL, SPRING, SLIDE];
-
-/// The part items, and back.
-fn part_item(part: usize) -> ItemId {
-    [PISTOL_FRAME, PISTOL_BARREL, PISTOL_SPRING, PISTOL_SLIDE, PISTOL_MAGAZINE][part]
-}
-
 /// A gun taken apart at `gun` (as it lay): where its parts end up, as they will lie, each
-/// with what it is made into (its stack, with the attachment on it and the gun's dirt); and
-/// how far the whole spread moves to be on the table (world).
-fn strip_targets(table: &Table, gun: &BenchItem) -> (Vec3, Vec<(Stack, f32, f32, f32)>, bool) {
+/// with what it is made into (its stack, with the attachment on it and the gun's dirt); how
+/// far the whole spread moves to be on the table (world); and the live rounds that go back to
+/// the player (from the pistol's chamber when it did not fit back into its magazine, the
+/// revolver's cylinder).
+fn strip_targets(table: &Table, gun: &BenchItem) -> (Vec3, Vec<(Stack, f32, f32, f32)>, u8) {
     let st = gun.stack;
     let mods = gun_mods(&st);
-    let Some((bones, rest)) = rig_of(&st, 0.0) else {
-        return (Vec3::ZERO, Vec::new(), false);
+    let Some((kind, bones, rest)) = rig_of(&st, 0.0) else {
+        return (Vec3::ZERO, Vec::new(), 0);
     };
-    let root = lying_root(table, bones, &rest, gun.x, gun.z, gun.turn);
-    let (_, end) = rig_of(&st, rig::strip_length()).unwrap_or((bones, rest));
-    let mut parts: Vec<(Stack, Piece)> = TABLE_PARTS
+    let root = lying_root(table, kind, bones, &rest, gun.x, gun.z, gun.turn);
+    let (_, _, end) = rig_of(&emptied(&st), strip_length(kind)).unwrap_or((kind, bones, rest));
+    let mut parts: Vec<(Stack, Piece)> = table_parts(kind)
         .iter()
         .map(|&p| {
-            let mut stack = Stack { damage: st.damage, ..Stack::one(part_item(p)) };
+            let mut stack = Stack { damage: st.damage, ..Stack::one(part_item(kind, p)) };
             // The attachments stay on their parts (kept in the parts' data, like a gun's).
             set_gun_mods(&mut stack, mods & attachment_of(p));
-            let own = rig::part(p, mods) & !rig::round();
-            (stack, Piece::new(own, &end, root, 0, None))
+            let own = match kind {
+                GunKind::Pistol | GunKind::Ak => rig::part(pv::rig(kind), p, mods) & !rig::round(pv::rig(kind)),
+                GunKind::Revolver => rrig::part(p),
+            };
+            (stack, Piece::new(kind, own, &end, root, 0, None))
         })
         .collect();
-    // Its magazine too, the round from the chamber back in it if there is room (else it goes
+    // The magazine too, the round from the chamber back in it if there is room (else it goes
     // back to the player).
-    let mut loose = gun_chambered(&st);
-    if gun_has_mag(&st) {
+    let mut loose = if kind.uses_magazine() { gun_chambered(&st) as u8 } else { gun_rounds(&st) };
+    if kind.uses_magazine() && gun_has_mag(&st) {
         let (mag, round_in) = magazine_out_of(&st);
-        loose &= !round_in;
-        parts.push((mag, Piece::new(rig::part(MAGAZINE, mods), &end, root, 0, None)));
+        if round_in {
+            loose = 0;
+        }
+        parts.push((mag, Piece::new(kind, rig::part(pv::rig(kind), MAGAZINE, mods), &end, root, 0, None)));
     }
     // Where each will lie: the middle it is placed by (`lying_root`), as the gun's pose has it.
     let spot = |pc: &Piece| {
-        let (lo, hi) = bounds(pivot_bones(pc.bones), &end);
+        let (lo, hi) = bounds(kind, pivot_bones(kind, pc.bones), &end);
         root.transform_point3((lo + hi) * 0.5)
     };
     // Moved as a whole to be on the table.
@@ -627,7 +813,7 @@ fn strip_targets(table: &Table, gun: &BenchItem) -> (Vec3, Vec<(Stack, f32, f32,
         lo = lo.min(a);
         hi = hi.max(b);
     }
-    let d = onto_table(lo, hi);
+    let d = onto_table(table, lo, hi);
     let shift = table.right * d.x + table.toward * d.y;
     let out = parts
         .into_iter()
@@ -642,7 +828,8 @@ fn strip_targets(table: &Table, gun: &BenchItem) -> (Vec3, Vec<(Stack, f32, f32,
 /// The magazine in a gun, taken out: as its own item (with the gun's dirt), and whether the
 /// round in the chamber went back into it.
 fn magazine_out_of(gun: &Stack) -> (Stack, bool) {
-    let item = if gun_mods(gun) & gun_mod::EXTENDED_MAGAZINE != 0 { EXTENDED_MAGAZINE } else { PISTOL_MAGAZINE };
+    let standard = GunKind::of(gun.item).and_then(|k| k.magazine_item()).unwrap_or(PISTOL_MAGAZINE);
+    let item = if gun_mods(gun) & gun_mod::EXTENDED_MAGAZINE != 0 { EXTENDED_MAGAZINE } else { standard };
     let cap = magazine_capacity(item).unwrap_or(0);
     let round = gun_chambered(gun) && gun_rounds(gun) < cap;
     let mut mag = Stack { damage: gun.damage, ..Stack::one(item) };
@@ -674,11 +861,12 @@ fn with_magazine(gun: &Stack, mag: &Stack) -> Stack {
 /// The pose of a gun with only its magazine `at` seconds into the strip animation (sliding
 /// out of the grip, and laid beside it by the end of its part).
 fn magazine_pose(gun: &Stack, at: f32) -> Vec<BonePose> {
+    let kind = GunKind::of(gun.item).unwrap_or(GunKind::Pistol);
     let mut when = [0.0; PARTS];
     when[MAGAZINE] = at.min(MAG_OUT);
     let has = gun_has_mag(gun);
-    let mut pose = rig::pose(when, gun_mods(gun), has && gun_rounds(gun) > 0, gun_chambered(gun));
-    if let (Some(b), false) = (find_bone(vm::BONES, "magazine"), has) {
+    let mut pose = rig::pose(pv::rig(kind), when, gun_mods(gun), has && gun_rounds(gun) > 0, gun_chambered(gun));
+    if let (Some(b), false) = (find_bone(gun_view::bones(kind), "magazine"), has) {
         pose[b].scale = Vec3::ZERO;
     }
     pose
@@ -686,23 +874,23 @@ fn magazine_pose(gun: &Stack, at: f32) -> Vec<BonePose> {
 
 /// Where a gun's magazine lies once it is out (beside the gun, on the table).
 fn magazine_spot(table: &Table, gun: &BenchItem) -> (f32, f32) {
-    let Some((bones, rest)) = rig_of(&gun.stack, 0.0) else { return (gun.x, gun.z) };
-    let root = lying_root(table, bones, &rest, gun.x, gun.z, gun.turn);
+    let Some((kind, bones, rest)) = rig_of(&gun.stack, 0.0) else { return (gun.x, gun.z) };
+    let root = lying_root(table, kind, bones, &rest, gun.x, gun.z, gun.turn);
     let pose = magazine_pose(&gun.stack, MAG_OUT);
-    let (lo, hi) = bounds(rig::part(MAGAZINE, gun_mods(&gun.stack)), &pose);
+    let (lo, hi) = bounds(kind, rig::part(pv::rig(kind), MAGAZINE, gun_mods(&gun.stack)), &pose);
     let (x, z) = table.local(root.transform_point3((lo + hi) * 0.5));
     let (mag, _) = magazine_out_of(&gun.stack);
     fit_spot(table, mag, x, z, gun.turn)
 }
 
-/// The gun a set of parts makes (frame, barrel, spring and slide, in `gone`): as dirty as
-/// they are on average, with the attachments that were on them, no magazine in it (that is
-/// put in the usual way) and nothing in the chamber.
-fn assembled(gone: &[BenchItem]) -> Stack {
-    let mut gun = Stack::one(PISTOL);
+/// The gun a set of parts makes (in `gone`): as dirty as they are on average; a pistol with
+/// the attachments that were on them, no magazine in it (that is put in the usual way) and
+/// nothing in the chamber; a revolver with its cylinder empty.
+fn assembled(kind: GunKind, gone: &[BenchItem]) -> Stack {
+    let mut gun = Stack::one(kind.item());
     let mut mods = 0;
     for it in gone {
-        if let Look::Part(p) = look(it.stack.item) {
+        if let Look::Part(_, p) = look(it.stack.item) {
             mods |= gun_mods(&it.stack) & attachment_of(p);
         }
     }
@@ -715,17 +903,23 @@ fn assembled(gone: &[BenchItem]) -> Stack {
 }
 
 /// A gun as it comes apart on the table: the round in its chamber is already out (into its
-/// magazine, or back to the player).
+/// magazine, or back to the player); a revolver's cylinder is emptied.
 fn emptied(st: &Stack) -> Stack {
     let mut g = *st;
+    if g.item == REVOLVER {
+        for k in 0..6 {
+            set_revolver_chamber(&mut g, k, chamber::EMPTY);
+        }
+        return g;
+    }
     set_gun_state(&mut g, gun_state::CHAMBER_EMPTY, true);
     g
 }
 
 /// Where the strip animation starts for a gun: with its magazine coming out, or after that
-/// part of it when there is none.
+/// part of it when there is none (a revolver: from the start).
 fn strip_start(gun: &Stack) -> f32 {
-    if gun_has_mag(gun) {
+    if gun.item == REVOLVER || gun_has_mag(gun) {
         0.0
     } else {
         MAG_OUT
@@ -734,10 +928,20 @@ fn strip_start(gun: &Stack) -> f32 {
 
 /// How long an animation on the table takes.
 fn event_length(e: &BenchEvent) -> f32 {
-    let fit = |bit: u8| rig::fit_anim(bit).map_or(0.4, |a| a.length);
+    let fit = |bit: u8| rig::fit_anim(&pv::PISTOL, bit).map_or(0.4, |a| a.length);
     match e.kind {
-        bench_event::STRIP => rig::strip_length() - e.gone.first().map_or(MAG_OUT, |g| strip_start(&g.stack)) + 0.1,
-        bench_event::ASSEMBLE => FLY + (rig::strip_length() - MAG_OUT) / ASSEMBLE_SPEED,
+        bench_event::STRIP => {
+            let kind = e.gone.first().and_then(|g| GunKind::of(g.stack.item)).unwrap_or(GunKind::Pistol);
+            strip_length(kind) - e.gone.first().map_or(MAG_OUT, |g| strip_start(&g.stack)) + 0.1
+        }
+        bench_event::ASSEMBLE => {
+            let kind = e.gone.iter().find_map(|g| match look(g.stack.item) {
+                Look::Part(k, _) => Some(k),
+                _ => None,
+            });
+            let kind = kind.unwrap_or(GunKind::Pistol);
+            FLY + (strip_length(kind) - assemble_from(kind)) / ASSEMBLE_SPEED
+        }
         bench_event::MAG_OUT => MAG_OUT + 0.05,
         bench_event::MAG_IN => FLY + MAG_OUT,
         bench_event::FIT | bench_event::UNFIT => FLY + fit(e.bit),
@@ -796,30 +1000,34 @@ fn animation(table: &Table, bench: &GunBench, t: f32) -> Vec<Piece> {
         bench_event::STRIP => {
             let Some(gun) = e.gone.first() else { return out };
             let st = gun.stack;
-            let (start, end) = (strip_start(&st), rig::strip_length());
+            let Some(kind) = GunKind::of(st.item) else { return out };
+            let (start, end) = (strip_start(&st), strip_length(kind));
             let at = (start + t).min(end);
-            let (Some((bones, rest)), Some((own, pose))) = (rig_of(&st, 0.0), rig_of(&emptied(&st), at)) else {
+            let (Some((_, bones, rest)), Some((_, own, pose))) = (rig_of(&st, 0.0), rig_of(&emptied(&st), at)) else {
                 return out;
             };
             let (shift, _, _) = strip_targets(table, gun);
             let root = Mat4::from_translation(shift * ease(t / (end - start)))
-                * lying_root(table, bones, &rest, gun.x, gun.z, gun.turn);
-            let mut piece = Piece::new(own, &pose, root, dirt_of(&st), None);
-            piece.mag = gun_has_mag(&st).then(|| magazine_out_of(&st).0).map(|m| (gun_rounds(&m), magazine_capacity(m.item).unwrap_or(12)));
+                * lying_root(table, kind, bones, &rest, gun.x, gun.z, gun.turn);
+            let mut piece = Piece::new(kind, own, &pose, root, dirt_of(&st), None);
+            piece.mag = (kind.uses_magazine() && gun_has_mag(&st))
+                .then(|| magazine_out_of(&st).0)
+                .map(|m| (gun_rounds(&m), magazine_capacity(m.item).unwrap_or(12)));
             out.push(piece);
         }
         bench_event::ASSEMBLE => {
             let Some(gun) = bench.get(e.gun) else { return out };
-            let (start, end) = (MAG_OUT, rig::strip_length());
+            let Some(kind) = GunKind::of(gun.stack.item) else { return out };
+            let (start, end) = (assemble_from(kind), strip_length(kind));
             let at = (end - (t - FLY).max(0.0) * ASSEMBLE_SPEED).clamp(start, end);
             // The gun they make, where it will lie, its parts as far apart as `at`.
-            let (Some((bones, rest)), Some((_, pose))) = (rig_of(&gun.stack, 0.0), rig_of(&gun.stack, at)) else {
+            let (Some((_, bones, rest)), Some((_, _, pose))) = (rig_of(&gun.stack, 0.0), rig_of(&gun.stack, at)) else {
                 return out;
             };
-            let root = lying_root(table, bones, &rest, gun.x, gun.z, gun.turn);
+            let root = lying_root(table, kind, bones, &rest, gun.x, gun.z, gun.turn);
             for part in &e.gone {
-                let Look::Part(p) = look(part.stack.item) else { continue };
-                let there = Piece::new(rig::part(p, 0xff), &pose, root, dirt_of(&part.stack), None);
+                let Look::Part(_, p) = look(part.stack.item) else { continue };
+                let there = Piece::new(kind, part_bones(kind, p, 0xff), &pose, root, dirt_of(&part.stack), None);
                 let piece = if t < FLY {
                     // Flying from where it lay to the gun, and turning as it goes.
                     match lying_pieces(table, part).and_then(|mut v| v.drain(..).next()) {
@@ -837,12 +1045,12 @@ fn animation(table: &Table, bench: &GunBench, t: f32) -> Vec<Piece> {
             let len = event_length(e) - FLY;
             let mut with = gun.stack;
             { let m = gun_mods(&with) | e.bit; set_gun_mods(&mut with, m); }
-            let Some((bones, mut pose)) = rig_of(&with, 0.0) else { return out };
-            let root = lying_root(table, bones, &pose, gun.x, gun.z, gun.turn);
+            let Some((kind, bones, mut pose)) = rig_of(&with, 0.0) else { return out };
+            let root = lying_root(table, kind, bones, &pose, gun.x, gun.z, gun.turn);
             // On the gun: into place (backwards to come off), after flying there.
             let u = if e.kind == bench_event::FIT { t - FLY } else { len - t };
-            rig::add_fit(&mut pose, e.bit, u.clamp(0.0, len));
-            let on = Piece::new(rig::attachment(e.bit), &pose, root, 0, None);
+            rig::add_fit(pv::rig(kind), &mut pose, e.bit, u.clamp(0.0, len));
+            let on = Piece::new(kind, rig::attachment(pv::rig(kind), e.bit), &pose, root, 0, None);
             let lies = if e.kind == bench_event::FIT { e.gone.first().copied() } else { e.made.first().and_then(|&id| bench.get(id)).copied() };
             let piece = match lies.and_then(|it| lying_pieces(table, &it)).and_then(|mut v| v.drain(..).next()) {
                 Some(off) if e.kind == bench_event::FIT && t < FLY => off.toward(&on, ease(t / FLY), 0.12),
@@ -862,10 +1070,10 @@ fn animation(table: &Table, bench: &GunBench, t: f32) -> Vec<Piece> {
                 let Some(m) = e.gone.first() else { return out };
                 (now.stack, m.stack)
             };
-            let Some((bones, rest)) = rig_of(&gun, 0.0) else { return out };
-            let root = lying_root(table, bones, &rest, now.x, now.z, now.turn);
+            let Some((kind, bones, rest)) = rig_of(&gun, 0.0) else { return out };
+            let root = lying_root(table, kind, bones, &rest, now.x, now.z, now.turn);
             let at = if e.kind == bench_event::MAG_OUT { t } else { MAG_OUT - (t - FLY).max(0.0) };
-            let mut there = Piece::new(rig::part(MAGAZINE, gun_mods(&gun)), &magazine_pose(&gun, at), root, dirt_of(&mag), None);
+            let mut there = Piece::new(kind, rig::part(pv::rig(kind), MAGAZINE, gun_mods(&gun)), &magazine_pose(&gun, at), root, dirt_of(&mag), None);
             there.mag = magazine_of(&mag);
             let piece = match (e.kind, e.gone.first().and_then(|m| lying_pieces(table, m)).and_then(|mut v| v.drain(..).next())) {
                 (bench_event::MAG_IN, Some(from)) if t < FLY => from.toward(&there.only(from.bones & there.bones, None), ease(t / FLY), 0.1),
@@ -888,7 +1096,7 @@ fn animation(table: &Table, bench: &GunBench, t: f32) -> Vec<Piece> {
             let mut round = pcs.remove(0);
             round.top_round = true;
             round.pick = None;
-            let Some(bone) = find_bone(vm::BONES, "magazine") else { return out };
+            let Some(bone) = find_bone(gun_view::bones(round.kind), "magazine") else { return out };
             let up = round.mats[bone].transform_vector3(Vec3::Y).normalize_or_zero();
             let seat = Piece { ..round.only(round.bones, None) };
             let (lo, hi) = seat.visible().flat_map(|c| corners(c, seat.mats[c.bone])).fold(
@@ -1005,7 +1213,7 @@ fn emit(out: &mut Vec<Vertex>, table: &Table, pieces: &[Piece], flats: &[BenchIt
         let lit = pc.pick.is_some() && pc.pick == hover;
         let tint = if lit && hover_ok { [150, 255, 150] } else { pc.tint };
         let from = out.len();
-        let first = layers(pc.dirt);
+        let first = gun_view::layers(pc.kind, pc.dirt);
         for c in pc.visible() {
             emit_cube(out, c, pc.mats[c.bone] * cube_matrix(c), first, light, flags::ENTITY);
         }
@@ -1022,7 +1230,7 @@ fn emit(out: &mut Vec<Vertex>, table: &Table, pieces: &[Piece], flats: &[BenchIt
         let lit = hover == Some(Pick::Item(it.id));
         if it.stack.item == AMMO_BOX {
             let from = out.len();
-            crate::model::gun_station::emit_ammo_box(out, box_matrix(table, it), box_rounds(&it.stack), light, flags::ENTITY);
+            crate::model::gun_station::emit_ammo_box(out, box_matrix(table, it), it.stack.data, light, flags::ENTITY);
             if lit {
                 for v in &mut out[from..] {
                     if hover_ok {
@@ -1155,10 +1363,20 @@ impl Game {
             let brush_out = (open_here == Some(p) && self.bench_brush) || remote_brushes.iter().any(|(q, _)| *q == p);
             let ammo = self.block_entities.benches.get(&p).map_or([Some(0); 3], |b| b.boxes);
             let handle_lit = open_here == Some(p) && self.bench_hover == Some(Pick::Handle);
-            crate::model::gun_station::emit_block(out, p, table.toward, drawer, !brush_out, ammo, handle_lit, light, flags::ENTITY);
+            let loader = self.block_entities.benches.get(&p).map_or(Default::default(), |b| crate::model::gun_station::Loader {
+                there: b.loader && table.rifle(),
+                feed: loader_source(b).map(|_| self.time),
+            });
+            crate::model::gun_station::emit_block(out, table.rifle(), p, table.toward, drawer, !brush_out, ammo, loader, handle_lit, light, flags::ENTITY);
             if let Some(bench) = self.block_entities.benches.get(&p) {
                 let t = self.bench_time(p);
-                let (pieces, flats) = scene(&table, bench, t);
+                let (mut pieces, flats) = scene(&table, bench, t);
+                // The magazine on the loader (with the drawer, wherever it is).
+                if let (true, Some(mag)) = (loader.there, bench.loader_mag) {
+                    if let Some(pc) = crate::model::gun_station::loader_mount(p, table.toward, drawer).and_then(|m| loader_piece(m, &mag)) {
+                        pieces.push(pc);
+                    }
+                }
                 let hover = if open_here == Some(p) { self.bench_hover.map(|h| (h, self.bench_hover_ok)) } else { None };
                 emit(out, &table, &pieces, &flats, hover, light);
             }
@@ -1175,7 +1393,7 @@ impl Game {
                 }
                 _ => None,
             };
-            let held = self.cursor.filter(|st| belongs_on_bench(st.item));
+            let held = self.cursor.filter(|st| belongs_on_bench(st.item, table.rifle()));
             if open_here == Some(p) {
                 self.bench_hold_at = None;
             }
@@ -1229,7 +1447,7 @@ impl Game {
                 let table = self.bench_table(p);
                 let bench = self.block_entities.benches.entry(p).or_default();
                 match bench.boxes.iter().position(|b| b.is_none()) {
-                    Some(i) => bench.boxes[i] = Some(box_rounds(&st)),
+                    Some(i) => bench.boxes[i] = Some(st.data),
                     None => {
                         if let Some(t) = table {
                             let (x, z) = free_spot(&t, bench, st, 0.0, 0.0, 0.0);
@@ -1286,7 +1504,7 @@ impl Game {
         if ready && !over_inventory {
             found = pick(&table, &pieces, &flats, o, d);
             if !self.bench_brush && drawer > 0.8 {
-                for (i, c, m) in crate::model::gun_station::ammo_boxes(p, table.toward, drawer) {
+                for (i, c, m) in crate::model::gun_station::ammo_boxes(table.rifle(), p, table.toward, drawer) {
                     let inv = m.inverse();
                     let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
                     if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
@@ -1296,8 +1514,25 @@ impl Game {
                     }
                 }
             }
+            if !self.bench_brush && drawer > 0.8 && bench.loader && table.rifle() {
+                // The loader itself (its feed tower); its flat base, where a magazine lies, looks
+                // like the drawer's floor: only with a magazine in hand to lay on it.
+                let laying = self.cursor.is_some_and(|st| is_gun_magazine(st.item)) && bench.loader_mag.is_none();
+                for (c, m) in crate::model::gun_station::loader_cubes(p, table.toward, drawer) {
+                    if c.name == "loader_base" && !laying {
+                        continue;
+                    }
+                    let inv = m.inverse();
+                    let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
+                    if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
+                        if found.is_none_or(|(_, bt)| t < bt) {
+                            found = Some((Pick::Loader, t));
+                        }
+                    }
+                }
+            }
             if !self.bench_brush && self.cursor.is_none() && drawer > 0.8 {
-                for (c, m) in crate::model::gun_station::brush_in_drawer(p, table.toward, drawer) {
+                for (c, m) in crate::model::gun_station::brush_in_drawer(table.rifle(), p, table.toward, drawer) {
                     let inv = m.inverse();
                     let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
                     if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
@@ -1307,12 +1542,14 @@ impl Game {
                     }
                 }
             }
-            if !self.bench_brush && self.cursor.is_none() {
-                for (c, m) in crate::model::gun_station::drawer_handle(p, table.toward, drawer) {
+            // The handle shuts the drawer (with something held too): the mouse on it is always
+            // on it, whatever lies in the drawer behind it.
+            if !self.bench_brush {
+                for (c, m) in crate::model::gun_station::drawer_handle(table.rifle(), p, table.toward, drawer) {
                     let inv = m.inverse();
                     let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
                     if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
-                        if found.is_none_or(|(_, bt)| t < bt) {
+                        if !matches!(found, Some((Pick::Handle, bt)) if bt <= t) {
                             found = Some((Pick::Handle, t));
                         }
                     }
@@ -1324,7 +1561,7 @@ impl Game {
             // Or in the drawer, out in front of the table: on its floor.
             drawer_spot = hit_plane(o, d, table.center.y - DRAWER_DEPTH).filter(|&q| {
                 let (x, z) = table.local(q);
-                drawer > 0.8 && x.abs() < 0.9 && (0.46..0.95).contains(&z)
+                drawer > 0.8 && x.abs() < table.half_w && (0.46..0.95).contains(&z)
             });
             // The table's top hides what is under it: over it, the mouse is on the table; the
             // drawer only where it is out in front of the table.
@@ -1342,7 +1579,7 @@ impl Game {
         // table with what goes into it (the brush, rounds, a box of them), it opens again.
         let settled = self.bench_focus > 0.99 || self.bench_focus < 0.01;
         let holding = self.cursor.is_some() || self.bench_brush;
-        let for_drawer = self.bench_brush || self.cursor.is_some_and(|st| st.item == BULLET || st.item == AMMO_BOX);
+        let for_drawer = self.bench_brush || self.cursor.is_some_and(|st| BOX_AMMO.contains(&st.item) || st.item == AMMO_BOX);
         let over_table = spot.is_some() || low < DRAWER_CLOSE;
         let wants = if self.bench_in_drawer {
             holding && over_table && drawer_spot.is_none()
@@ -1366,7 +1603,7 @@ impl Game {
         let point = found.map(|(_, t)| o + d * t).or(spot.map(|(x, z)| table.at(x, z))).or(drawer_spot);
         // Where what is held on the mouse would lie (kept from the last frame while it can be).
         self.bench_held_spot = match (self.cursor, spot) {
-            (Some(st), Some((x, z))) if belongs_on_bench(st.item) => {
+            (Some(st), Some((x, z))) if belongs_on_bench(st.item, table.rifle()) => {
                 let st = if rig_of(&st, 0.0).is_some() { Stack { count: 1, ..st } } else { st };
                 Some(free_spot_near(&table, &bench, st, x, z, 0.0, self.bench_held_spot))
             }
@@ -1379,6 +1616,9 @@ impl Game {
         self.bench_hover_ok = self.cursor.is_some() && ok;
 
         let (left, right) = (self.ui.pressed, self.ui.right_pressed);
+        // The loader's place: the middle of the rifle station's drawer floor, under the mouse.
+        let loader_place = table.rifle()
+            && drawer_spot.map(|q| table.local(q)).is_some_and(|(x, _)| (-0.45..0.6).contains(&x));
         self.bench_scrubbing = false;
         if self.bench_brush {
             // The brush: where the mouse points, scrubbing what it is held down on.
@@ -1401,18 +1641,27 @@ impl Game {
                 match (hovered, pick) {
                     (Some(r), _) if over_inventory => self.click_slot(Container::GunStation(p), r, false, false),
                     (_, Some(Pick::Ammo(i))) => self.bench_box_slot(p, i as usize, false),
+                    (_, Some(Pick::Loader)) => self.bench_loader_click(p, &table),
+                    _ if loader_place && self.cursor.is_some_and(|st| st.item == MAG_LOADER) => self.bench_loader_click(p, &table),
                     _ => self.bench_put(p, &table, pick, spot, false),
                 }
             }
         } else if (left || right) && ready && !busy && !over_inventory {
             match (self.cursor, pick) {
                 (_, Some(Pick::Ammo(i))) => self.bench_box_slot(p, i as usize, right),
-                (Some(_), _) => self.bench_put(p, &table, pick, spot, right),
-                (None, Some(Pick::Brush)) if left => self.bench_brush = true,
-                (None, Some(Pick::Handle)) => {
+                (_, Some(Pick::Loader)) => self.bench_loader_click(p, &table),
+                (Some(st), None) if loader_place && st.item == MAG_LOADER => self.bench_loader_click(p, &table),
+                (_, Some(Pick::Handle)) => {
                     self.bench_in_drawer = !self.bench_in_drawer;
                     self.bench_dwell = 0.0;
                 }
+                // Looking into the drawer, a click beside it (on nothing) shuts it.
+                (None, None) if self.bench_in_drawer && drawer_spot.is_none() && spot.is_none() => {
+                    self.bench_in_drawer = false;
+                    self.bench_dwell = 0.0;
+                }
+                (Some(_), _) => self.bench_put(p, &table, pick, spot, right),
+                (None, Some(Pick::Brush)) if left => self.bench_brush = true,
                 (None, Some(Pick::Item(id))) if left => {
                     if let Some(it) = self.block_entities.benches.get_mut(&p).and_then(|b| b.take(id)) {
                         self.cursor = Some(it.stack);
@@ -1433,14 +1682,15 @@ impl Game {
             self.bench_changed(p, None);
         }
 
-        let min = p.as_vec3().min(p.as_vec3() + table.right);
-        let over_block = ray_box(o, d, min, min + Vec3::new(1.0, 1.0, 1.0) + table.right.abs(), 64.0).is_some();
+        let far = table.right * (table.wide - 1.0);
+        let min = p.as_vec3().min(p.as_vec3() + far);
+        let over_block = ray_box(o, d, min, min + Vec3::new(1.0, 1.0, 1.0) + far.abs(), 64.0).is_some();
         self.station_inside = over_inventory || over_block || pick.is_some() || spot.is_some() || holding_box;
         self.station_hover = None;
         // A glow on the table under what the mouse is on, or where what is held would go.
         self.station_frame = match (self.bench_hover, self.cursor, spot) {
             (Some(h), _, _) => glow_under(&table, &pieces, &flats, h),
-            (None, Some(st), Some(_)) if !self.bench_brush && belongs_on_bench(st.item) => {
+            (None, Some(st), Some(_)) if !self.bench_brush && belongs_on_bench(st.item, table.rifle()) => {
                 let st = if rig_of(&st, 0.0).is_some() { Stack { count: 1, ..st } } else { st };
                 let (x, z) = self.bench_held_spot.unwrap_or((0.0, 0.0));
                 let it = BenchItem { id: 0, stack: st, x, z, turn: 0.0 };
@@ -1461,25 +1711,34 @@ impl Game {
         let Some(st) = self.cursor else { return pick.is_some() };
         let item = |id: u16| bench.get(id).map(|i| i.stack);
         match pick {
+            // A magazine onto the loader when there is none on it.
+            Some(Pick::Loader) => is_gun_magazine(st.item) && bench.loader_mag.is_none(),
             Some(Pick::Item(id) | Pick::Mod(id, _) | Pick::Mag(id)) => {
                 let Some(t) = item(id) else { return false };
                 if let Some(bit) = attachment_bit(st.item) {
                     return GunKind::of(t.item).is_some_and(|k| k.fits(bit)) && attachment_fits(gun_mods(&t), bit);
                 }
-                if magazine_capacity(st.item).is_some() {
-                    return GunKind::of(t.item).is_some() && !gun_has_mag(&t);
+                if let Some(g) = magazine_gun(st.item) {
+                    return GunKind::of(t.item) == Some(g) && !gun_has_mag(&t);
                 }
-                if st.item == BULLET {
+                if let Some(g) = GUN_KINDS.into_iter().find(|k| k.uses_magazine() && k.ammo() == st.item) {
                     return match (magazine_capacity(t.item), t.item) {
-                        (Some(cap), _) => gun_rounds(&t) < cap,
-                        (None, AMMO_BOX) => box_rounds(&t) < AMMO_BOX_ROUNDS,
+                        (Some(cap), m) if magazine_gun(m) == Some(g) => gun_rounds(&t) < cap,
+                        (None, AMMO_BOX) => box_room(t.data, st.item) > 0,
+                        _ => false,
+                    };
+                }
+                if st.item == MAGNUM_ROUND {
+                    return match t.item {
+                        SPEEDLOADER => gun_rounds(&t) < magazine_capacity(SPEEDLOADER).unwrap_or(6),
+                        AMMO_BOX => box_room(t.data, MAGNUM_ROUND) > 0,
                         _ => false,
                     };
                 }
                 false
             }
             Some(Pick::Ammo(i)) => match bench.boxes[i as usize] {
-                Some(n) => st.item == BULLET && n < AMMO_BOX_ROUNDS,
+                Some(v) => box_room(v, st.item) > 0,
                 None => st.item == AMMO_BOX,
             },
             _ => false,
@@ -1489,7 +1748,7 @@ impl Game {
     /// Something held on the mouse cursor put on the table: an attachment onto the gun under
     /// the mouse (if it fits and has none such), otherwise laid where the mouse points (all
     /// of it, or one with the right button; the pistol's parts one at a time).
-    fn bench_put(&mut self, p: IVec3, _table: &Table, pick: Option<Pick>, spot: Option<(f32, f32)>, one: bool) {
+    fn bench_put(&mut self, p: IVec3, table: &Table, pick: Option<Pick>, spot: Option<(f32, f32)>, one: bool) {
         let Some(st) = self.cursor else { return };
         if let Some(Pick::Item(id) | Pick::Mod(id, _) | Pick::Mag(id)) = pick {
             if self.bench_mag_in(p, id, spot) {
@@ -1514,22 +1773,36 @@ impl Game {
                 return;
             }
         }
-        // Rounds onto a box of them lying on the table: into it.
-        if let (BULLET, Some(Pick::Item(id))) = (st.item, pick) {
+        // Rounds onto a box of them lying on the table: into it (only the kind it holds).
+        if let (BULLET | MAGNUM_ROUND | RIFLE_ROUND, Some(Pick::Item(id))) = (st.item, pick) {
             if let Some(b) = bench.items.iter_mut().find(|b| b.id == id && b.stack.item == AMMO_BOX) {
-                let room = AMMO_BOX_ROUNDS.saturating_sub(box_rounds(&b.stack));
+                let room = box_room(b.stack.data, st.item);
                 let n = (if one { 1 } else { st.count as u16 }).min(room);
                 if n > 0 {
-                    b.stack.data = box_rounds(&b.stack) + n;
+                    b.stack.data = box_with(b.stack.data, st.item, n);
                     take(&mut self.cursor, n as u8);
                     self.bench_changed(p, None);
                 }
                 return;
             }
         }
+        // Magnum rounds onto a speedloader lying on the table: into it.
+        if let (MAGNUM_ROUND, Some(Pick::Item(id))) = (st.item, pick) {
+            if let Some(l) = bench.items.iter_mut().find(|l| l.id == id && l.stack.item == SPEEDLOADER) {
+                let cap = magazine_capacity(SPEEDLOADER).unwrap_or(6);
+                let n = (if one { 1 } else { st.count }).min(cap.saturating_sub(gun_rounds(&l.stack)));
+                if n > 0 {
+                    let r = gun_rounds(&l.stack) + n;
+                    set_gun_rounds(&mut l.stack, r);
+                    take(&mut self.cursor, n);
+                    self.bench_changed(p, None);
+                }
+                return;
+            }
+        }
         // Rounds onto a magazine lying on the table: pushed into it, one after another.
-        if let (BULLET, Some(Pick::Item(id))) = (st.item, pick) {
-            let mag = bench.get(id).copied().filter(|m| magazine_capacity(m.stack.item).is_some());
+        if let (BULLET | RIFLE_ROUND, Some(Pick::Item(id))) = (st.item, pick) {
+            let mag = bench.get(id).copied().filter(|m| magazine_gun(m.stack.item).is_some_and(|k| k.ammo() == st.item));
             if let Some(m) = mag {
                 let cap = magazine_capacity(m.stack.item).unwrap_or(0);
                 let n = (if one { 1 } else { st.count }).min(cap.saturating_sub(gun_rounds(&m.stack)));
@@ -1539,7 +1812,7 @@ impl Game {
                         set_gun_rounds(&mut g.stack, r);
                     }
                     let (x, z) = spot.unwrap_or((m.x, m.z + 0.15));
-                    let gone = BenchItem { id: 0, stack: Stack::new(BULLET, n), x, z, turn: 0.0 };
+                    let gone = BenchItem { id: 0, stack: Stack::new(st.item, n), x, z, turn: 0.0 };
                     take(&mut self.cursor, n);
                     let e = BenchEvent { kind: bench_event::LOAD, gun: id, bit: n, gone: vec![gone], ..Default::default() };
                     self.bench_changed(p, Some(e));
@@ -1548,7 +1821,10 @@ impl Game {
             }
         }
         let Some((x, z)) = spot else { return };
-        if !belongs_on_bench(st.item) {
+        if !belongs_on_bench(st.item, table.rifle()) {
+            if needs_rifle_station(st.item) {
+                self.gun_message(t("gun.rifle_station_only"));
+            }
             return;
         }
         let single = one || rig_of(&st, 0.0).is_some();
@@ -1556,8 +1832,8 @@ impl Game {
         let turn = if rig_of(&st, 0.0).is_some() { 0.0 } else { (self.random() - 0.5) * 0.6 };
         let bench = self.block_entities.benches.entry(p).or_default();
         let (x, z) = match self.bench_held_spot {
-            Some(q) if single && is_free(_table, bench, lay, q.0, q.1, turn) => q,
-            _ => free_spot(_table, bench, lay, x, z, turn),
+            Some(q) if single && is_free(table, bench, lay, q.0, q.1, turn) => q,
+            _ => free_spot(table, bench, lay, x, z, turn),
         };
         bench.add(lay, x, z, turn);
         take(&mut self.cursor, lay.count);
@@ -1566,11 +1842,11 @@ impl Game {
 
     /// A right click on something on the table: a gun comes apart there, a part puts a gun
     /// together from the parts on the table (when they are all there).
-    fn bench_right_click(&mut self, p: IVec3, table: &Table, id: u16) {
+    pub(in crate::game) fn bench_right_click(&mut self, p: IVec3, table: &Table, id: u16) {
         let Some(bench) = self.block_entities.benches.get_mut(&p) else { return };
         let Some(it) = bench.get(id).copied() else { return };
         match look(it.stack.item) {
-            Look::Gun => {
+            Look::Gun(_) => {
                 bench.take(id);
                 let (_, targets, loose) = strip_targets(table, &it);
                 // Where something else already lies, a part goes beside it.
@@ -1583,27 +1859,28 @@ impl Game {
                     .collect();
                 let e = BenchEvent { kind: bench_event::STRIP, gun: id, gone: vec![it], made, ..Default::default() };
                 self.bench_changed(p, Some(e));
-                // The round from the chamber, when it did not fit back into the magazine.
-                if loose {
-                    self.give(Stack::one(BULLET));
+                // The live rounds that were in it (the pistol's chamber, when it did not fit back
+                // into the magazine; the revolver's cylinder).
+                if let (true, Some(k)) = (loose > 0, GunKind::of(it.stack.item)) {
+                    self.give(Stack::new(k.ammo(), loose));
                 }
             }
             Look::Flat if it.stack.item == AMMO_BOX => {
                 // A round out of it, onto the mouse.
-                if self.cursor.is_none() && box_rounds(&it.stack) > 0 {
+                if let (true, Some(kind)) = (self.cursor.is_none(), box_ammo(it.stack.data)) {
                     if let Some(b) = bench.items.iter_mut().find(|b| b.id == id) {
-                        b.stack.data = box_rounds(&b.stack) - 1;
+                        b.stack.data = box_without(b.stack.data, 1);
                     }
-                    self.cursor = Some(Stack::one(BULLET));
+                    self.cursor = Some(Stack::one(kind));
                     self.bench_drag = Some(self.ui.mouse);
                     self.bench_changed(p, None);
                 }
             }
-            Look::Part(q) if q != MAGAZINE => {
+            Look::Part(kind, q) if !(kind.uses_magazine() && q == MAGAZINE) => {
                 // One of each part (the clicked one first).
                 let mut chosen: Vec<u16> = Vec::new();
-                for want in TABLE_PARTS {
-                    let is = |i: &&BenchItem| matches!(look(i.stack.item), Look::Part(q) if q == want);
+                for &want in table_parts(kind) {
+                    let is = |i: &&BenchItem| matches!(look(i.stack.item), Look::Part(k, q) if k == kind && q == want);
                     match bench.items.iter().filter(is).min_by_key(|i| (i.id != id) as u8) {
                         Some(c) => chosen.push(c.id),
                         None => return,
@@ -1620,7 +1897,7 @@ impl Game {
                         bench.items.remove(i);
                     }
                 }
-                let gun = assembled(&gone);
+                let gun = assembled(kind, &gone);
                 let (x, z) = free_spot(table, bench, gun, 0.0, 0.0, 0.0);
                 let gid = bench.add(gun, x, z, 0.0);
                 let e = BenchEvent { kind: bench_event::ASSEMBLE, gun: gid, gone, ..Default::default() };
@@ -1636,28 +1913,28 @@ impl Game {
     fn bench_box_slot(&mut self, p: IVec3, i: usize, right: bool) {
         let bench = self.block_entities.benches.entry(p).or_default();
         match (self.cursor, bench.boxes[i]) {
-            (None, Some(n)) if right => {
-                if n > 0 {
-                    bench.boxes[i] = Some(n - 1);
-                    self.cursor = Some(Stack::one(BULLET));
-                } else {
-                    return;
+            (None, Some(v)) if right => match box_ammo(v) {
+                Some(kind) => {
+                    bench.boxes[i] = Some(box_without(v, 1));
+                    self.cursor = Some(Stack::one(kind));
                 }
-            }
-            (None, Some(n)) => {
+                None => return,
+            },
+            (None, Some(v)) => {
                 bench.boxes[i] = None;
-                self.cursor = Some(Stack { data: n, ..Stack::one(AMMO_BOX) });
+                self.cursor = Some(Stack { data: v, ..Stack::one(AMMO_BOX) });
             }
-            (Some(st), Some(n)) if st.item == BULLET => {
-                let k = (if right { 1 } else { st.count as u16 }).min(AMMO_BOX_ROUNDS.saturating_sub(n));
+            (Some(st), Some(v)) if BOX_AMMO.contains(&st.item) => {
+                // Only the kind it holds (either, when it is empty).
+                let k = (if right { 1 } else { st.count as u16 }).min(box_room(v, st.item));
                 if k == 0 {
                     return;
                 }
-                bench.boxes[i] = Some(n + k);
+                bench.boxes[i] = Some(box_with(v, st.item, k));
                 take(&mut self.cursor, k as u8);
             }
             (Some(st), None) if st.item == AMMO_BOX => {
-                bench.boxes[i] = Some(box_rounds(&st));
+                bench.boxes[i] = Some(st.data);
                 take(&mut self.cursor, 1);
             }
             _ => return,
@@ -1666,6 +1943,69 @@ impl Game {
             self.bench_drag = Some(self.ui.mouse);
         }
         self.bench_changed(p, None);
+    }
+
+    /// A click on the rifle station's magazine loader (or with one held, in its drawer): the
+    /// loader put in the middle of the drawer, a magazine laid on it (it fills it from the
+    /// boxes beside it), the magazine taken off it, or the loader itself taken out when it is
+    /// bare.
+    fn bench_loader_click(&mut self, p: IVec3, table: &Table) {
+        let drawer = self.bench_drawer.get(&p).copied().unwrap_or(0.0);
+        let bench = self.block_entities.benches.entry(p).or_default();
+        match self.cursor {
+            Some(st) if st.item == MAG_LOADER => {
+                if !table.rifle() {
+                    self.gun_message(t("gun.loader_rifle_station"));
+                    return;
+                }
+                if bench.loader || drawer < 0.8 {
+                    return;
+                }
+                bench.loader = true;
+                take(&mut self.cursor, 1);
+            }
+            Some(st) if is_gun_magazine(st.item) && bench.loader && bench.loader_mag.is_none() => {
+                bench.loader_mag = Some(Stack { count: 1, ..st });
+                take(&mut self.cursor, 1);
+            }
+            None if bench.loader_mag.is_some() => {
+                self.cursor = bench.loader_mag.take();
+                self.bench_drag = Some(self.ui.mouse);
+            }
+            None if bench.loader => {
+                bench.loader = false;
+                self.cursor = Some(Stack::one(MAG_LOADER));
+                self.bench_drag = Some(self.ui.mouse);
+            }
+            _ => return,
+        }
+        self.bench_changed(p, None);
+    }
+
+    /// Host, every frame: each loader with a magazine on it that is not full pushes a round
+    /// into it from a box of the rounds it takes, one after another.
+    pub(in crate::game) fn update_loaders(&mut self, dt: f32) {
+        let busy: Vec<(IVec3, usize)> = self
+            .block_entities
+            .benches
+            .iter()
+            .filter_map(|(p, b)| loader_source(b).map(|i| (*p, i)))
+            .collect();
+        self.loader_feed.retain(|p, _| busy.iter().any(|(q, _)| q == p));
+        for (p, i) in busy {
+            let t = self.loader_feed.entry(p).or_insert(0.0);
+            *t += dt;
+            if *t < LOADER_ROUND {
+                continue;
+            }
+            *t -= LOADER_ROUND;
+            let Some(bench) = self.block_entities.benches.get_mut(&p) else { continue };
+            let (Some(v), Some(mag)) = (bench.boxes[i], bench.loader_mag.as_mut()) else { continue };
+            bench.boxes[i] = Some(box_without(v, 1));
+            let r = gun_rounds(mag) + 1;
+            set_gun_rounds(mag, r);
+            self.bench_changed(p, None);
+        }
     }
 
     /// The magazine of a gun on the table clicked: it slides out and is laid beside the gun.
@@ -1687,9 +2027,10 @@ impl Game {
 
     /// A magazine held on the mouse let go on a gun without one: it goes in.
     fn bench_mag_in(&mut self, p: IVec3, id: u16, spot: Option<(f32, f32)>) -> bool {
-        let Some(st) = self.cursor.filter(|s| magazine_capacity(s.item).is_some()) else { return false };
+        let Some(st) = self.cursor.filter(|s| is_gun_magazine(s.item)) else { return false };
         let Some(bench) = self.block_entities.benches.get_mut(&p) else { return false };
-        let Some(g) = bench.items.iter_mut().find(|g| g.id == id && GunKind::of(g.stack.item).is_some() && !gun_has_mag(&g.stack)) else {
+        let fits = magazine_gun(st.item);
+        let Some(g) = bench.items.iter_mut().find(|g| g.id == id && GunKind::of(g.stack.item) == fits && !gun_has_mag(&g.stack)) else {
             return false;
         };
         g.stack = with_magazine(&g.stack, &st);
@@ -1754,7 +2095,7 @@ mod tests {
     use super::*;
 
     fn table() -> Table {
-        Table { center: Vec3::new(1.0, 65.0, 0.5), right: Vec3::X, toward: Vec3::Z }
+        Table { center: Vec3::new(1.0, 65.0, 0.5), right: Vec3::X, toward: Vec3::Z, wide: 2.0, half_w: HALF_W }
     }
 
     fn gun(mods: u8) -> Stack {
@@ -1789,7 +2130,7 @@ mod tests {
         let (lo, hi) = extent(&t, &pieces);
         assert!(lo.y.abs() < 0.01 && hi.y > 0.02, "{lo} {hi}");
         assert!(lo.x > -HALF_W && hi.x < HALF_W && lo.z > -HALF_D && hi.z < HALF_D, "{lo} {hi}");
-        let (b, m) = crate::model::pistol_view::muzzle(gun_mod::SILENCER);
+        let (b, m) = crate::model::pistol_view::muzzle(&pv::PISTOL, gun_mod::SILENCER);
         let muzzle = pieces[0].mats[b].transform_point3(m) - t.center;
         assert!(muzzle.dot(t.right) > 0.1, "{muzzle}");
     }
@@ -1818,10 +2159,44 @@ mod tests {
         }
         // Put together again: the same gun (its attachments back from its parts), as dirty,
         // with no magazine in it and nothing in the chamber.
-        let back = assembled(&bench.items);
+        let back = assembled(GunKind::Pistol, &bench.items);
         assert_eq!(gun_mods(&back), gun_mods(&st));
         assert_eq!(back.damage, st.damage);
         assert!(!gun_has_mag(&back) && !gun_chambered(&back));
+    }
+
+    #[test]
+    fn a_revolver_comes_apart_into_its_five_parts_and_goes_back_together() {
+        let t = table();
+        let mut st = Stack::one(REVOLVER);
+        set_gun_rounds(&mut st, 4);
+        st.damage = 30;
+        let it = BenchItem { id: 1, stack: st, x: 0.0, z: 0.0, turn: 0.0 };
+        let pieces = lying_pieces(&t, &it).unwrap();
+        let (lo, hi) = extent(&t, &pieces);
+        assert!(lo.y.abs() < 0.01 && hi.y > 0.02, "{lo} {hi}");
+        let (parts, loose) = {
+            let (_, parts, loose) = strip_targets(&t, &it);
+            (parts, loose)
+        };
+        // Frame, barrel, mainspring, cylinder, hammer; its four live rounds back to the player.
+        assert_eq!(parts.len(), 5);
+        assert_eq!(loose, 4);
+        let mut bench = GunBench::default();
+        for (s, x, z, turn) in &parts {
+            assert_eq!(s.damage, 30);
+            bench.add(*s, *x, *z, *turn);
+        }
+        let (pieces, _) = scene(&t, &bench, None);
+        for pc in &pieces {
+            let (lo, hi) = extent(&t, std::slice::from_ref(pc));
+            assert!(lo.y.abs() < 0.01, "{lo}");
+            assert!(lo.x >= -HALF_W - 1e-3 && hi.x <= HALF_W + 1e-3 && lo.z >= -HALF_D - 1e-3 && hi.z <= HALF_D + 1e-3, "{lo} {hi}");
+        }
+        let back = assembled(GunKind::Revolver, &bench.items);
+        assert_eq!(back.item, REVOLVER);
+        assert_eq!(back.damage, 30);
+        assert_eq!(gun_rounds(&back), 0);
     }
 
     #[test]

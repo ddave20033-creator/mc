@@ -374,6 +374,8 @@ impl Game {
         if third_person {
             if self.camera.mode == 2 {
                 fwd = -fwd;
+            } else if self.camera.mode == super::camera::SIDE_VIEW || self.camera.mode == super::camera::FIXED_FRONT {
+                fwd = (eye - Vec3::Y * 0.5 - cam).normalize_or_zero();
             } else {
                 // Keep view rotation independent of changing nearby blocks and plants.
                 // The reticle is projected onto the interaction ray's actual hit below.
@@ -602,7 +604,7 @@ impl Game {
                 .into_iter()
                 .filter(|&(_, _, mods, _, _)| mods & crate::item::gun_mod::LIGHT != 0 && mods & crate::item::gun_mod::LIGHT_ON != 0)
                 .map(|(id, kind, _, eye, look)| {
-                    let from = self.remote_gun_point(id, kind, crate::model::pistol_view::light()).unwrap_or(eye);
+                    let from = self.remote_gun_point(id, kind, crate::model::gun_view::light(kind)).unwrap_or(eye);
                     (from, look)
                 })
                 .collect();
@@ -804,6 +806,7 @@ impl Game {
             // The same for the pistol's muzzle flash and the spent cases.
             self.guns.muzzle = self.hand.muzzle_tip.map(to_world_view);
             self.guns.eject = self.hand.eject_tip.map(to_world_view);
+            self.guns.chambers = self.hand.chamber_tips.map(|c| c.map(to_world_view));
             self.guns.laser_from = self.hand.laser_tip.map(to_world_view);
             self.guns.light_from = self.hand.light_tip.map(to_world_view);
             let hit = self.hand.book_hit;
@@ -811,6 +814,7 @@ impl Game {
         } else {
             self.guns.muzzle = None;
             self.guns.eject = None;
+            self.guns.chambers = None;
             self.guns.laser_from = None;
             self.guns.light_from = None;
             self.guns.gun_dir = None;
@@ -820,6 +824,9 @@ impl Game {
             self.build_own_laser(&mut scene.particles, cam, view.right, view.up);
         }
         // The player model (shadow only in first person); a spectator has no body.
+        // Running eases the gun across the chest (and back) on the player model.
+        let run = if self.player.sprinting { 1.0 } else { 0.0 };
+        self.tp_sprint += (run - self.tp_sprint) * (1.0 - (-dt * 8.0).exp());
         if in_world && self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
             // In bed: built standing, then laid down on it.
             let bed = self.sleep.map(|s| {
@@ -838,6 +845,7 @@ impl Game {
                 limb_amount: self.limb_amount,
                 attack: self.hand.attack(),
                 crouch: self.player.crouch,
+                sprint: self.tp_sprint,
                 held: self.held(),
                 skin: self.effective_skin(),
                 time: self.time,
@@ -858,11 +866,11 @@ impl Game {
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {
                 let mods = pose.gun_mods;
-                use crate::model::pistol_view::{eject, muzzle, rest_point_in_gun_space};
-                let point = |q| crate::model::player::gun_point(&pose, kind, rest_point_in_gun_space(q));
-                self.guns.muzzle_tp = Some(point(muzzle(mods)));
-                self.guns.eject_tp = Some(point(eject()));
-                self.guns.light_tp = Some(point(crate::model::pistol_view::light()));
+                use crate::model::gun_view::{eject, light, muzzle, rest_point_in_gun_space};
+                let point = |q| crate::model::player::gun_point(&pose, kind, rest_point_in_gun_space(kind, q));
+                self.guns.muzzle_tp = Some(point(muzzle(kind, mods)));
+                self.guns.eject_tp = Some(point(eject(kind)));
+                self.guns.light_tp = Some(point(light(kind)));
             } else {
                 self.guns.muzzle_tp = None;
                 self.guns.eject_tp = None;
@@ -1112,6 +1120,8 @@ impl Game {
 
     /// The HUD and the open screen; returns what the screen asks for.
     fn draw_ui(&mut self, w: f32, h: f32, dt: f32, in_world: bool, medium: Medium) -> Action {
+        // The item icons asked for last frame, drawn for things as they are.
+        self.update_state_icons();
         let s = self.settings.effective_gui_scale(w, h);
         self.ui.input_enabled = !self.cursor_grabbed;
         self.ui.mouse_down = self.left_down;

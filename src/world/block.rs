@@ -105,6 +105,12 @@ pub const ADV_PART_LIT: u8 = 226;
 /// front, holds what lies on it). The cells in front of it are kept free for the drawer.
 /// (`GUN_STATION`, 62, is the old one-block station: a plain block now.)
 pub const GUN_BENCH: u8 = 238;
+/// The rifle station, the big gun station for the long guns, three blocks wide: its left
+/// block (seen from the front) + facing, which holds what lies on it (and is the item), and
+/// its other two blocks (`RIFLE_BENCH_PART`, without a facing: `bench_main` finds the left
+/// block they belong to). The cells in front of it are kept free for its drawer too.
+pub const RIFLE_BENCH: u8 = 246;
+pub const RIFLE_BENCH_PART: u8 = 250;
 /// The chimney's boxes (block-local): a slab over the furnace, the stack and a rim round
 /// its top.
 pub const CHIMNEY_BOXES: [([f32; 3], [f32; 3]); 3] = [
@@ -278,9 +284,54 @@ pub fn bed_facing(b: u8) -> u8 {
 pub fn bed_head(b: u8) -> bool {
     (b - BED) & 4 != 0
 }
+/// Any block of a gun station (the small one or the rifle station).
 #[inline]
 pub fn is_gun_bench(b: u8) -> bool {
-    (GUN_BENCH..GUN_BENCH + 8).contains(&b)
+    (GUN_BENCH..GUN_BENCH + 8).contains(&b) || is_rifle_bench(b)
+}
+/// Any block of a rifle station.
+pub fn is_rifle_bench(b: u8) -> bool {
+    (RIFLE_BENCH..=RIFLE_BENCH_PART).contains(&b)
+}
+pub fn rifle_bench_id(facing: u8) -> u8 {
+    RIFLE_BENCH + (facing & 3)
+}
+/// How many blocks wide the station a block is part of is.
+pub fn bench_width(b: u8) -> i32 {
+    if is_rifle_bench(b) {
+        3
+    } else {
+        2
+    }
+}
+/// The block of a station that holds what lies on it (its left one, seen from the front).
+pub fn is_bench_main(b: u8) -> bool {
+    if is_rifle_bench(b) {
+        b != RIFLE_BENCH_PART
+    } else {
+        is_gun_bench(b) && !gun_bench_right(b)
+    }
+}
+/// The left block of the station that the block `b` at `p` is part of (`get`: the block at a
+/// place; a rifle station's other blocks look for it beside them).
+pub fn bench_main(p: IVec3, b: u8, get: impl Fn(IVec3) -> u8) -> Option<IVec3> {
+    if b == RIFLE_BENCH_PART {
+        for k in 1..=2 {
+            for f in 0..4u8 {
+                let q = p - chest_right(f) * k;
+                if get(q) == rifle_bench_id(f) {
+                    return Some(q);
+                }
+            }
+        }
+        return None;
+    }
+    is_gun_bench(b).then(|| if is_rifle_bench(b) { p } else { gun_bench_main(p, b) })
+}
+/// The blocks of the station whose left block (`main`, the block `b`) is there, left to right.
+pub fn bench_cells(main: IVec3, b: u8) -> Vec<IVec3> {
+    let Some(f) = facing(b) else { return vec![main] };
+    (0..bench_width(b)).map(|i| main + chest_right(f) * i).collect()
 }
 pub fn gun_bench_id(facing: u8, right: bool) -> u8 {
     GUN_BENCH + (facing & 3) + ((right as u8) << 2)
@@ -637,6 +688,7 @@ pub fn facing(b: u8) -> Option<u8> {
         _ if is_adv_part(b) => Some((b - ADV_PART) & 3),
         _ if (CHEST..CHEST + 4).contains(&b) => Some(b - CHEST),
         _ if (CHEST_LEFT..CHEST_RIGHT + 4).contains(&b) => Some((b - CHEST_LEFT) & 3),
+        _ if is_rifle_bench(b) => (b != RIFLE_BENCH_PART).then_some((b - RIFLE_BENCH) & 3),
         _ if is_gun_bench(b) => Some((b - GUN_BENCH) & 3),
         _ => None,
     }

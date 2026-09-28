@@ -88,7 +88,7 @@ pub(super) fn framing(
 /// or looking down into its drawer (out in front of it): all of it in view above the bottom
 /// `strip` of the screen (a fraction of its height), filling as much of the rest as it can.
 /// Returns (position, look direction).
-pub(super) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, aspect: f32, strip: f32, drawer: bool) -> (Vec3, Vec3) {
+pub(super) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, half_w: f32, aspect: f32, strip: f32, drawer: bool) -> (Vec3, Vec3) {
     let pitch = if drawer { DRAWER_PITCH } else { GUN_PITCH }.to_radians();
     let fwd = -toward * pitch.cos() - Vec3::Y * pitch.sin();
     let up = right.cross(fwd).normalize();
@@ -102,7 +102,8 @@ pub(super) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, aspect: f32, str
         &[(-0.53, 0.02), (0.53, 0.02), (0.53, -0.32)]
     };
     let mut points = Vec::new();
-    for x in [-1.03, 1.03] {
+    // (as far across as things may lie on it, and a little more: its edges)
+    for x in [-half_w - 0.13, half_w + 0.13] {
         for &(z, y) in corners {
             points.push(c + right * x + toward * z + Vec3::Y * y);
         }
@@ -224,8 +225,8 @@ impl Game {
             let center = table.center + Vec3::Y * 0.03;
             // Above the inventory strip along the bottom of the screen.
             let strip = (96.0 * self.ui.s / self.ui.h.max(1.0)).clamp(0.0, 0.6);
-            let (over, over_fwd) = bench_framing(table.center, table.right, table.toward, aspect, strip, false);
-            let (into, into_fwd) = bench_framing(table.center, table.right, table.toward, aspect, strip, true);
+            let (over, over_fwd) = bench_framing(table.center, table.right, table.toward, table.half_w, aspect, strip, false);
+            let (into, into_fwd) = bench_framing(table.center, table.right, table.toward, table.half_w, aspect, strip, true);
             let k = smoothstep(0.0, 1.0, self.bench_focus);
             let (want, fwd) = (over.lerp(into, k), over_fwd.lerp(into_fwd, k).normalize());
             let sway = self.bench_pan;
@@ -485,7 +486,7 @@ mod tests {
             let strip = 0.2;
             // Over the table: all of the table; into the drawer: all of the drawer.
             for (drawer, points) in [(false, [(-0.5, 0.0), (0.5, 0.0)]), (true, [(0.55, -0.34), (0.95, -0.34)])] {
-            let (cam, fwd) = bench_framing(c, right, toward, aspect, strip, drawer);
+            let (cam, fwd) = bench_framing(c, right, toward, 0.9, aspect, strip, drawer);
             let mut proj = Mat4::perspective_rh(FOV.to_radians(), aspect, 0.05, 100.0);
             proj.y_axis.y *= -1.0;
             let vp = proj * Mat4::look_to_rh(cam, fwd, Vec3::Y);

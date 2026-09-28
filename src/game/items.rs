@@ -118,8 +118,8 @@ impl Game {
                     self.open_container(Container::Crafting(hit));
                     return;
                 }
-                if is_gun_bench(hb) {
-                    self.open_gun_station(gun_bench_main(hit, hb));
+                if let Some(main) = bench_main(hit, hb, |q| self.terrain.world.geti(q)) {
+                    self.open_gun_station(main);
                     return;
                 }
                 if hb == GUN_STATION {
@@ -170,6 +170,7 @@ impl Game {
             WATER_BUCKET | LAVA_BUCKET => self.empty_bucket(held),
             PIG_SPAWN_EGG => self.use_spawn_egg(MobKind::Pig),
             SHEEP_SPAWN_EGG => self.use_spawn_egg(MobKind::Sheep),
+            TARGET_DUMMY => self.use_spawn_egg(MobKind::Dummy),
             GLASS_BOTTLE => self.fill_bottle(),
             _ if block_of(held).is_some() => self.place_block(held),
             _ => {}
@@ -345,8 +346,8 @@ impl Game {
             self.place_big_furnace(at, base, facing);
             return;
         }
-        if base == GUN_STATION {
-            self.place_gun_bench(at, facing);
+        if base == GUN_STATION || base == RIFLE_BENCH {
+            self.place_gun_bench(at, facing, base == RIFLE_BENCH);
             return;
         }
         let b = if base == TORCH {
@@ -432,21 +433,28 @@ impl Game {
         self.action_cooldown = 0.2;
     }
 
-    /// A gun station, two blocks wide: its left half at `at`, its right one beside it (to
-    /// the right seen from its front), its front (the drawer) facing the player. The cells in
-    /// front of it must be free, for the drawer.
-    fn place_gun_bench(&mut self, at: IVec3, facing: u8) {
+    /// A gun station, two blocks wide (a rifle station three): its left block at `at`, the
+    /// others beside it (to the right seen from its front), its front (the drawer) facing the
+    /// player. The cells in front of it must be free, for the drawer.
+    fn place_gun_bench(&mut self, at: IVec3, facing: u8, rifle: bool) {
         let w = &self.terrain.world;
-        let right = at + chest_right(facing);
+        let main = if rifle { rifle_bench_id(facing) } else { gun_bench_id(facing, false) };
+        let cells = bench_cells(at, main);
         let front = facing_dir(facing);
-        let room = [at, right].iter().all(|&q| {
+        let room = cells.iter().all(|&q| {
             is_replaceable(w.geti(q)) && !self.player.intersects(q) && !self.drawer_room(q) && !is_solid(w.geti(q + front))
         });
         if !room {
             return;
         }
-        self.edit_block(at, gun_bench_id(facing, false));
-        self.edit_block(right, gun_bench_id(facing, true));
+        for (i, &q) in cells.iter().enumerate() {
+            let b = match (rifle, i) {
+                (_, 0) => main,
+                (true, _) => RIFLE_BENCH_PART,
+                (false, _) => gun_bench_id(facing, true),
+            };
+            self.edit_block(q, b);
+        }
         if !self.creative() {
             let slot = self.hotbar_slot;
             take(&mut self.inventory.slots[slot], 1);
@@ -460,8 +468,10 @@ impl Game {
     pub(super) fn drawer_room(&self, q: IVec3) -> bool {
         let w = &self.terrain.world;
         (0..4u8).any(|f| {
-            let b = w.geti(q - facing_dir(f));
-            is_gun_bench(b) && facing(b) == Some(f)
+            let at = q - facing_dir(f);
+            let b = w.geti(at);
+            // (a rifle station's other blocks have the facing of its left one)
+            is_gun_bench(b) && bench_main(at, b, |p| w.geti(p)).and_then(|m| facing(w.geti(m))) == Some(f)
         })
     }
 

@@ -5,7 +5,63 @@ use super::*;
 
 /// Frames shown in the F3 frame time graph.
 pub(super) const FRAME_GRAPH: usize = 240;
+/// How far away a dummy's damage can be read (blocks).
+const DUMMY_TAG_RANGE: f32 = 40.0;
+
+/// Damage as it is shown: whole numbers without a fraction, the rest to a tenth.
+fn damage_text(v: f32) -> String {
+    if (v - v.round()).abs() < 0.05 {
+        format!("{:.0}", v)
+    } else {
+        format!("{:.1}", v)
+    }
+}
+
 impl Game {
+    /// Over each target dummy that was hit lately: the damage it has taken in all, and the
+    /// last hit under it. The number pops a little with each hit and fades before it resets.
+    fn draw_dummy_tags(&mut self) {
+        use crate::entity::mob::{MobKind, DUMMY_RESET};
+        let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
+        let cam = self.player.eye();
+        let focal = 1.0 / (self.fov_current.to_radians() * 0.5).tan();
+        let tags: Vec<(Vec3, f32, f32, f32)> = self
+            .mobs
+            .iter()
+            .filter(|m| m.kind == MobKind::Dummy && m.taken > 0.0 && m.since_hit < DUMMY_RESET)
+            .map(|m| (m.pos + Vec3::Y * (m.size().1 + 0.35), m.taken, m.last_hit, m.since_hit))
+            .collect();
+        for (top, taken, last, since) in tags {
+            let dist = top.distance(cam);
+            if dist > DUMMY_TAG_RANGE || !self.line_of_sight(cam, top) {
+                continue;
+            }
+            let clip = self.view_proj * top.extend(1.0);
+            if clip.w < 0.1 {
+                continue;
+            }
+            let ndc = clip.truncate() / clip.w;
+            if ndc.x.abs() > 1.2 || ndc.y.abs() > 1.2 {
+                continue;
+            }
+            let (x, y) = ((ndc.x * 0.5 + 0.5) * w, (ndc.y * 0.5 + 0.5) * h);
+            let fade = ((DUMMY_RESET - since) / 1.5).clamp(0.0, 1.0) * ((DUMMY_TAG_RANGE - dist) / 8.0).clamp(0.0, 1.0);
+            // A fixed size in the world (so it shrinks with distance), readable from afar.
+            let px_per_block = h * 0.5 * focal / clip.w;
+            let pop = 1.0 + 0.3 * (1.0 - since / 0.15).max(0.0);
+            let fs = (0.4 * px_per_block / 9.0).clamp(1.0 * s, 3.0 * s) * pop;
+            let small = fs * 0.6;
+            let total = damage_text(taken);
+            let hit = format!("+{}", damage_text(last));
+            let tw = self.ui.text_width(&total, fs).max(self.ui.text_width(&hit, small));
+            let box_h = 9.0 * fs + 9.0 * small + 2.0 * small;
+            let (bx, by) = (x - tw * 0.5 - 3.0 * small, y - box_h);
+            self.ui.rect(bx, by, tw + 6.0 * small, box_h, rgba(0, 0, 0, (110.0 * fade) as u8), small);
+            self.ui.text_centered(&total, x, by + small, fs, with_alpha(rgba(255, 214, 90, 255), fade), true);
+            self.ui.text_centered(&hit, x, by + small + 9.0 * fs, small, with_alpha(rgba(255, 120, 100, 255), fade), true);
+        }
+    }
+
     fn draw_heart(ui: &mut Ui, x: f32, y: f32, px: f32, fill: u8, flash: bool, poison: bool) {
         const SHAPE: [&str; 8] = [
             ".ooo.ooo.",
@@ -374,6 +430,10 @@ impl Game {
         // Names of the other LAN players.
         if self.in_world_view() && self.camera.mode != 2 {
             self.draw_name_tags();
+        }
+        // The damage the target dummies have taken, over their heads.
+        if self.in_world_view() {
+            self.draw_dummy_tags();
         }
         // Tab held in a LAN game: who is playing.
         if self.net.is_some() && self.screen == Screen::Playing && self.bind_down(Bind::PlayerList)

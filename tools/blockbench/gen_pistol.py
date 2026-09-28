@@ -181,8 +181,11 @@ def bullet_tip(px, w, h, face):
             rect(px, i, 0, i + 1, h, lambda c, k=k: shade(c, int(-26 * (1 - k))))
 
 # witness holes on both sides of the magazine, toward its back; shared with the brass behind them
-MAG_BODY = dict(y0=-4.45, y1=6.2, z0=0.5, z1=4.3)
-HOLE, HOLES = 0.45, [1.0 + k * 1.25 for k in range(7)]   # size, distance of each from the top
+# The grip and the magazine as long as a Glock 17's are to its slide (139 mm high against
+# 202 mm long): the grip's bottom at GB (it was -4.5, a third too long).
+GB = -0.5
+MAG_BODY = dict(y0=GB + 0.05, y1=6.2, z0=0.5, z1=4.3)
+HOLE, HOLES = 0.45, [1.0 + k * 1.25 for k in range(5)]   # size, distance of each from the top
 HOLE_U = (0.3, 0.75)                                     # from the magazine's back edge
 
 def witness_holes(px, w, h, face):
@@ -493,19 +496,20 @@ recoil_spring = [
 
 # ---- grip: stepped profile so its edges read round (all tilted with the grip) ----
 grip = [
-    cube("grip_core", [-1.5, -4.5, 0.35], [1.5, 8, 4.65], "grip", [stipple], GP, GR),
-    cube("grip_mid", [-1.32, -4.49, 0.12], [1.32, 7.99, 4.88], "grip", [stipple], GP, GR),
-    cube("grip_front", [-1.05, -4.48, 0], [1.05, 7.98, 5], "grip", [stipple, finger_grooves], GP, GR),
-    cube("grip_backstrap", [-1.1, -4.2, 4.95], [1.1, 7.6, 5.55], "grip", [stipple], GP, GR),
-    cube("grip_backstrap_round", [-0.8, -4.19, 5.5], [0.8, 7.59, 5.72], "grip", [stipple], GP, GR),
+    cube("grip_core", [-1.5, GB, 0.35], [1.5, 8, 4.65], "grip", [stipple], GP, GR),
+    cube("grip_mid", [-1.32, GB + 0.01, 0.12], [1.32, 7.99, 4.88], "grip", [stipple], GP, GR),
+    cube("grip_front", [-1.05, GB + 0.02, 0], [1.05, 7.98, 5], "grip", [stipple, finger_grooves], GP, GR),
+    cube("grip_backstrap", [-1.1, GB + 0.3, 4.95], [1.1, 7.6, 5.55], "grip", [stipple], GP, GR),
+    cube("grip_backstrap_round", [-0.8, GB + 0.31, 5.5], [0.8, 7.59, 5.72], "grip", [stipple], GP, GR),
 ]
 
 # ---- magazine (inside the grip at rest) ----
 def round_at(name, x0, y0):
-    """A cartridge lying in the magazine, pointing forward (-z)."""
+    """A cartridge lying in the magazine, pointing forward (-z), against its back: 9x19 mm, a
+    19 mm case and 30 mm long (0.9 across here)."""
     return [
-        cube(name + "_case", [x0, y0, 1.5], [x0 + 0.9, y0 + 0.9, 4.1], "brass", [case_head, case_shine], GP, GR),
-        cube(name + "_bullet", [x0 + 0.1, y0 + 0.1, 0.35], [x0 + 0.8, y0 + 0.8, 1.5], "copper", [bullet_tip], GP, GR),
+        cube(name + "_case", [x0, y0, 2.36], [x0 + 0.9, y0 + 0.9, 4.1], "brass", [case_head, case_shine], GP, GR),
+        cube(name + "_bullet", [x0 + 0.1, y0 + 0.1, 1.4], [x0 + 0.8, y0 + 0.8, 2.37], "copper", [bullet_tip], GP, GR),
     ]
 
 mb = MAG_BODY
@@ -516,16 +520,16 @@ magazine = [
 ]
 # the base plate of the standard magazine; the extended one reaches 3.8 further out of the grip
 mag_standard = [
-    cube("mag_base", [-1.7, -5.4, -0.2], [1.7, -4.45, 5.8], "mag", [], GP, GR),
-    cube("mag_base_bottom", [-1.5, -5.6, 0.05], [1.5, -5.35, 5.55], "mag", [base_plate], GP, GR),
-    cube("mag_base_lip", [-1.45, -4.5, 0.2], [1.45, -4.1, 5.4], "mag", [], GP, GR),
+    cube("mag_base", [-1.7, GB - 0.9, -0.2], [1.7, GB + 0.05, 5.8], "mag", [], GP, GR),
+    cube("mag_base_bottom", [-1.5, GB - 1.1, 0.05], [1.5, GB - 0.85, 5.55], "mag", [base_plate], GP, GR),
+    cube("mag_base_lip", [-1.45, GB, 0.2], [1.45, GB + 0.4, 5.4], "mag", [], GP, GR),
 ]
 EXT = 3.8
 mag_extended = [
-    cube("ext_body", [-1.2, -4.45 - EXT, mb["z0"]], [1.2, -4.4, mb["z1"]], "magsteel", [], GP, GR),
-    cube("ext_base", [-1.7, -5.4 - EXT, -0.2], [1.7, -4.45 - EXT, 5.8], "ext", [ext_stripe], GP, GR),
-    cube("ext_base_bottom", [-1.5, -5.6 - EXT, 0.05], [1.5, -5.35 - EXT, 5.55], "ext", [base_plate], GP, GR),
-    cube("ext_base_lip", [-1.45, -4.5 - EXT, 0.2], [1.45, -4.1 - EXT, 5.4], "ext", [], GP, GR),
+    cube("ext_body", [-1.2, GB + 0.05 - EXT, mb["z0"]], [1.2, GB + 0.1, mb["z1"]], "magsteel", [], GP, GR),
+    cube("ext_base", [-1.7, GB - 0.9 - EXT, -0.2], [1.7, GB + 0.05 - EXT, 5.8], "ext", [ext_stripe], GP, GR),
+    cube("ext_base_bottom", [-1.5, GB - 1.1 - EXT, 0.05], [1.5, GB - 0.85 - EXT, 5.55], "ext", [base_plate], GP, GR),
+    cube("ext_base_lip", [-1.45, GB - EXT, 0.2], [1.45, GB + 0.4 - EXT, 5.4], "ext", [], GP, GR),
 ]
 mag_rounds = round_at("mag_round_top", -0.85, 6.3) + round_at("mag_round_2", -0.05, 5.5)
 # brass seen through every witness hole (hidden with the rounds when the magazine is empty)
@@ -636,13 +640,13 @@ g_flashlight = group("flashlight", flashlight, (0, 6, -9))
 g_frame = group("frame", frame + [g_trigger, g_laser, g_flashlight], (0, 8, 0))
 g_grip = group("grip", grip, GP)
 g_chamber_case = group("chamber_case", [
-    cube("chamber_case", [-0.45, 11.32, -0.9], [0.45, 12.22, 1.8], "brass", [case_head, case_shine])], (0, 11.8, 0))
+    cube("chamber_case", [-0.45, 11.32, 0.06], [0.45, 12.22, 1.8], "brass", [case_head, case_shine])], (0, 11.8, 0))
 g_chamber_bullet = group("chamber_bullet", [
-    cube("chamber_bullet", [-0.35, 11.42, -2.1], [0.35, 12.12, -0.9], "copper", [bullet_tip])], (0, 11.8, -1.5))
+    cube("chamber_bullet", [-0.35, 11.42, -0.9], [0.35, 12.12, 0.07], "copper", [bullet_tip])], (0, 11.8, -0.4))
 g_chamber = group("chambered_round", [g_chamber_case, g_chamber_bullet], (0, 11.8, 0))
 # the spent case thrown out of the port when firing (hidden inside the chambered one)
 g_spent = group("spent_case", [
-    cube("spent_case", [-0.43, 11.34, -0.88], [0.43, 12.2, 1.78], "brass", [case_head, case_shine])], (0, 11.77, 0.45))
+    cube("spent_case", [-0.43, 11.34, 0.08], [0.43, 12.2, 1.78], "brass", [case_head, case_shine])], (0, 11.77, 0.93))
 # the left arm hangs off the magazine, so the hand is always where the magazine is;
 # its keyframes are offsets from the magazine
 g_larm = group("left_arm", [arm("left", FL, (15, -35, 0))], FL)
@@ -721,7 +725,7 @@ aim = animation("aim", 0.25, "hold",
 DROP = (0, -0.95, 0.31)          # down along the tilted grip (pistol frame)
 def along(d): return dict(zip("xyz", [c * d for c in DROP]))
 def neg(d): return {k: -v for k, v in d.items()}
-G = (0, -10.8, 5.7)              # the left fist under the magazine's base plate (from FL)
+G = (0, -10.8 + (GB + 4.5), 5.7)  # the left fist under the magazine's base plate (from FL)
 TILT = dict(x=38, y=12, z=-28)
 LIFT = dict(x=-4, y=15, z=2)
 reload = animation("reload", 2.0, "once",

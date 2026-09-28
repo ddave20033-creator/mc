@@ -91,6 +91,9 @@ pub struct HandAnim {
     pub light_tip: Option<Vec3>,
     /// Which way the held gun's barrel points (in the hand's own view).
     pub barrel_dir: Option<Vec3>,
+    /// The held revolver's chambers: the head of what is in each (in the hand's own view),
+    /// where the cases come out.
+    pub chamber_tips: Option<[Vec3; 6]>,
     /// The held pistol: aimed down the sights (0 from the hip .. 1 aimed), how far a reload
     /// has got (0..1) and its attachments.
     pub aim: f32,
@@ -134,6 +137,54 @@ pub struct HandAnim {
     pub scope_across: f32,
 }
 
+/// Where a first-person arm's shoulder is from the eye (blocks: out to the side, down, back),
+/// out of the view below it.
+const FP_SHOULDER: Vec3 = Vec3::new(0.38, -0.56, 0.12);
+/// How much bigger than Minecraft's a handgun's first-person arms are (the rifle's keep 1.75).
+const FP_ARM_SCALE: f32 = 1.5;
+/// A first-person arm's forearm (the elbow to the middle of the fist), in the arm's own units
+/// (Minecraft's arm is 4 across).
+const FP_FOREARM: f32 = 12.0;
+/// How far the upper arm goes on past the shoulder, so its end is never seen.
+const FP_PAST_SHOULDER: f32 = 30.0;
+
+/// A first-person arm holding something: its fist and forearm exactly as `fist` has them (the
+/// arm's frame, the fist at its origin, the forearm running back along +Y: as the model's
+/// animations hold the gun, so it goes through the fist the way it should), then bent at the
+/// elbow, smoothly, up to `shoulder` (world), out of the view.
+fn emit_fp_arm_held(out: &mut Vec<Vertex>, shoulder: Vec3, fist: Mat4, skin: u8, light: [u8; 4], fl: u8) {
+    use super::player::{blend_down, emit_bent_limb, limb_rings};
+    use glam::Quat;
+    let u = fist.x_axis.length();
+    let (_, fore_q, _) = fist.to_scale_rotation_translation();
+    let elbow = fist.transform_point3(Vec3::new(0.0, FP_FOREARM, 0.0));
+    // The upper arm: from the elbow up to the shoulder, turned as little as it can be from the
+    // forearm (its +Y up it).
+    let up_arm = shoulder - elbow;
+    let a = (up_arm.length() / u).max(1.0);
+    let fore_y = fore_q * Vec3::Y;
+    let upper_q = Quat::from_rotation_arc(fore_y, up_arm.normalize_or(fore_y)) * fore_q;
+    const BLEND: f32 = 2.5;
+    let zone = (-a + BLEND, -a - BLEND);
+    let rings = limb_rings(FP_PAST_SHOULDER, -(a + FP_FOREARM + 2.0), &[zone]);
+    // Each ring about the elbow: the upper arm's turn above the bend, the forearm's below.
+    let frame = |y: f32| {
+        let q = upper_q.slerp(fore_q, blend_down(y, zone.0, zone.1));
+        Mat4::from_translation(elbow) * Mat4::from_quat(q) * Mat4::from_scale(Vec3::splat(u)) * Mat4::from_translation(Vec3::new(0.0, a, 0.0))
+    };
+    emit_bent_limb(
+        out,
+        frame,
+        Vec3::new(-2.0, 0.0, -2.0),
+        Vec3::new(2.0, 0.0, 2.0),
+        &rings,
+        ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
+        [[255; 3]; 6],
+        light,
+        fl,
+    );
+}
+
 impl HandAnim {
     pub fn new() -> Self {
         Self {
@@ -166,6 +217,7 @@ impl HandAnim {
             laser_tip: None,
             light_tip: None,
             barrel_dir: None,
+            chamber_tips: None,
             aim: 0.0,
             reload: None,
             gun_mods: 0,
@@ -380,6 +432,7 @@ impl HandAnim {
         self.eyepiece = None;
         self.muzzle_tip = None;
         self.eject_tip = None;
+        self.chamber_tips = None;
         self.laser_tip = None;
         self.light_tip = None;
         self.barrel_dir = None;
@@ -618,7 +671,7 @@ impl HandAnim {
     #[allow(clippy::too_many_arguments)]
     fn build_gun(
         &mut self,
-        _kind: GunKind,
+        kind: GunKind,
         out: &mut Vec<Vertex>,
         base: Mat4,
         light: [u8; 4],
@@ -626,8 +679,8 @@ impl HandAnim {
         eq: f32,
         skin: u8,
     ) {
-        use super::pistol_vm as vm;
-        use super::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, BonePose};
+        use super::gun_view;
+        use super::viewmodel::{add_anim, bone_matrices, find_anim, find_bone};
         use crate::item::gun_mod;
         let smooth = |x: f32| {
             let x = x.clamp(0.0, 1.0);
@@ -662,11 +715,11 @@ impl HandAnim {
         // With a scope, aiming brings its eyepiece up to the eye.
         let to_eye = if scope { SCOPE_EYE * a } else { Vec3::ZERO };
         let root = base * t(0.0, -(1.0 - eq) * 0.6, 0.0) * px * Mat4::from_translation(to_eye);
-        let bones = vm::BONES;
+        let bones = gun_view::bones(kind);
         let bone = |name: &str| find_bone(bones, name);
-        let anim = |name: &str| find_anim(vm::ANIMS, name);
+        let anim = |name: &str| find_anim(gun_view::anims(kind), name);
         // Looking it over: out in front of the view, turning slowly in the hand.
-        let root = match (self.inspect, bone("pistol")) {
+        let root = match (self.inspect, Some(gun_view::gun_bone(kind))) {
             (Some(it), Some(pb)) => {
                 let w = span(it, 0.0, 0.55) * (1.0 - span(it, INSPECT_TIME - 0.65, INSPECT_TIME));
                 let d = |x: f32| x.to_radians();
@@ -690,10 +743,12 @@ impl HandAnim {
                 };
                 let wobble = Quat::from_rotation_z(d((it * 1.4).sin() * 3.0))
                     * Quat::from_rotation_y(d((it * 0.9).sin() * 4.0));
-                let center = (Vec3::from(vm::MUZZLE.1) + Vec3::from(bones[pb].origin)) * 0.5;
+                let center = (gun_view::muzzle(kind, 0).1 + Vec3::from(bones[pb].origin)) * 0.5;
+                // A long gun is held further out, to be seen whole.
+                let away = if kind.long() { Vec3::new(0.02, -0.1, -1.15) } else { Vec3::new(0.06, -0.07, -0.47) };
                 // The model's muzzle points -Z; turned so it points +X like the turns above.
                 let held = base
-                    * Mat4::from_rotation_translation(wobble * q, Vec3::new(0.06, -0.07, -0.47))
+                    * Mat4::from_rotation_translation(wobble * q, away)
                     * ry(-90.0)
                     * px
                     * Mat4::from_translation(-center);
@@ -703,7 +758,7 @@ impl HandAnim {
         };
 
         // The animations, added up.
-        let mut pose = vec![BonePose::default(); bones.len()];
+        let mut pose = gun_view::rest_pose(kind);
         if let Some(an) = anim("aim") {
             add_anim(&mut pose, an, a * an.length, 1.0, |_| false);
         }
@@ -716,60 +771,102 @@ impl HandAnim {
         if let Some(an) = anim("sprint").filter(|_| sprint > 1e-3) {
             add_anim(&mut pose, an, phase * an.length, sprint, |_| false);
         }
-        super::pistol_view::add_gun_anims(&mut pose, &self.gun_anim(), false);
-        super::pistol_view::apply_mods(&mut pose, mods);
+        gun_view::add_gun_anims(kind, &mut pose, &self.gun_anim(), mods, false);
+        // Held bigger than modelled, about the grip; aimed, moved so the sights stay in the
+        // middle of the view.
+        let k = gun_view::HELD_SCALE;
+        let gb = gun_view::gun_bone(kind);
+        pose[gb].scale *= k;
+        let pivot = Vec3::from(bones[gb].origin);
+        pose[0].pos += (1.0 - k) * (gun_view::sight_point(kind, mods) - pivot) * a;
         let (mats, shown) = bone_matrices(bones, &pose, root);
 
         // With a scope, its eyepiece always shows the scope's view (held at the hip too).
         if scope {
-            self.eyepiece = super::pistol_view::eyepiece(&mats, &shown);
+            self.eyepiece = gun_view::eyepiece(kind, &mats, &shown);
         }
         {
             let mut glass = std::mem::take(&mut self.glass);
             let lamp = mods & gun_mod::LIGHT != 0 && mods & gun_mod::LIGHT_ON != 0;
-            super::pistol_view::emit_pistol(out, Some(&mut glass), &mats, &shown, self.eyepiece.is_some(), self.gun_dirt, lamp, light, fl);
+            gun_view::emit(kind, out, Some(&mut glass), &mats, &shown, self.eyepiece.is_some(), self.gun_dirt, lamp, &self.gun_anim(), light, fl);
             self.glass = glass;
-            // The player's own arms where the model has its arms: the fist at the bone's
-            // origin, the arm running back along the bone's +Z (Minecraft's arm, 1.75 times
-            // as big, longer so it reaches out of the view).
-            for name in ["right_arm_mesh", "left_arm_mesh"] {
+            // The player's own arms where the model has its arms, the fist at the bone's
+            // origin (a handgun's; the rifle keeps its straight ones), reaching from the shoulder (out of the view, below and a little behind
+            // it), bent at the elbow smoothly like the body's (Minecraft's arm, 1.75 times as
+            // big).
+            let unit = mats[0].x_axis.length();
+            let right = base.x_axis.truncate().normalize();
+            let up = base.y_axis.truncate().normalize();
+            let back = base.z_axis.truncate().normalize();
+            for (name, side) in [("right_arm_mesh", 1.0), ("left_arm_mesh", -1.0)] {
                 let Some(b) = bone(name).filter(|&b| shown[b]) else { continue };
-                let arm = mats[b]
+                if kind.long() {
+                    // The rifle's arms as they were made for it: straight, running back along
+                    // the bone's +Z, longer so they reach out of the view.
+                    let big = mats[b].x_axis.length() / unit.max(1e-9);
+                    let arm = mats[b]
+                        * Mat4::from_translation(Vec3::from(bones[b].origin))
+                        * Mat4::from_scale(Vec3::splat(1.0 / big.max(1e-3)))
+                        * rx(90.0)
+                        * Mat4::from_scale(Vec3::new(1.75, 2.45, 1.75));
+                    emit_box(
+                        out,
+                        arm,
+                        Vec3::new(-2.0, -2.0, -2.0),
+                        Vec3::new(2.0, 10.0, 2.0),
+                        ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
+                        [[255; 3]; 6],
+                        light,
+                        fl,
+                    );
+                    continue;
+                }
+                // The fist as the model holds it: the arm's frame at the bone (Minecraft's arm,
+                // the fist at the origin, running back along +Y), not scaled with the gun.
+                let big = mats[b].x_axis.length() / unit.max(1e-9);
+                let mut fist = mats[b]
                     * Mat4::from_translation(Vec3::from(bones[b].origin))
-                    * rx(90.0)
-                    * Mat4::from_scale(Vec3::new(1.75, 2.45, 1.75));
-                emit_box(
-                    out,
-                    arm,
-                    Vec3::new(-2.0, -2.0, -2.0),
-                    Vec3::new(2.0, 10.0, 2.0),
-                    ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-                    [[255; 3]; 6],
-                    light,
-                    fl,
-                );
+                    * Mat4::from_scale(Vec3::splat(FP_ARM_SCALE / big.max(1e-3)))
+                    * rx(90.0);
+                // A round being put in by hand is between the fingers: the fist just behind and
+                // below its back end, the two going in together.
+                if side < 0.0 {
+                    if let Some(r) = bone("loose_round").filter(|&r| shown[r] && mats[r].x_axis.length() > 1e-6) {
+                        let round = mats[r].transform_point3(Vec3::from(bones[r].origin));
+                        let at = round + (back * 0.02 - up * 0.035 - right * 0.012) * (unit / VIEW_PX);
+                        fist.w_axis = at.extend(1.0);
+                    }
+                }
+                let shoulder = cam + right * (side * FP_SHOULDER.x) + up * FP_SHOULDER.y + back * FP_SHOULDER.z;
+                emit_fp_arm_held(out, shoulder, fist, skin, light, fl);
             }
         }
 
         // Where the bullet and the flash leave, where the case comes out, where the laser
         // starts.
-        let (mb, mp) = super::pistol_view::muzzle(mods);
+        let (mb, mp) = gun_view::muzzle(kind, mods);
         let muzzle = mats[mb].transform_point3(mp);
         self.muzzle_tip = Some(muzzle);
         let dir = mats[mb].transform_vector3(Vec3::NEG_Z).normalize_or(Vec3::NEG_Z);
         self.barrel_dir = Some(dir);
         if self.flash > 0.0 {
-            let size = 0.11 * self.flash_size;
+            let size = 0.11 * self.flash_size * k;
             super::ballistics::emit_muzzle_flash(out, muzzle, dir, cam, size, self.flash_seed, self.flash);
         }
-        let (eb, ep) = super::pistol_view::eject();
+        let (eb, ep) = gun_view::eject(kind);
         self.eject_tip = Some(mats[eb].transform_point3(ep));
+        self.chamber_tips = (kind == GunKind::Revolver).then(|| {
+            std::array::from_fn(|c| {
+                let (b, p) = super::revolver_view::chamber_head(c);
+                mats[b].transform_point3(p)
+            })
+        });
         if mods & gun_mod::LASER != 0 {
-            let (lb, lp) = super::pistol_view::laser();
+            let (lb, lp) = gun_view::laser(kind);
             self.laser_tip = Some(mats[lb].transform_point3(lp));
         }
         if mods & gun_mod::LIGHT != 0 {
-            let (lb, lp) = super::pistol_view::light();
+            let (lb, lp) = gun_view::light(kind);
             self.light_tip = Some(mats[lb].transform_point3(lp));
         }
     }

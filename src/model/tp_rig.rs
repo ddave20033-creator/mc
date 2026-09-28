@@ -1,0 +1,122 @@
+//! How a player holds each gun as the others see them (third person), made in Blockbench
+//! (`tools/blockbench/tp_*.bbmodel`, from `gen_tp.py`): a rig per gun with a `gun` bone (the
+//! gun's place, its origin at the right fist on the grip), a `left_hand` bone in it (where
+//! the left hand holds it) and a `torso` bone (how far the body turns), and its animations: idle, walk, sprint, crouch, aim, shoot and
+//! reload. They are added up here from what the player is doing; `player` points the arms at
+//! the hands and turns it all with where the head looks.
+//!
+//! Model space: the player model's pixels, standing on the origin, facing -Z.
+
+#[allow(unused_imports, dead_code)]
+mod pistol {
+    include!("tp_pistol_data.rs");
+}
+#[allow(unused_imports, dead_code)]
+mod revolver {
+    include!("tp_revolver_data.rs");
+}
+#[allow(unused_imports, dead_code)]
+mod ak {
+    include!("tp_ak_data.rs");
+}
+
+use super::player::{PlayerPose, LIMB_SWING_SCALE};
+use super::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, Anim, Bone, BonePose};
+use crate::item::GunKind;
+use glam::{Mat4, Vec3};
+
+fn rig(kind: GunKind) -> (&'static [Bone], &'static [Anim]) {
+    match kind {
+        GunKind::Pistol => (pistol::BONES, pistol::ANIMS),
+        GunKind::Revolver => (revolver::BONES, revolver::ANIMS),
+        GunKind::Ak => (ak::BONES, ak::ANIMS),
+    }
+}
+
+/// Where the gun is held (a frame at the right fist on its grip, the muzzle toward -Z) and
+/// where the left hand is, in the player model's space, before the head's look turns them.
+pub struct Held {
+    pub gun: Mat4,
+    pub left_hand: Vec3,
+    /// How far the body is turned about the vertical (radians, + facing more to the left): a
+    /// rifle's stance puts the left shoulder forward.
+    pub turn: f32,
+}
+
+/// The rig's pose for what the player is doing now.
+pub fn held(kind: GunKind, p: &PlayerPose) -> Held {
+    let (bones, anims) = rig(kind);
+    let mut pose = vec![BonePose::default(); bones.len()];
+    let smooth = |x: f32| {
+        let x = x.clamp(0.0, 1.0);
+        x * x * (3.0 - 2.0 * x)
+    };
+    let aim = smooth(p.gun.aim);
+    let sprint = smooth(p.sprint) * (1.0 - aim);
+    let reloading = p.gun.reload.is_some();
+    let mut play = |name: &str, t: f32, weight: f32| {
+        if let (Some(an), true) = (find_anim(anims, name), weight > 1e-3) {
+            add_anim(&mut pose, an, t, weight, |_| false);
+        }
+    };
+    if let Some(an) = find_anim(anims, "idle") {
+        play("idle", p.time.rem_euclid(an.length), 1.0);
+    }
+    // One walk cycle a full swing of the legs.
+    if let Some(an) = find_anim(anims, "walk") {
+        let phase = (p.limb_swing * LIMB_SWING_SCALE / std::f32::consts::TAU).rem_euclid(1.0);
+        play("walk", phase * an.length, p.limb_amount.min(1.0) * (1.0 - sprint) * (1.0 - 0.7 * aim));
+    }
+    if let Some(an) = find_anim(anims, "sprint") {
+        let phase = (p.limb_swing * LIMB_SWING_SCALE / std::f32::consts::TAU).rem_euclid(1.0);
+        play("sprint", phase * an.length, sprint * if reloading { 0.3 } else { 1.0 });
+    }
+    if let Some(an) = find_anim(anims, "crouch") {
+        // The rig lowers the gun with shoulders sunk 3.2 pixels; the model's sink less now.
+        play("crouch", an.length, p.crouch.clamp(0.0, 1.0) * super::player::SNEAK_DROP / 3.2);
+    }
+    if let Some(an) = find_anim(anims, "aim") {
+        play("aim", aim * an.length, 1.0);
+    }
+    if let (Some(an), Some(t)) = (find_anim(anims, "shoot"), p.gun.shot) {
+        if t < an.length {
+            play("shoot", t, 1.0);
+        }
+    }
+    if let Some(an) = find_anim(anims, "reload") {
+        // The revolver's reload goes as its own (how far, of its length); the others' as the
+        // pistol's.
+        let t = match kind {
+            GunKind::Revolver => p.gun.reload.map(|f| f * an.length),
+            _ => p.gun.reload_time(),
+        };
+        if let Some(t) = t {
+            play("reload", t.min(an.length), 1.0);
+        }
+    }
+    let (mats, _) = bone_matrices(bones, &pose, Mat4::IDENTITY);
+    let at = |name: &str| find_bone(bones, name).map(|b| (mats[b], Vec3::from(bones[b].origin)));
+    let gun = at("gun").map_or(Mat4::IDENTITY, |(m, o)| m * Mat4::from_translation(o));
+    let left_hand = at("left_hand").map_or(gun.transform_point3(Vec3::ZERO), |(m, o)| m.transform_point3(o));
+    let turn = at("torso").map_or(0.0, |(m, _)| (-m.x_axis.z).atan2(m.x_axis.x));
+    Held { gun, left_hand, turn }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::item::GUN_KINDS;
+
+    #[test]
+    fn every_gun_has_its_rig() {
+        for k in GUN_KINDS {
+            let (bones, anims) = rig(k);
+            for b in ["gun", "left_hand"] {
+                assert!(find_bone(bones, b).is_some(), "{k:?} {b}");
+            }
+            for a in ["idle", "walk", "sprint", "crouch", "aim", "shoot", "reload"] {
+                assert!(find_anim(anims, a).is_some(), "{k:?} {a}");
+            }
+        }
+    }
+}

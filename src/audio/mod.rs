@@ -20,6 +20,7 @@ const MAX_VOICES: usize = 96;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Sound {
     ShotPistol,
+    ShotRifle,
     ShotSilenced,
     DryFire,
     MagOut,
@@ -39,8 +40,9 @@ pub enum Sound {
     ArmorHit,
 }
 
-pub const SOUNDS: [Sound; 18] = [
+pub const SOUNDS: [Sound; 19] = [
     Sound::ShotPistol,
+    Sound::ShotRifle,
     Sound::ShotSilenced,
     Sound::DryFire,
     Sound::MagOut,
@@ -66,6 +68,7 @@ impl Sound {
         match self {
             Sound::Explosion => (12.0, 260.0),
             Sound::ShotPistol => (7.0, 170.0),
+            Sound::ShotRifle => (10.0, 240.0),
             Sound::ShotSilenced => (2.0, 32.0),
             Sound::CaseBrass | Sound::DryFire => (1.0, 14.0),
             Sound::Impact | Sound::GrenadeBounce | Sound::ArmorHit => (2.0, 40.0),

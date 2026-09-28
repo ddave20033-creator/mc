@@ -1,14 +1,18 @@
 //! The guns: what kinds there are, how each shoots (damage, rate of fire, magazine, spread,
-//! recoil, reach) and what its five parts are at the gun station. The pistol is the only gun.
+//! recoil, reach) and what its five parts are at the gun station: the pistol, the revolver
+//! (loaded straight from the bullets carried) and the AK-47 (a big-calibre automatic rifle).
 
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum GunKind {
     Pistol,
+    Revolver,
+    Ak,
 }
 
-pub const GUN_KINDS: [GunKind; 1] = [GunKind::Pistol];
+/// Every gun, in the order of `kind as u8` (LAN messages).
+pub const GUN_KINDS: [GunKind; 3] = [GunKind::Pistol, GunKind::Revolver, GunKind::Ak];
 
 /// How a gun shoots.
 pub struct Stats {
@@ -66,15 +70,68 @@ const PISTOL_STATS: Stats = Stats {
     reload: 2.0,
     sight_zoom: 0.78,
     scope_zoom: 0.45,
-    dirt_max: 40,
+    dirt_max: 240,
     builtin_scope: false,
     flash: 1.0,
+};
+
+/// Heavier rounds, slower double action, harder kick; six in the cylinder.
+const REVOLVER_STATS: Stats = Stats {
+    damage: 12.0,
+    knockback: 0.9,
+    pellets: 1,
+    fire_delay: 0.42,
+    auto: false,
+    magazine: 6,
+    extended: 6,
+    spread_hip: 2.4,
+    spread_laser: 0.7,
+    spread_aimed: 0.1,
+    kick_hip: 3.0,
+    kick_aimed: 1.8,
+    speed: 200.0,
+    gravity: 10.0,
+    range: 90.0,
+    reload: 2.3,
+    sight_zoom: 0.76,
+    scope_zoom: 0.45,
+    dirt_max: 300,
+    builtin_scope: false,
+    flash: 1.3,
+};
+
+/// 7.62x39 mm: hits hard and flies far and flat; fully automatic, 600 rounds a minute, a
+/// 30-round magazine; it kicks with every shot, so long bursts climb.
+const AK_STATS: Stats = Stats {
+    damage: 11.0,
+    knockback: 0.7,
+    pellets: 1,
+    fire_delay: 0.1,
+    auto: true,
+    magazine: 30,
+    extended: 40,
+    spread_hip: 3.2,
+    spread_laser: 1.2,
+    spread_aimed: 0.18,
+    kick_hip: 1.3,
+    kick_aimed: 0.75,
+    speed: 300.0,
+    gravity: 7.0,
+    range: 160.0,
+    reload: 2.0,
+    sight_zoom: 0.7,
+    scope_zoom: 0.4,
+    dirt_max: 900,
+    builtin_scope: false,
+    flash: 1.6,
 };
 
 impl GunKind {
     pub fn item(self) -> ItemId {
         match self {
             GunKind::Pistol => PISTOL,
+            GunKind::Revolver => REVOLVER,
+            GunKind::Ak => AK47,
         }
     }
 
@@ -87,13 +144,37 @@ impl GunKind {
     pub fn ammo(self) -> ItemId {
         match self {
             GunKind::Pistol => BULLET,
+            GunKind::Revolver => MAGNUM_ROUND,
+            GunKind::Ak => RIFLE_ROUND,
         }
     }
 
     pub fn stats(self) -> &'static Stats {
         match self {
             GunKind::Pistol => &PISTOL_STATS,
+            GunKind::Revolver => &REVOLVER_STATS,
+            GunKind::Ak => &AK_STATS,
         }
+    }
+
+    /// Takes magazines (the pistol, the AK); otherwise it is loaded round by round from the
+    /// bullets carried (the revolver's cylinder).
+    pub fn uses_magazine(self) -> bool {
+        self != GunKind::Revolver
+    }
+
+    /// Its magazine (the standard one), for a gun that takes magazines.
+    pub fn magazine_item(self) -> Option<ItemId> {
+        match self {
+            GunKind::Pistol => Some(PISTOL_MAGAZINE),
+            GunKind::Revolver => None,
+            GunKind::Ak => Some(AK_MAGAZINE),
+        }
+    }
+
+    /// A long gun, held in both hands (its left hand under the handguard).
+    pub fn long(self) -> bool {
+        self == GunKind::Ak
     }
 
     /// Rounds the magazine holds with these attachments.
@@ -106,15 +187,18 @@ impl GunKind {
         }
     }
 
-    /// Attachments that can be fitted (a built-in scope cannot be changed).
+    /// Attachments that can be fitted (a built-in scope cannot be changed; the revolver takes
+    /// none).
     pub fn fits(self, bit: u8) -> bool {
-        !(bit == gun_mod::SCOPE && self.stats().builtin_scope)
+        self == GunKind::Pistol && !(bit == gun_mod::SCOPE && self.stats().builtin_scope)
     }
 
-    /// The five parts a gun goes together from (at the gun station).
-    pub fn parts(self) -> &'static [ItemId; 5] {
+    /// The parts a gun goes together from (at the gun station); none for one crafted whole.
+    pub fn parts(self) -> &'static [ItemId] {
         match self {
             GunKind::Pistol => &[PISTOL_FRAME, PISTOL_BARREL, PISTOL_SPRING, PISTOL_SLIDE, PISTOL_MAGAZINE],
+            GunKind::Revolver => &REVOLVER_PARTS,
+            GunKind::Ak => &AK_PARTS,
         }
     }
 }
@@ -129,11 +213,21 @@ mod tests {
             assert_eq!(GunKind::of(k.item()), Some(k));
             assert_eq!(max_stack(k.item()), 1);
             assert_eq!(max_damage(k.item()), k.stats().dirt_max);
-            assert!(k.magazine_size(gun_mod::EXTENDED_MAGAZINE) > k.magazine_size(0));
+            assert!(!k.uses_magazine() || k.magazine_size(gun_mod::EXTENDED_MAGAZINE) > k.magazine_size(0));
             // Rounds are kept in 6 bits of the item's data.
             assert!(k.magazine_size(gun_mod::EXTENDED_MAGAZINE) < 64);
             assert!(GunKind::of(k.ammo()).is_none() && max_stack(k.ammo()) == 64);
         }
         assert!(GunKind::Pistol.fits(gun_mod::SCOPE));
+        assert!(!GunKind::Revolver.fits(gun_mod::SCOPE));
+        assert!(!GunKind::Ak.fits(gun_mod::SCOPE));
+        // Each magazine goes into its own gun.
+        for k in GUN_KINDS {
+            if let Some(m) = k.magazine_item() {
+                assert_eq!(magazine_gun(m), Some(k));
+                assert_eq!(magazine_capacity(m), Some(k.magazine_size(0)));
+                assert_eq!(k.parts()[crate::model::gun::MAGAZINE], m);
+            }
+        }
     }
 }

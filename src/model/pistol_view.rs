@@ -1,11 +1,15 @@
-//! The Blockbench pistol (`pistol_vm`) wherever it is seen: its own moving parts (the slide
-//! flying back, the trigger, the round in the chamber, the magazine change) from what the
-//! gun is doing, and drawing it with its attachments. The first-person hand (`hand`) adds the
-//! arms' animations on top; the player model (`player`) holds it in its hands.
+//! The magazine-fed guns made in Blockbench, the pistol (`pistol_vm`) and the AK-47
+//! (`ak_vm`), wherever they are seen: their own moving parts (the slide or bolt carrier flying
+//! back, the trigger, the round in the chamber, the magazine change) from what the gun is
+//! doing, and drawing them with their attachments. Both models name their bones and
+//! animations alike and their reloads have the same moments, so everything here works on
+//! either (`Rig`). The first-person hand (`hand`) adds the arms' animations on top; the player
+//! model (`player`) holds them in its hands.
 
-use super::pistol_vm as vm;
-use super::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, sample, Anim, BonePose};
-use crate::item::gun_mod;
+use super::gun::PARTS;
+use super::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, sample, Anim, Bone, BonePose, Cube};
+use super::{ak_vm, pistol_vm};
+use crate::item::{gun_mod, GunKind};
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
 use glam::{Mat4, Vec3};
@@ -28,8 +32,87 @@ const RELOAD_RACK: f32 = 1.32;
 const RELOAD_PULL: f32 = 1.45;
 const RELOAD_PULLED: f32 = 1.55;
 
-/// The bones that are the arms and what holds the pistol, not the pistol's own parts.
+/// The bones that are the arms and what holds the gun, not the gun's own parts.
 const HOLDING: [&str; 5] = ["viewmodel", "right_arm", "right_arm_mesh", "left_arm", "left_arm_mesh"];
+
+/// A magazine-fed gun's Blockbench model: its bones, cubes, animations and texture pages, the
+/// points the game needs, and how it is placed.
+pub struct Rig {
+    pub kind: GunKind,
+    pub bones: &'static [Bone],
+    pub cubes: &'static [Cube],
+    pub anims: &'static [Anim],
+    pub pages: u32,
+    /// Its first texture layer (the clean pages; dirtier sets follow).
+    pub view: u32,
+    muzzle: (usize, [f32; 3]),
+    silenced: Option<(usize, [f32; 3])>,
+    eject: (usize, [f32; 3]),
+    laser: Option<(usize, [f32; 3])>,
+    light: Option<(usize, [f32; 3])>,
+    /// The gun's own bone (the whole gun, without the arms).
+    pub gun_bone: &'static str,
+    /// The groups each part is (`gun::FRAME` ..), with what is under them.
+    parts: [&'static [&'static str]; PARTS],
+    /// Degrees a magazine lying on its own is turned to stand up (the slant it has in the gun).
+    mag_upright: f32,
+}
+
+/// The pistol: a slide, the barrel with the chambered round, the recoil spring; attachments.
+pub static PISTOL: Rig = Rig {
+    kind: GunKind::Pistol,
+    bones: pistol_vm::BONES,
+    cubes: pistol_vm::CUBES,
+    anims: pistol_vm::ANIMS,
+    pages: pistol_vm::PAGES,
+    view: tex::PISTOL_VIEW,
+    muzzle: pistol_vm::MUZZLE,
+    silenced: Some(pistol_vm::SILENCED),
+    eject: pistol_vm::EJECT,
+    laser: Some(pistol_vm::LASER),
+    light: Some(pistol_vm::LIGHT),
+    gun_bone: "pistol",
+    parts: [&["frame", "grip"], &["barrel", "chambered_round"], &["recoil_spring"], &["slide"], &["magazine"]],
+    mag_upright: 18.0,
+};
+
+/// The AK-47: its parts at the gun station are the receiver (with the barrel, sights,
+/// handguard, grip and stock), the gas tube with the upper handguard, the bolt carrier (its
+/// `slide`), the dust cover with the recoil spring, and the curved magazine. No attachments.
+pub static AK: Rig = Rig {
+    kind: GunKind::Ak,
+    bones: ak_vm::BONES,
+    cubes: ak_vm::CUBES,
+    anims: ak_vm::ANIMS,
+    pages: ak_vm::PAGES,
+    view: tex::AK_VIEW,
+    muzzle: ak_vm::MUZZLE,
+    silenced: None,
+    eject: ak_vm::EJECT,
+    laser: None,
+    light: None,
+    gun_bone: "rifle",
+    parts: [&["frame", "grip", "chambered_round"], &["gas_tube"], &["slide"], &["dust_cover"], &["magazine"]],
+    mag_upright: 0.0,
+};
+
+/// The model of a magazine-fed gun (the pistol's for any other).
+pub fn rig(kind: GunKind) -> &'static Rig {
+    match kind {
+        GunKind::Ak => &AK,
+        _ => &PISTOL,
+    }
+}
+
+impl Rig {
+    fn anim(&self, name: &str) -> Option<&'static Anim> {
+        find_anim(self.anims, name)
+    }
+
+    fn bone(&self, name: &str) -> Option<usize> {
+        find_bone(self.bones, name)
+    }
+}
 
 /// What the R key does with the pistol.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -49,7 +132,7 @@ pub enum ReloadKind {
 /// only the magazine going out, or only coming in, or only the slide; `rack`: with the slide
 /// pulled and let go at the end.
 fn reload_span(kind: ReloadKind, rack: bool) -> (f32, f32) {
-    let length = anim("reload").map_or(2.0, |a| a.length);
+    let length = PISTOL.anim("reload").map_or(2.0, |a| a.length);
     let end = if rack { length } else { RELOAD_IN_END.min(length) };
     match kind {
         ReloadKind::Swap => (0.0, end),
@@ -64,7 +147,7 @@ fn reload_span(kind: ReloadKind, rack: bool) -> (f32, f32) {
 /// magazine dropped) would otherwise jump there.
 fn settle_seconds(kind: ReloadKind, rack: bool) -> f32 {
     let (_, b) = reload_span(kind, rack);
-    let length = anim("reload").map_or(2.0, |a| a.length);
+    let length = PISTOL.anim("reload").map_or(2.0, |a| a.length);
     if b < length - 1e-3 {
         0.3
     } else {
@@ -124,6 +207,48 @@ pub struct GunAnim {
     pub chambered: bool,
     /// Aimed (0 from the hip .. 1 aimed down the sights or the scope).
     pub aim: f32,
+    /// A revolver: its cylinder (the gun's `data`: what is in each chamber, the one under the
+    /// hammer); seconds into loading a round; whether its reload empties the cylinder; the
+    /// chambers the speedloader fills (bits).
+    pub cyl: u16,
+    pub load: Option<f32>,
+    pub ejects: bool,
+    pub loader: u8,
+    /// The pistol's magazine in it (rounds, how many it holds), and the one a reload puts in:
+    /// the rounds on top of it and in its witness holes show as many as there are (None: not
+    /// known, all of them).
+    pub mag: Option<(u8, u8)>,
+    pub new_mag: Option<(u8, u8)>,
+}
+
+impl GunAnim {
+    /// What `pack` leaves out, for the others (`net::Pose::gun_extra`): the magazine a reload
+    /// brings (bits 0-5 its rounds + 1, 0: none; bit 6 an extended one), a revolver's round
+    /// being loaded (bits 7-12: how far, + 1), its reload emptying the cylinder (bit 13) and
+    /// the chambers its speedloader fills (bits 16-21).
+    pub fn pack_extra(&self) -> u32 {
+        let mag = self.new_mag.map_or(0, |(n, cap)| (n as u32 + 1).min(63) | ((cap > 12) as u32) << 6);
+        let load = self.load.map_or(0, |t| 1 + (t / super::revolver_view::LOAD_END * 62.0).round().clamp(0.0, 62.0) as u32);
+        mag | load << 7 | (self.ejects as u32) << 13 | (self.loader as u32 & 0x3f) << 16
+    }
+
+    /// Takes back what `pack_extra` sent.
+    pub fn unpack_extra(&mut self, e: u32) {
+        let mag = e & 0x3f;
+        self.new_mag = (mag > 0).then(|| ((mag - 1) as u8, if e & 1 << 6 != 0 { 20 } else { 12 }));
+        let load = e >> 7 & 0x3f;
+        self.load = (load > 0).then(|| (load - 1) as f32 / 62.0 * super::revolver_view::LOAD_END);
+        self.ejects = e & 1 << 13 != 0;
+        self.loader = (e >> 16 & 0x3f) as u8;
+    }
+}
+
+/// The magazine seen now (see `GunAnim::mag`): a reload's new one once the hand has it.
+pub fn shown_mag(g: &GunAnim) -> Option<(u8, u8)> {
+    match g.reload_time() {
+        Some(t) if t >= RELOAD_FETCH && g.new_mag.is_some() => g.new_mag,
+        _ => g.mag,
+    }
 }
 
 impl GunAnim {
@@ -162,6 +287,10 @@ impl GunAnim {
             no_mag: b & 1 << 11 != 0,
             chambered: b & 1 << 12 == 0,
             aim: (b >> 13) as f32 / 7.0,
+            // A revolver's chambers are not sent: full while it has rounds.
+            cyl: if b & 1 << 12 == 0 { super::revolver_view::FULL } else { 0 },
+            ejects: true,
+            ..Default::default()
         }
     }
 
@@ -169,14 +298,6 @@ impl GunAnim {
     pub fn reload_time(&self) -> Option<f32> {
         self.reload.map(|p| reload_anim_time(p, self.kind, self.rack))
     }
-}
-
-fn anim(name: &str) -> Option<&'static Anim> {
-    find_anim(vm::ANIMS, name)
-}
-
-fn bone(name: &str) -> Option<usize> {
-    find_bone(vm::BONES, name)
 }
 
 /// A channel's value (0 position, 1 rotation, 2 scale) of one bone in an animation at `t`.
@@ -197,20 +318,20 @@ fn slide_back_time(anim: &Anim, bone: usize) -> f32 {
 }
 
 /// A pose with nothing moved.
-pub fn rest_pose() -> Vec<BonePose> {
-    vec![BonePose::default(); vm::BONES.len()]
+pub fn rest_pose(r: &Rig) -> Vec<BonePose> {
+    vec![BonePose::default(); r.bones.len()]
 }
 
 /// Adds the shot and the reload to the pose; the slide held back, the chamber empty and the
 /// magazine missing as the gun is. With `parts_only` the arms and what holds the pistol are
 /// left still (the player model holds it with its own arms).
-pub fn add_gun_anims(pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
-    let holding: Vec<usize> = if parts_only { HOLDING.iter().filter_map(|n| bone(n)).collect() } else { Vec::new() };
-    let slide = bone("slide");
-    let chamber = bone("chambered_round");
-    let rounds = bone("magazine_rounds");
+pub fn add_gun_anims(r: &Rig, pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
+    let holding: Vec<usize> = if parts_only { HOLDING.iter().filter_map(|n| r.bone(n)).collect() } else { Vec::new() };
+    let slide = r.bone("slide");
+    let chamber = r.bone("chambered_round");
+    let rounds = r.bone("magazine_rounds");
     let reloading = g.reload.is_some();
-    if let (Some(p), Some(an)) = (g.reload, anim("reload")) {
+    if let (Some(p), Some(an)) = (g.reload, r.anim("reload")) {
         // Without the slide being pulled, the slide and the chamber stay as they are.
         let t = reload_anim_time(p, g.kind, g.rack);
         let own = |b: usize| {
@@ -230,12 +351,12 @@ pub fn add_gun_anims(pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
             pose[r].scale = Vec3::ZERO;
         }
     }
-    if let (Some(st), Some(an)) = (g.shot, anim("shoot")) {
+    if let (Some(st), Some(an)) = (g.shot, r.anim("shoot")) {
         if st < an.length {
             add_anim(pose, an, st, 1.0, |b| holding.contains(&b));
         }
     }
-    if let (Some(dt), Some(an), Some(trigger)) = (g.dry, anim("shoot"), bone("trigger")) {
+    if let (Some(dt), Some(an), Some(trigger)) = (g.dry, r.anim("shoot"), r.bone("trigger")) {
         if dt < an.length {
             add_anim(pose, an, dt, 1.0, |b| b != trigger);
         }
@@ -243,23 +364,27 @@ pub fn add_gun_anims(pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
     if !(reloading && g.rack) {
         // Held back on an empty magazine (once the last shot has thrown it back).
         if let (Some(s), true) = (slide, g.locked) {
-            let back = anim("shoot").map_or(0.0, |an| slide_back_time(an, s));
+            let back = r.anim("shoot").map_or(0.0, |an| slide_back_time(an, s));
             if g.shot.map_or(true, |st| st >= back) {
-                pose[s].pos = anim("reload").map_or(Vec3::ZERO, |an| channel_at(an, s, 0, 0.0));
+                pose[s].pos = r.anim("reload").map_or(Vec3::ZERO, |an| channel_at(an, s, 0, 0.0));
             }
         }
         if let (Some(c), false) = (chamber, g.chambered) {
             pose[c].scale = Vec3::ZERO;
         }
     }
-    if let (Some(m), true, false) = (bone("magazine_mesh"), g.no_mag, reloading) {
+    if let (Some(m), true, false) = (r.bone("magazine_mesh"), g.no_mag, reloading) {
         pose[m].scale = Vec3::ZERO;
+    }
+    // An empty magazine shows no rounds (its witness holes: `emit_pistol`).
+    if let (Some(r), Some((0, _))) = (rounds, shown_mag(g)) {
+        pose[r].scale = Vec3::ZERO;
     }
 }
 
 /// The attachments are groups of the model: shown only when fitted (the extended magazine
 /// in place of the standard one's base plate).
-pub fn apply_mods(pose: &mut [BonePose], mods: u8) {
+pub fn apply_mods(r: &Rig, pose: &mut [BonePose], mods: u8) {
     let ext = mods & gun_mod::EXTENDED_MAGAZINE != 0;
     for (name, shown) in [
         ("silencer", mods & gun_mod::SILENCER != 0),
@@ -271,31 +396,33 @@ pub fn apply_mods(pose: &mut [BonePose], mods: u8) {
         ("mag_extended", ext),
         ("mag_standard", !ext),
     ] {
-        if let (Some(b), false) = (bone(name), shown) {
+        if let (Some(b), false) = (r.bone(name), shown) {
             pose[b].scale = Vec3::ZERO;
         }
     }
 }
 
 /// How dirty a gun looks (0 clean .. `tex::PISTOL_DIRT_LEVELS - 1`) with this much dirt
-/// (`Stack::damage`) of `max`.
+/// (`Stack::damage`) of `max`. A few magazines' worth does not show yet.
 pub fn dirt_level(damage: u16, max: u16) -> u8 {
     if damage == 0 || max == 0 {
         return 0;
     }
     let top = tex::PISTOL_DIRT_LEVELS - 1;
-    ((damage as f32 / max as f32 * top as f32).ceil() as u32).clamp(1, top) as u8
+    ((damage as f32 / max as f32 * top as f32).round() as u32).min(top) as u8
 }
 
-/// The first texture layer of the pistol's pages as dirty as `dirt` (`dirt_level`).
-pub fn layers(dirt: u8) -> u32 {
-    tex::PISTOL_VIEW + (dirt as u32).min(tex::PISTOL_DIRT_LEVELS - 1) * vm::PAGES
+/// The first texture layer of the gun's pages as dirty as `dirt` (`dirt_level`).
+pub fn layers(r: &Rig, dirt: u8) -> u32 {
+    r.view + (dirt as u32).min(tex::PISTOL_DIRT_LEVELS - 1) * r.pages
 }
 
 /// The pistol's cubes (with the attachments `apply_mods` left shown). The see-through glass
 /// (the scope's lenses) goes to `glass` to be drawn blended after the rest, when given; the
 /// eyepiece's glass is left out with `eyepiece_view` (the scope's view shows there instead).
+#[allow(clippy::too_many_arguments)]
 pub fn emit_pistol(
+    r: &Rig,
     out: &mut Vec<Vertex>,
     mut glass: Option<&mut Vec<Vertex>>,
     mats: &[Mat4],
@@ -303,11 +430,18 @@ pub fn emit_pistol(
     eyepiece_view: bool,
     dirt: u8,
     lamp: bool,
+    mag: Option<(u8, u8)>,
     light: [u8; 4],
     fl: u8,
 ) {
-    let first = layers(dirt);
-    for c in vm::CUBES {
+    let first = layers(r, dirt);
+    for c in r.cubes {
+        // The magazine's rounds: as many as are in it.
+        if let Some((n, cap)) = mag {
+            if !bench::mag_cube_shown(r, c.name, n, cap) {
+                continue;
+            }
+        }
         // The weapon light's lens glows while it is on.
         let fl = if lamp && c.name == "flashlight_lens" { fl | crate::world::mesh::flags::EMISSIVE } else { fl };
         if !shown[c.bone] {
@@ -329,11 +463,11 @@ pub fn emit_pistol(
 
 /// The scope's eyepiece (its back lens) where `mats` put it: its middle, its right and up
 /// directions (unit) and its radius, when a scope is shown.
-pub fn eyepiece(mats: &[Mat4], shown: &[bool]) -> Option<(Vec3, Vec3, Vec3, f32)> {
+pub fn eyepiece(r: &Rig, mats: &[Mat4], shown: &[bool]) -> Option<(Vec3, Vec3, Vec3, f32)> {
     let mut lo = Vec3::splat(f32::MAX);
     let mut hi = Vec3::splat(f32::MIN);
     let mut bone = None;
-    for c in vm::CUBES.iter().filter(|c| c.name.starts_with("scope_lens_back")) {
+    for c in r.cubes.iter().filter(|c| c.name.starts_with("scope_lens_back")) {
         lo = lo.min(Vec3::from(c.from)).min(Vec3::from(c.to));
         hi = hi.max(Vec3::from(c.from)).max(Vec3::from(c.to));
         bone = Some(c.bone);
@@ -353,19 +487,19 @@ pub fn eyepiece(mats: &[Mat4], shown: &[bool]) -> Option<(Vec3, Vec3, Vec3, f32)
 /// The pistol on the gun station's table, taken apart ("strip") and with attachments going on
 /// ("fit_*"): which bones each part is, and the part's window of the strip animation.
 pub mod bench {
-    use super::super::gun::{BARREL, FRAME, MAGAZINE, PARTS, SLIDE, SPRING};
+    use super::super::gun::{BARREL, FRAME, MAGAZINE, PARTS, SLIDE};
     use super::super::viewmodel::{add_anim, find_anim, BonePose};
-    use super::{bone, vm};
+    use super::Rig;
     use crate::item::gun_mod;
 
     /// A set of bones (bit i: bone i).
     pub type Bones = u64;
 
-    fn subtree(name: &str) -> Bones {
-        let Some(root) = bone(name) else { return 0 };
+    fn subtree(r: &Rig, name: &str) -> Bones {
+        let Some(root) = r.bone(name) else { return 0 };
         let mut set: Bones = 1 << root;
         // Parents come before their children.
-        for (i, b) in vm::BONES.iter().enumerate() {
+        for (i, b) in r.bones.iter().enumerate() {
             if b.parent >= 0 && set & (1 << b.parent) != 0 {
                 set |= 1 << i;
             }
@@ -374,7 +508,7 @@ pub mod bench {
     }
 
     /// The bones an attachment is (`gun_mod` bit; several bits: all of them).
-    pub fn attachment(bits: u8) -> Bones {
+    pub fn attachment(r: &Rig, bits: u8) -> Bones {
         [
             (gun_mod::SCOPE, "scope"),
             (gun_mod::SILENCER, "silencer"),
@@ -383,7 +517,7 @@ pub mod bench {
         ]
         .iter()
         .filter(|(bit, _)| bits & bit != 0)
-        .fold(0, |b, (_, name)| b | subtree(name))
+        .fold(0, |b, (_, name)| b | subtree(r, name))
     }
 
     /// The attachments that sit on a part.
@@ -398,26 +532,20 @@ pub mod bench {
 
     /// The bones a part is (`gun::FRAME` ..), without the attachments on it; with `mods`,
     /// those fitted on it too.
-    pub fn part(part: usize, mods: u8) -> Bones {
-        let own = match part {
-            FRAME => subtree("frame") | subtree("grip"),
-            BARREL => subtree("barrel") | subtree("chambered_round"),
-            SPRING => subtree("recoil_spring"),
-            SLIDE => subtree("slide"),
-            MAGAZINE => subtree("magazine"),
-            _ => 0,
-        };
+    pub fn part(r: &Rig, part: usize, mods: u8) -> Bones {
+        let own = r.parts.get(part).map_or(0, |names| names.iter().fold(0, |b, n| b | subtree(r, n)));
         let on = attachments_on(part);
-        let all_on = attachment(on);
+        let all_on = attachment(r, on);
         (own & !all_on) | if mods & on != 0 { all_on } else { 0 }
     }
 
     /// Whether a cube of a magazine with `rounds` of `cap` in it shows: the brass in its
     /// witness holes and the rounds on top only as far as there are rounds.
-    pub fn mag_cube_shown(name: &str, rounds: u8, cap: u8) -> bool {
+    pub fn mag_cube_shown(r: &Rig, name: &str, rounds: u8, cap: u8) -> bool {
         if let Some(k) = name.strip_prefix("witness_brass_").and_then(|r| r.get(1..)?.parse::<u32>().ok()) {
             // Hole k (from the top) shows brass once the rounds reach down to it.
-            return (rounds as u32) * 7 >= (k + 1) * cap.max(1) as u32;
+            let holes = r.cubes.iter().filter(|c| c.name.starts_with("witness_brass_r")).count() as u32;
+            return (rounds as u32) * holes >= (k + 1) * cap.max(1) as u32;
         }
         if name.starts_with("mag_round_top") {
             return rounds >= 1;
@@ -428,76 +556,80 @@ pub mod bench {
         true
     }
 
-    /// The pistol's bones an item is when it is on its own (a part, an attachment, a
-    /// magazine, a round), posed as it lies, with a magazine's rounds (in it, of how many it
-    /// holds), and how to turn the model for the item: the muzzle end to +X, its right side
-    /// toward +Z (a magazine straightened from the grip's slant, stood up).
-    pub fn item_rig(st: &crate::item::Stack) -> Option<(Bones, Vec<BonePose>, Option<(u8, u8)>, glam::Mat4)> {
+    /// The gun's bones an item is when it is on its own (a part, an attachment, a magazine, a
+    /// round), posed as it lies, with a magazine's rounds (in it, of how many it holds), and how
+    /// to turn the model for the item: the muzzle end to +X, its right side toward +Z (a
+    /// magazine straightened from its slant in the gun, stood up).
+    pub fn item_rig(r: &Rig, st: &crate::item::Stack) -> Option<(Bones, Vec<BonePose>, Option<(u8, u8)>, glam::Mat4)> {
         use crate::item::*;
         use glam::Mat4;
         let side = Mat4::from_rotation_y((-90f32).to_radians());
-        let part = |p: usize, mods: u8| (self::part(p, mods), pose([0.0; PARTS], mods, false, false), None, side);
-        Some(match st.item {
-            PISTOL_FRAME => part(FRAME, gun_mods(st) & gun_mod::RAIL),
-            PISTOL_BARREL => part(BARREL, gun_mods(st) & gun_mod::SILENCER),
-            PISTOL_SPRING => part(SPRING, 0),
-            PISTOL_SLIDE => part(SLIDE, gun_mods(st) & gun_mod::SCOPE),
-            PISTOL_MAGAZINE | EXTENDED_MAGAZINE => {
-                let cap = magazine_capacity(st.item).unwrap_or(12);
-                let rounds = gun_rounds(st);
-                let ext = if st.item == EXTENDED_MAGAZINE { gun_mod::EXTENDED_MAGAZINE } else { 0 };
-                let upright = side * Mat4::from_rotation_x(18f32.to_radians());
-                (self::part(MAGAZINE, 0), pose([0.0; PARTS], ext, rounds > 0, false), Some((rounds, cap)), upright)
-            }
-            SCOPE => (attachment(gun_mod::SCOPE), pose([0.0; PARTS], gun_mod::SCOPE, false, false), None, side),
-            SILENCER => (attachment(gun_mod::SILENCER), pose([0.0; PARTS], gun_mod::SILENCER, false, false), None, side),
-            LASER_SIGHT => (attachment(gun_mod::LASER), pose([0.0; PARTS], gun_mod::LASER, false, false), None, side),
-            FLASHLIGHT => (attachment(gun_mod::LIGHT), pose([0.0; PARTS], gun_mod::LIGHT, false, false), None, side),
-            BULLET => (round(), pose([0.0; PARTS], 0, false, true), None, side),
+        let none = [0.0; PARTS];
+        let is_mag = magazine_gun(st.item) == Some(r.kind);
+        if is_mag {
+            let cap = magazine_capacity(st.item).unwrap_or(12);
+            let rounds = gun_rounds(st);
+            let ext = if st.item == EXTENDED_MAGAZINE { gun_mod::EXTENDED_MAGAZINE } else { 0 };
+            let upright = side * Mat4::from_rotation_x(r.mag_upright.to_radians());
+            return Some((part(r, MAGAZINE, 0), pose(r, none, ext, rounds > 0, false), Some((rounds, cap)), upright));
+        }
+        if let Some(p) = r.kind.parts().iter().position(|&i| i == st.item) {
+            let mods = gun_mods(st) & attachments_on(p);
+            return Some((part(r, p, mods), pose(r, none, mods, false, false), None, side));
+        }
+        if st.item == r.kind.ammo() {
+            return Some((round(r), pose(r, none, 0, false, true), None, side));
+        }
+        let bit = match st.item {
+            SCOPE => gun_mod::SCOPE,
+            SILENCER => gun_mod::SILENCER,
+            LASER_SIGHT => gun_mod::LASER,
+            FLASHLIGHT => gun_mod::LIGHT,
             _ => return None,
-        })
+        };
+        let bones = attachment(r, bit);
+        (bones != 0).then(|| (bones, pose(r, none, bit, false, false), None, side))
     }
 
     /// The round in the chamber (a cartridge on its own).
-    pub fn round() -> Bones {
-        subtree("chambered_round")
+    pub fn round(r: &Rig) -> Bones {
+        subtree(r, "chambered_round")
     }
 
     /// The whole gun without its attachments, or with `mods` fitted.
-    pub fn gun(mods: u8) -> Bones {
-        (0..PARTS).fold(0, |b, p| b | part(p, mods))
+    pub fn gun(r: &Rig, mods: u8) -> Bones {
+        (0..PARTS).fold(0, |b, p| b | part(r, p, mods))
     }
 
     /// The strip animation's length: every part off.
-    pub fn strip_length() -> f32 {
-        find_anim(vm::ANIMS, "strip").map_or(2.4, |a| a.length)
+    pub fn strip_length(r: &Rig) -> f32 {
+        find_anim(r.anims, "strip").map_or(2.4, |a| a.length)
     }
 
     /// The bones a part's own animation moves.
-    fn moved(part: usize) -> Bones {
+    fn moved(r: &Rig, part: usize) -> Bones {
         match part {
-            BARREL => subtree("barrel") | subtree("chambered_round"),
             FRAME => 0,
-            p => self::part(p, 0xff),
+            p => self::part(r, p, 0xff),
         }
     }
 
     /// The pose with each part as far into the strip animation as `at` says (seconds), the
     /// attachments in `mods` shown (and the extended magazine with its bit), the magazine's
     /// top rounds and the chambered round shown or not.
-    pub fn pose(at: [f32; PARTS], mods: u8, rounds: bool, chambered: bool) -> Vec<BonePose> {
-        let mut pose = super::rest_pose();
-        if let Some(an) = find_anim(vm::ANIMS, "strip") {
+    pub fn pose(r: &Rig, at: [f32; PARTS], mods: u8, rounds: bool, chambered: bool) -> Vec<BonePose> {
+        let mut pose = super::rest_pose(r);
+        if let Some(an) = find_anim(r.anims, "strip") {
             for (p, &t) in at.iter().enumerate() {
-                let m = moved(p);
+                let m = moved(r, p);
                 if m != 0 && t > 0.0 {
                     add_anim(&mut pose, an, t, 1.0, |b| m & (1 << b) == 0);
                 }
             }
         }
-        super::apply_mods(&mut pose, mods);
+        super::apply_mods(r, &mut pose, mods);
         for (name, show) in [("magazine_rounds", rounds), ("chambered_round", chambered)] {
-            if let (Some(b), false) = (bone(name), show) {
+            if let (Some(b), false) = (r.bone(name), show) {
                 pose[b].scale = glam::Vec3::ZERO;
             }
         }
@@ -505,7 +637,7 @@ pub mod bench {
     }
 
     /// An attachment's own animation onto the gun ("fit_scope" ..) and its length.
-    pub fn fit_anim(bit: u8) -> Option<&'static super::super::viewmodel::Anim> {
+    pub fn fit_anim(r: &Rig, bit: u8) -> Option<&'static super::super::viewmodel::Anim> {
         let name = match bit {
             gun_mod::SCOPE => "fit_scope",
             gun_mod::SILENCER => "fit_silencer",
@@ -513,13 +645,13 @@ pub mod bench {
             gun_mod::LIGHT => "fit_flashlight",
             _ => return None,
         };
-        find_anim(vm::ANIMS, name)
+        find_anim(r.anims, name)
     }
 
     /// Adds an attachment going on, `t` seconds into its animation.
-    pub fn add_fit(pose: &mut [BonePose], bit: u8, t: f32) {
-        if let Some(an) = fit_anim(bit) {
-            let m = attachment(bit);
+    pub fn add_fit(r: &Rig, pose: &mut [BonePose], bit: u8, t: f32) {
+        if let Some(an) = fit_anim(r, bit) {
+            let m = attachment(r, bit);
             add_anim(pose, an, t, 1.0, |b| m & (1 << b) == 0);
         }
     }
@@ -530,68 +662,64 @@ pub mod bench {
 
         #[test]
         fn the_parts_are_the_whole_gun_once_each() {
-            let mut seen: Bones = 0;
-            for p in 0..PARTS {
-                let b = part(p, 0);
-                assert!(b != 0, "part {p}");
-                assert_eq!(seen & b, 0, "part {p} shares bones");
-                seen |= b;
-            }
-            for bit in [gun_mod::SCOPE, gun_mod::SILENCER, gun_mod::LASER, gun_mod::LIGHT] {
-                assert_eq!(seen & attachment(bit), 0);
-                assert!(gun(bit) & attachment(bit) != 0);
-            }
-            // Every drawn cube is in a part or an attachment.
-            let all = gun(0xff);
-            for c in vm::CUBES {
-                assert!(all & (1 << c.bone) != 0, "{} is in no part", c.name);
+            for r in [&super::super::PISTOL, &super::super::AK] {
+                let mut seen: Bones = 0;
+                for p in 0..PARTS {
+                    let b = part(r, p, 0);
+                    assert!(b != 0, "part {p}");
+                    assert_eq!(seen & b, 0, "part {p} shares bones");
+                    seen |= b;
+                }
+                for bit in [gun_mod::SCOPE, gun_mod::SILENCER, gun_mod::LASER, gun_mod::LIGHT] {
+                    assert_eq!(seen & attachment(r, bit), 0);
+                    if r.kind.fits(bit) {
+                        assert!(gun(r, bit) & attachment(r, bit) != 0);
+                    }
+                }
+                // Every drawn cube is in a part or an attachment.
+                let all = gun(r, 0xff);
+                for c in r.cubes {
+                    assert!(all & (1 << c.bone) != 0, "{} is in no part", c.name);
+                }
             }
         }
     }
 }
 
 /// Where the bullet leaves (the silencer's end when there is one): bone and model point.
-pub fn muzzle(mods: u8) -> (usize, Vec3) {
-    let (b, p) = if mods & gun_mod::SILENCER != 0 { vm::SILENCED } else { vm::MUZZLE };
+pub fn muzzle(r: &Rig, mods: u8) -> (usize, Vec3) {
+    let (b, p) = match r.silenced {
+        Some(s) if mods & gun_mod::SILENCER != 0 => s,
+        _ => r.muzzle,
+    };
     (b, Vec3::from(p))
 }
 
-/// Where the spent case comes out (the pistol's own bone: the chambered round's is hidden
+/// Where the spent case comes out (the gun's own bone: the chambered round's is hidden
 /// while the chamber is empty).
-pub fn eject() -> (usize, Vec3) {
-    (bone("pistol").unwrap_or(vm::EJECT.0), Vec3::from(vm::EJECT.1))
+pub fn eject(r: &Rig) -> (usize, Vec3) {
+    (r.bone(r.gun_bone).unwrap_or(r.eject.0), Vec3::from(r.eject.1))
 }
 
 /// Where the weapon light's light comes from (its lens).
-pub fn light() -> (usize, Vec3) {
-    let (b, p) = vm::LIGHT;
+pub fn light(r: &Rig) -> (usize, Vec3) {
+    let (b, p) = r.light.unwrap_or(r.muzzle);
     (b, Vec3::from(p))
 }
 
 /// Where the laser sight's beam starts.
-pub fn laser() -> (usize, Vec3) {
-    let (b, p) = vm::LASER;
+pub fn laser(r: &Rig) -> (usize, Vec3) {
+    let (b, p) = r.laser.unwrap_or(r.muzzle);
     (b, Vec3::from(p))
-}
-
-/// The bottom of the magazine's base plate, where a hand holds it (world, with `mats`).
-pub fn magazine_bottom(mats: &[Mat4]) -> Option<Vec3> {
-    let c = vm::CUBES.iter().find(|c| c.name == "mag_base")?;
-    let c = if mats[c.bone].x_axis.length() < 1e-4 {
-        vm::CUBES.iter().find(|c| c.name == "ext_base")?
-    } else {
-        c
-    };
-    let p = Vec3::new((c.from[0] + c.to[0]) * 0.5, c.from[1].min(c.to[1]), (c.from[2] + c.to[2]) * 0.5);
-    Some((mats[c.bone] * cube_matrix(c)).transform_point3(p))
 }
 
 /// From the Blockbench model's space to the old gun space (`gun::Spec`: the muzzle +X, the
 /// right side +Z, about a centimetre a unit), so the pistol sits where the old one did: the
-/// right fist's middle on the grip at the spec's `hand`, the same length.
-pub fn to_gun_space() -> Mat4 {
-    let spec = super::gun::spec(crate::item::GunKind::Pistol);
-    let fist = bone("right_arm_mesh").map_or(Vec3::ZERO, |b| Vec3::from(vm::BONES[b].origin));
+/// right fist's middle on the grip at the spec's `hand`, the same length (the AK at the same
+/// scale, its grip in the same fist).
+pub fn to_gun_space(r: &Rig) -> Mat4 {
+    let spec = super::gun::spec(r.kind);
+    let fist = r.bone("right_arm_mesh").map_or(Vec3::ZERO, |b| Vec3::from(r.bones[b].origin));
     // The old pistol is 18.2 gun units long, the Blockbench one 21.8 pixels.
     let scale = 18.2 / 21.8;
     Mat4::from_translation(spec.hand)
@@ -600,19 +728,10 @@ pub fn to_gun_space() -> Mat4 {
         * Mat4::from_translation(-fist)
 }
 
-/// The line of sight (the scope's axis with one, else over the iron sights) above the right
-/// fist, in the old gun space.
-pub fn sight_above_hand(mods: u8) -> Vec3 {
-    let y = if mods & gun_mod::SCOPE != 0 { -8.5 } else { -9.7 };
-    let fist = bone("right_arm_mesh").map_or(Vec3::ZERO, |b| Vec3::from(vm::BONES[b].origin));
-    let pistol = bone("pistol").unwrap_or(0);
-    rest_point_in_gun_space((pistol, Vec3::new(fist.x, y, fist.z))) - rest_point_in_gun_space((pistol, fist))
-}
-
-/// A model point of the pistol at rest, in the old gun space (for the third-person muzzle,
+/// A model point of the gun at rest, in the old gun space (for the third-person muzzle,
 /// ejection port and laser, see `player::gun_point`).
-pub fn rest_point_in_gun_space((b, p): (usize, Vec3)) -> Vec3 {
-    let (mats, _) = super::viewmodel::bone_matrices(vm::BONES, &rest_pose(), to_gun_space());
+pub fn rest_point_in_gun_space(r: &Rig, (b, p): (usize, Vec3)) -> Vec3 {
+    let (mats, _) = super::viewmodel::bone_matrices(r.bones, &rest_pose(r), to_gun_space(r));
     mats[b].transform_point3(p)
 }
 
@@ -633,14 +752,44 @@ mod tests {
             no_mag: false,
             chambered: false,
             aim: 0.0,
+            ..Default::default()
         };
         let back = GunAnim::unpack(g.pack(), None);
         assert!((back.reload.unwrap() - 0.5).abs() < 0.02);
-        assert_eq!(GunAnim { reload: g.reload, ..back }, g);
+        assert_eq!(GunAnim { reload: g.reload, cyl: 0, ejects: false, ..back }, g);
         let aimed = GunAnim { aim: 1.0, ..g };
         assert_eq!(GunAnim::unpack(aimed.pack(), None).aim, 1.0);
         let idle = GunAnim { chambered: true, ..GunAnim::default() };
-        assert_eq!(GunAnim::unpack(idle.pack(), None), idle);
+        assert_eq!(GunAnim { cyl: 0, ejects: false, ..GunAnim::unpack(idle.pack(), None) }, idle);
+    }
+
+    #[test]
+    fn what_the_gun_is_doing_reaches_the_others() {
+        let g = GunAnim { new_mag: Some((17, 20)), load: Some(0.3), ejects: true, loader: 0b101101, ..Default::default() };
+        let mut back = GunAnim::default();
+        back.unpack_extra(g.pack_extra());
+        assert_eq!(back.new_mag, g.new_mag);
+        assert!((back.load.unwrap() - 0.3).abs() < 0.01);
+        assert!(back.ejects && back.loader == g.loader);
+        let mut none = GunAnim::default();
+        none.unpack_extra(GunAnim::default().pack_extra());
+        assert_eq!(none, GunAnim::default());
+    }
+
+    #[test]
+    fn the_magazine_in_the_gun_shows_its_rounds() {
+        let drawn = |mag: Option<(u8, u8)>| {
+            let g = GunAnim { chambered: true, mag, ..Default::default() };
+            let mut pose = rest_pose(&PISTOL);
+            add_gun_anims(&PISTOL, &mut pose, &g, false);
+            let (mats, shown) = super::super::viewmodel::bone_matrices(PISTOL.bones, &pose, Mat4::IDENTITY);
+            let mut out = Vec::new();
+            emit_pistol(&PISTOL, &mut out, None, &mats, &shown, false, 0, false, shown_mag(&g), [255; 4], 0);
+            out.len()
+        };
+        let (full, half, empty) = (drawn(Some((12, 12))), drawn(Some((6, 12))), drawn(Some((0, 12))));
+        assert!(full > half && half > empty, "{full} {half} {empty}");
+        assert_eq!(drawn(None), full);
     }
 
     #[test]
@@ -659,10 +808,27 @@ mod tests {
     #[test]
     fn the_pistol_sits_where_the_old_one_did() {
         // The muzzle out in front (+X) of the grip, about where the old one's was.
-        let m = rest_point_in_gun_space(muzzle(0));
+        let m = rest_point_in_gun_space(&PISTOL, muzzle(&PISTOL, 0));
         let old = Vec3::new(8.6, 3.0, 0.0);
         assert!((m - old).length() < 4.0, "{m} vs {old}");
-        let e = rest_point_in_gun_space(eject());
+        let e = rest_point_in_gun_space(&PISTOL, eject(&PISTOL));
         assert!(e.x < m.x && e.y > 0.0, "{e}");
+    }
+
+    #[test]
+    fn the_ak_is_held_in_the_same_fist_and_reloads_at_the_same_moments() {
+        // Its reload is timed by the pistol's (`reload_span`).
+        let len = |r: &Rig| r.anim("reload").map(|a| a.length);
+        assert_eq!(len(&AK), len(&PISTOL));
+        for name in ["shoot", "reload", "walk", "sprint", "aim", "strip"] {
+            assert!(AK.anim(name).is_some(), "{name}");
+        }
+        for name in ["slide", "trigger", "magazine", "magazine_mesh", "magazine_rounds", "chambered_round", "left_arm", "rifle"] {
+            assert!(AK.bone(name).is_some(), "{name}");
+        }
+        // The muzzle far out in front of the grip, the ejection port over it.
+        let m = rest_point_in_gun_space(&AK, muzzle(&AK, 0));
+        let e = rest_point_in_gun_space(&AK, eject(&AK));
+        assert!(m.x > 40.0 && e.x < m.x && e.y > 0.0, "{m} {e}");
     }
 }

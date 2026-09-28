@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 26;
+pub const PROTOCOL: u16 = 30;
 
 // ---------------------------------------------------------------------------- data
 
@@ -59,14 +59,21 @@ pub struct Pose {
     pub book_page: u8,
     /// In spectator mode: flies through blocks, and only other spectators see them.
     pub spectator: bool,
+    /// Running (0..1, eased in and out: their gun is carried across the chest).
+    pub sprint: f32,
     /// How dirty the held gun is (`model::pistol_view::dirt_level`), for its look.
     pub gun_dirt: u8,
     /// At a gun station: the cleaning brush in the hand, where it is; looking into its
     /// drawer (it is out).
     pub brush: Option<Vec3>,
     pub drawer: bool,
-    /// The held stack's `data` (a magazine's rounds, a gun's state).
+    /// The held stack's `data` (a magazine's rounds, a gun's state: the rounds in its
+    /// magazine, a revolver's cylinder).
     pub held_data: u16,
+    /// More of what the held gun is doing (`model::pistol_view::GunAnim::pack_extra`): the
+    /// magazine a reload brings, a revolver's round being loaded, its cases thrown out, the
+    /// chambers its speedloader fills.
+    pub gun_extra: u32,
     /// At a gun station: what is held on the mouse over its table or drawer, and where it
     /// shows (world).
     pub bench_hold: Option<(Stack, Vec3)>,
@@ -122,6 +129,9 @@ pub struct MobNet {
     pub death: f32,
     /// A sheep without its wool.
     pub sheared: bool,
+    /// A target dummy: the damage it has taken, and the last hit.
+    pub taken: f32,
+    pub last_hit: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -230,6 +240,10 @@ pub enum Msg {
     },
     /// Used shears on a mob (the host drops its wool).
     Shear {
+        id: u32,
+    },
+    /// Took down a target dummy (the host removes it and drops it as an item).
+    BreakDummy {
         id: u32,
     },
     DropItem {
@@ -424,6 +438,7 @@ impl W {
         self.u8(p.book);
         self.u8(p.book_page);
         self.bool(p.spectator);
+        self.f32(p.sprint);
         self.u8(p.gun_dirt);
         match p.brush {
             Some(b) => {
@@ -434,6 +449,7 @@ impl W {
         }
         self.bool(p.drawer);
         self.u16(p.held_data);
+        self.u32(p.gun_extra);
         match p.bench_hold {
             Some((st, at)) => {
                 self.bool(true);
@@ -458,6 +474,11 @@ impl W {
         self.u16(b.next_id);
         for n in b.boxes {
             self.u16(n.unwrap_or(u16::MAX));
+        }
+        self.bool(b.loader);
+        self.bool(b.loader_mag.is_some());
+        if let Some(m) = b.loader_mag {
+            self.stack(m);
         }
         let e = &b.event;
         self.u16(e.serial);
@@ -591,10 +612,12 @@ impl R<'_> {
             book: self.u8()?,
             book_page: self.u8()?,
             spectator: self.bool()?,
+            sprint: self.f32()?,
             gun_dirt: self.u8()?,
             brush: if self.bool()? { Some(self.vec3()?) } else { None },
             drawer: self.bool()?,
             held_data: self.u16()?,
+            gun_extra: self.u32()?,
             bench_hold: if self.bool()? { Some((self.stack()?, self.vec3()?)) } else { None },
         })
     }
@@ -612,10 +635,14 @@ impl R<'_> {
         let next_id = self.u16()?;
         let slot = |v: u16| (v != u16::MAX).then_some(v);
         let boxes = [slot(self.u16()?), slot(self.u16()?), slot(self.u16()?)];
+        let loader = self.bool()?;
+        let loader_mag = if self.bool()? { Some(self.stack()?) } else { None };
         Some(GunBench {
             items,
             next_id,
             boxes,
+            loader,
+            loader_mag,
             event: BenchEvent {
                 serial: self.u16()?,
                 kind: self.u8()?,
@@ -694,6 +721,10 @@ impl Msg {
             }
             Msg::Shear { id } => {
                 w.u8(11);
+                w.u32(*id);
+            }
+            Msg::BreakDummy { id } => {
+                w.u8(48);
                 w.u32(*id);
             }
             Msg::FurnaceUse {
@@ -816,6 +847,8 @@ impl Msg {
                     w.bool(m.hurt);
                     w.f32(m.death);
                     w.bool(m.sheared);
+                    w.f32(m.taken);
+                    w.f32(m.last_hit);
                 }
                 w.u32(items.len() as u32);
                 for it in items {
@@ -982,6 +1015,7 @@ impl Msg {
             9 => Msg::Command(r.str()?),
             10 => Msg::Save(r.state()?),
             11 => Msg::Shear { id: r.u32()? },
+            48 => Msg::BreakDummy { id: r.u32()? },
             12 => Msg::FurnaceUse {
                 p: r.ivec3()?,
                 part: r.u8()?,
@@ -1026,6 +1060,8 @@ impl Msg {
                         hurt: r.bool()?,
                         death: r.f32()?,
                         sheared: r.bool()?,
+                        taken: r.f32()?,
+                        last_hit: r.f32()?,
                     })
                 })?,
                 items: r.list(|r| {
@@ -1165,10 +1201,13 @@ mod tests {
             status: status::TYPING,
             gun_mods: 0b1001,
             gun_state: 0x1c5,
+            held_data: 0x0915,
+            gun_extra: 0x2a_2d4b,
             armor: 0x1234,
             book: book::OPEN | 5,
             book_page: book::HUNGARIAN | 7,
             spectator: true,
+            sprint: 0.5,
             ..Default::default()
         }));
         roundtrip(Msg::Grenade {
@@ -1212,6 +1251,7 @@ mod tests {
         });
         roundtrip(Msg::Save(state));
         roundtrip(Msg::Shear { id: 77 });
+        roundtrip(Msg::BreakDummy { id: 78 });
         roundtrip(Msg::Blocks(vec![
             (IVec3::new(1, 2, 3), 7),
             (IVec3::new(-9, 0, 4), 0),
@@ -1229,6 +1269,8 @@ mod tests {
                 hurt: true,
                 death: -1.0,
                 sheared: true,
+                taken: 12.5,
+                last_hit: 7.0,
             }],
             items: vec![ItemNet {
                 id: 9,

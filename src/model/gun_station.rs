@@ -1,26 +1,60 @@
-//! The gun station, made in Blockbench (`tools/blockbench/gun_station.bbmodel`): a gunsmith's
-//! bench two blocks wide whose drawer slides out while it is used: the cleaning brush in it on
-//! the left, three boxes of rounds on the right (their count written on them).
-//! The data `bbmodel_to_rust.py` made of it and its texture pages; posed and drawn through
-//! `viewmodel`.
+//! The gun stations, made in Blockbench (`tools/blockbench/gun_station.bbmodel` and, three
+//! blocks wide for the rifles, `rifle_station.bbmodel`, both from `gen_gun_station.py`): a
+//! gunsmith's bench whose drawer slides out while it is used: the cleaning brush in it on the
+//! left, three boxes of rounds on the right (their count written on them).
+//! The data `bbmodel_to_rust.py` made of them and their texture pages; posed and drawn
+//! through `viewmodel`.
 //!
-//! Model space: Blockbench pixels, the station from (-8, 0, -8) to (24, 16, 8): its left half
-//! (seen from the front) is the block around the origin. Its front (the drawer) faces +Z.
+//! Model space: Blockbench pixels, the station from (-8, 0, -8) to (24, 16, 8) (the rifle
+//! station to 40): its left block (seen from the front) is the one around the origin. Its
+//! front (the drawer) faces +Z.
 
-include!("gun_station_data.rs");
+#[allow(unused_imports, dead_code)]
+mod small {
+    include!("gun_station_data.rs");
+}
+#[allow(unused_imports, dead_code)]
+mod big {
+    include!("rifle_station_data.rs");
+}
+pub use small::PAGES;
+use small::{BONES, CUBES};
 
-use super::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, BonePose};
+use super::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, Anim, Bone, BonePose, Cube};
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
 use glam::{IVec3, Mat4, Vec3};
 
 /// The texture pages (`PAGES` of 128x128, one under the other), loaded into the texture
-/// layers from `tex::GUN_STATION_MODEL`.
+/// layers from `tex::GUN_STATION_MODEL`, and the rifle station's (`RIFLE_PAGES`, from
+/// `tex::RIFLE_STATION_MODEL`).
 pub static PNG: &[u8] = include_bytes!("gun_station.png");
+pub static RIFLE_PNG: &[u8] = include_bytes!("rifle_station.png");
+pub const RIFLE_PAGES: u32 = big::PAGES;
+
+/// A station's model: its bones, cubes, animations and first texture layer.
+struct Model {
+    bones: &'static [Bone],
+    cubes: &'static [Cube],
+    anims: &'static [Anim],
+    layer: u32,
+}
+
+static SMALL: Model = Model { bones: small::BONES, cubes: small::CUBES, anims: small::ANIMS, layer: tex::GUN_STATION_MODEL };
+static RIFLE: Model = Model { bones: big::BONES, cubes: big::CUBES, anims: big::ANIMS, layer: tex::RIFLE_STATION_MODEL };
+
+/// The small station's model, or the rifle station's.
+fn model(rifle: bool) -> &'static Model {
+    if rifle {
+        &RIFLE
+    } else {
+        &SMALL
+    }
+}
 
 /// Seconds the drawer takes to slide out (its "open" animation).
 pub fn open_seconds() -> f32 {
-    find_anim(ANIMS, "open").map_or(0.5, |a| a.length)
+    find_anim(small::ANIMS, "open").map_or(0.5, |a| a.length)
 }
 
 /// From model space to the world for the station whose left half is at `p`, its front
@@ -32,26 +66,76 @@ pub fn root(p: IVec3, toward: Vec3) -> Mat4 {
         * Mat4::from_scale(Vec3::splat(1.0 / 16.0))
 }
 
-use crate::item::AMMO_BOX_ROUNDS;
+use crate::item::{box_ammo, box_count, BOX_MAGNUM, BOX_RIFLE};
 
-/// How full a box of rounds looks (0 empty .. 3 full).
-fn fill_level(n: u16) -> usize {
-    if n == 0 {
-        0
+/// The rounds stand in a box nose up in rows, as many as it has (up to a full grid): across
+/// it, along it, and the station's pixels per unit of the guns' models (the same size as the
+/// rounds lying on the table, `gui::gun_station::PX`).
+const BOX_ACROSS: usize = 7;
+const BOX_ALONG: usize = 18;
+const ROUND_PX: f32 = 0.026 * 16.0;
+
+/// The rounds standing on a box's floor (the cube `floor`, drawn by `m`), `v` in the box.
+fn emit_box_rounds(out: &mut Vec<Vertex>, m: Mat4, floor: &Cube, v: u16, light: [u8; 4], fl: u8) {
+    let Some(ammo) = box_ammo(v) else { return };
+    let (a, b) = (Vec3::from(floor.from), Vec3::from(floor.to));
+    let (lo, hi) = (a.min(b), a.max(b));
+    // Inside the walls (0.25 thick).
+    let (x0, x1, z0, z1) = (lo.x + 0.25, hi.x - 0.25, lo.z + 0.25, hi.z - 0.25);
+    let (dx, dz) = ((x1 - x0) / BOX_ACROSS as f32, (z1 - z0) / BOX_ALONG as f32);
+    let n = (box_count(v) as usize).min(BOX_ACROSS * BOX_ALONG);
+    // (a full box shows a full grid; the rows fill from the back)
+    for k in 0..n {
+        let (row, col) = (k / BOX_ACROSS, k % BOX_ACROSS);
+        let at = Vec3::new(x0 + dx * (col as f32 + 0.5), hi.y, z0 + dz * (row as f32 + 0.5));
+        let r = m * Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(ROUND_PX));
+        super::gun_view::emit_round(out, ammo, false, r, light, fl);
+    }
+}
+/// The count stencilled on a box: pale yellow, on a box of magnum rounds red.
+const STENCIL: [u8; 3] = [214, 196, 112];
+const STENCIL_MAGNUM: [u8; 3] = [226, 92, 72];
+const STENCIL_RIFLE: [u8; 3] = [120, 196, 110];
+
+/// The colour of a box's stencil: the kind of rounds in it.
+fn stencil(v: u16) -> [u8; 3] {
+    if v & BOX_MAGNUM != 0 {
+        STENCIL_MAGNUM
+    } else if v & BOX_RIFLE != 0 {
+        STENCIL_RIFLE
     } else {
-        (1 + (n as usize - 1) * 3 / AMMO_BOX_ROUNDS as usize).min(3)
+        STENCIL
     }
 }
 
-/// Each bone's matrix with the drawer `open` (0 shut .. 1 out), the brush in it or not, and
-/// the boxes of rounds in it (how many in each; None: not there).
-fn posed(root: Mat4, open: f32, brush: bool, ammo: [Option<u16>; 3]) -> (Vec<Mat4>, Vec<bool>) {
-    let mut pose = vec![BonePose::default(); BONES.len()];
-    if let Some(an) = find_anim(ANIMS, "open") {
+/// The rifle station's magazine loader in its drawer: there or not, and seconds into its
+/// feeding while it loads (None: still).
+#[derive(Clone, Copy, Default)]
+pub struct Loader {
+    pub there: bool,
+    pub feed: Option<f32>,
+}
+
+/// Each bone's matrix with the drawer `open` (0 shut .. 1 out), the brush in it or not, the
+/// boxes of rounds in it (how many in each; None: not there) and the loader.
+fn posed(md: &Model, root: Mat4, open: f32, brush: bool, ammo: [Option<u16>; 3], loader: Loader) -> (Vec<Mat4>, Vec<bool>) {
+    let mut pose = vec![BonePose::default(); md.bones.len()];
+    if let Some(an) = find_anim(md.anims, "open") {
         add_anim(&mut pose, an, open.clamp(0.0, 1.0) * an.length, 1.0, |_| false);
     }
+    match (loader.feed, find_anim(md.anims, "feed")) {
+        (Some(t), Some(an)) if loader.there => add_anim(&mut pose, an, t.rem_euclid(an.length), 1.0, |_| false),
+        _ => {
+            if let Some(b) = find_bone(md.bones, "loader_round") {
+                pose[b].scale = Vec3::ZERO;
+            }
+        }
+    }
+    if let (Some(b), false) = (find_bone(md.bones, "loader"), loader.there) {
+        pose[b].scale = Vec3::ZERO;
+    }
     let mut hide = |name: &str| {
-        if let Some(b) = find_bone(BONES, name) {
+        if let Some(b) = find_bone(md.bones, name) {
             pose[b].scale = Vec3::ZERO;
         }
     };
@@ -59,17 +143,15 @@ fn posed(root: Mat4, open: f32, brush: bool, ammo: [Option<u16>; 3]) -> (Vec<Mat
         hide("brush");
     }
     for (i, &n) in ammo.iter().enumerate() {
-        let Some(n) = n else {
-            hide(&format!("ammo_box_{i}"));
-            continue;
-        };
+        // The rounds in it are drawn on their own (`emit_box_rounds`).
         for level in 1..=3 {
-            if level != fill_level(n) {
-                hide(&format!("ammo_{i}_{level}"));
-            }
+            hide(&format!("ammo_{i}_{level}"));
+        }
+        if n.is_none() {
+            hide(&format!("ammo_box_{i}"));
         }
     }
-    bone_matrices(BONES, &pose, root)
+    bone_matrices(md.bones, &pose, root)
 }
 
 /// Lit up: the drawer's front and handle (the mouse is on them).
@@ -78,12 +160,12 @@ fn is_handle(c: &Cube) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit(out: &mut Vec<Vertex>, root: Mat4, open: f32, brush: bool, ammo: [Option<u16>; 3], handle_lit: bool, light: [u8; 4], fl: u8) {
-    let (mats, shown) = posed(root, open, brush, ammo);
-    for c in CUBES {
+fn emit(md: &Model, out: &mut Vec<Vertex>, root: Mat4, open: f32, brush: bool, ammo: [Option<u16>; 3], loader: Loader, handle_lit: bool, light: [u8; 4], fl: u8) {
+    let (mats, shown) = posed(md, root, open, brush, ammo, loader);
+    for c in md.cubes {
         if shown[c.bone] {
             let from = out.len();
-            emit_cube(out, c, mats[c.bone] * cube_matrix(c), tex::GUN_STATION_MODEL, light, fl);
+            emit_cube(out, c, mats[c.bone] * cube_matrix(c), md.layer, light, fl);
             if handle_lit && is_handle(c) {
                 for v in &mut out[from..] {
                     v.light[0] = v.light[0].saturating_add(90);
@@ -93,26 +175,80 @@ fn emit(out: &mut Vec<Vertex>, root: Mat4, open: f32, brush: bool, ammo: [Option
         }
     }
     if open > 0.0 {
+        // The rounds in the boxes (only seen with the drawer out).
         for (i, n) in ammo.iter().enumerate() {
-            if let (Some(n), Some((m, face))) = (n, label(&mats, i)) {
-                emit_number(out, m, face, *n, light, fl);
+            let floor = format!("ammo_box_{i}_floor");
+            if let (Some(v), Some(c)) = (n, md.cubes.iter().find(|c| c.name == floor)) {
+                if shown[c.bone] {
+                    emit_box_rounds(out, mats[c.bone], c, *v, light, fl);
+                }
+            }
+        }
+        for (i, n) in ammo.iter().enumerate() {
+            if let (Some(n), Some((m, face))) = (n, label(md, &mats, i)) {
+                let color = stencil(*n);
+                emit_number(out, m, face, box_count(*n), color, light, fl);
             }
         }
     }
 }
 
-/// The station whose left half is at `p`: its drawer `open`, the brush in it or not, this many
-/// rounds in each box, its handle lit up or not.
+/// The station (the rifle station with `rifle`) whose left block is at `p`: its drawer `open`,
+/// the brush in it or not, this many rounds in each box, its loader, its handle lit up or not.
 #[allow(clippy::too_many_arguments)]
-pub fn emit_block(out: &mut Vec<Vertex>, p: IVec3, toward: Vec3, open: f32, brush: bool, ammo: [Option<u16>; 3], handle_lit: bool, light: [u8; 4], fl: u8) {
-    emit(out, root(p, toward), open, brush, ammo, handle_lit, light, fl);
+pub fn emit_block(out: &mut Vec<Vertex>, rifle: bool, p: IVec3, toward: Vec3, open: f32, brush: bool, ammo: [Option<u16>; 3], loader: Loader, handle_lit: bool, light: [u8; 4], fl: u8) {
+    emit(model(rifle), out, root(p, toward), open, brush, ammo, loader, handle_lit, light, fl);
+}
+
+/// Where the magazine lies in the rifle station's loader (the drawer `open`): a frame at its
+/// middle, in the station's pixels, its x along the loader toward the feed block.
+pub fn loader_mount(p: IVec3, toward: Vec3, open: f32) -> Option<Mat4> {
+    let there = Loader { there: true, feed: None };
+    let (mats, _) = posed(&RIFLE, root(p, toward), open, true, [Some(0); 3], there);
+    let b = find_bone(RIFLE.bones, "loader_mag")?;
+    Some(mats[b] * Mat4::from_translation(Vec3::from(RIFLE.bones[b].origin)))
+}
+
+/// The loader's cubes where the rifle station's pose puts them (for the mouse to find it in
+/// the drawer): each cube and its matrix.
+pub fn loader_cubes(p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Mat4)> {
+    let there = Loader { there: true, feed: None };
+    let (mats, _) = posed(&RIFLE, root(p, toward), open, true, [Some(0); 3], there);
+    RIFLE
+        .cubes
+        .iter()
+        .filter(|c| c.name.starts_with("loader_") && !c.name.starts_with("loader_round"))
+        .map(|c| (c, mats[c.bone] * cube_matrix(c)))
+        .collect()
+}
+
+/// The loader on its own (an item): its cubes, the unit cube centered on the origin.
+pub fn emit_loader_item(out: &mut Vec<Vertex>, m: Mat4, light: [u8; 4], fl: u8) {
+    let own: Vec<&Cube> = RIFLE
+        .cubes
+        .iter()
+        .filter(|c| c.name.starts_with("loader_") && !c.name.starts_with("loader_round"))
+        .collect();
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for c in &own {
+        for q in [Vec3::from(c.from), Vec3::from(c.to)] {
+            let q = cube_matrix(c).transform_point3(q);
+            lo = lo.min(q);
+            hi = hi.max(q);
+        }
+    }
+    let k = 0.9 / (hi - lo).max_element().max(1e-3);
+    let root = m * Mat4::from_scale(Vec3::splat(k)) * Mat4::from_translation(-(lo + hi) * 0.5);
+    for c in own {
+        emit_cube(out, c, root * cube_matrix(c), RIFLE.layer, light, fl);
+    }
 }
 
 /// Where the count goes on a box: the bone's matrix, and the panel on its front (model
 /// space, on the front face).
-fn label(mats: &[Mat4], i: usize) -> Option<(Mat4, (Vec3, Vec3))> {
+fn label(md: &Model, mats: &[Mat4], i: usize) -> Option<(Mat4, (Vec3, Vec3))> {
     let name = format!("ammo_box_{i}_front");
-    let c = CUBES.iter().find(|c| c.name == name)?;
+    let c = md.cubes.iter().find(|c| c.name == name)?;
     let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
     let (lo, hi) = (a.min(b), a.max(b));
     Some((mats[c.bone], (Vec3::new(lo.x + 0.4, lo.y + 0.55, hi.z), Vec3::new(hi.x - 0.4, hi.y - 0.5, hi.z))))
@@ -121,7 +257,7 @@ fn label(mats: &[Mat4], i: usize) -> Option<(Mat4, (Vec3, Vec3))> {
 /// A number stencilled on a panel (model space `lo` .. `hi` on a face looking +Z), as army
 /// ammunition is marked: pale yellow seven-segment digits, a little gap where their strokes
 /// meet, in the panel's middle.
-fn emit_number(out: &mut Vec<Vertex>, m: Mat4, (lo, hi): (Vec3, Vec3), n: u16, light: [u8; 4], fl: u8) {
+fn emit_number(out: &mut Vec<Vertex>, m: Mat4, (lo, hi): (Vec3, Vec3), n: u16, color: [u8; 3], light: [u8; 4], fl: u8) {
     // Segments a..g: top, top right, bottom right, bottom, bottom left, top left, middle.
     const DIGITS: [u8; 10] = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f];
     let text = n.to_string();
@@ -131,7 +267,7 @@ fn emit_number(out: &mut Vec<Vertex>, m: Mat4, (lo, hi): (Vec3, Vec3), n: u16, l
     let width = count * dw + (count - 1.0) * gap;
     let mut x = (lo.x + hi.x) * 0.5 - width * 0.5;
     let (z0, z1) = (hi.z + 0.004, hi.z + 0.012);
-    let paint = [[214, 196, 112]; 6];
+    let paint = [color; 6];
     // The stencil's bridges: each stroke stops short of the next.
     let cut = t * 0.45;
     for ch in text.bytes() {
@@ -157,12 +293,13 @@ fn emit_number(out: &mut Vec<Vertex>, m: Mat4, (lo, hi): (Vec3, Vec3), n: u16, l
 
 /// The boxes of rounds' cubes where the station's pose puts them (for the mouse to find
 /// them in the drawer): the box, each cube and its matrix.
-pub fn ammo_boxes(p: IVec3, toward: Vec3, open: f32) -> Vec<(usize, &'static Cube, Mat4)> {
-    let (mats, _) = posed(root(p, toward), open, true, [Some(0); 3]);
+pub fn ammo_boxes(rifle: bool, p: IVec3, toward: Vec3, open: f32) -> Vec<(usize, &'static Cube, Mat4)> {
+    let md = model(rifle);
+    let (mats, _) = posed(md, root(p, toward), open, true, [Some(0); 3], Loader::default());
     let mut out = Vec::new();
     for i in 0..3 {
         let prefix = format!("ammo_box_{i}_");
-        for c in CUBES.iter().filter(|c| c.name.starts_with(&prefix)) {
+        for c in md.cubes.iter().filter(|c| c.name.starts_with(&prefix)) {
             out.push((i, c, mats[c.bone] * cube_matrix(c)));
         }
     }
@@ -171,39 +308,42 @@ pub fn ammo_boxes(p: IVec3, toward: Vec3, open: f32) -> Vec<(usize, &'static Cub
 
 /// As an item: the unit cube centered on the origin, like a block item (`emit_held`); the
 /// station fits in it lengthwise.
-pub fn emit_item(out: &mut Vec<Vertex>, m: Mat4, light: [u8; 4], fl: u8) {
-    let root = m * Mat4::from_scale(Vec3::splat(1.0 / 32.0)) * Mat4::from_translation(Vec3::new(-8.0, -8.0, 0.0));
-    emit(out, root, 0.0, true, [Some(0); 3], false, light, fl);
+pub fn emit_item(out: &mut Vec<Vertex>, rifle: bool, m: Mat4, light: [u8; 4], fl: u8) {
+    let long = if rifle { 48.0 } else { 32.0 };
+    let root = m * Mat4::from_scale(Vec3::splat(1.0 / long)) * Mat4::from_translation(Vec3::new(8.0 - long * 0.5, -8.0, 0.0));
+    emit(model(rifle), out, root, 0.0, true, [Some(0); 3], Loader::default(), false, light, fl);
 }
 
 /// The drawer's front and handle where the station's pose puts them (for the mouse to open
 /// or shut it with): each cube and its matrix.
-pub fn drawer_handle(p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Mat4)> {
-    let (mats, _) = posed(root(p, toward), open, true, [Some(0); 3]);
-    CUBES
+pub fn drawer_handle(rifle: bool, p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Mat4)> {
+    let md = model(rifle);
+    let (mats, _) = posed(md, root(p, toward), open, true, [Some(0); 3], Loader::default());
+    md.cubes
         .iter()
         .filter(|c| is_handle(c))
         .map(|c| (c, mats[c.bone] * cube_matrix(c)))
         .collect()
 }
 
-fn brush_cubes() -> impl Iterator<Item = &'static Cube> {
-    let b = find_bone(BONES, "brush");
-    CUBES.iter().filter(move |c| Some(c.bone) == b)
+fn brush_cubes(md: &'static Model) -> impl Iterator<Item = &'static Cube> {
+    let b = find_bone(md.bones, "brush");
+    md.cubes.iter().filter(move |c| Some(c.bone) == b)
 }
 
 /// The brush's cubes where the station's pose puts them (for the mouse to find it in the
 /// drawer): each cube's matrix.
-pub fn brush_in_drawer(p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Mat4)> {
-    let (mats, _) = posed(root(p, toward), open, true, [Some(0); 3]);
-    brush_cubes().map(|c| (c, mats[c.bone] * cube_matrix(c))).collect()
+pub fn brush_in_drawer(rifle: bool, p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Mat4)> {
+    let md = model(rifle);
+    let (mats, _) = posed(md, root(p, toward), open, true, [Some(0); 3], Loader::default());
+    brush_cubes(md).map(|c| (c, mats[c.bone] * cube_matrix(c))).collect()
 }
 
 /// The brush held with its bristles' middle at `at`, turned `turn` about the up axis, tipped
 /// `tilt` (radians) as it scrubs.
 pub fn emit_brush(out: &mut Vec<Vertex>, at: Vec3, turn: f32, tilt: f32, light: [u8; 4], fl: u8) {
     // The bristles' bottom middle in model space: the brush's origin, down to its bristles.
-    let (lo, hi) = brush_cubes().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), c| {
+    let (lo, hi) = brush_cubes(&SMALL).fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), c| {
         (lo.min(Vec3::from(c.from)), hi.max(Vec3::from(c.to)))
     });
     let bottom = Vec3::new((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5);
@@ -212,7 +352,7 @@ pub fn emit_brush(out: &mut Vec<Vertex>, at: Vec3, turn: f32, tilt: f32, light: 
         * Mat4::from_rotation_z(tilt)
         * Mat4::from_scale(Vec3::splat(1.0 / 16.0))
         * Mat4::from_translation(-bottom);
-    for c in brush_cubes() {
+    for c in brush_cubes(&SMALL) {
         emit_cube(out, c, m * cube_matrix(c), tex::GUN_STATION_MODEL, light, fl);
     }
 }
@@ -238,22 +378,61 @@ pub fn ammo_box_size() -> Vec3 {
     hi - lo
 }
 
-/// A box of rounds on its own with `rounds` in it, `m` putting it in place: from its bottom's
-/// middle, in pixels, its front (with the count) toward +Z.
-pub fn emit_ammo_box(out: &mut Vec<Vertex>, m: Mat4, rounds: u16, light: [u8; 4], fl: u8) {
+/// A box of rounds on its own with `v` in it (its value: the count and the kind), `m`
+/// putting it in place: from its bottom's middle, in pixels, its front (with the count)
+/// toward +Z.
+pub fn emit_ammo_box(out: &mut Vec<Vertex>, m: Mat4, v: u16, light: [u8; 4], fl: u8) {
     let (cubes, lo, hi) = box_cubes();
     let m = m * Mat4::from_translation(-Vec3::new((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5));
-    let level = fill_level(rounds);
     for c in cubes {
-        if let Some(l) = c.name.strip_prefix("ammo_rounds_0_") {
-            if l.parse::<usize>().ok() != Some(level) {
-                continue;
-            }
+        // Its rounds are drawn in 3D (`emit_box_rounds`), not the old flat layer of them.
+        if c.name.starts_with("ammo_rounds_0_") {
+            continue;
         }
         emit_cube(out, c, m * cube_matrix(c), tex::GUN_STATION_MODEL, light, fl);
+        if c.name == "ammo_box_0_floor" {
+            emit_box_rounds(out, m, c, v, light, fl);
+        }
     }
     let bones: Vec<Mat4> = vec![m; BONES.len()];
-    if let Some((mm, face)) = label(&bones, 0) {
-        emit_number(out, mm, face, rounds, light, fl);
+    if let Some((mm, face)) = label(&SMALL, &bones, 0) {
+        emit_number(out, mm, face, box_count(v), stencil(v), light, fl);
+    }
+}
+
+#[cfg(test)]
+mod ammo_box_tests {
+    use super::*;
+
+    /// The rounds drawn in a box: vertices on the revolver's texture pages (magnum rounds),
+    /// and on the pistol's (9 mm).
+    fn rounds(out: &[Vertex]) -> (usize, usize) {
+        let revolver = tex::REVOLVER_VIEW as f32..(tex::REVOLVER_VIEW + crate::model::revolver_vm::PAGES) as f32;
+        let pistol = tex::PISTOL_VIEW as f32..(tex::PISTOL_VIEW + crate::model::pistol_vm::PAGES) as f32;
+        (out.iter().filter(|v| revolver.contains(&v.layer)).count(), out.iter().filter(|v| pistol.contains(&v.layer)).count())
+    }
+
+    #[test]
+    fn a_box_shows_its_own_rounds_in_3d() {
+        let draw = |v: u16| {
+            let mut out = Vec::new();
+            emit_ammo_box(&mut out, Mat4::IDENTITY, v, [255; 4], 0);
+            rounds(&out)
+        };
+        let (m, p) = draw(40 | BOX_MAGNUM);
+        assert!(m > 0 && p == 0, "{m} {p}");
+        let (m, p) = draw(40);
+        assert!(m == 0 && p > 0, "{m} {p}");
+        assert_eq!(draw(0), (0, 0));
+        // More rounds, more drawn.
+        assert!(draw(80).1 > draw(40).1);
+        // In the drawer too, when it is out.
+        let drawer = |open: f32| {
+            let mut out = Vec::new();
+            emit(&SMALL, &mut out, Mat4::IDENTITY, open, true, [Some(12 | BOX_MAGNUM), None, Some(5)], Loader::default(), false, [255; 4], 0);
+            rounds(&out)
+        };
+        let (m, p) = drawer(1.0);
+        assert!(m > 0 && p > 0);
     }
 }

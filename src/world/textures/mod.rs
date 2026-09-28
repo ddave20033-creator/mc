@@ -244,7 +244,22 @@ pub mod tex {
     pub const AMMO_BOX: u32 = SMOKE_GRENADE + 1;
     /// The weapon light, as an item (drawn from its model, `render_item_icons`).
     pub const FLASHLIGHT: u32 = AMMO_BOX + 1;
-    pub const ARMOR_ICONS: u32 = FLASHLIGHT + 1;
+    /// The revolver, its five parts and the speedloader, as items (drawn from its model,
+    /// `render_item_icons`).
+    pub const REVOLVER: u32 = FLASHLIGHT + 1;
+    pub const REVOLVER_PARTS: u32 = REVOLVER + 1;
+    pub const SPEEDLOADER: u32 = REVOLVER_PARTS + 5;
+    pub const MAGNUM_ROUND: u32 = SPEEDLOADER + 1;
+    /// The AK-47, its five parts (the magazine last) and its rounds, as items (drawn from its
+    /// model, `render_item_icons`).
+    pub const AK47: u32 = MAGNUM_ROUND + 1;
+    pub const AK_PARTS: u32 = AK47 + 1;
+    pub const RIFLE_ROUND: u32 = AK_PARTS + 5;
+    /// The rifle station's magazine loader, as an item (drawn from its model).
+    pub const MAG_LOADER: u32 = RIFLE_ROUND + 1;
+    /// The target dummy, as an item (drawn from its model, `render_item_icons`).
+    pub const TARGET_DUMMY: u32 = MAG_LOADER + 1;
+    pub const ARMOR_ICONS: u32 = TARGET_DUMMY + 1;
     pub const ARMOR_WOOL: u32 = ARMOR_ICONS + 17;
     pub const ARMOR_METAL: u32 = ARMOR_WOOL + 1;
     pub const VEST: u32 = ARMOR_METAL + 1;
@@ -271,7 +286,21 @@ pub mod tex {
     pub const GUN_STATION_MODEL: u32 = PISTOL_VIEW + crate::model::pistol_vm::PAGES * PISTOL_DIRT_LEVELS;
     /// The grenades made in Blockbench: their texture pages (`model::grenade`).
     pub const GRENADE_MODEL: u32 = GUN_STATION_MODEL + crate::model::gun_station::PAGES;
-    pub const LAYERS: usize = (GRENADE_MODEL + crate::model::grenade::PAGES) as usize;
+    /// The revolver made in Blockbench: its texture pages (`model::revolver_vm`), clean and
+    /// dirtier, like the pistol's (`PISTOL_DIRT_LEVELS` sets).
+    pub const REVOLVER_VIEW: u32 = GRENADE_MODEL + crate::model::grenade::PAGES;
+    /// The target dummy made in Blockbench: its texture pages (`model::dummy`).
+    pub const DUMMY_MODEL: u32 = REVOLVER_VIEW + crate::model::revolver_vm::PAGES * PISTOL_DIRT_LEVELS;
+    /// Item icons drawn while the game runs for things as they are (a magazine as full as it
+    /// is, a gun with its attachments and dirt...: `game::icons`).
+    /// The AK-47 made in Blockbench: its texture pages (`model::ak_vm`), clean and dirtier,
+    /// like the pistol's (`PISTOL_DIRT_LEVELS` sets).
+    pub const AK_VIEW: u32 = DUMMY_MODEL + crate::model::dummy::PAGES;
+    /// The rifle station made in Blockbench: its texture pages (`model::gun_station`).
+    pub const RIFLE_STATION_MODEL: u32 = AK_VIEW + crate::model::ak_vm::PAGES * PISTOL_DIRT_LEVELS;
+    pub const STATE_ICONS: u32 = RIFLE_STATION_MODEL + crate::model::gun_station::RIFLE_PAGES;
+    pub const STATE_ICON_COUNT: u32 = 64;
+    pub const LAYERS: usize = (STATE_ICONS + STATE_ICON_COUNT) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -380,6 +409,14 @@ fn render_item_icons(base: &mut [u8]) {
     set_gun_rounds(&mut full, 12);
     let mut ext = Stack::one(EXTENDED_MAGAZINE);
     set_gun_rounds(&mut ext, 20);
+    let mut revolver = Stack::one(REVOLVER);
+    set_gun_rounds(&mut revolver, 6);
+    let mut loader = Stack::one(SPEEDLOADER);
+    set_gun_rounds(&mut loader, 6);
+    let mut ak = Stack::one(AK47);
+    set_gun_rounds(&mut ak, 30);
+    let mut ak_mag = Stack::one(AK_MAGAZINE);
+    set_gun_rounds(&mut ak_mag, 30);
     let icons = [
         (tex::PISTOL, loaded),
         (tex::PISTOL_PARTS, Stack::one(PISTOL_FRAME)),
@@ -393,19 +430,60 @@ fn render_item_icons(base: &mut [u8]) {
         (tex::GUN_ATTACHMENTS + 2, ext),
         (tex::GUN_ATTACHMENTS + 3, Stack::one(LASER_SIGHT)),
         (tex::FLASHLIGHT, Stack::one(FLASHLIGHT)),
+        (tex::REVOLVER, revolver),
+        (tex::REVOLVER_PARTS, Stack::one(REVOLVER_FRAME)),
+        (tex::REVOLVER_PARTS + 1, Stack::one(REVOLVER_BARREL)),
+        (tex::REVOLVER_PARTS + 2, Stack::one(REVOLVER_SPRING)),
+        (tex::REVOLVER_PARTS + 3, Stack::one(REVOLVER_CYLINDER)),
+        (tex::REVOLVER_PARTS + 4, Stack::one(REVOLVER_HAMMER)),
+        (tex::SPEEDLOADER, loader),
+        (tex::MAGNUM_ROUND, Stack::one(MAGNUM_ROUND)),
         (tex::FRAG_GRENADE, Stack::one(FRAG_GRENADE)),
         (tex::SMOKE_GRENADE, Stack::one(SMOKE_GRENADE)),
+        (tex::TARGET_DUMMY, Stack::one(TARGET_DUMMY)),
+        (tex::AK47, ak),
+        (tex::AK_PARTS, Stack::one(AK_RECEIVER)),
+        (tex::AK_PARTS + 1, Stack::one(AK_GAS_TUBE)),
+        (tex::AK_PARTS + 2, Stack::one(AK_BOLT)),
+        (tex::AK_PARTS + 3, Stack::one(AK_COVER)),
+        (tex::AK_PARTS + 4, ak_mag),
+        (tex::RIFLE_ROUND, Stack::one(RIFLE_ROUND)),
+        (tex::MAG_LOADER, Stack::one(MAG_LOADER)),
     ];
     for (layer, st) in icons {
-        let mut verts = Vec::new();
-        // A three-quarter view: turned toward the viewer's left, looked at a little from above.
-        let turn = -0.4;
-        let view = glam::Mat4::from_rotation_x(0.35) * glam::Mat4::from_rotation_y(turn);
-        crate::model::emit_held_data(&mut verts, view, &st, [255, 255, 255, 0], 0);
-        let img = rasterize(base, &verts, TILE);
+        let img = render_icon(base, &st);
         let dst = layer as usize * TILE * TILE * 4;
         base[dst..dst + TILE * TILE * 4].copy_from_slice(&img);
     }
+}
+
+/// An item's icon drawn from its 3D model as it is (its state: rounds, attachments, dirt), a
+/// `TILE` square, from the texture layers `base` (the items' model pages in it).
+pub fn render_icon(base: &[u8], st: &crate::item::Stack) -> Vec<u8> {
+    let mut verts = Vec::new();
+    // A three-quarter view: turned toward the viewer's left, looked at a little from above.
+    let turn = -0.4;
+    let view = glam::Mat4::from_rotation_x(0.35) * glam::Mat4::from_rotation_y(turn);
+    crate::model::emit_held_data(&mut verts, view, st, [255, 255, 255, 0], 0);
+    // A long gun and its long parts lie across the icon corner to corner, the muzzle end up, to
+    // fill it (as Minecraft draws its long items).
+    let (mut lo, mut hi) = (glam::Vec2::splat(f32::MAX), glam::Vec2::splat(f32::MIN));
+    for v in &verts {
+        lo = lo.min(glam::Vec2::new(v.pos[0], v.pos[1]));
+        hi = hi.max(glam::Vec2::new(v.pos[0], v.pos[1]));
+    }
+    let size = hi - lo;
+    let long = crate::item::GunKind::of(st.item).is_some_and(|k| k.long()) || crate::item::AK_PARTS[..4].contains(&st.item);
+    if long && size.x > size.y * 2.0 {
+        let c = (lo + hi) * 0.5;
+        let tip = glam::Mat4::from_translation(c.extend(0.0))
+            * glam::Mat4::from_rotation_z(35f32.to_radians())
+            * glam::Mat4::from_translation(-c.extend(0.0));
+        for v in &mut verts {
+            v.pos = tip.transform_point3(glam::Vec3::from(v.pos)).to_array();
+        }
+    }
+    rasterize(base, &verts, TILE)
 }
 
 /// Draws triangles (x right, y up, z toward the viewer) looking straight at them, fitted into
@@ -574,7 +652,7 @@ fn is_item_icon(l: u32) -> bool {
         || (tex::HALF_BURNT_PORKCHOP..=tex::RAW_BURNT_MUTTON).contains(&l)
         || (tex::PISTOL..tex::GUN_GLASS).contains(&l)
         || l == tex::COPPER_INGOT
-        || (tex::STEEL_INGOT..=tex::FLASHLIGHT).contains(&l)
+        || (tex::STEEL_INGOT..=tex::TARGET_DUMMY).contains(&l)
         || (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l)
         || l == tex::BOOK
         || (tex::MORE_TOOLS..tex::MORE_TOOLS + 4).contains(&l)
@@ -717,13 +795,19 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
         }
     });
     apply_pack(packs, &mut base);
-    use crate::model::{gun_station, pistol_vm};
+    use crate::model::{ak_vm, gun_station, pistol_vm, revolver_vm};
     synth_model_pages(&mut base, pistol_vm::PNG, pistol_vm::PAGES, tex::PISTOL_VIEW);
+    synth_model_pages(&mut base, revolver_vm::PNG, revolver_vm::PAGES, tex::REVOLVER_VIEW);
+    synth_model_pages(&mut base, ak_vm::PNG, ak_vm::PAGES, tex::AK_VIEW);
     for level in 1..tex::PISTOL_DIRT_LEVELS {
         synth_grime(&mut base, tex::PISTOL_VIEW, pistol_vm::PAGES, level);
+        synth_grime(&mut base, tex::REVOLVER_VIEW, revolver_vm::PAGES, level);
+        synth_grime(&mut base, tex::AK_VIEW, ak_vm::PAGES, level);
     }
     synth_model_pages(&mut base, gun_station::PNG, gun_station::PAGES, tex::GUN_STATION_MODEL);
+    synth_model_pages(&mut base, gun_station::RIFLE_PNG, gun_station::RIFLE_PAGES, tex::RIFLE_STATION_MODEL);
     synth_model_pages(&mut base, crate::model::grenade::PNG, crate::model::grenade::PAGES, tex::GRENADE_MODEL);
+    synth_model_pages(&mut base, crate::model::dummy::PNG, crate::model::dummy::PAGES, tex::DUMMY_MODEL);
     render_item_icons(&mut base);
     synth_doors(&mut base);
     synth_grilled(&mut base);

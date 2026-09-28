@@ -9,6 +9,11 @@ Models (by file name):
     pistol.bbmodel       -> src/model/pistol_vm_data.rs, src/model/pistol_vm.png
     gun_station.bbmodel  -> src/model/gun_station_data.rs, src/model/gun_station.png
     grenades.bbmodel     -> src/model/grenade_data.rs, src/model/grenade.png
+    revolver.bbmodel     -> src/model/revolver_vm_data.rs, src/model/revolver_vm.png
+    dummy.bbmodel        -> src/model/dummy_data.rs, src/model/dummy.png
+    ak.bbmodel           -> src/model/ak_vm_data.rs, src/model/ak_vm.png
+    rifle_station.bbmodel -> src/model/rifle_station_data.rs, src/model/rifle_station.png
+    tp_*.bbmodel         -> src/model/tp_*_data.rs (third-person rigs: bones and animations only)
 
 Conventions kept from Blockbench so the game moves exactly like the Blockbench preview:
 - positions in Blockbench pixels, the first-person camera at (0, 0, 0) looking -Z;
@@ -28,8 +33,11 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 # The model: given on the command line (e.g. the copy you work on), or the one next to this.
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "pistol.bbmodel")
 base = os.path.basename(SRC)
-KIND = "gun_station" if base.startswith("gun_station") else "grenades" if base.startswith("grenade") else "pistol"
-OUT_NAME = {"pistol": "pistol_vm", "gun_station": "gun_station", "grenades": "grenade"}[KIND]
+KIND = (base[:-len(".bbmodel")] if base.startswith("tp_") else "gun_station" if base.startswith("gun_station") else "rifle_station" if base.startswith("rifle_station") else "grenades" if base.startswith("grenade")
+        else "revolver" if base.startswith("revolver") else "dummy" if base.startswith("dummy") else "ak" if base.startswith("ak") else "pistol")
+OUT_NAME = {"pistol": "pistol_vm", "gun_station": "gun_station", "grenades": "grenade", "revolver": "revolver_vm",
+            "dummy": "dummy", "ak": "ak_vm", "rifle_station": "rifle_station"}.get(KIND, KIND)
+TP = KIND.startswith("tp_")
 OUT_RS = os.path.join(ROOT, "src", "model", OUT_NAME + "_data.rs")
 OUT_PNG = os.path.join(ROOT, "src", "model", OUT_NAME + ".png")
 PAGE = 128
@@ -64,6 +72,8 @@ def walk(node, parent, hidden):
         walk(c, i, hide)
 for n in m["outliner"]:
     walk(n, -1, False)
+if TP:
+    cubes = []
 
 # ---- every face's texels onto 128x128 pages (1 texel border copied from the edge) ----
 pieces = []  # (cube index, face index, image, flip_u, flip_v)
@@ -117,7 +127,8 @@ for ci, fi, img, fu, fv in pieces:
 sheet = Image.new("RGBA", (PAGE, PAGE * max(1, len(pages))), (0, 0, 0, 0))
 for i, p in enumerate(pages):
     sheet.paste(p, (0, i * PAGE))
-sheet.save(OUT_PNG, optimize=True)
+if not TP:
+    sheet.save(OUT_PNG, optimize=True)
 
 # ---- animations ----
 def num(v):
@@ -214,6 +225,30 @@ if KIND == "pistol":
           "SILENCED": "The middle of the silencer's front end (where the bullet leaves with one).",
           "LASER": "The laser sight's lens: where its beam starts.",
           "LIGHT": "The weapon light's lens: where its light comes from."}
+  for k, (b, p) in points.items():
+      out.append(f"/// {docs[k]} (bone, point)")
+      out.append(f"pub const {k}: (usize, [f32; 3]) = ({b}, {v3(p)});")
+if KIND == "revolver":
+  barrel = cubes_named(lambda n: n.startswith("barrel_"))
+  lo, hi = bbox(barrel)
+  points["MUZZLE"] = (barrel[0][0], [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
+  rims = cubes_named(lambda n: n.startswith("round") and "_rim" in n)
+  lo, hi = bbox(rims)
+  points["CYLINDER"] = (rims[0][0], [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, hi[2]])
+  docs = {"MUZZLE": "The middle of the barrel's front end.",
+          "CYLINDER": "The middle of the cylinder's back: where the cases come out when reloading."}
+  for k, (b, p) in points.items():
+      out.append(f"/// {docs[k]} (bone, point)")
+      out.append(f"pub const {k}: (usize, [f32; 3]) = ({b}, {v3(p)});")
+if KIND == "ak":
+  brake = cubes_named(lambda n: n.startswith("brake_"))
+  lo, hi = bbox(brake)
+  points["MUZZLE"] = (brake[0][0], [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
+  case = cubes_named(lambda n: n == "chamber_case")
+  lo, hi = bbox(case)
+  points["EJECT"] = (case[0][0], [(lo[k] + hi[k]) / 2 for k in range(3)])
+  docs = {"MUZZLE": "The middle of the muzzle brake's front end.",
+          "EJECT": "The round in the chamber: where a spent case comes out."}
   for k, (b, p) in points.items():
       out.append(f"/// {docs[k]} (bone, point)")
       out.append(f"pub const {k}: (usize, [f32; 3]) = ({b}, {v3(p)});")

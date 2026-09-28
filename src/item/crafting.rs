@@ -224,6 +224,12 @@ fn recipes() -> &'static Vec<Recipe> {
                 keys: vec![('I', vec![IRON_INGOT]), ('N', vec![IRON_NUGGET])],
                 result: Stack::one(GUN_STATION as ItemId),
             },
+            // The rifle station: a gun station made longer, with steel and a wooden top.
+            Recipe {
+                pattern: &["PPP", "SGS"],
+                keys: vec![('P', b(PLANKS)), ('S', vec![STEEL_INGOT]), ('G', vec![GUN_STATION as ItemId])],
+                result: Stack::one(RIFLE_BENCH as ItemId),
+            },
             Recipe {
                 pattern: &["III", "I  "],
                 keys: vec![('I', vec![IRON_INGOT])],
@@ -248,6 +254,45 @@ fn recipes() -> &'static Vec<Recipe> {
                 pattern: &["I", "I"],
                 keys: vec![('I', vec![IRON_INGOT])],
                 result: Stack::one(PISTOL_MAGAZINE),
+            },
+            // The revolver's parts (put together at the station): a steel frame with a wooden
+            // grip, a steel barrel, a mainspring of nuggets, a steel cylinder and an iron
+            // hammer; and the speedloader.
+            Recipe {
+                pattern: &["SSS", "S P"],
+                keys: vec![('S', vec![STEEL_INGOT]), ('P', b(PLANKS))],
+                result: Stack::one(REVOLVER_FRAME),
+            },
+            Recipe {
+                pattern: &["SS"],
+                keys: vec![('S', vec![STEEL_INGOT])],
+                result: Stack::one(REVOLVER_BARREL),
+            },
+            Recipe {
+                pattern: &["N  ", " N ", "  N"],
+                keys: vec![('N', vec![IRON_NUGGET])],
+                result: Stack::one(REVOLVER_SPRING),
+            },
+            Recipe {
+                pattern: &[" S ", "S S", " S "],
+                keys: vec![('S', vec![STEEL_INGOT])],
+                result: Stack::one(REVOLVER_CYLINDER),
+            },
+            Recipe {
+                pattern: &["IN"],
+                keys: vec![('I', vec![IRON_INGOT]), ('N', vec![IRON_NUGGET])],
+                result: Stack::one(REVOLVER_HAMMER),
+            },
+            // Magnum rounds: a copper jacket, an iron core and the powder.
+            Recipe {
+                pattern: &["O", "N", "C"],
+                keys: vec![('O', vec![COPPER_INGOT]), ('N', vec![IRON_NUGGET]), ('C', vec![COAL, CHARCOAL])],
+                result: Stack::new(MAGNUM_ROUND, 4),
+            },
+            Recipe {
+                pattern: &["N N", " I "],
+                keys: vec![('N', vec![IRON_NUGGET]), ('I', vec![IRON_INGOT])],
+                result: Stack::one(SPEEDLOADER),
             },
             // Pistol attachments.
             Recipe {
@@ -275,6 +320,44 @@ fn recipes() -> &'static Vec<Recipe> {
                 keys: vec![('N', vec![IRON_NUGGET]), ('C', vec![COAL, CHARCOAL])],
                 result: Stack::new(BULLET, 4),
             },
+            // The AK-47's parts: steel (from the blast furnace) and wood.
+            Recipe {
+                pattern: &["SSS", "PSP"],
+                keys: vec![('S', vec![STEEL_INGOT]), ('P', b(PLANKS))],
+                result: Stack::one(AK_RECEIVER),
+            },
+            Recipe {
+                pattern: &["PSS"],
+                keys: vec![('S', vec![STEEL_INGOT]), ('P', b(PLANKS))],
+                result: Stack::one(AK_GAS_TUBE),
+            },
+            Recipe {
+                pattern: &["SN", "SS"],
+                keys: vec![('S', vec![STEEL_INGOT]), ('N', vec![IRON_NUGGET])],
+                result: Stack::one(AK_BOLT),
+            },
+            Recipe {
+                pattern: &["SS", "NN"],
+                keys: vec![('S', vec![STEEL_INGOT]), ('N', vec![IRON_NUGGET])],
+                result: Stack::one(AK_COVER),
+            },
+            Recipe {
+                pattern: &["S", "N", "S"],
+                keys: vec![('S', vec![STEEL_INGOT]), ('N', vec![IRON_NUGGET])],
+                result: Stack::one(AK_MAGAZINE),
+            },
+            // The magazine loader: steel, a crank of iron, a spring.
+            Recipe {
+                pattern: &["NIN", "SSS"],
+                keys: vec![('N', vec![IRON_NUGGET]), ('I', vec![IRON_INGOT]), ('S', vec![STEEL_INGOT])],
+                result: Stack::one(MAG_LOADER),
+            },
+            // Rifle rounds: a copper jacket, a steel core and more powder than the pistol's.
+            Recipe {
+                pattern: &["O", "S", "C"],
+                keys: vec![('O', vec![COPPER_INGOT]), ('S', vec![STEEL_INGOT]), ('C', vec![COAL, CHARCOAL])],
+                result: Stack::new(RIFLE_ROUND, 6),
+            },
             // Grenades: a steel body (from the blast furnace), the filling and the fuse.
             Recipe {
                 pattern: &[" N ", "SCS", " S "],
@@ -293,6 +376,12 @@ fn recipes() -> &'static Vec<Recipe> {
                     ('C', vec![COAL, CHARCOAL]),
                 ],
                 result: Stack::new(SMOKE_GRENADE, 2),
+            },
+            // The target dummy: a wool sack on a post with a crossbar, on plank feet.
+            Recipe {
+                pattern: &[" W ", "SWS", "PSP"],
+                keys: vec![('W', b(WOOL)), ('S', vec![STICK]), ('P', b(PLANKS))],
+                result: Stack::one(TARGET_DUMMY),
             },
         ];
         // Storage blocks and back.

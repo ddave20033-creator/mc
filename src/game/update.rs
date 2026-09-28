@@ -249,14 +249,17 @@ impl Game {
             }
         }
 
-        // Body follows the head when moving, otherwise lags within 50 degrees (like Minecraft).
+        // Body follows the head when moving, otherwise lags within 50 degrees (like Minecraft);
+        // with a gun in hand it turns with the head, all of it at once.
         let diff = crate::util::wrap_angle(self.yaw - self.body_yaw);
+        let lag = if self.holding_gun() { 0f32 } else { 50f32 }.to_radians();
+        // (The shoulder views, 3 and 4, orbit the body while stationary.)
+        let orbiting = matches!(self.camera.mode, 3 | 4);
         if speed > 0.1 {
             self.body_yaw += diff * (1.0 - (-10.0 * dt).exp());
-        } else if self.camera.mode < 3 && diff.abs() > 50f32.to_radians() {
-            // Shoulder views orbit the body while stationary; in regular views the torso
-            // follows the head so a large turn still looks natural.
-            let excess = diff - diff.signum() * 50f32.to_radians();
+        } else if !orbiting && diff.abs() > lag {
+            // In regular views the torso follows the head so a large turn still looks natural.
+            let excess = diff - diff.signum() * lag;
             self.body_yaw += excess * (1.0 - (-12.0 * dt).exp());
         }
         // Limb swing follows horizontal movement (in the air too, like Minecraft).
@@ -387,6 +390,11 @@ impl Game {
         }
         self.items.extend(pickup_visuals);
         self.merge_items();
+
+        // The rifle stations' magazine loaders.
+        if !self.is_client() {
+            self.update_loaders(dt);
+        }
 
         // Mobs
         self.update_mobs(dt);

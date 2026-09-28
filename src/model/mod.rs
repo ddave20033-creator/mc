@@ -2,18 +2,24 @@
 //! world-space vertices: the shared pieces (boxes, items, torches, crack overlays) and the
 //! models made of them.
 
+pub mod ak_vm;
 pub mod ballistics;
 pub mod book;
+pub mod dummy;
 pub mod grenade;
 pub mod gun;
 pub mod gun_station;
+pub mod gun_view;
 pub mod hand;
 pub mod lantern;
 pub mod particles;
 pub mod pistol_view;
 pub mod pistol_vm;
 pub mod player;
+pub mod revolver_view;
+pub mod revolver_vm;
 pub mod spring;
+pub mod tp_rig;
 pub mod viewmodel;
 
 use crate::item::{icon, Icon, ItemId};
@@ -28,7 +34,9 @@ use glam::{Mat4, Vec3};
 pub fn is_model_item(item: ItemId) -> bool {
     item == crate::item::FRAG_GRENADE
         || item == crate::item::SMOKE_GRENADE
-        || pistol_view::bench::item_rig(&crate::item::Stack::one(item)).is_some()
+        || item == crate::item::TARGET_DUMMY
+        || item == crate::item::MAG_LOADER
+        || gun_view::item_rig(&crate::item::Stack::one(item)).is_some()
 }
 
 /// Any item centered on the origin with unit size: a cube for blocks, a thin double-sided
@@ -45,24 +53,32 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
         emit_torch(out, m, light, fl, 94);
         return;
     }
-    if item == crate::world::GUN_STATION as ItemId {
-        gun_station::emit_item(out, m, light, fl);
+    if item == crate::world::GUN_STATION as ItemId || item == crate::world::RIFLE_BENCH as ItemId {
+        gun_station::emit_item(out, item == crate::world::RIFLE_BENCH as ItemId, m, light, fl);
         return;
     }
     if item == crate::item::FRAG_GRENADE || item == crate::item::SMOKE_GRENADE {
         grenade::emit_sized(out, item == crate::item::SMOKE_GRENADE, m, 0.62, light, fl);
         return;
     }
-    if let Some((bones, pose, mag, upright)) = pistol_view::bench::item_rig(st) {
-        // A piece of the Blockbench pistol (a part, an attachment, a magazine with its rounds
-        // showing in its witness holes, a round), its middle at the origin, its size the unit's
-        // (a round smaller), the muzzle end to +X, its right side toward +Z.
+    if item == crate::item::TARGET_DUMMY {
+        dummy::emit_sized(out, m, 0.95, light, fl);
+        return;
+    }
+    if item == crate::item::MAG_LOADER {
+        gun_station::emit_loader_item(out, m, light, fl);
+        return;
+    }
+    if let Some((kind, bones, pose, mag, upright)) = gun_view::item_rig(st) {
+        // A piece of a Blockbench gun (a part, an attachment, a magazine with its rounds
+        // showing in its witness holes, a speedloader, a round), its middle at the origin, its
+        // size the unit's (a round smaller), the muzzle end to +X, its right side toward +Z.
         use pistol_view::bench;
-        let (mats, shown) = viewmodel::bone_matrices(pistol_vm::BONES, &pose, Mat4::IDENTITY);
-        let cubes: Vec<&viewmodel::Cube> = pistol_vm::CUBES
+        let (mats, shown) = viewmodel::bone_matrices(gun_view::bones(kind), &pose, Mat4::IDENTITY);
+        let cubes: Vec<&viewmodel::Cube> = gun_view::cubes(kind)
             .iter()
             .filter(|c| bones & (1 << c.bone) != 0 && shown[c.bone])
-            .filter(|c| mag.is_none_or(|(n, cap)| bench::mag_cube_shown(c.name, n, cap)))
+            .filter(|c| mag.is_none_or(|(n, cap)| bench::mag_cube_shown(pistol_view::rig(kind), c.name, n, cap)))
             .collect();
         let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
         for c in &cubes {
@@ -73,10 +89,12 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
                 hi = hi.max(q);
             }
         }
-        let size = if item == crate::item::BULLET { 0.3 } else { 0.62 };
-        let k = size / (hi - lo).max_element().max(1e-3);
+        // A round keeps its real length (the models share their scale: the 9 mm round is 0.3
+        // long, a magnum round longer); anything else fills the unit.
+        let round = matches!(item, crate::item::BULLET | crate::item::MAGNUM_ROUND | crate::item::RIFLE_ROUND);
+        let k = if round { 0.3 / 2.7 } else { 0.62 / (hi - lo).max_element().max(1e-3) };
         let root = m * Mat4::from_scale(Vec3::splat(k)) * Mat4::from_translation(-(lo + hi) * 0.5) * upright;
-        let first = pistol_view::layers(pistol_view::dirt_level(st.damage, crate::item::max_damage(item)));
+        let first = gun_view::layers(kind, pistol_view::dirt_level(st.damage, crate::item::max_damage(item)));
         for c in cubes {
             viewmodel::emit_cube(out, c, root * mats[c.bone] * viewmodel::cube_matrix(c), first, light, fl);
         }
@@ -87,26 +105,27 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
         let size = gun_station::ammo_box_size();
         let k = 1.0 / size.max_element();
         let at = m * Mat4::from_scale(Vec3::splat(k)) * Mat4::from_translation(Vec3::new(0.0, -size.y * 0.5, 0.0));
-        gun_station::emit_ammo_box(out, at, crate::item::box_rounds(st), light, fl);
+        gun_station::emit_ammo_box(out, at, st.data, light, fl);
         return;
     }
     if let Some(kind) = crate::item::GunKind::of(item) {
-        // The Blockbench pistol at rest, the size and place of the old gun model.
-        let root = m * gun::gun_to_unit(kind) * pistol_view::to_gun_space();
-        let mut pose = pistol_view::rest_pose();
+        // The Blockbench gun at rest, the size and place of the old gun model.
+        let root = m * gun::gun_to_unit(kind) * gun_view::to_gun_space(kind);
         let state = pistol_view::GunAnim {
             locked: crate::item::gun_locked(st),
             no_mag: !crate::item::gun_has_mag(st),
             chambered: crate::item::gun_chambered(st),
+            // The revolver's cylinder as it is; the pistol's magazine as full as it is.
+            cyl: st.data,
+            mag: (kind.uses_magazine() && crate::item::gun_has_mag(st))
+                .then(|| (crate::item::gun_rounds(st), kind.magazine_size(crate::item::gun_mods(st)))),
             ..Default::default()
         };
-        pistol_view::add_gun_anims(&mut pose, &state, true);
-        pistol_view::apply_mods(&mut pose, crate::item::gun_mods(st));
-        let (mats, shown) = viewmodel::bone_matrices(pistol_vm::BONES, &pose, root);
-        let dirt = pistol_view::dirt_level(st.damage, crate::item::max_damage(item));
         let mods = crate::item::gun_mods(st);
+        let (mats, shown) = gun_view::matrices(kind, &state, mods, true, root);
+        let dirt = pistol_view::dirt_level(st.damage, crate::item::max_damage(item));
         let lamp = mods & crate::item::gun_mod::LIGHT != 0 && mods & crate::item::gun_mod::LIGHT_ON != 0;
-        pistol_view::emit_pistol(out, None, &mats, &shown, false, dirt, lamp, light, fl);
+        gun_view::emit(kind, out, None, &mats, &shown, false, dirt, lamp, &state, light, fl);
         return;
     }
     match icon(item) {
@@ -410,16 +429,38 @@ pub fn emit_box(
     light: [u8; 4],
     fl: u8,
 ) {
+    emit_box_rows(out, m, min, max, layers, tints, light, fl, [0.0, 1.0]);
+}
+
+/// `emit_box` whose sides (the faces standing up) show only the rows `rows` (0 top .. 1 bottom)
+/// of their textures: one part of something longer, like half of an arm.
+#[allow(clippy::too_many_arguments)]
+pub fn emit_box_rows(
+    out: &mut Vec<Vertex>,
+    m: Mat4,
+    min: Vec3,
+    max: Vec3,
+    layers: [u32; 6],
+    tints: [[u8; 3]; 6],
+    light: [u8; 4],
+    fl: u8,
+    rows: [f32; 2],
+) {
     for face in 0..6 {
         let mut quad = [Vertex::default(); 4];
+        let upright = crate::world::mesh::FACE_V[face] == [0, 1, 0];
         for (i, &(su, sv)) in CORNERS.iter().enumerate() {
             let c = corner_pos(face, su, sv);
             let local = min + (max - min) * Vec3::from(c);
             let p = m.transform_point3(local);
             let tn = tints[face];
+            let mut uv = corner_uv(su, sv);
+            if upright {
+                uv[1] = rows[0] + (rows[1] - rows[0]) * uv[1];
+            }
             quad[i] = Vertex {
                 pos: p.to_array(),
-                uv: corner_uv(su, sv),
+                uv,
                 layer: layers[face] as f32,
                 light: [light[0], light[1], light[2], face as u8],
                 tint: [tn[0], tn[1], tn[2], fl],

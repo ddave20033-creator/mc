@@ -1,4 +1,6 @@
 //! Mobs (the pig and the sheep): physics, a Minecraft-style passive animal AI and the models.
+//! The target dummy is one too: it stands where it was set up, rocks when hit and counts the
+//! damage it takes (it never dies).
 //!
 //! The AI follows Minecraft's goals for animals: panic after being hurt (run to random spots,
 //! away from whoever hit it), wander to random nearby spots (preferring grass, avoiding
@@ -20,6 +22,7 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 pub enum MobKind {
     Pig,
     Sheep,
+    Dummy,
 }
 
 impl MobKind {
@@ -27,6 +30,7 @@ impl MobKind {
         match self {
             MobKind::Pig => "pig",
             MobKind::Sheep => "sheep",
+            MobKind::Dummy => "target_dummy",
         }
     }
 
@@ -34,6 +38,7 @@ impl MobKind {
         match k.strip_prefix("minecraft:").unwrap_or(k) {
             "pig" => Some(MobKind::Pig),
             "sheep" => Some(MobKind::Sheep),
+            "target_dummy" => Some(MobKind::Dummy),
             _ => None,
         }
     }
@@ -43,6 +48,7 @@ impl MobKind {
         match v {
             0 => Some(MobKind::Pig),
             1 => Some(MobKind::Sheep),
+            2 => Some(MobKind::Dummy),
             _ => None,
         }
     }
@@ -51,6 +57,7 @@ impl MobKind {
         match self {
             MobKind::Pig => 10.0,
             MobKind::Sheep => 8.0,
+            MobKind::Dummy => 20.0,
         }
     }
 
@@ -59,9 +66,13 @@ impl MobKind {
         match self {
             MobKind::Pig => (0.45, 0.9),
             MobKind::Sheep => (0.45, 1.3),
+            MobKind::Dummy => (0.35, 1.95),
         }
     }
 }
+
+/// Seconds without a hit after which a dummy starts counting from zero again.
+pub const DUMMY_RESET: f32 = 6.0;
 const GRAVITY: f32 = 32.0;
 /// Jump speed: clears one block (Minecraft: 0.42 blocks per tick).
 const JUMP: f32 = 8.6;
@@ -117,6 +128,14 @@ pub struct Mob {
     pub fire: f32,
     /// A sheep without its wool (it grows back when the sheep eats grass).
     pub sheared: bool,
+    /// A dummy: the damage it has taken since it was last left alone for `DUMMY_RESET`
+    /// seconds, the last hit, and seconds since that hit.
+    pub taken: f32,
+    pub last_hit: f32,
+    pub since_hit: f32,
+    /// A dummy: how far its body is tipped (radians toward model +X and +Z), and how fast.
+    pub tilt: Vec2,
+    tilt_vel: Vec2,
     on_ground: bool,
     in_water: bool,
     /// Highest point since leaving the ground, for fall damage.
@@ -237,6 +256,11 @@ impl Mob {
             death: None,
             fire: 0.0,
             sheared: false,
+            taken: 0.0,
+            last_hit: 0.0,
+            since_hit: f32::MAX,
+            tilt: Vec2::ZERO,
+            tilt_vel: Vec2::ZERO,
             on_ground: false,
             in_water: false,
             fall_peak: pos.y,
@@ -266,11 +290,14 @@ impl Mob {
             body_yaw: self.body_yaw,
             head_yaw: self.head_yaw,
             pitch: self.pitch,
-            limb_swing: self.limb_swing,
-            limb_amount: self.limb_amount,
+            // A dummy has no legs: its limb values carry how it is tipped.
+            limb_swing: if self.kind == MobKind::Dummy { self.tilt.x } else { self.limb_swing },
+            limb_amount: if self.kind == MobKind::Dummy { self.tilt.y } else { self.limb_amount },
             hurt: self.hurt_time > 0.0,
             death: self.death.unwrap_or(-1.0),
             sheared: self.sheared,
+            taken: self.taken,
+            last_hit: self.last_hit,
         }
     }
 
@@ -289,6 +316,11 @@ impl Mob {
         self.hurt_time = if s.hurt { HURT_TIME } else { 0.0 };
         self.death = (s.death >= 0.0).then_some(s.death);
         self.sheared = s.sheared;
+        if s.taken != self.taken {
+            self.since_hit = if s.taken > 0.0 { 0.0 } else { f32::MAX };
+        }
+        self.taken = s.taken;
+        self.last_hit = s.last_hit;
     }
 
     /// Half width and height of its bounding box.
@@ -317,6 +349,10 @@ impl Mob {
         self.pitch += (s.pitch - self.pitch) * k;
         self.limb_swing += (s.limb_swing - self.limb_swing) * k;
         self.limb_amount += (s.limb_amount - self.limb_amount) * k;
+        if self.kind == MobKind::Dummy {
+            self.tilt = Vec2::new(self.limb_swing, self.limb_amount);
+            self.since_hit += dt;
+        }
         if let Some(d) = &mut self.death {
             *d += dt;
         }
@@ -348,6 +384,10 @@ impl Mob {
 
     /// Hit by something at `from`. Returns false if it could not be hurt right now.
     pub fn hurt(&mut self, amount: f32, from: Option<Vec3>, knockback: f32) -> bool {
+        if self.kind == MobKind::Dummy {
+            self.hit_dummy(amount, from, knockback);
+            return true;
+        }
         if !self.alive() || self.hurt_time > 0.0 {
             return false;
         }
@@ -373,6 +413,50 @@ impl Mob {
         true
     }
 
+    /// A dummy hit: every hit counts (it is never out of reach for a moment like a hurt
+    /// animal), and it rocks away from where the hit came from.
+    fn hit_dummy(&mut self, amount: f32, from: Option<Vec3>, knockback: f32) {
+        if self.since_hit > DUMMY_RESET {
+            self.taken = 0.0;
+        }
+        self.taken += amount;
+        self.last_hit = amount;
+        self.since_hit = 0.0;
+        let away = from
+            .and_then(|src| ((self.center() - src) * Vec3::new(1.0, 0.0, 1.0)).try_normalize())
+            .unwrap_or_else(|| {
+                let a = self.rand() * TAU;
+                Vec3::new(a.cos(), 0.0, a.sin())
+            });
+        // Into model space (the model is turned by `FRAC_PI_2 - body_yaw`, see `build`).
+        let local = Mat4::from_rotation_y(self.body_yaw - FRAC_PI_2).transform_vector3(away);
+        let kick = (1.6 + amount * 0.2) * knockback.clamp(0.3, 2.0);
+        self.tilt_vel += Vec2::new(local.x, local.z) * kick.min(5.5);
+    }
+
+    /// A dummy's update: it only falls (onto what it stands on), rocks back upright, and
+    /// forgets the damage after a while left alone.
+    fn update_dummy(&mut self, dt: f32, w: &World) -> MobEvent {
+        self.since_hit += dt;
+        if self.since_hit > DUMMY_RESET {
+            self.taken = 0.0;
+            self.last_hit = 0.0;
+        }
+        // A springy wooden foot: it rocks back and forth a few times before it settles.
+        let acc = -self.tilt * 55.0 - self.tilt_vel * 3.0;
+        self.tilt_vel += acc * dt;
+        self.tilt += self.tilt_vel * dt;
+        if self.tilt.length() > 0.6 {
+            self.tilt = self.tilt.normalize() * 0.6;
+            self.tilt_vel *= 0.5;
+        }
+        self.vel = Vec3::new(0.0, (self.vel.y - GRAVITY * dt).max(-60.0), 0.0);
+        if self.move_axis(w, 1, self.vel.y * dt) {
+            self.vel.y = 0.0;
+        }
+        MobEvent::None
+    }
+
     /// Environmental damage (no knockback).
     fn hurt_env(&mut self, amount: f32) {
         self.hurt(amount, None, 0.0);
@@ -380,6 +464,9 @@ impl Mob {
 
     /// Nudged by something overlapping it (other mobs, the player).
     pub fn push(&mut self, v: Vec3) {
+        if self.kind == MobKind::Dummy {
+            return;
+        }
         self.vel.x += v.x;
         self.vel.z += v.z;
     }
@@ -602,6 +689,9 @@ impl Mob {
     /// Advances the mob by `dt` seconds.
     pub fn update(&mut self, dt: f32, w: &World, ctx: &MobCtx) -> MobEvent {
         let dt = dt.min(0.05);
+        if self.kind == MobKind::Dummy {
+            return self.update_dummy(dt, w);
+        }
         self.hurt_time = (self.hurt_time - dt).max(0.0);
         self.jump_cooldown -= dt;
         self.damage_tick -= dt;
@@ -797,6 +887,14 @@ impl Mob {
 
     pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8) {
         let light = vertex_light(sky, blk);
+        if self.kind == MobKind::Dummy {
+            // Its model's front (+Z) toward where it faces.
+            let root = Mat4::from_translation(self.pos)
+                * Mat4::from_rotation_y(FRAC_PI_2 - self.body_yaw)
+                * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
+            crate::model::dummy::emit(out, root, self.tilt, light, 0);
+            return;
+        }
         let tint = if self.hurt_time > 0.0 || self.death.is_some() {
             [255, 110, 110]
         } else {
@@ -814,6 +912,7 @@ impl Mob {
         match self.kind {
             MobKind::Pig => self.build_pig(out, root, tint, light),
             MobKind::Sheep => self.build_sheep(out, root, tint, light),
+            MobKind::Dummy => {}
         }
     }
 
