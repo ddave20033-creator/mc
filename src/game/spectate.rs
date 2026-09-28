@@ -178,6 +178,7 @@ impl Game {
             sprint: k(Bind::Sprint) || (self.w_sprint && k(Bind::Forward)),
             sneak: false,
             using: false,
+            aiming: false,
         };
         self.player
             .update(dt, &self.terrain.world, self.yaw, &input);

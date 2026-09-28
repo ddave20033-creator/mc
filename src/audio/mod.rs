@@ -20,20 +20,12 @@ const MAX_VOICES: usize = 96;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Sound {
     ShotPistol,
-    ShotMagnum,
-    ShotRifle,
-    ShotSniper,
-    ShotShotgun,
     ShotSilenced,
     DryFire,
     MagOut,
     MagIn,
     SlideRelease,
-    BoltCycle,
-    PumpCycle,
-    ShellIn,
     CaseBrass,
-    CaseShell,
     Impact,
     PinPull,
     Throw,
@@ -47,22 +39,14 @@ pub enum Sound {
     ArmorHit,
 }
 
-pub const SOUNDS: [Sound; 26] = [
+pub const SOUNDS: [Sound; 18] = [
     Sound::ShotPistol,
-    Sound::ShotMagnum,
-    Sound::ShotRifle,
-    Sound::ShotSniper,
-    Sound::ShotShotgun,
     Sound::ShotSilenced,
     Sound::DryFire,
     Sound::MagOut,
     Sound::MagIn,
     Sound::SlideRelease,
-    Sound::BoltCycle,
-    Sound::PumpCycle,
-    Sound::ShellIn,
     Sound::CaseBrass,
-    Sound::CaseShell,
     Sound::Impact,
     Sound::PinPull,
     Sound::Throw,
@@ -80,13 +64,10 @@ impl Sound {
     /// How far it carries: full loudness up to about `near` blocks, gone at `far`.
     fn reach(self) -> (f32, f32) {
         match self {
-            Sound::ShotSniper | Sound::Explosion => (12.0, 260.0),
-            Sound::ShotPistol
-            | Sound::ShotMagnum
-            | Sound::ShotRifle
-            | Sound::ShotShotgun => (7.0, 170.0),
+            Sound::Explosion => (12.0, 260.0),
+            Sound::ShotPistol => (7.0, 170.0),
             Sound::ShotSilenced => (2.0, 32.0),
-            Sound::CaseBrass | Sound::CaseShell | Sound::DryFire => (1.0, 14.0),
+            Sound::CaseBrass | Sound::DryFire => (1.0, 14.0),
             Sound::Impact | Sound::GrenadeBounce | Sound::ArmorHit => (2.0, 40.0),
             Sound::FireCrackle | Sound::BlastRoar => (1.5, 18.0),
             Sound::SmokeHiss => (3.0, 40.0),
@@ -432,8 +413,8 @@ mod tests {
             seed: 1,
         };
         a.set_listener(Vec3::ZERO, Vec3::X);
-        let (near, t0) = a.place(Sound::ShotRifle, Some(Vec3::new(2.0, 0.0, 0.0)), 1.0);
-        let (far, t1) = a.place(Sound::ShotRifle, Some(Vec3::new(100.0, 0.0, 0.0)), 1.0);
+        let (near, t0) = a.place(Sound::ShotPistol, Some(Vec3::new(2.0, 0.0, 0.0)), 1.0);
+        let (far, t1) = a.place(Sound::ShotPistol, Some(Vec3::new(100.0, 0.0, 0.0)), 1.0);
         assert!(near[1] > far[1] && t1 > t0);
         assert!(near[1] > near[0], "on the right: {near:?}");
         let (gone, _) = a.place(Sound::CaseBrass, Some(Vec3::new(0.0, 0.0, 50.0)), 1.0);

@@ -23,8 +23,12 @@ const SKY_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sky.vert.spv")
 const SKY_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sky.frag.spv"));
 const UI_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.vert.spv"));
 const UI_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.frag.spv"));
+const LENS_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lens.frag.spv"));
 
 pub const SHADOW_SIZE: u32 = 4096;
+/// The scope's view: its size in pixels (square) and format.
+pub const SCOPE_SIZE: u32 = 512;
+const SCOPE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
 const SHADOW_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 const UI_MAX_VERTS: usize = 150_000;
 const DYN_MAX_VERTS: usize = 250_000;
@@ -37,6 +41,9 @@ const STAGING_SIZE: usize = 16 << 20;
 fn as_bytes<T: Copy>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts(v as *const T as *const u8, size_of::<T>()) }
 }
+
+/// Weapon lights at once (`FrameUbo::spots`).
+pub const MAX_SPOTS: usize = 4;
 
 /// Must match `heldLights` in frame.glsl.
 pub const MAX_HELD_LIGHTS: usize = 8;
@@ -57,6 +64,9 @@ pub struct FrameUbo {
     pub misc: [f32; 4],
     /// Held torches and lanterns (this player's and the other LAN players'): position, intensity.
     pub held_lights: [[f32; 4]; MAX_HELD_LIGHTS],
+    /// Weapon lights: pairs of (xyz position, w on) and (xyz direction, w the cosine of the
+    /// cone's edge). Must match `spots` in frame.glsl.
+    pub spots: [[f32; 4]; 2 * MAX_SPOTS],
     /// x: how many pixels a block at distance 1 covers (detail too small for the screen is
     /// simplified by it).
     pub detail: [f32; 4],
@@ -111,6 +121,21 @@ pub struct FrameInfo<'a> {
     pub player_vertex_count: u32,
     pub player_opacity: f32,
     pub translucent: &'a [Vertex],
+    /// The first-person gun's see-through glass (drawn blended after it), and its scope's
+    /// eyepiece, which shows `scope`'s view.
+    pub viewmodel_glass: &'a [Vertex],
+    pub lens: &'a [Vertex],
+    pub scope: Option<ScopeView>,
+}
+
+/// The view through the scope (magnified): rendered into the scope image before the main
+/// pass, then shown on the eyepiece (`FrameInfo::lens`).
+pub struct ScopeView {
+    pub ubo: FrameUbo,
+    pub view_proj: Mat4,
+    pub cam_pos: Vec3,
+    /// Pixels a block at distance 1 covers in the scope's image.
+    pub detail_px: f32,
 }
 
 /// A chunk drawn this frame: where its mesh is and how far away it is.
@@ -176,6 +201,21 @@ pub struct Renderer {
     shadow_sampler: vk::Sampler,
     shadow_pass: vk::RenderPass,
     shadow_fb: vk::Framebuffer,
+    /// The scope's view (picture in picture): its images, pass and framebuffer, the pipelines
+    /// it is drawn with (like the main pass's), its uniform buffers and descriptor sets per
+    /// frame slot; and the eyepiece's pipeline and set, which show it on the gun.
+    scope_color: Image,
+    scope_depth: Image,
+    scope_sampler: vk::Sampler,
+    scope_pass: vk::RenderPass,
+    scope_fb: vk::Framebuffer,
+    scope_pipes: [vk::Pipeline; 7],
+    scope_ubos: Vec<Buffer>,
+    scope_sets: Vec<vk::DescriptorSet>,
+    lens_dsl: vk::DescriptorSetLayout,
+    lens_set: vk::DescriptorSet,
+    lens_layout: vk::PipelineLayout,
+    lens_pipe: vk::Pipeline,
     ubos: Vec<Buffer>,
     ui_bufs: Vec<Buffer>,
     dyn_bufs: Vec<Buffer>,
@@ -383,6 +423,108 @@ fn create_main_pipes(
     ]
 }
 
+/// The scope eyepiece's pipeline: the world's vertices, the scope's view as its colour.
+fn create_lens_pipe(
+    d: &ash::Device,
+    render_pass: vk::RenderPass,
+    samples: vk::SampleCountFlags,
+    layout: vk::PipelineLayout,
+) -> vk::Pipeline {
+    create_pipeline(
+        d,
+        &PipelineDesc {
+            vert: WORLD_VERT,
+            frag: LENS_FRAG,
+            stride: size_of::<Vertex>() as u32,
+            attributes: &WORLD_ATTRS,
+            layout,
+            render_pass,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            cull: false,
+            depth_test: true,
+            depth_write: true,
+            blend: false,
+            multiply: false,
+            color: true,
+            depth_bias: None,
+            samples,
+            alpha_to_coverage: false,
+        },
+    )
+}
+
+/// The scope's pass: a colour image the eyepiece samples afterwards, and a depth image.
+fn create_scope_pass(device: &ash::Device) -> vk::RenderPass {
+    let attachments = [
+        vk::AttachmentDescription::default()
+            .format(SCOPE_FORMAT)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+        vk::AttachmentDescription::default()
+            .format(vk::Format::D32_SFLOAT)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+    ];
+    let color_ref = [vk::AttachmentReference {
+        attachment: 0,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+    }];
+    let depth_ref = vk::AttachmentReference {
+        attachment: 1,
+        layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+    let subpasses = [vk::SubpassDescription::default()
+        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+        .color_attachments(&color_ref)
+        .depth_stencil_attachment(&depth_ref)];
+    let fragment_tests =
+        vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
+    let deps = [
+        // The last frame's eyepiece has read the image (and its depth is written) before it
+        // is drawn again.
+        vk::SubpassDependency::default()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
+            .dst_subpass(0)
+            .src_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER | fragment_tests)
+            .src_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | fragment_tests)
+            .dst_access_mask(
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
+            ),
+        // The image is drawn before the eyepiece reads it.
+        vk::SubpassDependency::default()
+            .src_subpass(0)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+            .dst_access_mask(vk::AccessFlags::SHADER_READ),
+    ];
+    unsafe {
+        device
+            .create_render_pass(
+                &vk::RenderPassCreateInfo::default()
+                    .attachments(&attachments)
+                    .subpasses(&subpasses)
+                    .dependencies(&deps),
+                None,
+            )
+            .expect("create scope render pass")
+    }
+}
+
 fn create_shadow_pass(device: &ash::Device) -> vk::RenderPass {
     let attachments = [vk::AttachmentDescription::default()
         .format(SHADOW_FORMAT)
@@ -560,7 +702,7 @@ impl Renderer {
             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         }];
         unsafe {
-            for &set in &self.world_sets {
+            for &set in self.world_sets.iter().chain(&self.scope_sets) {
                 gpu.device.update_descriptor_sets(
                     &[vk::WriteDescriptorSet::default()
                         .dst_set(set)
@@ -590,7 +732,7 @@ impl Renderer {
     pub fn new(gpu: &Gpu, block_levels: &[Vec<u8>], font_atlas: &[u8]) -> Self {
         assert_eq!(size_of::<Vertex>(), 32);
         assert_eq!(size_of::<UiVertex>(), 52);
-        assert_eq!(size_of::<FrameUbo>(), 304 + 16 * MAX_HELD_LIGHTS + 16);
+        assert_eq!(size_of::<FrameUbo>(), 304 + 16 * MAX_HELD_LIGHTS + 32 * MAX_SPOTS + 16);
 
         let block_tex = Texture::new(
             gpu,
@@ -657,6 +799,58 @@ impl Renderer {
                 )
                 .unwrap();
 
+            // The scope's view
+            let scope_color = Image::new(
+                d,
+                &gpu.mem_props,
+                SCOPE_SIZE,
+                SCOPE_SIZE,
+                1,
+                1,
+                SCOPE_FORMAT,
+                vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+                vk::ImageAspectFlags::COLOR,
+                vk::ImageViewType::TYPE_2D,
+            );
+            let scope_depth = Image::new(
+                d,
+                &gpu.mem_props,
+                SCOPE_SIZE,
+                SCOPE_SIZE,
+                1,
+                1,
+                vk::Format::D32_SFLOAT,
+                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                vk::ImageAspectFlags::DEPTH,
+                vk::ImageViewType::TYPE_2D,
+            );
+            let scope_sampler = d
+                .create_sampler(
+                    &vk::SamplerCreateInfo::default()
+                        .mag_filter(vk::Filter::LINEAR)
+                        .min_filter(vk::Filter::LINEAR)
+                        .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                        .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                        .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                        .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                        .max_lod(0.0),
+                    None,
+                )
+                .unwrap();
+            let scope_pass = create_scope_pass(d);
+            let scope_views = [scope_color.view, scope_depth.view];
+            let scope_fb = d
+                .create_framebuffer(
+                    &vk::FramebufferCreateInfo::default()
+                        .render_pass(scope_pass)
+                        .attachments(&scope_views)
+                        .width(SCOPE_SIZE)
+                        .height(SCOPE_SIZE)
+                        .layers(1),
+                    None,
+                )
+                .unwrap();
+
             // Descriptors
             let binding = |i: u32, ty: vk::DescriptorType, stages: vk::ShaderStageFlags| {
                 vk::DescriptorSetLayoutBinding::default()
@@ -686,26 +880,38 @@ impl Renderer {
                     None,
                 )
                 .unwrap();
+            let lens_bindings = [binding(0, cis, frag)];
+            let lens_dsl = d
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::default().bindings(&lens_bindings),
+                    None,
+                )
+                .unwrap();
+            // World sets and the scope's (block texture, shadow map, uniform buffer each), the
+            // UI's (font, blocks) and the eyepiece's (the scope's view).
+            let n = FRAMES_IN_FLIGHT as u32;
             let sizes = [
                 vk::DescriptorPoolSize {
                     ty: cis,
-                    descriptor_count: 2 * FRAMES_IN_FLIGHT as u32 + 2,
+                    descriptor_count: 4 * n + 2 + 1,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::UNIFORM_BUFFER,
-                    descriptor_count: FRAMES_IN_FLIGHT as u32,
+                    descriptor_count: 2 * n,
                 },
             ];
             let pool = d
                 .create_descriptor_pool(
                     &vk::DescriptorPoolCreateInfo::default()
-                        .max_sets(FRAMES_IN_FLIGHT as u32 + 1)
+                        .max_sets(2 * n + 2)
                         .pool_sizes(&sizes),
                     None,
                 )
                 .unwrap();
             let mut layouts = vec![world_dsl; FRAMES_IN_FLIGHT];
             layouts.push(ui_dsl);
+            layouts.extend(std::iter::repeat(world_dsl).take(FRAMES_IN_FLIGHT));
+            layouts.push(lens_dsl);
             let sets = d
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::default()
@@ -715,10 +921,22 @@ impl Renderer {
                 .unwrap();
             let world_sets = sets[..FRAMES_IN_FLIGHT].to_vec();
             let ui_set = sets[FRAMES_IN_FLIGHT];
+            let scope_sets = sets[FRAMES_IN_FLIGHT + 1..2 * FRAMES_IN_FLIGHT + 1].to_vec();
+            let lens_set = sets[2 * FRAMES_IN_FLIGHT + 1];
 
             let host =
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
             let ubos: Vec<Buffer> = (0..FRAMES_IN_FLIGHT)
+                .map(|_| {
+                    Buffer::new(
+                        gpu,
+                        size_of::<FrameUbo>() as u64,
+                        vk::BufferUsageFlags::UNIFORM_BUFFER,
+                        host,
+                    )
+                })
+                .collect();
+            let scope_ubos: Vec<Buffer> = (0..FRAMES_IN_FLIGHT)
                 .map(|_| {
                     Buffer::new(
                         gpu,
@@ -754,7 +972,52 @@ impl Renderer {
                     }]
                 })
                 .collect();
+            let scope_ubo_infos: Vec<[vk::DescriptorBufferInfo; 1]> = scope_ubos
+                .iter()
+                .map(|b| {
+                    [vk::DescriptorBufferInfo {
+                        buffer: b.handle,
+                        offset: 0,
+                        range: size_of::<FrameUbo>() as u64,
+                    }]
+                })
+                .collect();
+            let lens_info = [vk::DescriptorImageInfo {
+                sampler: scope_sampler,
+                image_view: scope_color.view,
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            }];
             let mut writes = Vec::new();
+            for (i, &set) in scope_sets.iter().enumerate() {
+                writes.push(
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(0)
+                        .descriptor_type(cis)
+                        .image_info(&block_info),
+                );
+                writes.push(
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(1)
+                        .descriptor_type(cis)
+                        .image_info(&shadow_info),
+                );
+                writes.push(
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(2)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .buffer_info(&scope_ubo_infos[i]),
+                );
+            }
+            writes.push(
+                vk::WriteDescriptorSet::default()
+                    .dst_set(lens_set)
+                    .dst_binding(0)
+                    .descriptor_type(cis)
+                    .image_info(&lens_info),
+            );
             for (i, &set) in world_sets.iter().enumerate() {
                 writes.push(
                     vk::WriteDescriptorSet::default()
@@ -799,6 +1062,10 @@ impl Renderer {
             let ui_layout = create_layout(d, &[ui_dsl], 16);
             let [sky_pipe, world_pipe, water_pipe, player_fade_pipe, overlay_pipe, line_pipe, ui_pipe] =
                 create_main_pipes(d, gpu.render_pass, gpu.samples, world_layout, ui_layout);
+            let scope_pipes =
+                create_main_pipes(d, scope_pass, vk::SampleCountFlags::TYPE_1, world_layout, ui_layout);
+            let lens_layout = create_layout(d, &[world_dsl, lens_dsl], size_of::<DrawPush>() as u32);
+            let lens_pipe = create_lens_pipe(d, gpu.render_pass, gpu.samples, lens_layout);
             let shadow_pipe = create_pipeline(
                 d,
                 &PipelineDesc {
@@ -887,6 +1154,18 @@ impl Renderer {
                 shadow_sampler,
                 shadow_pass,
                 shadow_fb,
+                scope_color,
+                scope_depth,
+                scope_sampler,
+                scope_pass,
+                scope_fb,
+                scope_pipes,
+                scope_ubos,
+                scope_sets,
+                lens_dsl,
+                lens_set,
+                lens_layout,
+                lens_pipe,
                 ubos,
                 ui_bufs,
                 dyn_bufs,
@@ -1067,6 +1346,8 @@ impl Renderer {
                     self.world_layout,
                     self.ui_layout,
                 );
+                d.destroy_pipeline(self.lens_pipe, None);
+                self.lens_pipe = create_lens_pipe(d, gpu.render_pass, gpu.samples, self.lens_layout);
                 self.pass_version = gpu.pass_version;
             }
             // begin_frame waited for the frame recorded FRAMES_IN_FLIGHT frames ago, so chunk
@@ -1161,8 +1442,10 @@ impl Renderer {
                 lines.as_slice(),
                 f.entity,
                 f.translucent,
+                f.viewmodel_glass,
+                f.lens,
             ];
-            let mut offsets = [0u32; 7];
+            let mut offsets = [0u32; 9];
             let mut cursor = 0usize;
             for (i, r) in ranges.iter().enumerate() {
                 let n = r.len().min(DYN_MAX_VERTS - cursor);
@@ -1172,7 +1455,7 @@ impl Renderer {
                 offsets[i] = cursor as u32;
                 cursor += n;
             }
-            offsets[6] = cursor as u32;
+            offsets[8] = cursor as u32;
             let range = |i: usize| (offsets[i], offsets[i + 1] - offsets[i]);
 
             let d = &gpu.device;
@@ -1302,6 +1585,139 @@ impl Renderer {
             }
             d.cmd_end_render_pass(cmd);
             stamp(d, 1);
+
+            // ---- Scope pass: the magnified view, for the eyepiece
+            if let Some(sv) = &f.scope {
+                self.scope_ubos[slot].write(0, std::slice::from_ref(&sv.ubo));
+                let scope_set = self.scope_sets[slot];
+                let area = vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: vk::Extent2D {
+                        width: SCOPE_SIZE,
+                        height: SCOPE_SIZE,
+                    },
+                };
+                let clears = [
+                    vk::ClearValue {
+                        color: vk::ClearColorValue {
+                            float32: [0.0, 0.0, 0.0, 1.0],
+                        },
+                    },
+                    vk::ClearValue {
+                        depth_stencil: vk::ClearDepthStencilValue {
+                            depth: 1.0,
+                            stencil: 0,
+                        },
+                    },
+                ];
+                d.cmd_begin_render_pass(
+                    cmd,
+                    &vk::RenderPassBeginInfo::default()
+                        .render_pass(self.scope_pass)
+                        .framebuffer(self.scope_fb)
+                        .render_area(area)
+                        .clear_values(&clears),
+                    vk::SubpassContents::INLINE,
+                );
+                d.cmd_set_viewport(
+                    cmd,
+                    0,
+                    &[vk::Viewport {
+                        x: 0.0,
+                        y: 0.0,
+                        width: SCOPE_SIZE as f32,
+                        height: SCOPE_SIZE as f32,
+                        min_depth: 0.0,
+                        max_depth: 1.0,
+                    }],
+                );
+                d.cmd_set_scissor(cmd, 0, &[area]);
+                let [sky, world, water, _, overlay, ..] = self.scope_pipes;
+                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, sky);
+                d.cmd_bind_descriptor_sets(
+                    cmd,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.world_layout,
+                    0,
+                    &[scope_set],
+                    &[],
+                );
+                d.cmd_push_constants(cmd, self.world_layout, stages, 0, as_bytes(&push(sv.view_proj, 0.0)));
+                d.cmd_draw(cmd, 3, 1, 0, 0);
+                // The chunks in its narrow view, with the detail its magnification shows.
+                let frustum = Frustum::new(sv.view_proj);
+                let max_d = f.view_distance + 24.0;
+                let mut draws: Vec<IndirectDraw> = Vec::new();
+                let mut waters = Vec::new();
+                for c in self.chunks.values() {
+                    let Some(r) = c.mesh else { continue };
+                    let center = (c.min + c.max) * 0.5;
+                    let (dx, dz) = (center.x - sv.cam_pos.x, center.z - sv.cam_pos.z);
+                    let dist2 = dx * dx + dz * dz;
+                    if dist2 > max_d * max_d || !frustum.visible(c.min, c.max) {
+                        continue;
+                    }
+                    let near = sv.cam_pos.clamp(c.min, c.max);
+                    let block_px = sv.detail_px / near.distance(sv.cam_pos).max(1e-3);
+                    let drawn = if block_px >= 5.0 {
+                        c.opaque
+                    } else if block_px >= 1.5 {
+                        c.solid + c.leaf_inner
+                    } else {
+                        c.solid
+                    };
+                    let (b, v, i) = (self.arena.buffer(r), r.offset, r.offset + c.index_offset);
+                    if drawn > 0 {
+                        draws.push(chunk_draw(b, v, i, 0, drawn));
+                    }
+                    if c.water > 0 {
+                        waters.push((b, v, i, c.opaque, c.water, dist2));
+                    }
+                }
+                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, world);
+                let ind = &self.indirect[slot];
+                match record_indirect(d, cmd, ind, indirect_used, &mut draws, gpu.multi_draw_indirect) {
+                    Some(next) => indirect_used = next,
+                    None => {
+                        for (b, c) in &draws {
+                            d.cmd_bind_vertex_buffers(cmd, 0, &[*b], &[0]);
+                            d.cmd_bind_index_buffer(cmd, *b, 0, vk::IndexType::UINT32);
+                            d.cmd_draw_indexed(cmd, c.index_count, 1, c.first_index, c.vertex_offset, 0);
+                        }
+                    }
+                }
+                let dynb = self.dyn_bufs[slot].handle;
+                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                let (p0, pn) = range(0);
+                if pn > 0 {
+                    d.cmd_draw(cmd, pn, 1, p0, 0);
+                }
+                let (e0, en) = range(4);
+                if f.entity_visible && en > 0 {
+                    d.cmd_draw(cmd, en, 1, e0, 0);
+                }
+                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, water);
+                d.cmd_push_constants(cmd, self.world_layout, stages, 0, as_bytes(&push(sv.view_proj, 1.0)));
+                waters.sort_unstable_by(|a, b| b.5.total_cmp(&a.5));
+                for &(b, v, i, first, count, _) in &waters {
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[v]);
+                    d.cmd_bind_index_buffer(cmd, b, i, vk::IndexType::UINT32);
+                    d.cmd_draw_indexed(cmd, count, 1, first, 0, 0);
+                }
+                let (t0, tn) = range(5);
+                if tn > 0 {
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, tn, 1, t0, 0);
+                }
+                // Bullet holes and break cracks on the blocks.
+                let (o0, on) = range(1);
+                if on > 0 {
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, overlay);
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, on, 1, o0, 0);
+                }
+                d.cmd_end_render_pass(cmd);
+            }
 
             // ---- Main pass
             gpu.begin_render_pass(cmd, image, [0.0, 0.0, 0.0, 1.0]);
@@ -1554,6 +1970,47 @@ impl Renderer {
                     d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
                     d.cmd_draw(cmd, vm_flame, 1, v0 + vn - vm_flame, 0);
                 }
+                // The scope's eyepiece shows its view; the glass is drawn over what is behind.
+                let (n0, nn) = range(7);
+                if nn > 0 && f.scope.is_some() {
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.lens_pipe);
+                    d.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.lens_layout,
+                        0,
+                        &[world_set, self.lens_set],
+                        &[],
+                    );
+                    d.cmd_push_constants(
+                        cmd,
+                        self.lens_layout,
+                        stages,
+                        0,
+                        as_bytes(&push(f.vm_view_proj, 2.0)),
+                    );
+                    d.cmd_draw(cmd, nn, 1, n0, 0);
+                    d.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.world_layout,
+                        0,
+                        &[world_set],
+                        &[],
+                    );
+                }
+                let (g0, gn) = range(6);
+                if gn > 0 {
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
+                    d.cmd_push_constants(
+                        cmd,
+                        self.world_layout,
+                        stages,
+                        0,
+                        as_bytes(&push(f.vm_view_proj, 4.0)),
+                    );
+                    d.cmd_draw(cmd, gn, 1, g0, 0);
+                }
             }
 
             stamp(d, 2);
@@ -1644,6 +2101,7 @@ impl Renderer {
                 .chain(self.indirect.drain(..))
                 .chain(self.staging.drain(..))
                 .chain(self.ubos.drain(..))
+                .chain(self.scope_ubos.drain(..))
             {
                 b.destroy(d);
             }
@@ -1656,9 +2114,20 @@ impl Renderer {
                 self.line_pipe,
                 self.shadow_pipe,
                 self.ui_pipe,
-            ] {
+                self.lens_pipe,
+            ]
+            .into_iter()
+            .chain(self.scope_pipes)
+            {
                 d.destroy_pipeline(p, None);
             }
+            d.destroy_pipeline_layout(self.lens_layout, None);
+            d.destroy_descriptor_set_layout(self.lens_dsl, None);
+            d.destroy_framebuffer(self.scope_fb, None);
+            d.destroy_render_pass(self.scope_pass, None);
+            d.destroy_sampler(self.scope_sampler, None);
+            self.scope_color.destroy(d);
+            self.scope_depth.destroy(d);
             d.destroy_pipeline_layout(self.world_layout, None);
             d.destroy_pipeline_layout(self.ui_layout, None);
             d.destroy_descriptor_pool(self.pool, None);

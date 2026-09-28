@@ -427,10 +427,13 @@ fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut Preview
         hide_right_arm: false,
         lantern: None,
         gun_mods: 0,
+        gun_dirt: 0,
+        held_data: 0,
+        gun: Default::default(),
         armor: 0,
     };
     let mut model = Vec::new();
-    build_player(&mut model, &pose, &limb_targets(&pose), 15, 15);
+    build_player(&mut model, &mut Vec::new(), &pose, &limb_targets(&pose), 15, 15);
     let camera = Vec3::new(0.0, 1.2, -5.0);
     let mut faces: Vec<(f32, [UiVertex; 3])> = Vec::new();
     for tri in model.chunks_exact(3) {

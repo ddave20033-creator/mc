@@ -13,10 +13,13 @@ layout(set = 0, binding = 2) uniform FrameData {
     // Torches and lanterns held by players (this one and the others on the LAN):
     // xyz position, w = intensity (zero for unused slots).
     vec4 heldLights[8];
+    // Weapon lights: pairs of (xyz position, w on) and (xyz direction, w cosine of the cone's
+    // edge).
+    vec4 spots[8];
     vec4 detail;    // x: pixels a block at distance 1 covers (field of view setting and zoom)
 } frame;
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
-    vec4 params;    // x: 0 opaque, 1 translucent, 2 view model, 3 shadow
+    vec4 params;    // x: 0 opaque, 1 translucent, 2 view model, 3 shadow, 4 view model glass
 } pc;

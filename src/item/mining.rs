@@ -52,6 +52,7 @@ fn mining(b: u8) -> Option<Mining> {
         COPPER_BLOCK => m(5.0, Some(Pickaxe), Some(1)),
         IRON_BLOCK => m(5.0, Some(Pickaxe), Some(2)),
         GUN_STATION => m(3.5, Some(Pickaxe), Some(0)),
+        _ if is_gun_bench(b) => m(3.5, Some(Pickaxe), Some(0)),
         GOLD_BLOCK => m(3.0, Some(Pickaxe), Some(3)),
         DIAMOND_BLOCK => m(5.0, Some(Pickaxe), Some(3)),
         OBSIDIAN => m(50.0, Some(Pickaxe), Some(4)),
@@ -177,9 +178,9 @@ mod tests {
             assert!(ok(ore, Tier::Iron) && ok(ore, Tier::Diamond));
         }
         assert!(!ok(OBSIDIAN, Tier::Iron) && ok(OBSIDIAN, Tier::Diamond));
-        // The copper tools have their own ids: the rounds after the first 20 tools are not
-        // tools.
-        assert_eq!(tool_of(RIFLE_ROUND), None);
+        // The copper tools have their own ids: what comes after the first 20 tools is not a
+        // tool.
+        assert_eq!(tool_of(BULLET), None);
         for t in TIER_ORDER {
             assert_eq!(tool_of(pick(t)), Some((ToolKind::Pickaxe, t)));
         }

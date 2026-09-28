@@ -28,6 +28,10 @@ impl Game {
             self.shots_step(dt);
             return;
         }
+        if self.gun_shots.is_some() && self.screen == Screen::Playing {
+            self.gun_shots_step(dt);
+            return;
+        }
         let Some(b) = self.bench.as_mut() else {
             return;
         };

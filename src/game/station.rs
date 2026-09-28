@@ -15,14 +15,15 @@ const FOV: f32 = 60.0;
 /// Seconds the camera takes to glide there (and back).
 const GLIDE: f32 = 0.4;
 /// How steeply the camera looks down at the chest or table (less steeply at a gun station,
-/// where the gun floats over the table).
+/// to see along its long table).
 const PITCH: f32 = 55.0;
-pub(super) const GUN_PITCH: f32 = 40.0;
-/// How far the camera is from the gun station, what it looks at (that far behind the table's
-/// middle, that high over it), and how far right and down of that it aims.
-const GUN_DIST: f32 = 1.3;
-const GUN_FOCUS: (f32, f32) = (0.05, 0.22);
-const GUN_AIM: (f32, f32) = (0.14, 0.34);
+const GUN_PITCH: f32 = 60.0;
+/// How steeply it looks down into the gun station's drawer.
+const DRAWER_PITCH: f32 = 68.0;
+/// How far the camera sways to the side over a gun station with the mouse (blocks), and
+/// turns toward that side (degrees).
+const GUN_SWAY: f32 = 0.3;
+const GUN_TURN: f32 = 6.0;
 
 /// The chest or table the view is over, and how far the camera has glided.
 pub(super) struct Station {
@@ -83,20 +84,50 @@ pub(super) fn framing(
     (center - look * dist, fwd)
 }
 
-/// The camera over a gun station (`top`: the middle of its table top, `toward`: the side the
-/// player is on): close enough that the parts on the table can be told apart, with the table
-/// and the gun floating over it in the upper left, clear of the panel on the right and the
-/// inventory at the bottom. Returns (position, look direction).
-pub(super) fn gun_framing(top: Vec3, toward: Vec3, aspect: f32) -> (Vec3, Vec3) {
-    let pitch = GUN_PITCH.to_radians();
-    let right = (-toward).cross(Vec3::Y);
-    let look = -toward * pitch.cos() - Vec3::Y * pitch.sin();
-    let focus = top + Vec3::Y * GUN_FOCUS.1 - toward * GUN_FOCUS.0;
-    // Narrower windows need more room across.
-    let dist = GUN_DIST * (16.0 / 9.0 / aspect).max(1.0).powf(0.8);
-    let cam = focus - look * dist;
-    let aim = focus + right * GUN_AIM.0 - Vec3::Y * GUN_AIM.1;
-    (cam, (aim - cam).normalize())
+/// The camera over a gun station's table (its top's middle `c`, its right and front axes),
+/// or looking down into its drawer (out in front of it): all of it in view above the bottom
+/// `strip` of the screen (a fraction of its height), filling as much of the rest as it can.
+/// Returns (position, look direction).
+pub(super) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, aspect: f32, strip: f32, drawer: bool) -> (Vec3, Vec3) {
+    let pitch = if drawer { DRAWER_PITCH } else { GUN_PITCH }.to_radians();
+    let fwd = -toward * pitch.cos() - Vec3::Y * pitch.sin();
+    let up = right.cross(fwd).normalize();
+    let tv = (FOV.to_radians() * 0.5).tan();
+    let th = tv * aspect;
+    // The table's corners; or the drawer (out) and the table's front edge above it.
+    let corners: &[(f32, f32)] = if drawer {
+        &[(0.5, 0.02), (0.5, -0.36), (0.97, -0.12), (0.97, -0.36)]
+    } else {
+        // The table and, under its front edge, the drawer's front with its handle.
+        &[(-0.53, 0.02), (0.53, 0.02), (0.53, -0.32)]
+    };
+    let mut points = Vec::new();
+    for x in [-1.03, 1.03] {
+        for &(z, y) in corners {
+            points.push(c + right * x + toward * z + Vec3::Y * y);
+        }
+    }
+    // Where they should be on the screen (x, y from -1 to 1, y up), with a margin.
+    let (want_lo, want_hi) = (Vec2::new(-0.94, -1.0 + 2.0 * strip + 0.04), Vec2::new(0.94, 0.92));
+    let mut cam = c - fwd * 3.0;
+    for _ in 0..40 {
+        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        let mut depth = 0.0;
+        for &p in &points {
+            let d = p - cam;
+            let z = d.dot(fwd).max(0.05);
+            let s = Vec2::new(d.dot(right) / (z * th), d.dot(up) / (z * tv));
+            lo = lo.min(s);
+            hi = hi.max(s);
+            depth += z / points.len() as f32;
+        }
+        // Closer or further to fill the space, then sideways and up to center it there.
+        let k = ((hi.x - lo.x) / (want_hi.x - want_lo.x)).max((hi.y - lo.y) / (want_hi.y - want_lo.y));
+        cam -= fwd * (depth * (k - 1.0) * 0.8);
+        let off = (lo + hi) * 0.5 - (want_lo + want_hi) * 0.5;
+        cam += right * off.x * depth * th * 0.8 + up * off.y * depth * tv * 0.8;
+    }
+    (cam, fwd)
 }
 
 /// Where the ray meets the horizontal plane at height `y` (in front of it).
@@ -113,9 +144,9 @@ impl Game {
     pub(super) fn open_station(&mut self, c: Container) {
         let pos = match c {
             Container::Chest(p) => p,
-            Container::Crafting(p) | Container::GunStation(p) => {
-                // The grid reads like a page from where the player stands (and the gun lies
-                // across the gun station toward them).
+            Container::GunStation(p) => p,
+            Container::Crafting(p) => {
+                // The grid reads like a page from where the player stands.
                 let d = self.player.pos - (p.as_vec3() + Vec3::splat(0.5));
                 self.table_sides.insert(p, facing_of(d.x, d.z));
                 p
@@ -143,7 +174,7 @@ impl Game {
             let b = self.terrain.world.geti(p);
             let there = match c {
                 Container::Chest(_) => is_chest(b),
-                Container::GunStation(_) => b == GUN_STATION,
+                Container::GunStation(_) => is_gun_bench(b),
                 _ => b == CRAFTING_TABLE,
             };
             if !there {
@@ -187,11 +218,21 @@ impl Game {
                 0.4,
                 PITCH,
             )
-        } else if b == GUN_STATION {
-            let toward = facing_dir(self.table_side(st.pos)).as_vec3();
-            let top = st.pos.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
-            let (want, fwd) = gun_framing(top, toward, aspect);
-            let origin = Vec3::new(top.x, top.y + 0.45, top.z);
+        } else if is_gun_bench(b) {
+            // The long table, the camera swaying along it with the mouse.
+            let table = self.bench_table(st.pos)?;
+            let center = table.center + Vec3::Y * 0.03;
+            // Above the inventory strip along the bottom of the screen.
+            let strip = (96.0 * self.ui.s / self.ui.h.max(1.0)).clamp(0.0, 0.6);
+            let (over, over_fwd) = bench_framing(table.center, table.right, table.toward, aspect, strip, false);
+            let (into, into_fwd) = bench_framing(table.center, table.right, table.toward, aspect, strip, true);
+            let k = smoothstep(0.0, 1.0, self.bench_focus);
+            let (want, fwd) = (over.lerp(into, k), over_fwd.lerp(into_fwd, k).normalize());
+            let sway = self.bench_pan;
+            let want = want + table.right * sway * GUN_SWAY;
+            // Moved to one side, it turns a little back toward the middle.
+            let fwd = glam::Quat::from_rotation_y(sway * GUN_TURN.to_radians()) * fwd;
+            let origin = Vec3::new(center.x, st.pos.y as f32 + 1.45, center.z);
             let cam = origin + super::camera::clamp_offset(w, origin, want - origin);
             return Some((cam, fwd));
         } else {
@@ -434,6 +475,29 @@ mod tests {
             assert!(pts[0].y < pts[3].y && pts[0].x < pts[1].x);
             // Big enough to see what lies in it.
             assert!(pts[2].x - pts[3].x > 0.25, "{half_w} {aspect}: {pts:?}");
+        }
+    }
+
+    #[test]
+    fn a_gun_station_is_framed_above_the_inventory() {
+        let (c, right, toward) = (Vec3::new(1.0, 65.0, 0.5), Vec3::X, Vec3::Z);
+        for aspect in [16.0 / 9.0, 4.0 / 3.0, 21.0 / 9.0] {
+            let strip = 0.2;
+            // Over the table: all of the table; into the drawer: all of the drawer.
+            for (drawer, points) in [(false, [(-0.5, 0.0), (0.5, 0.0)]), (true, [(0.55, -0.34), (0.95, -0.34)])] {
+            let (cam, fwd) = bench_framing(c, right, toward, aspect, strip, drawer);
+            let mut proj = Mat4::perspective_rh(FOV.to_radians(), aspect, 0.05, 100.0);
+            proj.y_axis.y *= -1.0;
+            let vp = proj * Mat4::look_to_rh(cam, fwd, Vec3::Y);
+            let view = Screen2 { view_proj: vp, w: 1600.0, h: 1600.0 / aspect };
+            for x in [-1.0, 1.0] {
+                for (z, y) in points {
+                    let q = view.to_screen(c + right * x + toward * z + Vec3::Y * y).unwrap();
+                    assert!(q.x > 0.0 && q.x < view.w, "{aspect}: {q}");
+                    assert!(q.y > 0.0 && q.y < view.h * (1.0 - strip), "{aspect}: {q} over the inventory");
+                }
+            }
+            }
         }
     }
 

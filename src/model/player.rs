@@ -2,7 +2,7 @@
 //! and attack animations.
 //! Model space is in pixels (1 px = 1/16 of the model height unit), Y up, facing -Z.
 
-use super::{emit_box, emit_held};
+use super::emit_box;
 use crate::item::{icon, tool_of, Icon, ItemId, NONE, STICK};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
@@ -27,6 +27,8 @@ pub struct PlayerPose {
     /// Sneak amount 0..1.
     pub crouch: f32,
     pub held: ItemId,
+    /// The held stack's `data` (a magazine's rounds).
+    pub held_data: u16,
     pub skin: u8,
     pub time: f32,
     /// Red flash when hurt.
@@ -45,8 +47,12 @@ pub struct PlayerPose {
     pub hide_right_arm: bool,
     /// Held lantern: direction from the hand down its chain (from its swing).
     pub lantern: Option<Vec3>,
-    /// The held pistol's attachments.
+    /// The held pistol's attachments, and what it is doing (its slide, trigger and magazine
+    /// move like in the first-person view).
     pub gun_mods: u8,
+    /// How dirty the held gun looks (`pistol_view::dirt_level`).
+    pub gun_dirt: u8,
+    pub gun: super::pistol_view::GunAnim,
     /// What is worn (`item::armor_code`).
     pub armor: u16,
     /// Holding the guide book open: its pages (see `book::BookView`).
@@ -193,10 +199,17 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
         let g = gun_on_model(p, kind);
         let shoulder_y = 22.0 - 3.2 * c;
         let right_hand = g.transform_point3(spec.hand);
-        let left_hand = g.transform_point3(
-            spec.support
-                .unwrap_or(spec.hand + Vec3::new(0.6, -1.2, -2.2)),
-        );
+        // Reloading, the left hand takes the old magazine out and brings the new one.
+        let reloading = p.gun.reload_time();
+        let mag = reloading
+            .filter(|&t| (super::pistol_view::RELOAD_MAG_OUT - 0.1..super::pistol_view::RELOAD_MAG_IN + 0.1).contains(&t))
+            .and_then(|_| {
+                let (mats, _) = pistol_matrices(p, g);
+                super::pistol_view::magazine_bottom(&mats)
+            });
+        let left_hand = mag.unwrap_or_else(|| {
+            g.transform_point3(spec.support.unwrap_or(spec.hand + Vec3::new(0.6, -1.2, -2.2)))
+        });
         l.right_arm = reach(Vec3::new(5.0, shoulder_y, 0.0), right_hand);
         l.left_arm = reach(Vec3::new(-5.0, shoulder_y, 0.0), left_hand);
     }
@@ -236,7 +249,8 @@ impl LimbSmoother {
     }
 }
 
-pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u8, blk: u8) {
+/// `glass`: where the held gun's see-through glass goes (drawn blended).
+pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u8, blk: u8) {
     let light = vertex_light(sky, blk);
     let tint = if p.hurt {
         [255, 120, 120]
@@ -358,9 +372,13 @@ pub fn build_player(out: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u
     } else if let (Some(view), true) = (&p.book, show_right) {
         super::book::emit_open_book(out, root * book_on_model(p), view, light, fl);
     } else if let (Some(kind), true) = (crate::item::GunKind::of(p.held), show_right) {
-        super::gun::emit_gun(out, kind, root * gun_on_model(p, kind), light, fl, p.gun_mods);
+        // The Blockbench pistol, its parts moving like in the first-person view.
+        let (mats, shown) = pistol_matrices(p, root * gun_on_model(p, kind));
+        let lamp = p.gun_mods & crate::item::gun_mod::LIGHT != 0 && p.gun_mods & crate::item::gun_mod::LIGHT_ON != 0;
+        super::pistol_view::emit_pistol(out, Some(glass), &mats, &shown, false, p.gun_dirt, lamp, light, fl);
     } else if p.held != NONE && show_right {
-        emit_held(out, held_item(p, right), p.held, light, fl);
+        let st = crate::item::Stack { data: p.held_data, ..crate::item::Stack::one(p.held) };
+        super::emit_held_data(out, held_item(p, right), &st, light, fl);
     }
 }
 
@@ -386,10 +404,21 @@ fn book_on_model(p: &PlayerPose) -> Mat4 {
 pub fn gun_on_model(p: &PlayerPose, kind: crate::item::GunKind) -> Mat4 {
     let spec = super::gun::spec(kind);
     // The right fist on the grip, from the neck in the head's frame.
-    let grip = if spec.support.is_some() {
+    let hip = if spec.support.is_some() {
         Vec3::new(3.0, -3.0, -9.5)
     } else {
         Vec3::new(0.8, -2.2, -9.6)
+    };
+    // Aimed, the arms stretch out and bring the sights (or the scope) up in front of the
+    // right eye.
+    let a = p.gun.aim.clamp(0.0, 1.0);
+    let a = a * a * (3.0 - 2.0 * a);
+    let grip = if a > 0.0 {
+        let eye = Vec3::new(1.6, 3.5, -11.2);
+        let sight = super::pistol_view::sight_above_hand(p.gun_mods).y * spec.arm_scale;
+        hip.lerp(eye - Vec3::Y * sight, a)
+    } else {
+        hip
     };
     // Gun space to model space: the muzzle forward (-Z), its right side to the right (+X).
     let basis = Mat4::from_cols(
@@ -405,6 +434,15 @@ pub fn gun_on_model(p: &PlayerPose, kind: crate::item::GunKind) -> Mat4 {
         * basis
         * Mat4::from_scale(Vec3::splat(spec.arm_scale))
         * Mat4::from_translation(-spec.hand)
+}
+
+/// The Blockbench pistol's bones held by the model: `gun` is the old gun space's transform
+/// (`gun_on_model`, with the model's own root in front for the world).
+fn pistol_matrices(p: &PlayerPose, gun: Mat4) -> (Vec<Mat4>, Vec<bool>) {
+    let mut pose = super::pistol_view::rest_pose();
+    super::pistol_view::add_gun_anims(&mut pose, &p.gun, true);
+    super::pistol_view::apply_mods(&mut pose, p.gun_mods);
+    super::viewmodel::bone_matrices(super::pistol_vm::BONES, &pose, gun * super::pistol_view::to_gun_space())
 }
 
 /// A point of the held gun (gun space) in the world.
@@ -430,6 +468,9 @@ fn held_item(p: &PlayerPose, right: Mat4) -> Mat4 {
         ([0.0, 4.0, 0.5], [0.0, -90.0, 55.0], 0.85)
     } else if matches!(icon(p.held), Icon::Block(_)) {
         ([0.0, 2.5, 0.0], [75.0, 45.0, 0.0], 0.375)
+    } else if super::is_model_item(p.held) {
+        // A gun's part, a magazine, a grenade...: in the fist, its side outward.
+        ([0.0, 2.0, 0.5], [0.0, -90.0, 0.0], 0.42)
     } else {
         ([0.0, 3.0, 1.0], [0.0, 0.0, 0.0], 0.55)
     };
@@ -527,6 +568,9 @@ mod gun_hold_tests {
             hide_right_arm: false,
             lantern: None,
             gun_mods: 0,
+            gun_dirt: 0,
+            held_data: 0,
+            gun: Default::default(),
             armor: 0,
             book: None,
         }
@@ -543,8 +587,11 @@ mod gun_hold_tests {
                 let look = Mat4::from_rotation_y(-turn)
                     * Mat4::from_rotation_x(pitch)
                     * glam::Vec4::new(0.0, 0.0, -1.0, 0.0);
-                let along = g.transform_point3(crate::model::gun::muzzle(kind, 0))
-                    - g.transform_point3(spec.grip);
+                use crate::model::pistol_view::{muzzle, rest_point_in_gun_space};
+                let (bone, front) = muzzle(0);
+                // Down the barrel: from ten pixels behind its end to its end.
+                let back = rest_point_in_gun_space((bone, front + Vec3::Z * 10.0));
+                let along = g.transform_point3(rest_point_in_gun_space((bone, front))) - g.transform_point3(back);
                 assert!(along.normalize().dot(look.truncate()) > 0.97, "{kind:?}");
                 // The right arm points at the grip; the fist ends within reach of it.
                 let l = limb_targets(&p);

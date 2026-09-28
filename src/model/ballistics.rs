@@ -19,11 +19,6 @@ const BRASS: [u8; 3] = [236, 182, 72];
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CaseKind {
     Pistol,
-    Magnum,
-    Rifle,
-    Bmg,
-    /// A shotgun shell's red plastic hull.
-    Shell,
 }
 
 impl CaseKind {
@@ -31,10 +26,6 @@ impl CaseKind {
     fn look(self) -> (Vec3, [u8; 3]) {
         match self {
             CaseKind::Pistol => (CASE_HALF, BRASS),
-            CaseKind::Magnum => (Vec3::new(0.036, 0.017, 0.017), BRASS),
-            CaseKind::Rifle => (Vec3::new(0.05, 0.012, 0.012), BRASS),
-            CaseKind::Bmg => (Vec3::new(0.08, 0.02, 0.02), BRASS),
-            CaseKind::Shell => (Vec3::new(0.05, 0.022, 0.022), [200, 40, 36]),
         }
     }
 }
@@ -79,7 +70,7 @@ impl Cases {
     /// Falls, bounces off blocks (a little less each time) and comes to rest lying down.
     /// Returns where cases hit the ground hard enough to be heard: (where, a shotgun hull,
     /// how hard 0..1).
-    pub fn update(&mut self, dt: f32, world: &World) -> Vec<(Vec3, bool, f32)> {
+    pub fn update(&mut self, dt: f32, world: &World) -> Vec<(Vec3, f32)> {
         let mut clinks = Vec::new();
         let solid = |p: Vec3| {
             is_solid(world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32))
@@ -105,7 +96,7 @@ impl Cases {
                 if axis == 1 && c.vel.y < 0.0 {
                     let hard = (-c.vel.y / 6.0).min(1.0);
                     if hard > 0.15 {
-                        clinks.push((p, c.kind == CaseKind::Shell, hard));
+                        clinks.push((p, hard));
                     }
                     // Landed: bounce a little, lose speed, spin slower.
                     p.y = q.y.floor() + 1.0 + c.kind.look().0.y;
@@ -142,12 +133,6 @@ impl Cases {
             let (half, tint) = c.kind.look();
             let light = vertex_light(sky, blk);
             emit_box(out, m, -half, half, [tex::WOOL; 6], [tint; 6], light, flags::ENTITY);
-            if c.kind == CaseKind::Shell {
-                // The shell's brass head.
-                let head = Vec3::new(-half.x, -half.y - 0.002, -half.z - 0.002);
-                let top = Vec3::new(-half.x * 0.5, half.y + 0.002, half.z + 0.002);
-                emit_box(out, m, head, top, [tex::WOOL; 6], [BRASS; 6], light, flags::ENTITY);
-            }
         }
     }
 }

@@ -4,11 +4,17 @@
 
 pub mod ballistics;
 pub mod book;
+pub mod grenade;
 pub mod gun;
+pub mod gun_station;
 pub mod hand;
 pub mod lantern;
 pub mod particles;
+pub mod pistol_view;
+pub mod pistol_vm;
 pub mod player;
+pub mod spring;
+pub mod viewmodel;
 
 use crate::item::{icon, Icon, ItemId};
 use crate::world::mesh::{corner_pos, corner_uv, flags, Vertex, CORNERS};
@@ -17,15 +23,90 @@ use crate::world::{
     face_texture, icon_tint, is_plant, is_stairs, is_water, tint_kind, TintKind, TORCH,
 };
 use glam::{Mat4, Vec3};
+/// Whether an item is drawn as a 3D model of its own (the pistol's parts, attachments,
+/// magazines and rounds, the grenades) rather than as a flat icon.
+pub fn is_model_item(item: ItemId) -> bool {
+    item == crate::item::FRAG_GRENADE
+        || item == crate::item::SMOKE_GRENADE
+        || pistol_view::bench::item_rig(&crate::item::Stack::one(item)).is_some()
+}
+
 /// Any item centered on the origin with unit size: a cube for blocks, a thin double-sided
 /// sprite for everything else.
 pub fn emit_held(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], fl: u8) {
+    emit_held_data(out, m, &crate::item::Stack::one(item), light, fl);
+}
+
+/// `emit_held` for an item with its state: a gun shows its attachments, its magazine (or
+/// none), its slide held back, and how dirty it is.
+pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, light: [u8; 4], fl: u8) {
+    let item = st.item;
     if item == TORCH as ItemId {
         emit_torch(out, m, light, fl, 94);
         return;
     }
+    if item == crate::world::GUN_STATION as ItemId {
+        gun_station::emit_item(out, m, light, fl);
+        return;
+    }
+    if item == crate::item::FRAG_GRENADE || item == crate::item::SMOKE_GRENADE {
+        grenade::emit_sized(out, item == crate::item::SMOKE_GRENADE, m, 0.62, light, fl);
+        return;
+    }
+    if let Some((bones, pose, mag, upright)) = pistol_view::bench::item_rig(st) {
+        // A piece of the Blockbench pistol (a part, an attachment, a magazine with its rounds
+        // showing in its witness holes, a round), its middle at the origin, its size the unit's
+        // (a round smaller), the muzzle end to +X, its right side toward +Z.
+        use pistol_view::bench;
+        let (mats, shown) = viewmodel::bone_matrices(pistol_vm::BONES, &pose, Mat4::IDENTITY);
+        let cubes: Vec<&viewmodel::Cube> = pistol_vm::CUBES
+            .iter()
+            .filter(|c| bones & (1 << c.bone) != 0 && shown[c.bone])
+            .filter(|c| mag.is_none_or(|(n, cap)| bench::mag_cube_shown(c.name, n, cap)))
+            .collect();
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for c in &cubes {
+            let m = upright * mats[c.bone] * viewmodel::cube_matrix(c);
+            for p in [Vec3::from(c.from), Vec3::from(c.to)] {
+                let q = m.transform_point3(p);
+                lo = lo.min(q);
+                hi = hi.max(q);
+            }
+        }
+        let size = if item == crate::item::BULLET { 0.3 } else { 0.62 };
+        let k = size / (hi - lo).max_element().max(1e-3);
+        let root = m * Mat4::from_scale(Vec3::splat(k)) * Mat4::from_translation(-(lo + hi) * 0.5) * upright;
+        let first = pistol_view::layers(pistol_view::dirt_level(st.damage, crate::item::max_damage(item)));
+        for c in cubes {
+            viewmodel::emit_cube(out, c, root * mats[c.bone] * viewmodel::cube_matrix(c), first, light, fl);
+        }
+        return;
+    }
+    if item == crate::item::AMMO_BOX {
+        // The box standing in the unit cube, its longest side across it.
+        let size = gun_station::ammo_box_size();
+        let k = 1.0 / size.max_element();
+        let at = m * Mat4::from_scale(Vec3::splat(k)) * Mat4::from_translation(Vec3::new(0.0, -size.y * 0.5, 0.0));
+        gun_station::emit_ammo_box(out, at, crate::item::box_rounds(st), light, fl);
+        return;
+    }
     if let Some(kind) = crate::item::GunKind::of(item) {
-        gun::emit_gun(out, kind, m * gun::gun_to_unit(kind), light, fl, 0);
+        // The Blockbench pistol at rest, the size and place of the old gun model.
+        let root = m * gun::gun_to_unit(kind) * pistol_view::to_gun_space();
+        let mut pose = pistol_view::rest_pose();
+        let state = pistol_view::GunAnim {
+            locked: crate::item::gun_locked(st),
+            no_mag: !crate::item::gun_has_mag(st),
+            chambered: crate::item::gun_chambered(st),
+            ..Default::default()
+        };
+        pistol_view::add_gun_anims(&mut pose, &state, true);
+        pistol_view::apply_mods(&mut pose, crate::item::gun_mods(st));
+        let (mats, shown) = viewmodel::bone_matrices(pistol_vm::BONES, &pose, root);
+        let dirt = pistol_view::dirt_level(st.damage, crate::item::max_damage(item));
+        let mods = crate::item::gun_mods(st);
+        let lamp = mods & crate::item::gun_mod::LIGHT != 0 && mods & crate::item::gun_mod::LIGHT_ON != 0;
+        pistol_view::emit_pistol(out, None, &mats, &shown, false, dirt, lamp, light, fl);
         return;
     }
     match icon(item) {
@@ -37,13 +118,14 @@ pub fn emit_held(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], f
 /// Like `emit_held`, but a flat item is only its front and back (no edge walls): for items
 /// lying flat and seen from above, where the edges hardly show, so a chest full of them
 /// stays cheap.
-pub fn emit_lying(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], fl: u8) {
+pub fn emit_lying(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, light: [u8; 4], fl: u8) {
+    let item = st.item;
     let Icon::Flat(layer) = icon(item) else {
-        emit_held(out, m, item, light, fl);
+        emit_held_data(out, m, st, light, fl);
         return;
     };
     if item == TORCH as ItemId {
-        emit_held(out, m, item, light, fl);
+        emit_held_data(out, m, st, light, fl);
         return;
     }
     let t = 1.0 / 32.0;
@@ -162,20 +244,21 @@ pub fn emit_flame(out: &mut Vec<Vertex>, m: Mat4, fl: u8, seed: u8) {
 pub fn emit_item_flat_or_block(
     out: &mut Vec<Vertex>,
     m: Mat4,
-    item: ItemId,
+    st: &crate::item::Stack,
     size: f32,
     light: [u8; 4],
     fl: u8,
 ) {
+    let item = st.item;
     let scale = if matches!(icon(item), Icon::Block(_)) {
         size
     } else {
         size * 1.5
     };
-    emit_held(
+    emit_held_data(
         out,
         m * Mat4::from_translation(Vec3::Y * scale * 0.5) * Mat4::from_scale(Vec3::splat(scale)),
-        item,
+        st,
         light,
         fl,
     );

@@ -11,10 +11,8 @@ use crate::entity::player::raycast_solid;
 use crate::item::mining::{drops, hardness};
 use crate::item::inventory::take;
 use crate::item::*;
-use crate::model::emit_box;
 use crate::net::Msg;
 use crate::util::vertex_light;
-use crate::world::textures::tex;
 use glam::Quat;
 
 /// Seconds from the throw until a frag grenade explodes, and until a smoke grenade starts
@@ -98,6 +96,7 @@ fn blastable(b: u8) -> bool {
         && !is_chest(b)
         && furnace_base(b).is_none()
         && b != GUN_STATION
+        && !is_gun_bench(b)
         && b != CRAFTING_TABLE
         && !is_door(b)
         && !is_bed(b)
@@ -409,22 +408,9 @@ impl Game {
             let light = vertex_light(sky, blk);
             let m = Mat4::from_rotation_translation(g.rot, g.pos);
             let fl = crate::world::mesh::flags::ENTITY;
-            let v = Vec3::new;
-            let steel = [tex::GUN_STEEL; 6];
-            match g.kind {
-                GrenadeKind::Frag => {
-                    let olive = [[98, 110, 64]; 6];
-                    emit_box(out, m, v(-0.055, -0.07, -0.055), v(0.055, 0.06, 0.055), [tex::WOOL; 6], olive, light, fl);
-                    emit_box(out, m, v(-0.045, 0.06, -0.045), v(0.045, 0.075, 0.045), [tex::WOOL; 6], olive, light, fl);
-                    emit_box(out, m, v(-0.02, 0.075, -0.02), v(0.02, 0.105, 0.02), steel, [[200; 3]; 6], light, fl);
-                }
-                GrenadeKind::Smoke => {
-                    let gray = [[130, 136, 140]; 6];
-                    emit_box(out, m, v(-0.045, -0.085, -0.045), v(0.045, 0.075, 0.045), steel, gray, light, fl);
-                    emit_box(out, m, v(-0.047, 0.0, -0.047), v(0.047, 0.03, 0.047), [tex::WOOL; 6], [[210, 60, 50]; 6], light, fl);
-                    emit_box(out, m, v(-0.02, 0.075, -0.02), v(0.02, 0.1, 0.02), steel, [[200; 3]; 6], light, fl);
-                }
-            }
+            // The Blockbench grenades, as big as the old ones were.
+            let smoke = matches!(g.kind, GrenadeKind::Smoke);
+            crate::model::grenade::emit_sized(out, smoke, m, 0.2, light, fl);
         }
     }
 }

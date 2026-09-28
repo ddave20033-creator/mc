@@ -148,8 +148,6 @@ enum El {
     Picture(Pic),
     /// A gun's number: its name, how big it is next to the other guns' (0..1), the value.
     Stat(String, f32, String),
-    /// A gun part made at the gun station, and what it takes.
-    Part(String, Vec<(ItemId, u8)>),
     /// The rest goes on the next page.
     Break,
 }
@@ -171,7 +169,6 @@ pub enum Piece {
     Row(ItemId, Vec<String>),
     Pic(Pic),
     Stat(String, f32, String),
-    Part(String, Vec<(ItemId, u8)>),
 }
 
 impl Piece {
@@ -204,7 +201,6 @@ fn height(m: &Metrics, p: &Piece) -> f32 {
         Piece::Row(_, lines) => (19.0 * u).max(lines.len() as f32 * m.lh + 4.0 * u),
         Piece::Pic(p) => p.height() * u,
         Piece::Stat(..) => m.lh.max(7.0 * u) + 2.0 * u,
-        Piece::Part(..) => (15.0 * u).max(m.lh + 3.0 * u),
     }
 }
 
@@ -527,48 +523,42 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
     v.push(Chapter(s("The Gun Station", "A fegyverasztal"), s("Station", "Asztal")));
     v.push(Picture(Pic::Station));
     v.push(Text(s(
-        "Right-click the gun station and the view glides over its table. On the right you choose what to do: assemble, clean or tune a gun.",
-        "Kattints jobb gombbal a fegyverasztalra, és a nézet az asztal fölé úszik. Jobb oldalt választod ki, mit csinálsz: összerakás, tisztítás vagy tuning.",
+        "The gun station is two blocks wide, its drawer at the front (keep the space in front of it free). Right-click it and the view glides over its table; move the mouse to look along it. Everything happens right there on the table.",
+        "A fegyverasztal két blokk széles, elöl van a fiókja (előtte hagyd szabadon a helyet). Kattints rá jobb gombbal, és a nézet az asztal fölé úszik; az egérrel végignézhetsz rajta. Minden közvetlenül az asztalon történik.",
     )));
     recipe(&mut v, GUN_STATION as ItemId);
-    v.push(Head(s("Assemble", "Összerakás")));
+    v.push(Head(s("On the table", "Az asztalon")));
     v.push(Text(s(
-        "Pick the gun at the top of the panel. Every gun has five parts that go on in order: click the next part on the table and it flies into place. The last one finishes the gun, and it goes into your inventory.",
-        "A panel tetején válaszd ki a fegyvert. Minden fegyvernek öt alkatrésze van, sorban kerülnek fel: kattints a következő alkatrészre az asztalon, és a helyére repül. Az utolsóval kész a fegyver, és a tárgylistádba kerül.",
+        "Lay anything from your inventory on the table where you click: a gun, its parts, attachments. Click it again to pick it up, or drag it somewhere else.",
+        "Bármit rárakhatsz az asztalra a tárgylistádból oda, ahová kattintasz: fegyvert, alkatrészeket, kiegészítőket. Újra rákattintva felveszed, vagy odébb húzhatod.",
     )));
-    v.push(Bullet(s(
-        "The pistol's parts are crafted first (see the pistol's pages).",
-        "A pisztoly alkatrészeit előbb barkácsolod (lásd a pisztoly oldalait).",
-    )));
-    v.push(Bullet(s(
-        "The other guns' parts are made right at the station, from the materials in your inventory.",
-        "A többi fegyver alkatrészei közvetlenül az asztalon készülnek a tárgylistádban lévő anyagokból.",
+    v.push(Head(s("Assemble and take apart", "Összerakás és szétszedés")));
+    v.push(Text(s(
+        "Right-click a gun on the table and it comes apart there; its magazine goes back into your inventory. Right-click one of the parts and the parts on the table (frame, barrel, recoil spring and slide) fly to the middle and go together.",
+        "Jobb klikk egy fegyverre az asztalon, és ott szétszedi; a tára visszakerül a tárgylistádba. Jobb klikk valamelyik alkatrészre, és az asztalon lévő alkatrészek (váz, cső, helyretoló rugó és szán) középre repülnek és összeállnak.",
     )));
     v.push(Head(s("Clean", "Tisztítás")));
     v.push(Text(s(
-        "Every shot makes a gun dirtier, and a gun that is too dirty jams and will not fire. Put it on the station in clean mode: it comes apart, and you scrub the parts by holding the left mouse button on them.",
-        "Minden lövéstől koszosabb lesz a fegyver, és a túl koszos beakad, nem lő. Tedd az asztalra tisztítás módban: szétszedi, te pedig a bal egérgombot nyomva tartva sikálod tisztára az alkatrészeket.",
+        "Every shot makes a gun dirtier, and you can see it on the gun. A gun that is too dirty jams and will not fire. Take the brush out of the drawer and hold the left mouse button on a part to scrub it clean; a whole gun cleans too, but slowly. Right-click puts the brush back.",
+        "Minden lövéstől koszosabb lesz a fegyver, és ez látszik is rajta. A túl koszos beakad, nem lő. Vedd ki a kefét a fiókból, és a bal egérgombot nyomva tartva sikáld tisztára az alkatrészeket; egészben is lehet, de lassan. Jobb klikkel visszateszed a kefét.",
     )));
-    v.push(Bullet(s(
-        "Hold the gun, or shift-click it onto the table from the inventory.",
-        "Tartsd a kezedben a fegyvert, vagy shift+kattintással tedd az asztalra a tárgylistából.",
-    )));
-    v.push(Bullet(s(
-        "A gun's tooltip shows how clean it is and the rounds in its magazine.",
-        "A fegyver tippje mutatja, mennyire tiszta, és hány töltény van a tárában.",
-    )));
-    v.push(Head(s("Tune", "Tuning")));
+    v.push(Head(s("Attachments", "Kiegészítők")));
     v.push(Text(s(
-        "In tune mode the gun lies on the table with your attachments beside it. Click one and the hand fits it on; click one on the gun to take it off.",
-        "Tuning módban a fegyver az asztalon fekszik, mellette a kiegészítőid. Kattints egyre, és a kéz felszereli; a fegyveren lévőre kattintva leveszed.",
+        "Drag an attachment onto a gun lying on the table and it goes on. Click one on the gun to take it off: it is laid beside the gun.",
+        "Húzz egy kiegészítőt az asztalon fekvő fegyverre, és felmegy rá. A fegyveren lévőre kattintva leveszed: a fegyver mellé kerül.",
+    )));
+    v.push(Head(s("Loading magazines", "Tárak töltése")));
+    v.push(Text(s(
+        "Move the mouse down to the drawer: on its right are three boxes of rounds, 128 in each, the count written on them. Drop rounds from your inventory into a box, click a box to take a round out (right-click: a magazine's worth), and drag rounds onto a magazine lying on the table: they are pushed in one by one. The witness holes on its side show how many are in it.",
+        "Vidd le az egeret a fiókhoz: a jobb oldalán három doboz töltény van, mindegyikben 128 fér el, a szám rá van írva. A tárgylistádból dobj töltényt a dobozba, kattints egy dobozra, hogy kivegyél egy töltényt (jobb klikk: egy tárnyit), és húzd a töltényeket az asztalon fekvő tárra: egyenként belenyomja őket. Az oldalán lévő lyukakban látszik, mennyi van benne.",
     )));
 
     // ------------------------------------------------------------ the guns
     v.push(Chapter(s("Guns", "Fegyverek"), s("Guns", "Fegyverek")));
     v.push(Text(if hu {
-        format!("Bal egérgomb: lövés (az M16 nyomva tartva sorozatot lő). Jobb egérgomb: célzás, pontosabb és ránagyít. {reload}: újratöltés a tárgylistádban lévő töltényekből.")
+        format!("Bal egérgomb: lövés. Jobb egérgomb: célzás, pontosabb és ránagyít. {reload}: tárcsere: a régi tár kiesik, a legtelibb töltött tárad bekerül. Ha nincs másik, csak kiesik a régi. A tárat a fegyverasztalon töltöd meg: húzz töltényt az asztalon fekvő tárra.")
     } else {
-        format!("Left mouse button: shoot (hold it with the M16 to keep firing). Right mouse button: aim down the sights, steadier and zoomed in. {reload}: reload from the ammunition in your inventory.")
+        format!("Left mouse button: shoot. Right mouse button: aim down the sights, steadier and zoomed in. {reload}: change magazines: the old one drops out and your fullest loaded one goes in. Without another, the old one only drops out. Magazines are loaded at the gun station: drag rounds onto a magazine lying on its table.")
     }));
     v.push(Bullet(s(
         "Bullets really fly: they take time to get there and drop with distance. Aim a little higher at far targets.",
@@ -581,7 +571,7 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
     let all = GUN_KINDS.map(|k| k.stats());
     let max = |f: &dyn Fn(&Stats) -> f32| all.iter().map(|s| f(s)).fold(0.0f32, f32::max);
     let per_shot = |st: &Stats| st.damage * st.pellets as f32;
-    let rate = |st: &Stats| 1.0 / st.fire_delay.max(st.cycle);
+    let rate = |st: &Stats| 1.0 / st.fire_delay;
     for kind in GUN_KINDS {
         let st = kind.stats();
         let gun = kind.item();
@@ -591,14 +581,6 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
         v.push(Text(match (kind, hu) {
             (GunKind::Pistol, false) => "Light and quick, a good first gun. Its five parts are crafted from iron.".into(),
             (GunKind::Pistol, true) => "Könnyű és gyors, jó első fegyver. Az öt alkatrészét vasból barkácsolod.".into(),
-            (GunKind::DesertEagle, false) => "A heavy handgun: twice the pistol's damage, but it kicks hard and holds few rounds.".into(),
-            (GunKind::DesertEagle, true) => "Nehéz pisztoly: kétszer akkorát sebez, mint a sima, de nagyot rúg, és kevés töltény fér bele.".into(),
-            (GunKind::M16, false) => "Fires as long as you hold the button. Little damage per bullet, but a long magazine and a long reach.".into(),
-            (GunKind::M16, true) => "Addig lő, amíg nyomod a gombot. Egy golyó keveset sebez, de hosszú a tára és messzire hord.".into(),
-            (GunKind::Sniper, false) => format!("Always has a scope, and hits very hard very far. After each shot you work the bolt ({} s). Hopeless from the hip.", n(st.cycle)),
-            (GunKind::Sniper, true) => format!("Mindig van rajta távcső, és nagyon messzire, nagyon nagyot üt. Minden lövés után ismételni kell ({} mp). Csípőből reménytelen.", n(st.cycle)),
-            (GunKind::Shotgun, false) => format!("Every shell fires {} pellets: deadly up close, weak far away. You load it one shell at a time and pump it after every shot ({} s).", st.pellets, n(st.cycle)),
-            (GunKind::Shotgun, true) => format!("Minden patron {} sörétet lő ki: közelről halálos, messzire gyenge. Egyenként töltöd, és minden lövés után pumpálni kell ({} mp).", st.pellets, n(st.cycle)),
         }));
         let damage = if st.pellets > 1 {
             format!("{}\u{d7}{}", n(st.damage), st.pellets)
@@ -645,47 +627,35 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
             format!("{}: {}", s("Fires", "Lőszere"), name(kind.ammo())),
         ));
         v.push(Head(s("Parts", "Alkatrészek")));
-        if kind == GunKind::Pistol {
-            v.push(Text(s(
-                "Craft these five, then put them together at the gun station in this order:",
-                "Barkácsold meg ezt az ötöt, majd ebben a sorrendben rakd össze a fegyverasztalon:",
-            )));
-            for part in kind.parts() {
-                if let Some(item) = part.item {
-                    recipe(&mut v, item);
-                }
-            }
-        } else {
-            v.push(Text(s(
-                "Made at the gun station in this order, from:",
-                "A fegyverasztalon készülnek ebben a sorrendben, ebből:",
-            )));
-            for part in kind.parts() {
-                v.push(Part(crate::lang::t(part.name).to_string(), part.cost.to_vec()));
-            }
+        v.push(Text(s(
+            "Craft the frame, barrel, recoil spring and slide, lay them on the gun station's table and right-click one of them. The gun comes out without a magazine: craft that too, and put it in with the reload key.",
+            "Barkácsold meg a vázat, a csövet, a helyretoló rugót és a szánt, tedd őket a fegyverasztalra, és kattints jobb gombbal valamelyikre. A fegyver tár nélkül készül el: azt is barkácsold meg, és az újratöltés gombbal tedd bele.",
+        )));
+        for &item in kind.parts() {
+            recipe(&mut v, item);
         }
     }
 
     // ------------------------------------------------------------ ammunition and attachments
     v.push(Chapter(s("Ammo and Attachments", "Lőszer és kiegészítők"), s("Ammo", "Lőszer")));
     v.push(Text(s(
-        "Every gun fires its own ammunition, made from iron and coal (or charcoal). One round goes per shot, a whole shell for a shotgun blast.",
-        "Minden fegyver a saját lőszerét használja, ami vasból és szénből (vagy faszénből) készül. Lövésenként egy töltény fogy, sörétesnél egy patron.",
+        "The pistol fires bullets made from iron and coal (or charcoal). One goes per shot.",
+        "A pisztoly vasból és szénből (vagy faszénből) készült töltényt lő. Lövésenként egy fogy.",
     )));
     for kind in GUN_KINDS {
         recipe(&mut v, kind.ammo());
     }
     v.push(Head(s("Attachments", "Kiegészítők")));
     v.push(Text(s(
-        "Fitted at the gun station in tune mode, on any gun.",
-        "A fegyverasztalon, tuning módban szerelheted fel őket bármelyik fegyverre.",
+        "Fitted on the pistol at the gun station: drag one onto the gun lying on its table.",
+        "A fegyverasztalon szerelheted fel őket a pisztolyra: húzd rá az asztalon fekvő fegyverre.",
     )));
     v.push(Picture(Pic::Items(ATTACHMENTS.iter().map(|a| a.1).collect())));
     for (_, item) in ATTACHMENTS {
         v.push(Head(name(item)));
         v.push(Text(match (item, hu) {
-            (SCOPE, false) => "Zooms in far when you aim. The sniper rifle always has one.".into(),
-            (SCOPE, true) => "Célzáskor nagyon ránagyít. A mesterlövész puskán mindig van.".into(),
+            (SCOPE, false) => "Zooms in far when you aim.".into(),
+            (SCOPE, true) => "Célzáskor nagyon ránagyít.".into(),
             (SILENCER, false) => "No muzzle flash gives you away.".into(),
             (SILENCER, true) => "Nem árul el a torkolattűz.".into(),
             (EXTENDED_MAGAZINE, _) => {
@@ -699,10 +669,14 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
                     list.join(", ")
                 )
             }
+            (FLASHLIGHT, false) => "A bright light on the rail (instead of the laser sight): it lights up where the gun points. Switched on and off with its key (L). Only found in creative.".into(),
+            (FLASHLIGHT, true) => "Erős lámpa a sínen (a lézer helyett): megvilágítja, amerre a fegyver néz. A gombjával (L) kapcsolod ki-be. Csak kreatívban van.".into(),
             (_, false) => "Much steadier from the hip, and a red dot shows where you point.".into(),
             (_, true) => "Csípőből sokkal pontosabb, és egy piros pont mutatja, hová célzol.".into(),
         }));
-        recipe(&mut v, item);
+        if item != FLASHLIGHT {
+            recipe(&mut v, item);
+        }
     }
 
     // ------------------------------------------------------------ everything else
@@ -748,7 +722,6 @@ fn pieces(font: &Font, m: &Metrics, el: El) -> Vec<Piece> {
         El::Row(id, t) => vec![Piece::Row(id, wrap(font, &t, m.w - 22.0 * u, m.fs))],
         El::Picture(p) => vec![Piece::Pic(p)],
         El::Stat(a, k, b) => vec![Piece::Stat(a, k, b)],
-        El::Part(a, c) => vec![Piece::Part(a, c)],
     }
 }
 
@@ -1067,21 +1040,6 @@ impl Draw<'_, '_> {
                 let by = (ty + 3.5 * m.fs - bh * 0.5).round();
                 self.cv.fill(bx, by, bw, bh, th.bar_bg);
                 self.cv.fill(bx, by, (bw * k.clamp(0.04, 1.0)).round(), bh, th.bar);
-            }
-            Piece::Part(label, cost) => {
-                let ty = y + ((15.0 * u - m.lh) * 0.5).max(0.0) + u;
-                self.cv.text(label, x, ty, m.fs, th.ink, false);
-                let s = 13.0 * u;
-                let mut cx = x + m.w;
-                for &(item, count) in cost.iter().rev() {
-                    let t = format!("{count}\u{d7}");
-                    let cw = text_width(self.cv.font(), &t, m.fs);
-                    cx -= s;
-                    self.icon(item, 1, cx, y + u, s);
-                    cx -= cw + u;
-                    self.cv.text(&t, cx, ty, m.fs, th.soft, false);
-                    cx -= 5.0 * u;
-                }
             }
         }
     }

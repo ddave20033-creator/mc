@@ -100,6 +100,11 @@ pub const ADV_FURNACE: u8 = 206;
 pub const ADV_FURNACE_LIT: u8 = 210;
 pub const ADV_PART: u8 = 214;
 pub const ADV_PART_LIT: u8 = 226;
+/// The gun station, two blocks wide: base id + facing (its front, where its drawer slides
+/// out, toward the player who placed it) + right half (bit 2; the left half, seen from the
+/// front, holds what lies on it). The cells in front of it are kept free for the drawer.
+/// (`GUN_STATION`, 62, is the old one-block station: a plain block now.)
+pub const GUN_BENCH: u8 = 238;
 /// The chimney's boxes (block-local): a slab over the furnace, the stack and a rim round
 /// its top.
 pub const CHIMNEY_BOXES: [([f32; 3], [f32; 3]); 3] = [
@@ -272,6 +277,33 @@ pub fn bed_facing(b: u8) -> u8 {
 }
 pub fn bed_head(b: u8) -> bool {
     (b - BED) & 4 != 0
+}
+#[inline]
+pub fn is_gun_bench(b: u8) -> bool {
+    (GUN_BENCH..GUN_BENCH + 8).contains(&b)
+}
+pub fn gun_bench_id(facing: u8, right: bool) -> u8 {
+    GUN_BENCH + (facing & 3) + ((right as u8) << 2)
+}
+pub fn gun_bench_right(b: u8) -> bool {
+    (b - GUN_BENCH) & 4 != 0
+}
+/// Offset from a gun station half to its other half.
+pub fn gun_bench_other_half(b: u8) -> IVec3 {
+    let r = chest_right((b - GUN_BENCH) & 3);
+    if gun_bench_right(b) {
+        -r
+    } else {
+        r
+    }
+}
+/// The left half of the gun station a half belongs to (it keeps what lies on the table).
+pub fn gun_bench_main(p: IVec3, b: u8) -> IVec3 {
+    if gun_bench_right(b) {
+        p + gun_bench_other_half(b)
+    } else {
+        p
+    }
 }
 /// Offset from a bed half to its other half.
 pub fn bed_other_half(b: u8) -> IVec3 {
@@ -605,6 +637,7 @@ pub fn facing(b: u8) -> Option<u8> {
         _ if is_adv_part(b) => Some((b - ADV_PART) & 3),
         _ if (CHEST..CHEST + 4).contains(&b) => Some(b - CHEST),
         _ if (CHEST_LEFT..CHEST_RIGHT + 4).contains(&b) => Some((b - CHEST_LEFT) & 3),
+        _ if is_gun_bench(b) => Some((b - GUN_BENCH) & 3),
         _ => None,
     }
 }
@@ -666,7 +699,8 @@ pub fn is_opaque(b: u8) -> bool {
         || is_door(b)
         || is_stairs(b)
         || is_bed(b)
-        || is_chimney(b))
+        || is_chimney(b)
+        || is_gun_bench(b))
 }
 /// Blocks player movement.
 #[inline]
@@ -881,6 +915,11 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
         COAL_BLOCK => tex::COAL_BLOCK,
         STONE_BRICKS => tex::STONE_BRICKS,
         WOOL => tex::WOOL,
+        _ if is_gun_bench(b) => match face {
+            2 => tex::GUN_STATION_TOP,
+            3 => tex::GUN_STATION_BOTTOM,
+            _ => tex::GUN_STATION_SIDE,
+        },
         GUN_STATION => match face {
             2 => tex::GUN_STATION_TOP,
             3 => tex::GUN_STATION_BOTTOM,

@@ -334,7 +334,7 @@ impl Game {
         self.falling.clear();
         self.cursor = None;
         self.craft = [None; 9];
-        self.guns.bench.clear();
+        self.bench_anims.clear();
         self.guns.cases.clear();
         self.drag = None;
         self.mining = None;

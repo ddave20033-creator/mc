@@ -50,6 +50,13 @@ pub struct MeshData {
     pub max_y: f32,
     /// Door halves in the chunk (world positions): drawn every frame so they can swing.
     pub doors: Vec<glam::IVec3>,
+    /// Chests in the chunk (world positions): their lids are drawn every frame so they can
+    /// open, whether or not their contents are known here (a LAN player only gets those
+    /// once someone opens them).
+    pub chests: Vec<glam::IVec3>,
+    /// Gun stations in the chunk (world positions): their Blockbench model is drawn every
+    /// frame (its drawer slides out while one is used).
+    pub gun_stations: Vec<glam::IVec3>,
     /// The chunk's light (see `ChunkLight`), for things drawn outside chunk meshes.
     pub light: ChunkLight,
 }
@@ -1126,6 +1133,8 @@ pub fn mesh_chunk(
         oz: pos.1 * 16 - 16,
     };
     let mut doors = Vec::new();
+    let mut chests = Vec::new();
+    let mut gun_stations = Vec::new();
     let top = (nb[4].max_y as i32 + 1).min(r.h as i32 - 1);
     for y in 0..=top {
         for z in 16..32 {
@@ -1161,6 +1170,7 @@ pub fn mesh_chunk(
                 }
                 if is_chest(b) {
                     m.chest(&r, x, y, z, b);
+                    chests.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
                     continue;
                 }
                 if is_furnace(b) {
@@ -1173,6 +1183,13 @@ pub fn mesh_chunk(
                 }
                 if is_door(b) {
                     doors.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
+                    continue;
+                }
+                if is_gun_bench(b) {
+                    // Drawn every frame from its left half (see `gun_stations`).
+                    if !gun_bench_right(b) {
+                        gun_stations.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
+                    }
                     continue;
                 }
                 if is_stairs(b) {
@@ -1261,6 +1278,8 @@ pub fn mesh_chunk(
         min_y: m.min_y,
         max_y: m.max_y,
         doors,
+        chests,
+        gun_stations,
         light: ChunkLight {
             h: r.h,
             data: light.into(),
@@ -1335,6 +1354,33 @@ mod tests {
         // The end pane joins only toward the middle.
         let end = glass_mask(&r, 16 + 7, 1, 16 + 8, 5);
         assert_eq!((end & 0b11).count_ones(), 1, "{end:08b}");
+    }
+
+    #[test]
+    fn a_just_broken_block_takes_the_light_around_it() {
+        // A stone block on the floor, under the open sky.
+        let nb = hood(|c| c.set(8, 1, 8, STONE));
+        let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+        let mut world = World::new();
+        world.chunks.insert((0, 0), nb[4].clone());
+        world.light.insert((0, 0), m.light.clone());
+        // Broken: its cell still has the solid block's light until the chunk is lit again.
+        world.set(8, 1, 8, AIR);
+        let at = glam::IVec3::new(8, 1, 8);
+        assert!(world.light_estimate(at.as_vec3() + glam::Vec3::splat(0.5)).0 < 15);
+        assert_eq!(world.light_around(at).0, 15);
+    }
+
+    #[test]
+    fn chests_are_listed_for_their_lids() {
+        let nb = hood(|c| {
+            c.set(3, 1, 4, crate::world::CHEST);
+            c.set(10, 5, 12, crate::world::CHEST + 2);
+        });
+        let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+        let mut chests = m.chests.clone();
+        chests.sort_by_key(|p| p.x);
+        assert_eq!(chests, [glam::IVec3::new(3, 1, 4), glam::IVec3::new(10, 5, 12)]);
     }
 
     #[test]

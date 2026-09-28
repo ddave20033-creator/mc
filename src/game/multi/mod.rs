@@ -49,6 +49,8 @@ pub(super) struct RemotePlayer {
     /// The guide book in their hands: its page turning, and how it is shown here.
     pub(in crate::game) book: crate::model::book::TurnAnim,
     pub(in crate::game) book_view: Option<crate::model::book::BookView>,
+    /// When they last fired (game time), for their gun's slide.
+    pub(in crate::game) shot_at: Option<f32>,
 }
 
 impl RemotePlayer {
@@ -278,10 +280,19 @@ impl Game {
             },
             status: self.my_status(),
             gun_mods: self.held_gun_mods(),
+            gun_state: if self.holding_gun() { self.hand.gun_anim().pack() } else { 0 },
             armor: armor_code(&self.inventory.armor),
             book: self.book_pose().0,
             book_page: self.book_pose().1,
             spectator: self.spectator(),
+            gun_dirt: self.held_gun_dirt(),
+            brush: self.bench_brush_pose(),
+            drawer: matches!(self.screen, Screen::Container(Container::GunStation(_))) && self.bench_in_drawer,
+            held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
+            bench_hold: match (self.screen, self.cursor, self.bench_hold_at) {
+                (Screen::Container(Container::GunStation(_)), Some(st), Some(at)) => Some((st, at)),
+                _ => None,
+            },
         }
     }
 
@@ -312,6 +323,35 @@ impl Game {
             .iter()
             .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
             .map(|r| (r.target.open, r.target.pos))
+            .collect()
+    }
+
+    /// The other players holding a gun station's brush: the station (its left half) and where
+    /// the brush is.
+    /// Gun stations another player looks into the drawer of (it is out for everyone).
+    pub(super) fn remote_drawers(&self) -> Vec<IVec3> {
+        self.remotes
+            .iter()
+            .filter(|r| r.has_pose && r.target.drawer && r.target.open != NO_BLOCK)
+            .map(|r| r.target.open)
+            .collect()
+    }
+
+    /// What the other players hold over a gun station's table (the station, the stack, where
+    /// it shows).
+    pub(super) fn remote_bench_holds(&self) -> Vec<(IVec3, crate::item::Stack, Vec3)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
+            .filter_map(|r| r.target.bench_hold.map(|(st, at)| (r.target.open, st, at)))
+            .collect()
+    }
+
+    pub(super) fn remote_brushes(&self) -> Vec<(IVec3, Vec3)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
+            .filter_map(|r| r.target.brush.map(|b| (r.target.open, b)))
             .collect()
     }
 
@@ -415,6 +455,7 @@ impl Game {
             p.flags = t.flags;
             p.status = t.status;
             p.gun_mods = t.gun_mods;
+            p.gun_state = t.gun_state;
             p.armor = t.armor;
             p.book = t.book;
             p.book_page = t.book_page;
@@ -451,13 +492,14 @@ impl Game {
             lantern: Default::default(),
             book: Default::default(),
             book_view: None,
+            shot_at: None,
         });
     }
 }
 
 /// Other players' models (into the entity and particle ranges, like mobs).
-/// Another player's model, standing as their pose says.
-fn standing_pose(p: &Pose, time: f32) -> PlayerPose {
+/// Another player's model, standing as their pose says (`shot_at`: when they last fired).
+fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
     PlayerPose {
         pos: p.pos,
         body_yaw: p.body_yaw,
@@ -478,6 +520,12 @@ fn standing_pose(p: &Pose, time: f32) -> PlayerPose {
         hide_right_arm: false,
         lantern: None,
         gun_mods: p.gun_mods,
+        gun_dirt: p.gun_dirt,
+        held_data: p.held_data,
+        gun: crate::model::pistol_view::GunAnim::unpack(
+            p.gun_state,
+            shot_at.map(|at| time - at).filter(|&t| (0.0..1.0).contains(&t)),
+        ),
         armor: p.armor,
         book: None,
     }
@@ -498,10 +546,12 @@ impl Game {
             .collect()
     }
 
-    /// Where a point of another player's gun (gun space) is on their model.
-    pub(super) fn remote_gun_point(&self, id: u8, kind: GunKind, point: Vec3) -> Option<Vec3> {
+    /// Where a point of another player's gun (Blockbench model: bone and point) is on their
+    /// model.
+    pub(super) fn remote_gun_point(&self, id: u8, kind: GunKind, point: (usize, Vec3)) -> Option<Vec3> {
         let r = self.remotes.iter().find(|r| r.id == id && r.shown())?;
-        let pose = standing_pose(&r.pose, self.time);
+        let pose = standing_pose(&r.pose, self.time, r.shot_at);
+        let point = crate::model::pistol_view::rest_point_in_gun_space(point);
         Some(crate::model::player::gun_point(&pose, kind, point))
     }
 }
@@ -512,6 +562,7 @@ pub(super) fn build_remote_players(
     world: &World,
     time: f32,
     out: &mut Vec<Vertex>,
+    glass: &mut Vec<Vertex>,
     dt: f32,
     inside: Option<u8>,
 ) {
@@ -528,7 +579,7 @@ pub(super) fn build_remote_players(
                 let head = facing_dir(facing_of(d.x, d.z)).as_vec3();
                 crate::model::player::lying(p.pos, head)
             });
-            let standing = standing_pose(&p, time);
+            let standing = standing_pose(&p, time, r.shot_at);
             let pose = match bed {
                 Some((feet, yaw, _)) => PlayerPose {
                     pos: feet,
@@ -561,6 +612,7 @@ pub(super) fn build_remote_players(
             let start = out.len();
             build_player(
                 out,
+                glass,
                 &pose,
                 &limbs,
                 world.sky_estimate(c),

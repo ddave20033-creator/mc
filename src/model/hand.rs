@@ -2,7 +2,8 @@
 //! eating and sword-blocking animations. Built on the CPU each frame in world space.
 
 use super::player::ARM as ARM_LAYERS;
-use super::{emit_box, emit_held};
+use super::spring::Spring3;
+use super::emit_box;
 use crate::item::{icon, GunKind, Icon, ItemId, NONE};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
@@ -22,6 +23,18 @@ fn rz(d: f32) -> Mat4 {
     Mat4::from_rotation_z(d.to_radians())
 }
 
+/// Aimed with a scope, the gun comes this much further (model pixels): down to the scope's
+/// axis instead of the iron sights', and back so the eyepiece is close to the eye.
+const SCOPE_EYE: Vec3 = Vec3::new(0.0, -0.95, 13.6);
+
+/// Seconds a gun is looked over (the inspect key): brought up showing its right side, turned
+/// to look down its top, then over to its left side, and back.
+pub const INSPECT_TIME: f32 = 4.4;
+
+/// Blocks per Blockbench pixel of the first-person pistol (`pistol_vm`): its camera is at
+/// the model's origin, so this only sets how far in front of the eye it is.
+const VIEW_PX: f32 = 1.0 / 64.0;
+
 /// Arm swing duration in seconds (a bit snappier than Minecraft's 6 ticks).
 const SWING_TIME: f32 = 0.24;
 /// Fastest swing, used when actions follow each other very quickly.
@@ -38,8 +51,13 @@ pub struct HandAnim {
     equip: f32,
     walk_dist: f32,
     bob: f32,
-    sway: Vec2,
+    /// The held item lagging behind the view's turning (yaw, pitch, roll in degrees): a
+    /// spring, so it swings back a little past rest when the turning stops.
+    sway: Spring3,
     pub held: ItemId,
+    /// The held stack's state (`Stack::data`, `Stack::damage`): a magazine's rounds, dirt.
+    pub held_data: u16,
+    pub held_damage: u16,
     /// Hand height, 1 = normal; lowered out of view when the body's arms take over
     /// (First Person Model's dynamic hands).
     pub lower: f32,
@@ -56,8 +74,10 @@ pub struct HandAnim {
     /// Where the held torch's fire was drawn last frame (world, but in the hand's own
     /// projection), for its flame particles.
     pub torch_tip: Option<Vec3>,
-    /// A held pistol's kick after a shot: 1 right after it, back to 0 as it settles.
-    recoil: f32,
+    /// Seconds since the held gun last fired (while its shot animation is playing), and since
+    /// its trigger was pulled on an empty chamber.
+    shot: Option<f32>,
+    dry: Option<f32>,
     /// The muzzle flash of the last shot: how much is left (1 .. 0), its size and its turn.
     flash: f32,
     flash_size: f32,
@@ -67,25 +87,51 @@ pub struct HandAnim {
     /// And its ejection port, where the spent cases fly out, and its laser sight's lens.
     pub eject_tip: Option<Vec3>,
     pub laser_tip: Option<Vec3>,
+    /// The weapon light's lens (where its light comes from), when there is one.
+    pub light_tip: Option<Vec3>,
+    /// Which way the held gun's barrel points (in the hand's own view).
+    pub barrel_dir: Option<Vec3>,
     /// The held pistol: aimed down the sights (0 from the hip .. 1 aimed), how far a reload
     /// has got (0..1) and its attachments.
     pub aim: f32,
     pub reload: Option<f32>,
     pub gun_mods: u8,
-    /// The held pistol's magazine is empty (its slide stays back), and the reload going on
-    /// started from an empty one (the slide gets racked at the end).
-    pub gun_empty: bool,
-    pub reload_empty: bool,
-    /// Working the bolt or the pump after a shot (0..1).
-    pub cycle: Option<f32>,
-    /// A shotgun being loaded: how far it is turned over (eases in and out around the shells).
-    shell_tilt: f32,
+    /// How dirty the held gun looks (`pistol_view::dirt_level`).
+    pub gun_dirt: u8,
+    /// The held pistol's state and what its reload does (set by the game; the shot and the
+    /// reload's progress are `shot` and `reload`).
+    pub gun_state: super::pistol_view::GunAnim,
+    /// Sprinting and sneaking this frame (set by the game), and how far the gun has gone into
+    /// the sprinting and the crouched pose (0..1, eased).
+    pub sprinting: bool,
+    pub crouching: bool,
+    sprint: f32,
+    crouch: f32,
+    /// How much the player is walking on the ground (0 standing .. 1 at walking speed and
+    /// more when running), eased: how much the gun sways with the steps.
+    stride: f32,
+    /// The player's velocity in the view's frame (x right, y up, z forward; set by the
+    /// game), and the gun's lagging copy of it: it leans into a strafe and trails a jump.
+    pub motion: Vec3,
+    lag: Spring3,
+    /// The gun's sprint and crouch poses (x, y; 0..1 with a little overshoot).
+    poses: Spring3,
+    /// Seconds into looking the held gun over (set by the game).
+    pub inspect: Option<f32>,
     /// The held guide book: how far it is lifted up to read (0 held low .. 1 in front of the
     /// eyes) and how it looks. Set by the game each frame.
     pub book: Option<(f32, super::book::BookView)>,
     /// Where the view's middle falls on the book's pages (see `book::page_hit`), from the
     /// last build.
     pub book_hit: Option<super::book::BookHit>,
+    /// The held gun's see-through glass from the last build (drawn blended after the hand),
+    /// and its scope's eyepiece when that shows the scope's view: middle, right and up
+    /// (unit), radius (world, in the hand's own view).
+    pub glass: Vec<Vertex>,
+    pub eyepiece: Option<(Vec3, Vec3, Vec3, f32)>,
+    /// How much of the view (from its middle to its top edge) the eyepiece covers when fully
+    /// aimed, last seen so: the scope's field of view is the same wherever it is held.
+    pub scope_across: f32,
 }
 
 impl HandAnim {
@@ -99,8 +145,10 @@ impl HandAnim {
             equip: 0.0,
             walk_dist: 0.0,
             bob: 0.0,
-            sway: Vec2::ZERO,
+            sway: Spring3::default(),
             held: NONE,
+            held_data: 0,
+            held_damage: 0,
             lower: 1.0,
             blocking: false,
             block: 0.0,
@@ -108,33 +156,64 @@ impl HandAnim {
             fancy_lantern: false,
             lantern_swing: crate::model::lantern::SmoothSwing::default(),
             torch_tip: None,
-            recoil: 0.0,
+            shot: None,
+            dry: None,
             flash: 0.0,
             flash_size: 1.0,
             flash_seed: 0.0,
             muzzle_tip: None,
             eject_tip: None,
             laser_tip: None,
+            light_tip: None,
+            barrel_dir: None,
             aim: 0.0,
             reload: None,
             gun_mods: 0,
-            gun_empty: false,
-            reload_empty: false,
-            cycle: None,
-            shell_tilt: 0.0,
+            gun_dirt: 0,
+            gun_state: super::pistol_view::GunAnim { chambered: true, ..Default::default() },
+            sprinting: false,
+            crouching: false,
+            sprint: 0.0,
+            crouch: 0.0,
+            stride: 0.0,
+            motion: Vec3::ZERO,
+            lag: Spring3::default(),
+            poses: Spring3::default(),
+            inspect: None,
             book: None,
             book_hit: None,
+            glass: Vec::new(),
+            eyepiece: None,
+            scope_across: 0.185,
         }
     }
 
-    /// A shot from the held gun: it kicks up and back, the slide flies back, and a muzzle
-    /// flash of this size (0: none, silenced) turned by `seed` (0..1) lights up for a moment.
+    /// A shot from the held gun: its shot animation plays (the slide flies back and the case
+    /// is pulled out), and a muzzle flash of this size (0: none, silenced) turned by `seed`
+    /// (0..1) lights up for a moment.
     pub fn shoot(&mut self, flash: f32, seed: f32) {
-        self.recoil = 1.0;
+        self.shot = Some(0.0);
+        self.dry = None;
         if flash > 0.0 {
             self.flash = 1.0;
             self.flash_size = flash;
             self.flash_seed = seed;
+        }
+    }
+
+    /// The trigger pulled with nothing in the chamber: it moves, nothing else does.
+    pub fn dry_fire(&mut self) {
+        self.dry = Some(0.0);
+    }
+
+    /// What the held gun is doing, for its moving parts (also on the player model).
+    pub fn gun_anim(&self) -> super::pistol_view::GunAnim {
+        super::pistol_view::GunAnim {
+            shot: self.shot,
+            dry: self.dry,
+            reload: self.reload,
+            aim: self.aim.clamp(0.0, 1.0),
+            ..self.gun_state
         }
     }
 
@@ -175,6 +254,8 @@ impl HandAnim {
         if item != self.held {
             self.held = item;
             self.equip = 0.0;
+            self.shot = None;
+            self.dry = None;
             self.block = 0.0;
             self.lantern_swing = crate::model::lantern::SmoothSwing::default();
         }
@@ -208,7 +289,8 @@ impl HandAnim {
             self.keep_swinging();
         }
         self.equip = (self.equip + dt * 4.0).min(1.0);
-        self.recoil = (self.recoil - dt / 0.25).max(0.0);
+        self.shot = self.shot.map(|t| t + dt).filter(|&t| t < 1.0);
+        self.dry = self.dry.map(|t| t + dt).filter(|&t| t < 1.0);
         self.flash = (self.flash - dt / 0.06).max(0.0);
         // The sword swings into the blocking pose and back in about 0.15 s.
         let target = if self.blocking { 1.0 } else { 0.0 };
@@ -222,14 +304,31 @@ impl HandAnim {
         };
         self.bob += (target - self.bob) * (1.0 - (-8.0 * dt).exp());
         self.walk_dist += walk_speed * dt * 0.6;
-        let sway_target = (look_delta * 0.03).clamp(Vec2::splat(-2.5), Vec2::splat(2.5));
-        self.sway += (sway_target - self.sway) * (1.0 - (-12.0 * dt).exp());
+        // Turning the view: the item lags behind and rolls into the turn, swinging back past
+        // rest when the turning stops.
+        let turn = (look_delta * 0.03).clamp(Vec2::splat(-3.0), Vec2::splat(3.0));
+        self.sway
+            .step(Vec3::new(turn.x, turn.y, -turn.x * 0.9), 4.2, 0.42, dt);
+        // Into and out of the sprint and crouch poses with a little overshoot; out of the
+        // sprint faster (to shoot again).
+        let sprint = if self.sprinting && self.reload.is_none() { 1.0 } else { 0.0 };
+        let crouch = if self.crouching { 1.0 } else { 0.0 };
+        let freq = if sprint < self.poses.x.x { 4.2 } else { 2.8 };
+        self.poses.step(Vec3::new(sprint, crouch, 0.0), freq, 0.62, dt);
+        self.sprint = self.poses.x.x.max(0.0);
+        self.crouch = self.poses.x.y.max(0.0);
+        let target = if on_ground { (walk_speed / 4.3).min(1.4) } else { 0.0 };
+        self.stride += (target - self.stride) * (1.0 - (-8.0 * dt).exp());
+        let target = self.motion.clamp(Vec3::new(-6.0, -9.0, -6.0), Vec3::new(6.0, 9.0, 6.0));
+        self.lag.step(target, 2.4, 0.42, dt);
     }
 
     /// View bobbing, applied in camera space to both the world and the hand (like Minecraft).
+    /// Aiming a gun steadies the view (a gun has its own sway instead, see `build_gun`).
     pub fn bob_matrix(&self) -> Mat4 {
         let f = -self.walk_dist * PI;
-        let b = self.bob;
+        let k = self.aim.clamp(0.0, 1.0);
+        let b = self.bob * (1.0 - 0.9 * k * k * (3.0 - 2.0 * k));
         t(f.sin() * b * 0.5, -(f.cos() * b).abs(), 0.0)
             * rz(f.sin() * b * 3.0)
             * rx((((-self.walk_dist) * PI - 0.2).cos() * b).abs() * 5.0)
@@ -277,14 +376,18 @@ impl HandAnim {
         let light = vertex_light(sky, blk);
         let fl = flags::VIEWMODEL;
         self.torch_tip = None;
+        self.glass.clear();
+        self.eyepiece = None;
         self.muzzle_tip = None;
         self.eject_tip = None;
         self.laser_tip = None;
+        self.light_tip = None;
+        self.barrel_dir = None;
         self.book_hit = None;
         if let (crate::item::GUIDE_BOOK, Some((read, view))) = (self.held, self.book) {
             // A little light to read by, even at night.
             let light = vertex_light(sky, blk.max(9));
-            let base = cam_to_world * rx(self.sway.y) * ry(self.sway.x);
+            let base = cam_to_world * rx(self.sway.x.y) * ry(self.sway.x.x) * rz(self.sway.x.z);
             let eq = {
                 let e = self.equip;
                 e * e * (3.0 - 2.0 * e)
@@ -299,7 +402,10 @@ impl HandAnim {
             e * e * (3.0 - 2.0 * e)
         } * self.lower;
         // Hand lags slightly behind camera rotation.
-        let base = cam_to_world * rx(self.sway.y) * ry(self.sway.x);
+        // Aimed, the gun stays nearly on the sight line while turning.
+        let k = 1.0 - 0.75 * self.aim.clamp(0.0, 1.0);
+        let sw = self.sway.x * k;
+        let base = cam_to_world * rx(sw.y) * ry(sw.x) * rz(sw.z);
 
         if self.held == NONE {
             let m = Self::arm_part(Self::arm_pose(base, s, sq, eq));
@@ -345,7 +451,7 @@ impl HandAnim {
             * rx(f1 * -80.0)
             * ry(-45.0);
         if let Some(kind) = GunKind::of(self.held) {
-            self.build_gun(kind, out, base, light, fl, eq, (s, sq, f1), skin, dt);
+            self.build_gun(kind, out, base, light, fl, eq, skin);
             return;
         }
         let flat = matches!(icon(self.held), Icon::Flat(_));
@@ -381,7 +487,17 @@ impl HandAnim {
             return;
         }
         let lantern = self.held == crate::world::LANTERN as ItemId;
-        let item = if self.held == TORCH as ItemId || lantern {
+        let item = if super::is_model_item(self.held) {
+            // A gun's part, a magazine, an attachment, a round or a grenade: held low in the
+            // right hand, turned a little so its side and top show, swinging with it.
+            base * eat
+                * t(-0.4 * f1, 0.2 * (sq * TAU).sin(), -0.2 * (s * PI).sin())
+                * t(0.3, -0.3 - (1.0 - eq) * 0.6, -0.56)
+                * ry(-32.0 + f * 10.0)
+                * rx(14.0 + f1 * -40.0)
+                * rz(-6.0)
+                * Mat4::from_scale(Vec3::splat(0.36))
+        } else if self.held == TORCH as ItemId || lantern {
             // Upright in the fist (a lantern without the first-person body too).
             m * t(0.08, 0.2, 0.06) * rz(-12.0) * Mat4::from_scale(Vec3::splat(0.82))
         } else if flat {
@@ -423,7 +539,8 @@ impl HandAnim {
         if self.held == TORCH as ItemId {
             self.torch_tip = Some(item.transform_point3(super::player::TORCH_TIP));
         }
-        emit_held(out, item, self.held, light, fl);
+        let st = crate::item::Stack { data: self.held_data, damage: self.held_damage, ..crate::item::Stack::one(self.held) };
+        super::emit_held_data(out, item, &st, light, fl);
     }
 }
 
@@ -489,268 +606,171 @@ impl HandAnim {
         self.book_hit = book_hit(book, Vec3::ZERO, Vec3::NEG_Z, view.tabs.is_some());
     }
 
-    /// The held gun. From the hip a pistol is held out in the lower right, a long gun against
-    /// the shoulder with the left hand under its handguard; aimed, the sight line lies on the
-    /// view's axis with the rear sight (or the scope's eyepiece) just in front of the eye. A
-    /// shot kicks it up about the grip; a pistol's slide flies back (and stays back when the
-    /// magazine is empty), a bolt or a pump is worked after every shot.
-    ///
-    /// Reloading a magazine: the gun is raised and turned in with the magazine well facing
-    /// the left hand, the old magazine drops out tumbling, the left hand brings a new one and
-    /// pushes it in (the gun bumps); after an empty magazine the slide slams forward. A
-    /// shotgun is loaded one shell at a time through the port under it.
+    /// The held pistol: the Blockbench model (`pistol_vm`) with its animations, mixed from
+    /// what the player does: aiming brings the sights to the middle of the view, walking and
+    /// running play their loops in step with the feet, a shot plays the slide flying back,
+    /// and a reload plays the magazine change (from an empty magazine with the slide released
+    /// at the end; otherwise it stops once the new magazine is in and the slide stays
+    /// forward). With an empty magazine the slide stays back and the chamber is empty. The
+    /// arms are the player's own, where the model has its arms. On top, the game's own
+    /// small movements: breathing, leaning into a strafe, trailing a jump, and the crouched
+    /// ready pose; looking it over (the inspect key) turns it in the hand.
     #[allow(clippy::too_many_arguments)]
     fn build_gun(
         &mut self,
-        kind: GunKind,
+        _kind: GunKind,
         out: &mut Vec<Vertex>,
         base: Mat4,
         light: [u8; 4],
         fl: u8,
         eq: f32,
-        (s, sq, f1): (f32, f32, f32),
         skin: u8,
-        dt: f32,
     ) {
-        use super::gun;
+        use super::pistol_vm as vm;
+        use super::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, BonePose};
         use crate::item::gun_mod;
         let smooth = |x: f32| {
             let x = x.clamp(0.0, 1.0);
             x * x * (3.0 - 2.0 * x)
         };
-        // 0 until `a`, 1 from `b`, eased in between.
         let span = |p: f32, a: f32, b: f32| smooth((p - a) / (b - a));
-        let spec = gun::spec(kind);
-        let long = spec.support.is_some();
         let cam = base.w_axis.truncate();
-        let mods = kind.shown_mods(self.gun_mods);
+        let mods = self.gun_mods;
         let scope = mods & gun_mod::SCOPE != 0;
-        let shells = kind.stats().shells;
-        let reloading = self.reload.is_some();
-        let p = self.reload.unwrap_or(0.0);
 
-        // Turned in toward the middle while reloading (steady while shells go in one by one).
-        let target = if reloading && shells { 1.0 } else { 0.0 };
-        self.shell_tilt += (target - self.shell_tilt).clamp(-dt / 0.2, dt / 0.2);
-        let tilt = if shells {
-            smooth(self.shell_tilt)
-        } else if reloading {
-            span(p, 0.0, 0.12) * (1.0 - span(p, 0.88, 1.0))
-        } else {
-            0.0
-        };
-        // Little bumps: the magazine release, the new magazine seating, the slide slamming
-        // shut; a shell pushed in.
-        let pulse = |at: f32, len: f32| {
-            let d = p - at;
-            if reloading && (0.0..len).contains(&d) {
-                (d / len * PI).sin()
-            } else {
-                0.0
-            }
-        };
-        let bump = if shells {
-            pulse(0.6, 0.12) * 0.6
-        } else {
-            pulse(0.15, 0.05) * 0.5 + pulse(0.66, 0.06) + pulse(0.75, 0.06) * 0.8
-        };
-        // Working the bolt or the pump: back, then forward again.
-        let c = self.cycle.unwrap_or(0.0);
-        let cycled = if self.cycle.is_some() {
-            span(c, 0.1, 0.4) * (1.0 - span(c, 0.55, 0.85))
-        } else {
-            0.0
-        };
-        let base = if long {
-            base * t(-0.07 * tilt, 0.1 * tilt, 0.04 * tilt)
-        } else {
-            base * t(-0.13 * tilt, 0.2 * tilt, 0.02 * tilt)
-        };
-
-        let scale = Mat4::from_scale(Vec3::splat(spec.view_scale));
-        let hip = base
-            * t(-0.2 * f1, 0.1 * (sq * TAU).sin(), -0.2 * (s * PI).sin())
-            * t(spec.hip.x, spec.hip.y - (1.0 - eq) * 0.6, spec.hip.z)
-            // A long gun is turned in more, so its side shows instead of just its stock.
-            * ry(if long { 104.0 + 8.0 * tilt } else { 92.0 + 18.0 * tilt })
-            * scale
-            * Mat4::from_translation(-spec.grip);
-        let (height, eye) = if scope {
-            (spec.scope_height, spec.scope_eye)
-        } else {
-            (spec.sight_height - 0.05, spec.rear_sight)
-        };
-        let aimed = base
-            * t(0.0, -(1.0 - eq) * 0.6, -spec.eye_gap)
-            * ry(90.0)
-            * scale
-            * t(-eye, -height, 0.0);
+        // The game's own small movements (the view's bobbing is taken off the gun by the game).
         let a = smooth(self.aim);
-        let pose = blend(hip, aimed, a);
+        let sprint = smooth(self.sprint) * (1.0 - a);
+        let crouch = smooth(self.crouch);
+        let still = 1.0 - 0.92 * a;
+        let br = self.clock;
+        let rest = (1.0 - self.stride.min(1.0) * 0.6) * (1.0 - 0.55 * a);
+        let breath = t((br * 0.9).sin() * 0.0028 * rest, (br * 1.7).sin() * 0.0022 * rest, 0.0)
+            * rx((br * 1.7).sin() * 0.35 * rest);
+        let lag = self.lag.x * still;
+        let inertia = t(-lag.x * 0.005, -lag.y * 0.0035, lag.z * 0.003) * rz(-lag.x * 1.4);
+        let ready = crouch * (1.0 - a) * (1.0 - sprint);
+        let tucked = t(-0.045 * ready, 0.03 * ready, 0.05 * ready);
+        // Aimed, a strafe cants the gun a little toward where it goes (around the view's
+        // axis, so the sights stay in front of the eye).
+        let cant = rz(-self.lag.x.x * 1.5 * a);
+        let base = base * breath * inertia * tucked * cant;
 
-        let r = self.recoil;
-        let kick = r * r * (3.0 - 2.0 * r);
-        let about_grip = |m: Mat4| {
-            Mat4::from_translation(spec.grip) * m * Mat4::from_translation(-spec.grip)
-        };
-        // A long gun is held against the shoulder: it is pushed back more and turns less.
-        let (back, turn_up) = if long { (3.0, 7.0 - 4.0 * a) } else { (1.5, 16.0 - 10.0 * a) };
-        let recoil = about_grip(t(-back * kick, 0.0, 0.0) * rz(kick * turn_up));
-        let (up, roll) = if long { (12.0, 28.0) } else { (22.0, 34.0) };
-        // Working a bolt rolls the gun over a little; racking a pump dips its muzzle.
-        let (bolt_roll, pump_dip) = if shells { (0.0, 3.0) } else { (8.0, 0.0) };
-        let turn = about_grip(
-            rz(up * tilt + 3.0 * bump - pump_dip * cycled) * rx(roll * tilt + bolt_roll * cycled),
-        );
-        let m = pose * recoil * turn;
-
-        // A pistol's slide: back after a shot; locked back while the magazine is empty;
-        // released to slam forward once a new magazine is in.
-        let shot = (r * 2.5).min(1.0) * 2.2 * if kind == GunKind::DesertEagle { 1.3 } else { 1.0 };
-        let locked = 2.2 * if kind == GunKind::DesertEagle { 1.3 } else { 1.0 };
-        let slide = if reloading && self.reload_empty && !shells {
-            locked * (1.0 - span(p, 0.74, 0.76))
-        } else if self.gun_empty {
-            locked
-        } else {
-            shot
-        };
-
-        // The left hand: where its fist is (gun space). It holds a long gun's handguard (or
-        // pump), and during a reload brings the new magazine (or the shells).
-        let well = spec.mag_bottom;
-        let axis = spec.mag_axis;
-        let holding = |d: f32| well + axis * (d + 1.2);
-        let away = well + Vec3::new(-2.0, -24.0, -20.0);
-        let pump = match spec.cycle {
-            Some((part, travel)) if Some(part) == Some(3) && shells => Vec3::X * -travel * cycled,
-            _ => Vec3::ZERO,
-        };
-        let rest = spec.support.map(|s| s + pump);
-        let home = rest.unwrap_or(away);
-        let lerp = |a: Vec3, b: Vec3, k: f32| a + (b - a) * k;
-        // The forearm comes up from below and a little from the left, out of the bottom of
-        // the view (not toward the eye).
-        let arm_dir = if long {
-            Vec3::new(0.3, 1.0, 0.35).normalize()
-        } else {
-            Vec3::new(-0.1, 1.0, 0.6).normalize()
-        };
-        // Loading shells: the hand stays by the loading port. For each shell it reaches down
-        // for it, brings it up under the port, pushes it in (up and forward into the tube) and
-        // goes down for the next.
-        let loading = if shells {
-            let grab = holding(9.0) + Vec3::new(-3.0, 0.0, -4.0);
-            let pushed = holding(0.0) + Vec3::X * 2.5;
-            let q = if reloading { p } else { 1.0 };
-            let at = if q < 0.35 {
-                lerp(grab, holding(3.5), span(q, 0.0, 0.35))
-            } else if q < 0.5 {
-                lerp(holding(3.5), holding(0.0), span(q, 0.35, 0.5))
-            } else if q < 0.6 {
-                lerp(holding(0.0), pushed, span(q, 0.5, 0.6))
-            } else {
-                lerp(pushed, grab, span(q, 0.6, 1.0))
-            };
-            Some(at)
-        } else {
-            None
-        };
-        let fist = if let Some(at) = loading {
-            // Between the pump and the loading port as the gun turns over and back.
-            lerp(home, at, tilt)
-        } else if !reloading {
-            home
-        } else if p < 0.25 {
-            lerp(home, away, span(p, 0.0, 0.15))
-        } else if p < 0.55 {
-            lerp(away, holding(7.0), span(p, 0.25, 0.55))
-        } else if p < 0.7 {
-            lerp(holding(7.0), holding(0.0), span(p, 0.55, 0.66))
-        } else {
-            lerp(holding(0.0), home, span(p, 0.7, 0.88))
-        };
-
-        // The magazines: the old one drops out tumbling; the new one rides in the left hand
-        // until it is pushed in.
-        let old_mag = |p: f32| {
-            let k = (p - 0.15) / 0.3;
-            let fall = axis * (2.0 + 26.0 * k * k) + Vec3::new(0.0, 0.0, -4.0 * k);
-            Mat4::from_translation(fall)
-                * Mat4::from_translation(well)
-                * rz(40.0 * k * k)
-                * rx(-25.0 * k)
-                * Mat4::from_translation(-well)
-        };
-        let in_hand = Mat4::from_translation(fist - holding(0.0));
-        let mag_part = gun::MAGAZINE;
-        let magazine = if shells || !reloading || p < 0.15 {
-            Some(Mat4::IDENTITY)
-        } else if p < 0.25 {
-            None
-        } else if p < 0.68 {
-            Some(in_hand)
-        } else {
-            Some(Mat4::IDENTITY)
-        };
-
-        // Aimed through the scope, the view is the scope's picture instead (drawn by the HUD).
-        if !(scope && self.aim > 0.97) {
-            let cycle_part = spec.cycle;
-            gun::emit_gun_parts(out, kind, m, light, fl, self.gun_mods, |part| {
-                if Some(part) == spec.slide {
-                    return Some(Mat4::from_translation(Vec3::new(-slide, 0.0, 0.0)));
-                }
-                if let Some((cp, travel)) = cycle_part {
-                    if cp == part {
-                        return Some(Mat4::from_translation(Vec3::new(-travel * cycled, 0.0, 0.0)));
-                    }
-                }
-                if part == mag_part && !shells {
-                    return magazine;
-                }
-                Some(Mat4::IDENTITY)
-            });
-            if reloading && !shells && (0.15..0.45).contains(&p) {
-                let at = old_mag(p);
-                gun::emit_gun_parts(out, kind, m, light, fl, self.gun_mods, |part| {
-                    (part == mag_part).then_some(at)
-                });
+        // Blockbench pixels to blocks, the camera at the model's origin; lowered while it is
+        // being taken out.
+        let px = Mat4::from_scale(Vec3::splat(VIEW_PX));
+        // With a scope, aiming brings its eyepiece up to the eye.
+        let to_eye = if scope { SCOPE_EYE * a } else { Vec3::ZERO };
+        let root = base * t(0.0, -(1.0 - eq) * 0.6, 0.0) * px * Mat4::from_translation(to_eye);
+        let bones = vm::BONES;
+        let bone = |name: &str| find_bone(bones, name);
+        let anim = |name: &str| find_anim(vm::ANIMS, name);
+        // Looking it over: out in front of the view, turning slowly in the hand.
+        let root = match (self.inspect, bone("pistol")) {
+            (Some(it), Some(pb)) => {
+                let w = span(it, 0.0, 0.55) * (1.0 - span(it, INSPECT_TIME - 0.65, INSPECT_TIME));
+                let d = |x: f32| x.to_radians();
+                use glam::Quat;
+                // The right side toward the view, muzzle to the right and a little away, top
+                // tipped toward the eye; then the muzzle away and the top up to look down it;
+                // then the left side.
+                let right = Quat::from_rotation_y(d(-22.0)) * Quat::from_rotation_x(d(16.0));
+                let top = Quat::from_rotation_y(d(-32.0)) * Quat::from_rotation_x(d(72.0));
+                let left = Quat::from_rotation_y(d(202.0)) * Quat::from_rotation_x(d(16.0));
+                let q = if it < 1.4 {
+                    right
+                } else if it < 2.0 {
+                    right.slerp(top, span(it, 1.4, 2.0))
+                } else if it < 2.6 {
+                    top
+                } else if it < 3.2 {
+                    top.slerp(left, span(it, 2.6, 3.2))
+                } else {
+                    left
+                };
+                let wobble = Quat::from_rotation_z(d((it * 1.4).sin() * 3.0))
+                    * Quat::from_rotation_y(d((it * 0.9).sin() * 4.0));
+                let center = (Vec3::from(vm::MUZZLE.1) + Vec3::from(bones[pb].origin)) * 0.5;
+                // The model's muzzle points -Z; turned so it points +X like the turns above.
+                let held = base
+                    * Mat4::from_rotation_translation(wobble * q, Vec3::new(0.06, -0.07, -0.47))
+                    * ry(-90.0)
+                    * px
+                    * Mat4::from_translation(-center);
+                blend(root, held, smooth(w))
             }
-            let hand_shown = long || (reloading && (shells || p >= 0.25));
-            if hand_shown {
-                // The left hand and forearm, fist first (model pixels, about a grip across).
-                let rot = glam::Quat::from_rotation_arc(Vec3::Y, arm_dir);
-                let px = 1.0 / 16.0 / spec.view_scale * if long { 0.34 } else { 0.45 };
-                let arm = m * Mat4::from_scale_rotation_translation(Vec3::splat(px), rot, fist);
+            _ => root,
+        };
+
+        // The animations, added up.
+        let mut pose = vec![BonePose::default(); bones.len()];
+        if let Some(an) = anim("aim") {
+            add_anim(&mut pose, an, a * an.length, 1.0, |_| false);
+        }
+        // Both loops take two steps.
+        let phase = (self.walk_dist * 0.5).rem_euclid(1.0);
+        let walk = self.stride.min(1.0) * (1.0 - 0.85 * a) * (1.0 - sprint) * (1.0 - 0.4 * crouch);
+        if let Some(an) = anim("walk").filter(|_| walk > 1e-3) {
+            add_anim(&mut pose, an, phase * an.length, walk, |_| false);
+        }
+        if let Some(an) = anim("sprint").filter(|_| sprint > 1e-3) {
+            add_anim(&mut pose, an, phase * an.length, sprint, |_| false);
+        }
+        super::pistol_view::add_gun_anims(&mut pose, &self.gun_anim(), false);
+        super::pistol_view::apply_mods(&mut pose, mods);
+        let (mats, shown) = bone_matrices(bones, &pose, root);
+
+        // With a scope, its eyepiece always shows the scope's view (held at the hip too).
+        if scope {
+            self.eyepiece = super::pistol_view::eyepiece(&mats, &shown);
+        }
+        {
+            let mut glass = std::mem::take(&mut self.glass);
+            let lamp = mods & gun_mod::LIGHT != 0 && mods & gun_mod::LIGHT_ON != 0;
+            super::pistol_view::emit_pistol(out, Some(&mut glass), &mats, &shown, self.eyepiece.is_some(), self.gun_dirt, lamp, light, fl);
+            self.glass = glass;
+            // The player's own arms where the model has its arms: the fist at the bone's
+            // origin, the arm running back along the bone's +Z (Minecraft's arm, 1.75 times
+            // as big, longer so it reaches out of the view).
+            for name in ["right_arm_mesh", "left_arm_mesh"] {
+                let Some(b) = bone(name).filter(|&b| shown[b]) else { continue };
+                let arm = mats[b]
+                    * Mat4::from_translation(Vec3::from(bones[b].origin))
+                    * rx(90.0)
+                    * Mat4::from_scale(Vec3::new(1.75, 2.45, 1.75));
                 emit_box(
                     out,
                     arm,
-                    Vec3::new(-2.0, -7.0, -2.0),
-                    Vec3::new(2.0, 1.0, 2.0),
+                    Vec3::new(-2.0, -2.0, -2.0),
+                    Vec3::new(2.0, 10.0, 2.0),
                     ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
                     [[255; 3]; 6],
                     light,
                     fl,
                 );
-                if shells && reloading && p < 0.55 && tilt > 0.5 {
-                    // The shell between the fingers: red hull, brass head.
-                    let sh = m * Mat4::from_translation(fist + Vec3::Y * 1.2);
-                    emit_box(out, sh, Vec3::new(-1.2, -0.7, -0.7), Vec3::new(1.4, 0.7, 0.7), [crate::world::textures::tex::WOOL; 6], [[200, 40, 36]; 6], light, fl);
-                    emit_box(out, sh, Vec3::new(-2.0, -0.75, -0.75), Vec3::new(-1.2, 0.75, 0.75), [crate::world::textures::tex::WOOL; 6], [[236, 182, 72]; 6], light, fl);
-                }
             }
         }
-        let muzzle = m.transform_point3(gun::muzzle(kind, mods));
+
+        // Where the bullet and the flash leave, where the case comes out, where the laser
+        // starts.
+        let (mb, mp) = super::pistol_view::muzzle(mods);
+        let muzzle = mats[mb].transform_point3(mp);
         self.muzzle_tip = Some(muzzle);
-        if self.flash > 0.0 && !(scope && self.aim > 0.97) {
-            let dir = m.transform_vector3(Vec3::X);
+        let dir = mats[mb].transform_vector3(Vec3::NEG_Z).normalize_or(Vec3::NEG_Z);
+        self.barrel_dir = Some(dir);
+        if self.flash > 0.0 {
             let size = 0.11 * self.flash_size;
             super::ballistics::emit_muzzle_flash(out, muzzle, dir, cam, size, self.flash_seed, self.flash);
         }
-        self.eject_tip = Some(m.transform_point3(spec.eject));
+        let (eb, ep) = super::pistol_view::eject();
+        self.eject_tip = Some(mats[eb].transform_point3(ep));
         if mods & gun_mod::LASER != 0 {
-            self.laser_tip = Some(m.transform_point3(spec.laser));
+            let (lb, lp) = super::pistol_view::laser();
+            self.laser_tip = Some(mats[lb].transform_point3(lp));
+        }
+        if mods & gun_mod::LIGHT != 0 {
+            let (lb, lp) = super::pistol_view::light();
+            self.light_tip = Some(mats[lb].transform_point3(lp));
         }
     }
 }
@@ -799,5 +819,67 @@ mod lantern_view_tests {
             rest_x,
             center_x(&verts) - 0.8
         );
+    }
+}
+
+#[cfg(test)]
+mod pistol_view_tests {
+    use super::*;
+
+    /// The hand holding the pistol after `secs` of frames, built in camera space.
+    fn held(secs: f32, setup: impl Fn(&mut HandAnim)) -> (HandAnim, Vec<Vertex>) {
+        let mut hand = HandAnim::new();
+        hand.equip(crate::item::PISTOL);
+        let dt = 1.0 / 60.0;
+        let mut verts = Vec::new();
+        for _ in 0..(secs / dt) as usize {
+            setup(&mut hand);
+            hand.update(dt, false, 0.0, true, Vec2::ZERO);
+            verts.clear();
+            hand.build(&mut verts, Mat4::IDENTITY, 15, 15, dt, 0);
+        }
+        (hand, verts)
+    }
+
+    #[test]
+    fn the_blockbench_pistol_is_drawn_in_front_of_the_eye() {
+        let (hand, verts) = held(1.0, |_| {});
+        assert!(verts.len() > 2000, "{} vertices", verts.len());
+        for v in &verts {
+            assert!(v.pos.iter().all(|c| c.is_finite()));
+        }
+        // Held from the hip: down to the right, in front.
+        let muzzle = hand.muzzle_tip.unwrap();
+        assert!(muzzle.z < -0.3 && muzzle.y < 0.0 && muzzle.x > 0.0, "{muzzle}");
+        // The case comes out of the port, behind the muzzle.
+        let port = hand.eject_tip.unwrap();
+        assert!(port.z > muzzle.z, "{port} {muzzle}");
+    }
+
+    #[test]
+    fn aiming_brings_the_sights_to_the_middle() {
+        let (hand, _) = held(1.0, |h| h.aim = 1.0);
+        let m = hand.muzzle_tip.unwrap();
+        // The muzzle is just under the view's axis, straight ahead.
+        assert!(m.x.abs() < 0.02 && m.y < 0.0 && m.y > -0.08 && m.z < -0.3, "{m}");
+    }
+
+    #[test]
+    fn a_shot_and_a_reload_play_through() {
+        let (mut hand, _) = held(0.3, |_| {});
+        hand.shoot(1.0, 0.3);
+        let (_, verts) = {
+            let dt = 1.0 / 60.0;
+            let mut verts = Vec::new();
+            for i in 0..120 {
+                hand.reload = Some(i as f32 / 120.0);
+                hand.gun_state.rack = true;
+                hand.update(dt, false, 0.0, true, Vec2::ZERO);
+                verts.clear();
+                hand.build(&mut verts, Mat4::IDENTITY, 15, 15, dt, 0);
+            }
+            ((), verts)
+        };
+        assert!(verts.len() > 2000);
     }
 }

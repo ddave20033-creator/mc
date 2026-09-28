@@ -18,6 +18,10 @@ pub struct Terrain {
     offsets: Vec<(i32, i32)>,
     /// Door halves of each meshed chunk (see `MeshData::doors`).
     pub doors: FastMap<ChunkPos, Vec<IVec3>>,
+    /// Chests of each meshed chunk (see `MeshData::chests`).
+    pub chests: FastMap<ChunkPos, Vec<IVec3>>,
+    /// Gun stations of each meshed chunk (see `MeshData::gun_stations`).
+    pub gun_stations: FastMap<ChunkPos, Vec<IVec3>>,
     /// LAN host: where the other players are. Chunks around them stay loaded (without
     /// meshes) so the world keeps running there.
     pub extra_centers: Vec<ChunkPos>,
@@ -55,6 +59,8 @@ impl Terrain {
             meshed: FastSet::default(),
             offsets,
             doors: FastMap::default(),
+            chests: FastMap::default(),
+            gun_stations: FastMap::default(),
             extra_centers: Vec::new(),
         }
     }
@@ -136,6 +142,16 @@ impl Terrain {
                         } else {
                             self.doors.insert(m.pos, m.doors.clone());
                         }
+                        if m.chests.is_empty() {
+                            self.chests.remove(&m.pos);
+                        } else {
+                            self.chests.insert(m.pos, m.chests.clone());
+                        }
+                        if m.gun_stations.is_empty() {
+                            self.gun_stations.remove(&m.pos);
+                        } else {
+                            self.gun_stations.insert(m.pos, m.gun_stations.clone());
+                        }
                         out.push(TerrainEvent::Mesh(m));
                     }
                 }
@@ -159,6 +175,8 @@ impl Terrain {
             }
             self.meshed.remove(&p);
             self.doors.remove(&p);
+            self.chests.remove(&p);
+            self.gun_stations.remove(&p);
             self.world.light.remove(&p);
             self.dirty.remove(&p);
             out.push(TerrainEvent::Unload(p));

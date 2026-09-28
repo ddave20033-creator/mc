@@ -54,10 +54,10 @@ fn sky_state(tod: f32) -> SkyState {
             .lerp(Vec3::new(1.0, 0.96, 0.88), smoothstep(0.0, 0.35, sun.y));
         (stepped, warm, sun_i)
     } else {
-        (-stepped, Vec3::new(0.75, 0.85, 1.0), 0.35 * moon_i)
+        (-stepped, Vec3::new(0.75, 0.85, 1.0), 0.25 * moon_i)
     };
     let dusk = smoothstep(0.35, 0.0, sun.y.abs()) * day;
-    let sky_light = Vec3::new(0.1, 0.12, 0.22)
+    let sky_light = Vec3::new(0.035, 0.045, 0.1)
         .lerp(Vec3::new(0.93, 0.95, 1.0), day)
         .lerp(Vec3::new(1.0, 0.82, 0.7), dusk * 0.35);
     SkyState {
@@ -111,8 +111,14 @@ struct Scene {
     entity: Vec<Vertex>,
     entity_visible: bool,
     player_vertex_count: usize,
-    /// Blended flames (no depth writes, no shadows).
+    /// Blended flames and glass (no depth writes, no shadows).
     translucent: Vec<Vertex>,
+    /// The first-person gun's glass, and its scope's eyepiece (showing the scope's view).
+    viewmodel_glass: Vec<Vertex>,
+    lens: Vec<Vertex>,
+    /// Where the scope looks (a direction) and its field of view (radians), while its view
+    /// shows on the eyepiece.
+    scope: Option<(Vec3, Vec3, Vec3, f32, f32)>,
 }
 
 impl Game {
@@ -208,6 +214,23 @@ impl Game {
             player_vertex_count: scene.player_vertex_count as u32,
             player_opacity: view.player_opacity,
             translucent: &scene.translucent,
+            viewmodel_glass: &scene.viewmodel_glass,
+            lens: &scene.lens,
+            scope: scene.scope.map(|(from, dir, up, fov, near)| {
+                let look = Mat4::look_to_rh(from, dir, up);
+                let mut proj = Mat4::perspective_rh(fov, 1.0, near, 2500.0);
+                proj.y_axis.y *= -1.0;
+                let view_proj = proj * look;
+                let mut ubo = lighting.ubo;
+                ubo.view_proj = view_proj.to_cols_array();
+                ubo.inv_view_proj = view_proj.inverse().to_cols_array();
+                ubo.cam_pos = from.extend(ubo.cam_pos[3]).to_array();
+                // No anti-aliasing in its pass; detail as its magnified view shows it.
+                ubo.light_dir[3] = 0.0;
+                let detail_px = crate::render::SCOPE_SIZE as f32 * 0.5 / (fov * 0.5).tan();
+                ubo.detail[0] = detail_px;
+                crate::render::ScopeView { ubo, view_proj, cam_pos: from, detail_px }
+            }),
         };
         let t_build = Instant::now();
         self.renderer.render(&mut self.gpu, &frame);
@@ -312,6 +335,11 @@ impl Game {
             self.check_stations();
         }
         let mining = self.mining.is_some();
+        self.hand.sprinting = self.player.sprinting;
+        self.hand.crouching = self.player.sneaking;
+        let (fwd, right) = (look_dir(self.yaw, 0.0), look_dir(self.yaw + FRAC_PI_2, 0.0));
+        let v = self.player.vel;
+        self.hand.motion = Vec3::new(v.dot(right), v.y, v.dot(fwd));
         self.hand.update(
             dt,
             mining,
@@ -358,8 +386,9 @@ impl Game {
         } else {
             1.0
         };
-        // Zoom key held: a narrow view, like OptiFine's zoom.
-        let zooming = self.screen == Screen::Playing && self.bind_down(Bind::Zoom);
+        // Zoom key held: a narrow view, like OptiFine's zoom (not with a gun in hand: it has
+        // its sights and scope).
+        let zooming = self.screen == Screen::Playing && self.bind_down(Bind::Zoom) && self.held_gun().is_none();
         // Aiming a gun narrows the view too (a lot through a scope).
         let gun_zoom = if in_world { self.gun_zoom() } else { 1.0 };
         let fov_target = self.settings.fov
@@ -419,7 +448,10 @@ impl Game {
             && self.settings.view_bobbing
             && !self.player.flying
         {
-            cam_fx *= self.hand.bob_matrix();
+            self.view_bob = self.hand.bob_matrix();
+            cam_fx *= self.view_bob;
+        } else {
+            self.view_bob = Mat4::IDENTITY;
         }
         let view = cam_fx * Mat4::look_to_rh(cam, fwd, Vec3::Y);
         let mut proj = Mat4::perspective_rh(fov, w / h, 0.05, 2500.0);
@@ -532,11 +564,12 @@ impl Game {
             ],
             misc: [
                 self.settings.clouds as i32 as f32,
-                1.0 + (1.0 - sky.day) * 0.5,
+                1.0 + (1.0 - sky.day) * 0.15,
                 1.0 / SHADOW_SIZE as f32,
                 self.time,
             ],
             held_lights: self.held_lights(in_world, cam),
+            spots: self.gun_spots(in_world, cam),
             detail: [
                 self.gpu.extent.height as f32 * 0.5
                     / (self.detail_fov.to_radians() * 0.5).tan(),
@@ -556,6 +589,35 @@ impl Game {
     /// Torches and lanterns in hand light up the world around the holder: this player and
     /// the other LAN players (nearest first). A lantern burns steadily; a torch flickers
     /// (each with its own phase).
+    /// Weapon lights switched on (this player's and the others'), nearest first: each a pair
+    /// of (position, 1) and (direction, the cosine of the cone's edge).
+    fn gun_spots(&self, in_world: bool, cam: Vec3) -> [[f32; 4]; 2 * crate::render::MAX_SPOTS] {
+        let mut spots: Vec<(Vec3, Vec3)> = Vec::new();
+        if in_world && self.player.spawned && !self.spectator() {
+            spots.extend(self.own_gun_light());
+        }
+        if in_world {
+            let mut others: Vec<(Vec3, Vec3)> = self
+                .remote_guns()
+                .into_iter()
+                .filter(|&(_, _, mods, _, _)| mods & crate::item::gun_mod::LIGHT != 0 && mods & crate::item::gun_mod::LIGHT_ON != 0)
+                .map(|(id, kind, _, eye, look)| {
+                    let from = self.remote_gun_point(id, kind, crate::model::pistol_view::light()).unwrap_or(eye);
+                    (from, look)
+                })
+                .collect();
+            others.sort_by(|a, b| a.0.distance(cam).total_cmp(&b.0.distance(cam)));
+            spots.extend(others);
+        }
+        let edge = 17f32.to_radians().cos();
+        let mut out = [[0.0; 4]; 2 * crate::render::MAX_SPOTS];
+        for (i, (p, d)) in spots.into_iter().take(crate::render::MAX_SPOTS).enumerate() {
+            out[2 * i] = [p.x, p.y, p.z, 1.0];
+            out[2 * i + 1] = [d.x, d.y, d.z, edge];
+        }
+        out
+    }
+
     fn held_lights(&self, in_world: bool, cam: Vec3) -> [[f32; 4]; MAX_HELD_LIGHTS] {
         let intensity = |held: ItemId, phase: f32| {
             if held == LANTERN as ItemId {
@@ -668,6 +730,13 @@ impl Game {
                 (-f).extend(0.0),
                 cam.extend(1.0),
             );
+            // A gun is held steady against the view's bobbing: it sways on its own (see
+            // `HandAnim::build_gun`), so the sights stay where they point.
+            let cam_to_world = if pistol {
+                cam_to_world * self.view_bob.inverse()
+            } else {
+                cam_to_world
+            };
             self.hand.fancy_lantern = fp_body;
             self.hand.book = self.book_view().map(|v| (self.book_read(), v));
             self.hand.build(
@@ -688,17 +757,67 @@ impl Game {
             if let Some(tip) = self.hand.torch_tip {
                 held_torch_tip = Some(to_world_view(tip));
             }
+            scene.viewmodel_glass = std::mem::take(&mut self.hand.glass);
+            // A direction in the hand's view turned into the world's.
+            let to_world_dir = |v: Vec3| {
+                let d = cam_to_world.inverse().transform_vector3(v);
+                cam_to_world.transform_vector3(Vec3::new(d.x * k, d.y * k, d.z)).normalize()
+            };
+            // Where the gun points: its barrel, or its scope's axis when it has one.
+            self.guns.gun_dir = self.hand.barrel_dir.map(to_world_dir);
+            // The scope's eyepiece: a disc on its back lens showing the scope's magnified view.
+            if let Some((mid, right, up, radius)) = self.hand.eyepiece {
+                let corner = |x: f32, y: f32| mid + right * radius * x + up * radius * y;
+                let quad = [(-1.0, 1.0, [0.0, 0.0]), (1.0, 1.0, [1.0, 0.0]), (1.0, -1.0, [1.0, 1.0]), (-1.0, -1.0, [0.0, 1.0])]
+                    .map(|(x, y, uv)| Vertex {
+                        pos: corner(x, y).to_array(),
+                        uv,
+                        layer: 0.0,
+                        light: [255, 255, 255, 4],
+                        tint: [255, 255, 255, crate::world::mesh::flags::VIEWMODEL],
+                    });
+                scene.lens.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
+                // It looks exactly where the gun points: along the scope's own axis (and turned
+                // with it), from the hand's view into the world's.
+                let dir = to_world_dir(up.cross(right));
+                let up = to_world_dir(up);
+                self.guns.gun_dir = Some(dir);
+                // Its field of view is the one it has fully aimed, however far from the eye.
+                if self.hand.aim > 0.97 {
+                    let dist = (mid - cam).length().max(1e-3);
+                    self.hand.scope_across = (radius / dist) / 35f32.to_radians().tan();
+                }
+                let across = self.hand.scope_across;
+                let half = (across * (self.fov_current.to_radians() * 0.5).tan()).atan();
+                let magnify = 1.0 / crate::item::GunKind::Pistol.stats().scope_zoom;
+                // Seen from the scope itself, not from the eye: but never from beyond a wall
+                // the eye is up against (the gun would be in it), and with its near plane
+                // before whatever is right in front of it. Otherwise the near plane is further
+                // out than the eye's: finer depth, so the bullet holes stay on their blocks
+                // far off.
+                let world = &self.terrain.world;
+                let from = cam + super::camera::clamp_offset(world, cam, to_world_view(mid) - cam);
+                let free = super::camera::clamp_offset(world, from, dir * 0.5).length();
+                let near = (free * 0.5).clamp(0.01, 0.25);
+                scene.scope = Some((from, dir, up, (2.0 * half / magnify).max(0.2f32.to_radians()), near));
+            }
             // The same for the pistol's muzzle flash and the spent cases.
             self.guns.muzzle = self.hand.muzzle_tip.map(to_world_view);
             self.guns.eject = self.hand.eject_tip.map(to_world_view);
             self.guns.laser_from = self.hand.laser_tip.map(to_world_view);
+            self.guns.light_from = self.hand.light_tip.map(to_world_view);
             let hit = self.hand.book_hit;
             self.set_book_hit(hit);
         } else {
             self.guns.muzzle = None;
             self.guns.eject = None;
             self.guns.laser_from = None;
+            self.guns.light_from = None;
+            self.guns.gun_dir = None;
             self.set_book_hit(None);
+        }
+        if in_world {
+            self.build_own_laser(&mut scene.particles, cam, view.right, view.up);
         }
         // The player model (shadow only in first person); a spectator has no body.
         if in_world && self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
@@ -730,18 +849,24 @@ impl Game {
                 hide_right_arm: false,
                 lantern: None,
                 gun_mods: self.held_gun_mods(),
+                gun_dirt: self.held_gun_dirt(),
+                held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
+                gun: self.hand.gun_anim(),
                 armor: crate::item::armor_code(&self.inventory.armor),
                 book: self.book_view(),
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {
                 let mods = pose.gun_mods;
-                let point = |q| crate::model::player::gun_point(&pose, kind, q);
-                self.guns.muzzle_tp = Some(point(crate::model::gun::muzzle(kind, mods)));
-                self.guns.eject_tp = Some(point(crate::model::gun::spec(kind).eject));
+                use crate::model::pistol_view::{eject, muzzle, rest_point_in_gun_space};
+                let point = |q| crate::model::player::gun_point(&pose, kind, rest_point_in_gun_space(q));
+                self.guns.muzzle_tp = Some(point(muzzle(mods)));
+                self.guns.eject_tp = Some(point(eject()));
+                self.guns.light_tp = Some(point(crate::model::pistol_view::light()));
             } else {
                 self.guns.muzzle_tp = None;
                 self.guns.eject_tp = None;
+                self.guns.light_tp = None;
             }
             let target = limb_targets(&PlayerPose {
                 first_person: fp_body,
@@ -764,7 +889,10 @@ impl Game {
                 ..pose
             };
             let start = scene.entity.len();
-            build_player(&mut scene.entity, &pose, &limbs, player_sky, player_blk);
+            // Only seen in third person (its shadow otherwise): so is its gun's glass.
+            let mut hidden_glass = Vec::new();
+            let glass = if third_person { &mut scene.translucent } else { &mut hidden_glass };
+            build_player(&mut scene.entity, glass, &pose, &limbs, player_sky, player_blk);
             if let Some((feet, _, turn)) = bed {
                 crate::model::player::lay_down(&mut scene.entity[start..], feet, turn);
             }
@@ -787,7 +915,7 @@ impl Game {
                     hide_right_arm: lantern || pistol || book,
                     ..pose
                 };
-                build_player(&mut scene.particles, &fp, &limbs, player_sky, player_blk);
+                build_player(&mut scene.particles, &mut scene.translucent, &fp, &limbs, player_sky, player_blk);
                 if torch {
                     held_torch_tip = Some(crate::model::player::held_torch_tip(&fp, &limbs));
                 }
@@ -796,12 +924,6 @@ impl Game {
         self.held_torch_tip = held_torch_tip;
         if in_world {
             self.build_world_entities(&mut scene, third_person, dt);
-            let target = if third_person {
-                &mut scene.entity
-            } else {
-                &mut scene.particles
-            };
-            self.build_gun_station(target, cam, view.right, view.up);
         }
         scene.entity_visible = third_person;
 
@@ -842,6 +964,9 @@ impl Game {
     /// Dropped items, falling blocks, mobs, the other LAN players, chest lids and items on
     /// crafting tables near the player.
     fn build_world_entities(&mut self, scene: &mut Scene, third_person: bool, dt: f32) {
+        // Gun stations: their model, the drawer sliding out while one is used, what lies on
+        // them.
+        self.build_benches(if third_person { &mut scene.entity } else { &mut scene.particles }, dt);
         let world = &self.terrain.world;
         // Items and falling blocks must always be visible, so in first person they go into
         // the particle range (which is drawn normally) instead.
@@ -870,10 +995,19 @@ impl Game {
         }
         // Watching someone through their eyes: their own model would be in the way.
         let inside = self.spectating.filter(|_| !third_person);
-        multi::build_remote_players(&mut self.remotes, world, self.time, &mut mob_verts, dt, inside);
+        multi::build_remote_players(
+            &mut self.remotes,
+            world,
+            self.time,
+            &mut mob_verts,
+            &mut scene.translucent,
+            dt,
+            inside,
+        );
         let near = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < 48.0 * 48.0;
         let light = |p: IVec3| world.light_estimate(p.as_vec3() + Vec3::new(0.5, 1.2, 0.5));
-        for p in self.block_entities.chests.keys().filter(|p| near(p)) {
+        // Every chest in the loaded chunks gets its lid, known contents or not.
+        for p in self.terrain.chests.values().flatten().filter(|p| near(p)) {
             let b = world.geti(*p);
             if let Some(facing) = facing(b).filter(|_| is_chest(b)) {
                 // Both halves of a double chest open together.
@@ -898,8 +1032,9 @@ impl Game {
                         }
                         _ => None,
                     };
-                    let slots = &self.block_entities.chests[p][..];
-                    build_chest_items(target, *p, facing, side, slots, lift, sky, blk);
+                    if let Some(slots) = self.block_entities.chests.get(p) {
+                        build_chest_items(target, *p, facing, side, &slots[..], lift, sky, blk);
+                    }
                 }
             }
         }

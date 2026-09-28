@@ -1,8 +1,8 @@
 //! Guns: shooting (left mouse button; held down for automatic fire), aiming down the sights
 //! (right), reloading (a magazine, or a shotgun's shells one by one), working a bolt or a
 //! pump, bullets in flight, pellets, spent cases, recoil, the laser sight and the gun HUD
-//! (crosshair, scope, ammo), and the state of the gun station screen (drawn in
-//! `gui::gun_station`), where guns are put together part by part, cleaned and tuned.
+//! (crosshair, scope, ammo). Guns are put together, taken apart, cleaned and tuned at the gun
+//! station (`gui::gun_station`).
 
 use super::*;
 use crate::entity::player::{ray_boxes, raycast_solid};
@@ -10,20 +10,15 @@ use crate::item::*;
 use crate::lang::tf;
 use crate::model::ballistics::{self, CaseKind, Cases};
 use crate::audio::Sound;
-use crate::model::gun::{self, PARTS};
+use crate::model::pistol_view::{
+    reload_anim_time, reload_seconds, GunAnim, ReloadKind, RELOAD_MAG_IN, RELOAD_MAG_OUT, RELOAD_SLIDE,
+};
 
 /// Seconds to raise the gun to the eye.
 const AIM_TIME: f32 = 0.16;
 /// Every shot widens the cone of the next ones for a moment (degrees).
 const BLOOM_PER_SHOT: f32 = 1.3;
 const BLOOM_MAX: f32 = 6.0;
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum BenchMode {
-    Assemble,
-    Clean,
-    Tune,
-}
 
 /// A bullet (or a pellet) in flight.
 struct Bullet {
@@ -47,11 +42,21 @@ struct Bullet {
 
 #[derive(Default)]
 pub(super) struct Guns {
+    /// Looking the held gun over (the inspect key): seconds so far, and the gun.
+    pub(super) inspect: Option<(f32, ItemId)>,
+    /// Seconds after a shot before sprinting is possible again (a shot ends a sprint).
+    pub(super) no_sprint: f32,
     /// Where the held gun's muzzle, ejection port and laser lens were drawn last frame
     /// (first person).
     pub(super) muzzle: Option<Vec3>,
     pub(super) eject: Option<Vec3>,
     pub(super) laser_from: Option<Vec3>,
+    /// Where the held gun's weapon light is (first person; and on the player model).
+    pub(super) light_from: Option<Vec3>,
+    pub(super) light_tp: Option<Vec3>,
+    /// Which way the held gun points (first person: its barrel, or its scope's axis): its
+    /// shots and its laser go that way, not where the view looks.
+    pub(super) gun_dir: Option<Vec3>,
     /// The same on the player model (third person).
     pub(super) muzzle_tp: Option<Vec3>,
     pub(super) eject_tp: Option<Vec3>,
@@ -66,30 +71,39 @@ pub(super) struct Guns {
     wisp: f32,
     /// When the last "jammed" or "no bullets" message was shown.
     last_message: f32,
-    pub(super) bench: Bench,
     /// Aimed down the sights: 0 from the hip .. 1 aimed.
     pub(super) aim: f32,
-    /// Reloading: seconds so far (for a shotgun, of the shell going in), and whether the
-    /// magazine was empty (a pistol's slide is released at the end).
+    /// Reloading (the R key): seconds so far, and what it does.
     pub(super) reload: Option<f32>,
-    reload_empty: bool,
+    plan: ReloadPlan,
     /// The reload key was pressed.
     pub(super) reload_pressed: bool,
-    /// Working the bolt or the pump after a shot: seconds so far; the case comes out halfway.
-    cycle: Option<f32>,
-    cycle_ejected: bool,
     /// Extra spread from the last shots (degrees), for the aim and the crosshair.
     bloom: f32,
     /// Recoil that has not come back yet (radians of pitch).
     recover: f32,
     bullets: Vec<Bullet>,
     pub(super) cases: Cases,
-    /// Where the laser sight's dot is.
-    laser_dot: Option<Vec3>,
     /// Muzzle flashes of the other players' shots (as `flash`).
     remote_flashes: Vec<(f32, Vec3, Vec3, f32, f32)>,
     /// Holes the bullets left in the blocks.
     holes: Vec<Hole>,
+}
+
+/// A reload going on: what it does (the magazine out and a new one in, only out, only in, or
+/// only the slide), whether the slide is pulled at the end (to chamber a round), whether the
+/// magazine coming out is empty, how long it takes, the magazine going in (taken from the
+/// inventory at the start) and which of its steps are done.
+#[derive(Default)]
+struct ReloadPlan {
+    kind: ReloadKind,
+    rack: bool,
+    old_empty: bool,
+    length: f32,
+    new_mag: Option<Stack>,
+    out_done: bool,
+    in_done: bool,
+    rack_done: bool,
 }
 
 /// A bullet hole: where on which face of which block (it goes when the block does), how it
@@ -107,134 +121,6 @@ struct Hole {
 /// Bullet holes kept at most, and for how long (they shrink away over the last seconds).
 const MAX_HOLES: usize = 300;
 const HOLE_LIFE: f32 = 120.0;
-
-pub(super) struct Bench {
-    pub(super) mode: BenchMode,
-    /// The gun being put together, the parts put in so far (in order), which of them the
-    /// player paid for (in creative they are free), and when the last one went in.
-    pub(super) kind: GunKind,
-    pub(super) installed: usize,
-    pub(super) taken: [bool; PARTS],
-    pub(super) installed_at: f32,
-    /// A gun was just finished: it stays on show until the next one is started.
-    pub(super) finished: bool,
-    /// The gun being cleaned or tuned, how dirty each of its parts is (0 clean .. 1), and the
-    /// gun's dirt when `dirt` was last matched to it (another gun put in reloads it).
-    pub(super) gun: Slot,
-    pub(super) dirt: [f32; PARTS],
-    pub(super) dirt_of: Option<(ItemId, u16)>,
-    /// The gun floating over the table while it is put together: turned by dragging with the
-    /// right mouse button (it sways by itself until then).
-    pub(super) yaw: f32,
-    pub(super) turned: bool,
-    pub(super) drag_from: Option<Vec2>,
-    /// A part was clicked but is not in the inventory: when (flashes its line red).
-    pub(super) missing_at: f32,
-    /// When the gun being cleaned or tuned was laid on the table (the hand puts it down), and
-    /// the inventory slot it came from (it goes back there).
-    pub(super) placed_at: f32,
-    pub(super) from_slot: Option<usize>,
-    /// Whether a gun lay on the table last frame (to notice one put there with the mouse).
-    pub(super) had_gun: bool,
-    /// The hand fitting an attachment or taking one off.
-    pub(super) fit: Option<FitAnim>,
-    /// What the mouse points at on the table.
-    pub(super) hover: Option<Pick>,
-    /// The hand with the brush: 0 away .. 1 scrubbing at `scrub_point`.
-    pub(super) brush: f32,
-    pub(super) scrub_point: Vec3,
-}
-
-/// Something on the gun station's table under the mouse.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Pick {
-    /// A part (lying on the table, or on the gun being put together).
-    Part(usize),
-    /// The gun itself.
-    Gun,
-    /// An attachment (index into ATTACHMENTS), on the gun or lying beside it.
-    Attachment(usize),
-    /// The bare table top.
-    Table,
-}
-
-/// The hand fitting an attachment onto the gun on the table, or taking one off.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct FitAnim {
-    pub(super) index: usize,
-    pub(super) removing: bool,
-    pub(super) start: f32,
-}
-
-impl Default for Bench {
-    fn default() -> Self {
-        Self {
-            mode: BenchMode::Assemble,
-            kind: GunKind::Pistol,
-            installed: 0,
-            taken: [false; PARTS],
-            installed_at: -10.0,
-            finished: false,
-            gun: None,
-            dirt: [0.0; PARTS],
-            dirt_of: None,
-            yaw: 0.0,
-            turned: false,
-            drag_from: None,
-            missing_at: -10.0,
-            placed_at: -10.0,
-            from_slot: None,
-            had_gun: false,
-            fit: None,
-            hover: None,
-            brush: 0.0,
-            scrub_point: Vec3::ZERO,
-        }
-    }
-}
-
-impl Bench {
-    /// What the parts put in so far were made of (it goes back to the player when assembling
-    /// stops): the pistol's own part items, or the materials of the others.
-    pub(super) fn parts(&self) -> Vec<Stack> {
-        let mut out = Vec::new();
-        for (i, part) in self.kind.parts().iter().enumerate().take(self.installed.min(PARTS)) {
-            if !self.taken[i] || self.finished {
-                continue;
-            }
-            match part.item {
-                Some(item) => out.push(Stack::one(item)),
-                None => out.extend(part.cost.iter().map(|&(item, n)| Stack::new(item, n))),
-            }
-        }
-        out
-    }
-
-    /// Everything on the bench that belongs to the player: what the parts put in so far were
-    /// made of, and the gun being cleaned or tuned.
-    pub(super) fn items(&self) -> Vec<Stack> {
-        let mut out = self.parts();
-        out.extend(self.gun);
-        out
-    }
-
-    /// Stops assembling (after the parts went back to the player).
-    pub(super) fn reset_assembly(&mut self) {
-        self.installed = 0;
-        self.taken = [false; PARTS];
-        self.finished = false;
-    }
-
-    /// Empties the bench (after its items went back to the player).
-    pub(super) fn clear(&mut self) {
-        let (mode, kind) = (self.mode, self.kind);
-        *self = Self {
-            mode,
-            kind,
-            ..Self::default()
-        };
-    }
-}
 
 impl Guns {
     /// The light of a muzzle flash going on now: where it is and how bright.
@@ -274,10 +160,6 @@ fn shot_sound(kind: GunKind, silenced: bool) -> Sound {
     }
     match kind {
         GunKind::Pistol => Sound::ShotPistol,
-        GunKind::DesertEagle => Sound::ShotMagnum,
-        GunKind::M16 => Sound::ShotRifle,
-        GunKind::Sniper => Sound::ShotSniper,
-        GunKind::Shotgun => Sound::ShotShotgun,
     }
 }
 
@@ -285,10 +167,6 @@ fn shot_sound(kind: GunKind, silenced: bool) -> Sound {
 fn case_kind(kind: GunKind) -> CaseKind {
     match kind {
         GunKind::Pistol => CaseKind::Pistol,
-        GunKind::DesertEagle => CaseKind::Magnum,
-        GunKind::M16 => CaseKind::Rifle,
-        GunKind::Sniper => CaseKind::Bmg,
-        GunKind::Shotgun => CaseKind::Shell,
     }
 }
 
@@ -303,7 +181,7 @@ fn scatter(dir: Vec3, deg: f32, r1: f32, r2: f32) -> Vec3 {
 
 impl Game {
     /// The held gun: its stack and kind.
-    fn held_gun(&self) -> Option<(Stack, GunKind)> {
+    pub(super) fn held_gun(&self) -> Option<(Stack, GunKind)> {
         self.inventory.slots[self.hotbar_slot].and_then(|s| GunKind::of(s.item).map(|k| (s, k)))
     }
 
@@ -317,17 +195,45 @@ impl Game {
         self.held_gun().map_or(0, |(s, _)| gun_mods(&s))
     }
 
+    /// Switches the held gun's weapon light on or off (when it has one).
+    pub(super) fn toggle_gun_light(&mut self) {
+        let slot = self.hotbar_slot;
+        let Some(s) = self.inventory.slots[slot].as_mut().filter(|s| GunKind::of(s.item).is_some()) else { return };
+        let mods = gun_mods(s);
+        if mods & gun_mod::LIGHT == 0 {
+            return;
+        }
+        set_gun_mods(s, mods ^ gun_mod::LIGHT_ON);
+        self.audio.play(Sound::DryFire, None, 0.35);
+    }
+
+    /// Where the held gun's weapon light shines from and which way (when it is on).
+    pub(super) fn own_gun_light(&self) -> Option<(Vec3, Vec3)> {
+        let (g, _) = self.held_gun()?;
+        let mods = gun_mods(&g);
+        if mods & gun_mod::LIGHT == 0 || mods & gun_mod::LIGHT_ON == 0 || self.screen == Screen::Dead {
+            return None;
+        }
+        let look = look_dir(self.yaw, self.pitch);
+        let from = self.guns.light_from.or(self.guns.light_tp).unwrap_or(self.player.eye() + look * 0.5);
+        Some((from, self.guns.gun_dir.unwrap_or(look)))
+    }
+
+    /// How dirty the held gun looks (`pistol_view::dirt_level`).
+    pub(super) fn held_gun_dirt(&self) -> u8 {
+        self.held_gun()
+            .map_or(0, |(s, _)| crate::model::pistol_view::dirt_level(s.damage, max_damage(s.item)))
+    }
+
     /// How much the gun narrows the view now (1 = not at all).
     pub(super) fn gun_zoom(&self) -> f32 {
         let Some((s, kind)) = self.held_gun() else {
             return 1.0;
         };
         let stats = kind.stats();
-        let full = if kind.shown_mods(gun_mods(&s)) & gun_mod::SCOPE != 0 {
-            stats.scope_zoom
-        } else {
-            stats.sight_zoom
-        };
+        // A scope magnifies only in its eyepiece (the view through it is rendered there).
+        let full = stats.sight_zoom;
+        let _ = s;
         let a = smoothstep(0.0, 1.0, self.guns.aim);
         1.0 + (full - 1.0) * a
     }
@@ -340,11 +246,11 @@ impl Game {
         let mods = held.map_or(0, |(s, _)| gun_mods(&s));
         let reload_pressed = std::mem::take(&mut self.guns.reload_pressed);
         if held.is_none() {
-            self.guns.reload = None;
-            self.guns.cycle = None;
+            self.cancel_reload();
         } else if reload_pressed && control {
             self.start_reload();
         }
+        let sprinting = self.player.sprinting;
         let g = &mut self.guns;
         let aiming = held.is_some() && control && self.right_down && g.reload.is_none();
         let step = dt / AIM_TIME;
@@ -354,72 +260,79 @@ impl Game {
             (g.aim - step).max(0.0)
         };
         g.bloom = (g.bloom - dt * 5.0).max(0.0);
+        g.no_sprint = (g.no_sprint - dt).max(0.0);
+        // Inspecting goes on until it is done, or anything else is done with the gun.
+        let item = held.map(|(s, _)| s.item);
+        g.inspect = g.inspect.and_then(|(t, it)| {
+            let t = t + dt;
+            let on = t < crate::model::hand::INSPECT_TIME
+                && item == Some(it)
+                && !aiming
+                && g.reload.is_none()
+                && g.no_sprint <= 0.0
+                && !sprinting;
+            on.then_some((t, it))
+        });
         let back = g.recover.min(dt * 0.12);
         g.recover -= back;
         self.pitch -= back;
 
-        if let (Some(t), Some((_, kind))) = (self.guns.reload, held) {
-            let length = kind.stats().reload;
-            let (was, t) = (t / length, t + dt);
-            let now = t / length;
+        if let (Some(t), Some(_)) = (self.guns.reload, held) {
+            // The steps happen with the animation: the old magazine drops out, the new one is
+            // seated, the slide slams shut (whatever was not done yet is done at the end).
+            let (kind, rack, length) = (self.guns.plan.kind, self.guns.plan.rack, self.guns.plan.length.max(0.01));
+            let (was, now) = (
+                reload_anim_time(t / length, kind, rack),
+                reload_anim_time((t + dt) / length, kind, rack),
+            );
+            let finished = t + dt >= length;
             let at = self.player.eye();
-            let crossed = |k: f32| was < k && now >= k;
-            if kind.stats().shells {
-                if crossed(0.45) {
-                    self.audio.play(Sound::ShellIn, Some(at), 0.8);
-                }
-            } else {
-                if crossed(0.12) {
-                    self.audio.play(Sound::MagOut, Some(at), 0.8);
-                }
-                if crossed(0.6) {
-                    self.audio.play(Sound::MagIn, Some(at), 0.9);
-                }
-                if crossed(0.84) && self.guns.reload_empty {
-                    self.audio.play(Sound::SlideRelease, Some(at), 0.9);
-                }
+            let due = |k: f32| (was < k && now >= k) || finished;
+            let takes_out = matches!(kind, ReloadKind::Swap | ReloadKind::Eject);
+            if takes_out && !self.guns.plan.out_done && due(RELOAD_MAG_OUT) {
+                self.guns.plan.out_done = true;
+                self.audio.play(Sound::MagOut, Some(at), 0.8);
+                self.magazine_out();
             }
-            if t >= length {
-                self.guns.reload = None;
-                self.finish_reload();
-            } else {
-                self.guns.reload = Some(t);
+            let puts_in = matches!(kind, ReloadKind::Swap | ReloadKind::Insert);
+            if puts_in && !self.guns.plan.in_done && due(RELOAD_MAG_IN) {
+                self.guns.plan.in_done = true;
+                self.audio.play(Sound::MagIn, Some(at), 0.9);
+                self.magazine_in();
             }
+            if rack && !self.guns.plan.rack_done && due(RELOAD_SLIDE) {
+                self.guns.plan.rack_done = true;
+                self.audio.play(Sound::SlideRelease, Some(at), 0.9);
+                self.rack_slide();
+            }
+            self.guns.reload = (!finished).then_some(t + dt);
         }
-        // The bolt or the pump: the spent case comes out halfway.
-        if let (Some(t), Some((_, kind))) = (self.guns.cycle, held) {
-            let length = kind.stats().cycle;
-            let start = length * 0.12;
-            if t < start && t + dt >= start {
-                let sound = if kind == GunKind::Shotgun { Sound::PumpCycle } else { Sound::BoltCycle };
-                self.audio.play(sound, Some(self.player.eye()), 0.9);
-            }
-            let t = t + dt;
-            if t >= length * 0.35 && !self.guns.cycle_ejected {
-                self.guns.cycle_ejected = true;
-                self.eject_case(kind);
-            }
-            self.guns.cycle = (t < length).then_some(t);
-        }
-
         let kind = held.map(|(_, k)| k);
         self.hand.aim = self.guns.aim;
+        self.hand.inspect = self.guns.inspect.map(|(t, _)| t);
         self.hand.reload = match (self.guns.reload, kind) {
-            (Some(t), Some(k)) => Some(t / k.stats().reload),
-            _ => None,
-        };
-        self.hand.cycle = match (self.guns.cycle, kind) {
-            (Some(t), Some(k)) => Some(t / k.stats().cycle),
+            (Some(t), Some(_)) => Some(t / self.guns.plan.length.max(0.01)),
             _ => None,
         };
         self.hand.gun_mods = mods;
-        self.hand.gun_empty = held.is_some_and(|(g, _)| gun_rounds(&g) == 0);
-        self.hand.reload_empty = self.guns.reload_empty;
+        self.hand.gun_dirt = self.held_gun_dirt();
+        let plan = &self.guns.plan;
+        self.hand.gun_state = match held {
+            Some((g, _)) => GunAnim {
+                kind: plan.kind,
+                rack: plan.rack,
+                old_empty: plan.old_empty,
+                locked: gun_locked(&g),
+                no_mag: !gun_has_mag(&g),
+                chambered: gun_chambered(&g),
+                ..GunAnim::default()
+            },
+            None => GunAnim { chambered: true, ..GunAnim::default() },
+        };
 
         self.update_bullets(dt);
-        for (at, shell, hard) in self.guns.cases.update(dt, &self.terrain.world) {
-            let sound = if shell { Sound::CaseShell } else { Sound::CaseBrass };
-            self.audio.play(sound, Some(at), 0.25 + 0.75 * hard);
+        for (at, hard) in self.guns.cases.update(dt, &self.terrain.world) {
+            self.audio.play(Sound::CaseBrass, Some(at), 0.25 + 0.75 * hard);
         }
 
         // The flash fades in a moment; a hot barrel smokes.
@@ -449,56 +362,151 @@ impl Game {
             }
         }
 
-        // The laser points where the view does; its dot sits on whatever is there.
-        self.guns.laser_dot = None;
-        if let Some((_, kind)) = held.filter(|_| mods & gun_mod::LASER != 0 && self.screen != Screen::Dead) {
-            let range = kind.stats().range.min(120.0);
-            let eye = self.player.eye();
-            let dir = look_dir(self.yaw, self.pitch);
-            self.guns.laser_dot = self.laser_hit(eye, dir, range, None);
+    }
+
+    /// Starts looking the held gun over (again from the start if already).
+    pub(super) fn start_inspect(&mut self) {
+        let Some((gun, _)) = self.held_gun() else { return };
+        if self.guns.reload.is_none() && self.guns.aim < 0.3 {
+            self.guns.inspect = Some((0.0, gun.item));
         }
     }
 
-    /// Starts reloading the held gun, if its magazine is not full and there are rounds for it.
+    /// The R key: a round into the chamber if it is empty and the magazine has one;
+    /// otherwise the magazine in it out and the fullest loaded one from the inventory in, or
+    /// only the one in it out when there is no other, or only a new one in when there is none
+    /// in it. The slide is pulled at the end when the chamber is empty.
     fn start_reload(&mut self) {
         let Some((gun, kind)) = self.held_gun() else { return };
         if self.guns.reload.is_some() {
             return;
         }
-        if gun_rounds(&gun) >= kind.magazine_size(gun_mods(&gun)) {
-            return;
-        }
-        if !self.creative() && self.inventory.count(kind.ammo()) == 0 {
-            self.gun_message(t("gun.no_ammo"));
-            return;
-        }
+        let has_mag = gun_has_mag(&gun);
+        let rounds = if has_mag { gun_rounds(&gun) } else { 0 };
+        let chambered = gun_chambered(&gun);
+        let (what, new_mag) = if has_mag && !chambered && rounds > 0 {
+            (ReloadKind::Rack, None)
+        } else {
+            if has_mag && chambered && rounds >= kind.magazine_size(gun_mods(&gun)) {
+                return;
+            }
+            match (has_mag, self.take_magazine()) {
+                (true, Some(m)) => (ReloadKind::Swap, Some(m)),
+                (true, None) => (ReloadKind::Eject, None),
+                (false, Some(m)) => (ReloadKind::Insert, Some(m)),
+                (false, None) => {
+                    self.gun_message(t("gun.no_mags"));
+                    return;
+                }
+            }
+        };
+        let rack = match what {
+            ReloadKind::Rack => true,
+            ReloadKind::Eject => false,
+            _ => !chambered,
+        };
+        self.guns.plan = ReloadPlan {
+            kind: what,
+            rack,
+            old_empty: rounds == 0,
+            length: reload_seconds(what, rack),
+            new_mag,
+            ..ReloadPlan::default()
+        };
         self.guns.aim = 0.0;
         self.guns.reload = Some(0.0);
-        self.guns.reload_empty = gun_rounds(&gun) == 0;
     }
 
-    /// A reload is done: the new magazine is filled from the inventory (free in creative), or
-    /// one shell went into a shotgun (then the next one follows while there is room).
-    fn finish_reload(&mut self) {
+    /// Stops a reload (the gun was put away): the magazine it was bringing goes back.
+    pub(super) fn cancel_reload(&mut self) {
+        if self.guns.reload.take().is_some() {
+            if let Some(m) = self.guns.plan.new_mag.take() {
+                if !self.creative() {
+                    self.give(m);
+                }
+            }
+        }
+    }
+
+    /// Holding a magazine with rounds in it (in creative there always is one).
+    fn has_loaded_magazine(&self) -> bool {
+        self.creative()
+            || self.inventory.slots.iter().flatten().any(|s| magazine_capacity(s.item).is_some() && gun_rounds(s) > 0)
+    }
+
+    /// The fullest loaded magazine, taken out of the inventory (in creative a full new one).
+    fn take_magazine(&mut self) -> Option<Stack> {
+        if self.creative() {
+            let mut m = Stack::one(PISTOL_MAGAZINE);
+            set_gun_rounds(&mut m, magazine_capacity(PISTOL_MAGAZINE).unwrap_or(12));
+            return Some(m);
+        }
+        let (i, _) = self
+            .inventory
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.filter(|s| magazine_capacity(s.item).is_some() && gun_rounds(s) > 0).map(|s| (i, gun_rounds(&s))))
+            .max_by_key(|&(i, r)| (r, std::cmp::Reverse(i)))?;
+        self.inventory.slots[i].take()
+    }
+
+    /// The held gun, to change it.
+    fn held_gun_mut(&mut self) -> Option<&mut Stack> {
         let slot = self.hotbar_slot;
-        let Some((mut gun, kind)) = self.held_gun() else {
+        self.inventory.slots[slot].as_mut().filter(|s| GunKind::of(s.item).is_some())
+    }
+
+    /// The magazine drops out of the grip onto the ground, with the rounds left in it (in
+    /// creative it is gone). The slide stays where it is.
+    fn magazine_out(&mut self) {
+        let Some(gun) = self.held_gun_mut() else { return };
+        if !gun_has_mag(gun) {
+            return;
+        }
+        let mods = gun_mods(gun);
+        let item = if mods & gun_mod::EXTENDED_MAGAZINE != 0 { EXTENDED_MAGAZINE } else { PISTOL_MAGAZINE };
+        let mut mag = Stack::one(item);
+        set_gun_rounds(&mut mag, gun_rounds(gun));
+        set_gun_rounds(gun, 0);
+        set_gun_state(gun, gun_state::NO_MAG, true);
+        set_gun_mods(gun, mods & !gun_mod::EXTENDED_MAGAZINE);
+        if self.creative() {
+            return;
+        }
+        let look = look_dir(self.yaw, 0.0);
+        let right = look.cross(Vec3::Y).normalize_or_zero();
+        let at = self.player.eye() - Vec3::Y * 0.7 + look * 0.35 + right * 0.15;
+        let vel = self.player.vel * 0.8 + look * 0.4 - Vec3::Y * 0.5;
+        self.add_item(crate::entity::dropped::ItemEntity::new(at, vel, mag, 1.0));
+    }
+
+    /// The new magazine is pushed into the grip.
+    fn magazine_in(&mut self) {
+        let Some(mag) = self.guns.plan.new_mag.take() else { return };
+        let Some(gun) = self.held_gun_mut() else {
+            self.give(mag);
             return;
         };
-        let have = gun_rounds(&gun);
-        let room = kind.magazine_size(gun_mods(&gun)).saturating_sub(have);
-        let want = if kind.stats().shells { room.min(1) } else { room };
-        let mut got = 0;
-        while got < want && (self.creative() || self.inventory.remove_one(kind.ammo())) {
-            got += 1;
-        }
-        set_gun_rounds(&mut gun, have + got);
-        if self.inventory.slots[slot].is_some_and(|s| s.item == gun.item) {
-            self.inventory.slots[slot] = Some(gun);
-        }
-        // A shotgun keeps loading while there is room and shells.
-        let more = self.creative() || self.inventory.count(kind.ammo()) > 0;
-        if kind.stats().shells && got > 0 && room > 1 && more {
-            self.guns.reload = Some(0.0);
+        set_gun_state(gun, gun_state::NO_MAG, false);
+        set_gun_rounds(gun, gun_rounds(&mag));
+        let mods = gun_mods(gun) & !gun_mod::EXTENDED_MAGAZINE;
+        let ext = if mag.item == EXTENDED_MAGAZINE { gun_mod::EXTENDED_MAGAZINE } else { 0 };
+        set_gun_mods(gun, mods | ext);
+    }
+
+    /// The slide pulled back and let go: it takes the magazine's top round into the chamber,
+    /// or, with none there, stays back on an empty magazine (or closes on nothing without one).
+    fn rack_slide(&mut self) {
+        let Some(gun) = self.held_gun_mut() else { return };
+        let has_mag = gun_has_mag(gun);
+        if has_mag && gun_rounds(gun) > 0 {
+            set_gun_rounds(gun, gun_rounds(gun) - 1);
+            set_gun_state(gun, gun_state::CHAMBER_EMPTY, false);
+            set_gun_state(gun, gun_state::LOCKED, false);
+        } else {
+            set_gun_state(gun, gun_state::CHAMBER_EMPTY, true);
+            set_gun_state(gun, gun_state::LOCKED, has_mag);
         }
     }
 
@@ -507,20 +515,23 @@ impl Game {
     pub(super) fn shoot(&mut self) {
         let Some((gun, kind)) = self.held_gun() else { return };
         let stats = kind.stats();
-        if stats.shells && self.guns.reload.is_some() && gun_rounds(&gun) > 0 {
-            self.guns.reload = None;
-        }
-        if self.action_cooldown > 0.0 || self.guns.reload.is_some() || self.guns.cycle.is_some() {
+        if self.action_cooldown > 0.0 || self.guns.reload.is_some() {
             return;
         }
         let slot = self.hotbar_slot;
         self.action_cooldown = stats.fire_delay;
-        if gun_rounds(&gun) == 0 {
-            if self.creative() || self.inventory.count(kind.ammo()) > 0 {
+        // Firing ends a sprint (the gun comes up to shoot), for a moment after.
+        self.guns.no_sprint = 0.4;
+        self.w_sprint = false;
+        if !gun_chambered(&gun) {
+            // Nothing in the chamber: it gets readied if it can be (a round from the magazine,
+            // or a loaded magazine in), otherwise the trigger only clicks.
+            if (gun_has_mag(&gun) && gun_rounds(&gun) > 0) || self.has_loaded_magazine() {
                 self.start_reload();
             } else {
                 self.gun_message(t("gun.no_ammo"));
                 self.audio.play(Sound::DryFire, None, 0.8);
+                self.hand.dry_fire();
             }
             return;
         }
@@ -529,13 +540,21 @@ impl Game {
         if dirt >= 1.0 || (dirt > 0.6 && self.random() < (dirt - 0.6) * 1.2) {
             self.gun_message(t("gun.jammed"));
             self.audio.play(Sound::DryFire, None, 0.8);
+            self.hand.dry_fire();
             return;
         }
         let mods = gun_mods(&gun);
         let silenced = mods & gun_mod::SILENCER != 0;
         let creative = self.creative();
         if let Some(s) = &mut self.inventory.slots[slot] {
-            set_gun_rounds(s, gun_rounds(s) - 1);
+            // The next round comes up from the magazine into the chamber; after the last one
+            // the chamber is empty, and an empty magazine holds the slide back.
+            if gun_has_mag(s) && gun_rounds(s) > 0 {
+                set_gun_rounds(s, gun_rounds(s) - 1);
+            } else {
+                set_gun_state(s, gun_state::CHAMBER_EMPTY, true);
+                set_gun_state(s, gun_state::LOCKED, gun_has_mag(s));
+            }
             if !creative {
                 s.damage = (s.damage + 1).min(stats.dirt_max);
             }
@@ -544,7 +563,9 @@ impl Game {
         self.hand.shoot(if silenced { 0.0 } else { stats.flash }, seed);
 
         let eye = self.player.eye();
-        let look = look_dir(self.yaw, self.pitch);
+        // The shot goes where the gun points (the scope's middle, with one), not where the
+        // view looks.
+        let look = self.guns.gun_dir.unwrap_or_else(|| look_dir(self.yaw, self.pitch));
         let aim = smoothstep(0.0, 1.0, self.guns.aim);
         let spread = shot_spread(stats, mods, aim, self.guns.bloom);
         self.guns.bloom = (self.guns.bloom + BLOOM_PER_SHOT).min(BLOOM_MAX);
@@ -597,15 +618,8 @@ impl Game {
         self.guns.recover += kick * 0.6;
         self.yaw += (self.random() - 0.5) * (0.4 + kick.to_degrees() * 0.15).to_radians();
 
-        // A self-loading gun throws its case out now; a bolt or a pump is worked first.
-        if stats.cycle > 0.0 && gun_rounds(&gun) > 1 {
-            self.guns.cycle = Some(0.0);
-            self.guns.cycle_ejected = false;
-        } else if stats.cycle > 0.0 {
-            // The last round: the case stays in until the reload.
-        } else {
-            self.eject_case(kind);
-        }
+        // The spent case flies out of the ejection port.
+        self.eject_case(kind);
 
         self.audio.play(shot_sound(kind, silenced), Some(muzzle), 1.0);
 
@@ -660,8 +674,13 @@ impl Game {
         }
         let stats = kind.stats();
         let look = bullets[0].normalize_or(Vec3::X);
+        // Their slide flies back.
+        let time = self.time;
+        if let Some(r) = self.remotes.iter_mut().find(|r| r.id == id) {
+            r.shot_at = Some(time);
+        }
         let muzzle = self
-            .remote_gun_point(id, kind, gun::muzzle(kind, mods))
+            .remote_gun_point(id, kind, crate::model::pistol_view::muzzle(mods))
             .unwrap_or(eye + look * 0.9);
         for &vel in bullets.iter().take(32) {
             self.guns.bullets.push(Bullet {
@@ -689,7 +708,7 @@ impl Game {
         }
         let puff = if size > 1.5 { 2 } else { 1 };
         self.particles.gun_smoke(muzzle, look, puff, sky, blk);
-        if let Some(port) = self.remote_gun_point(id, kind, gun::spec(kind).eject) {
+        if let Some(port) = self.remote_gun_point(id, kind, crate::model::pistol_view::eject()) {
             let right = look.cross(Vec3::Y).normalize_or(Vec3::X);
             let up = right.cross(look);
             let r = |g: &mut Self| g.random() - 0.5;
@@ -844,18 +863,28 @@ impl Game {
             };
             let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
             ballistics::emit_laser_dot(out, p, right, up, size);
-            if let Some(from) = self.remote_gun_point(id, kind, gun::spec(kind).laser) {
+            if let Some(from) = self.remote_gun_point(id, kind, crate::model::pistol_view::laser()) {
                 ballistics::emit_tracer(out, from, p, cam, 0.004, true);
             }
         }
-        if let Some(p) = self.guns.laser_dot {
-            // A small dot near by, still visible far away.
-            let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
-            ballistics::emit_laser_dot(out, p, right, up, size);
-            // The beam, faint, from the lens (first person) to the dot.
-            if let Some(from) = self.guns.laser_from.filter(|_| self.camera.mode == 0) {
-                ballistics::emit_tracer(out, from, p, cam, 0.004, true);
-            }
+    }
+
+    /// The held gun's laser sight, once the gun is where it is drawn this frame (so the dot
+    /// does not trail it): zeroed onto where the shot goes (from the eye the way the gun
+    /// points, see `shoot`), a small dot there, and the faint beam from the lens (first person).
+    pub(super) fn build_own_laser(&self, out: &mut Vec<Vertex>, cam: Vec3, right: Vec3, up: Vec3) {
+        let Some((gun, kind)) = self.held_gun() else { return };
+        if gun_mods(&gun) & gun_mod::LASER == 0 || self.screen == Screen::Dead {
+            return;
+        }
+        let range = kind.stats().range.min(120.0);
+        let dir = self.guns.gun_dir.unwrap_or_else(|| look_dir(self.yaw, self.pitch));
+        let Some(p) = self.laser_hit(self.player.eye(), dir, range, None) else { return };
+        // A small dot near by, still visible far away.
+        let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
+        ballistics::emit_laser_dot(out, p, right, up, size);
+        if let Some(from) = self.guns.laser_from.filter(|_| self.camera.mode == 0) {
+            ballistics::emit_tracer(out, from, p, cam, 0.004, true);
         }
     }
 
@@ -901,30 +930,7 @@ impl Game {
         let mods = gun_mods(&gun);
         let aim = self.guns.aim;
         let center = Vec2::new((w * 0.5).round(), (h * 0.5).round());
-        let first_person = self.camera.mode == 0;
-        let scope = kind.shown_mods(mods) & gun_mod::SCOPE != 0;
-        if playing && first_person && scope && aim > 0.97 {
-            // The scope's round view: black around it, a fine cross with a gap and dots.
-            let r = (h * 0.44).round();
-            let far = w.max(h) * 1.5;
-            self.ui.ring(center, r + far * 0.5, far, rgba(0, 0, 0, 255));
-            self.ui.ring(center, r, 10.0 * s, rgba(0, 0, 0, 150));
-            let k = (s * 0.5).max(1.0);
-            let black = rgba(0, 0, 0, 230);
-            let gap = 10.0 * s;
-            self.ui.solid(center.x - r, center.y - k * 0.5, r - gap, k, black);
-            self.ui.solid(center.x + gap, center.y - k * 0.5, r - gap, k, black);
-            self.ui.solid(center.x - k * 0.5, center.y - r, k, r - gap, black);
-            self.ui.solid(center.x - k * 0.5, center.y + gap, k, r - gap, black);
-            for i in 1..5 {
-                let d = gap + i as f32 * 14.0 * s;
-                for (dx, dy) in [(d, 0.0), (-d, 0.0), (0.0, d), (0.0, -d)] {
-                    self.ui
-                        .solid(center.x + dx - k, center.y + dy - k, 2.0 * k, 2.0 * k, black);
-                }
-            }
-            self.ui.solid(center.x - k, center.y - k, 2.0 * k, 2.0 * k, rgba(220, 30, 30, 255));
-        } else if playing && self.camera.mode != 2 && aim < 0.6 {
+        if playing && self.camera.mode != 2 && aim < 0.6 {
             // Four lines around a dot, as far apart as the shots scatter.
             let a = 1.0 - aim / 0.6;
             let spread = shot_spread(stats, mods, 0.0, self.guns.bloom);
@@ -943,13 +949,22 @@ impl Game {
             }
         }
 
-        // Rounds in the magazine / rounds carried, bottom right, and the controls.
-        let rounds = gun_rounds(&gun);
+        // Rounds ready (in the magazine and the chamber) / rounds in the magazines carried,
+        // bottom right, and the controls.
+        let rounds = gun_ready_rounds(&gun);
         let size = kind.magazine_size(mods);
         let carried = if self.creative() {
             "-".to_string()
         } else {
-            self.inventory.count(kind.ammo()).to_string()
+            let in_mags: u32 = self
+                .inventory
+                .slots
+                .iter()
+                .flatten()
+                .filter(|s| magazine_capacity(s.item).is_some())
+                .map(|s| gun_rounds(s) as u32)
+                .sum();
+            in_mags.to_string()
         };
         let fs = (s * 1.5).round().max(1.0);
         let big = format!("{rounds}");
@@ -973,10 +988,12 @@ impl Game {
             // A bar filling up under the counter.
             let (bx, by, bw2) = (x - 20.0 * s, y + 14.0 * s, bw + sw + 20.0 * s);
             self.ui.solid(bx, by, bw2, 2.0 * s, rgba(0, 0, 0, 160));
-            let k = (t / stats.reload).min(1.0);
+            let k = (t / self.guns.plan.length.max(0.01)).min(1.0);
             self.ui
                 .solid(bx, by, bw2 * k, 2.0 * s, rgba(120, 230, 140, 255));
             t_owned("gun.reloading")
+        } else if !gun_has_mag(&gun) {
+            tf("gun.no_mag", &[&key])
         } else if rounds == 0 {
             tf("gun.empty", &[&key])
         } else if stats.auto {
@@ -1001,62 +1018,6 @@ impl Game {
         if self.time - self.guns.last_message > 1.0 {
             self.guns.last_message = self.time;
             self.say(text, rgba(255, 190, 110, 255));
-        }
-    }
-
-    /// Opens the gun station: the camera glides over its table. To clean or tune, the held
-    /// gun is laid on it once the camera is there.
-    pub(super) fn open_gun_station(&mut self, p: IVec3) {
-        self.guns.bench.drag_from = None;
-        self.open_container(Container::GunStation(p));
-        if self.guns.bench.mode != BenchMode::Assemble {
-            self.lay_gun_on_bench(0.3);
-        }
-    }
-
-    /// The hand lays a gun on the table to clean or tune it (after `delay` seconds): the held
-    /// one, or else the first in the inventory.
-    pub(super) fn lay_gun_on_bench(&mut self, delay: f32) {
-        if self.guns.bench.gun.is_some() {
-            return;
-        }
-        let is_gun = |s: &Slot| s.is_some_and(|s| GunKind::of(s.item).is_some());
-        let slot = if is_gun(&self.inventory.slots[self.hotbar_slot]) {
-            Some(self.hotbar_slot)
-        } else {
-            self.inventory.slots.iter().position(is_gun)
-        };
-        if let Some(i) = slot {
-            let bench = &mut self.guns.bench;
-            bench.gun = self.inventory.slots[i].take();
-            bench.from_slot = Some(i);
-            bench.placed_at = self.time + delay;
-            bench.had_gun = true;
-        }
-    }
-
-    /// The gun on the table goes back where it came from (or wherever there is room).
-    pub(super) fn take_gun_off_bench(&mut self) {
-        let bench = &mut self.guns.bench;
-        let (Some(gun), from) = (bench.gun.take(), bench.from_slot.take()) else {
-            return;
-        };
-        bench.had_gun = false;
-        bench.fit = None;
-        match from {
-            Some(i) if self.inventory.slots[i].is_none() => self.inventory.slots[i] = Some(gun),
-            _ => self.give(gun),
-        }
-    }
-
-    /// Closing the gun station: what the parts put together so far were made of goes back to
-    /// the player, and the gun on the table back into its slot.
-    pub(super) fn close_gun_station(&mut self) {
-        self.take_gun_off_bench();
-        let items = self.guns.bench.items();
-        self.guns.bench.clear();
-        for s in items {
-            self.give(s);
         }
     }
 }
@@ -1100,33 +1061,14 @@ mod tests {
 
     #[test]
     fn gun_data_keeps_rounds_and_attachments_apart() {
-        let mut s = Stack::one(M16);
+        let mut s = Stack::one(PISTOL);
         set_gun_mods(&mut s, gun_mod::SCOPE | gun_mod::LASER);
-        set_gun_rounds(&mut s, 45);
-        assert_eq!(gun_rounds(&s), 45);
+        set_gun_rounds(&mut s, 20);
+        assert_eq!(gun_rounds(&s), 20);
         assert_eq!(gun_mods(&s), gun_mod::SCOPE | gun_mod::LASER);
         set_gun_rounds(&mut s, 3);
         assert_eq!(gun_mods(&s), gun_mod::SCOPE | gun_mod::LASER);
         assert_eq!(GunKind::Pistol.magazine_size(0), 12);
         assert_eq!(GunKind::Pistol.magazine_size(gun_mod::EXTENDED_MAGAZINE), 20);
-    }
-
-    #[test]
-    fn a_half_built_gun_gives_back_what_it_was_made_of() {
-        let mut bench = Bench {
-            kind: GunKind::M16,
-            installed: 2,
-            ..Bench::default()
-        };
-        bench.taken = [true, true, false, false, false];
-        let back: u32 = bench
-            .parts()
-            .iter()
-            .filter(|s| s.item == IRON_INGOT)
-            .map(|s| s.count as u32)
-            .sum();
-        assert_eq!(back, 7);
-        bench.kind = GunKind::Pistol;
-        assert_eq!(bench.parts(), vec![Stack::one(PISTOL_FRAME), Stack::one(PISTOL_BARREL)]);
     }
 }

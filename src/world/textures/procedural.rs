@@ -131,6 +131,26 @@ fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
 }
 
 /// Pixel center in design units (0..32).
+/// A lumpy round puff of smoke (a few overlapping balls), lighter on top.
+fn cloud_puff(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let (fx, fy) = (d(x), d(y));
+    const BALLS: [(f32, f32, f32); 5] = [
+        (16.0, 18.0, 10.5),
+        (9.5, 20.0, 7.0),
+        (22.5, 20.0, 7.0),
+        (12.5, 11.5, 6.5),
+        (20.0, 11.0, 6.0),
+    ];
+    let inside = BALLS
+        .iter()
+        .any(|&(cx, cy, r)| (fx - cx).hypot(fy - cy) < r);
+    if !inside {
+        return [0, 0, 0, 0];
+    }
+    let shade = 0.82 + 0.18 * (1.0 - fy / 32.0) + 0.06 * (grain(l, x, y, 531) - 0.5);
+    col([235.0, 235.0, 235.0], shade, 255)
+}
+
 fn d(v: i32) -> f32 {
     (v as f32 + 0.5) / K
 }
@@ -695,6 +715,29 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
             shape(x, y, c, inside)
         }
         tex::FRAG_GRENADE | tex::SMOKE_GRENADE => grenade_icon(l == tex::SMOKE_GRENADE, x, y),
+        // Drawn from its model later (`render_item_icons`).
+        tex::FLASHLIGHT => None,
+        tex::AMMO_BOX => {
+            // An olive ammo can seen from the front and a little above: its open top full of
+            // brass, its front with a yellow stencilled band.
+            let can = |fx: f32, fy: f32| (5.0..27.0).contains(&fx) && (10.0..27.0).contains(&fy);
+            let top = (6.0..26.0).contains(&fx) && (10.0..15.0).contains(&fy);
+            let c = if top {
+                let (cx, cy) = ((fx - 6.0) % 3.0, (fy - 10.0) % 2.5);
+                if (cx - 1.5).hypot(cy - 1.25) < 1.1 {
+                    [206.0, 164.0, 70.0]
+                } else {
+                    [60.0, 48.0, 30.0]
+                }
+            } else if (18.0..20.0).contains(&fy) && (9.0..23.0).contains(&fx) {
+                [214.0, 196.0, 112.0]
+            } else if fy < 16.0 {
+                [70.0, 76.0, 46.0]
+            } else {
+                [92.0, 100.0, 60.0].map(|c| c * (0.95 + 0.08 * n))
+            };
+            shape(x, y, c, can)
+        }
         _ if (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l) => armor_icon(l, x, y),
         tex::BOOK => book_icon(x, y),
         tex::DIAMOND => Some(diamond_icon(x, y)),
@@ -868,13 +911,6 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
             })
         }
         _ if (tex::PISTOL..tex::GUN_GLASS).contains(&l) => gun_icon(l, x, y),
-        _ if (tex::GUN_ICONS..tex::AMMO_ICONS).contains(&l) => {
-            // Drawn from the gun's 3D model.
-            let kind = crate::item::GUN_KINDS[(l - tex::GUN_ICONS) as usize + 1];
-            let p = crate::model::gun::icon(kind)[y as usize * TILE + x as usize];
-            (p[3] > 0).then_some(p)
-        }
-        _ if (tex::AMMO_ICONS..tex::AMMO_ICONS + 4).contains(&l) => ammo_icon(l - tex::AMMO_ICONS, x, y),
         _ => Some(tool_icon(l, x, y)).filter(|p| p[3] > 0),
     };
     out.unwrap_or([0, 0, 0, 0])
@@ -1865,47 +1901,6 @@ fn bullet_hole(l: u32, x: i32, y: i32) -> [u8; 4] {
     [0, 0, 0, 0]
 }
 
-/// Ammunition icons: a .50 AE round (short and fat), a 5.56 mm round (long and slim), a
-/// .50 BMG round (very long, black tip) and a red 12 gauge shell with a brass head.
-fn ammo_icon(i: u32, x: i32, y: i32) -> Option<[u8; 4]> {
-    let (fx, fy) = (d(x), d(y));
-    let round = |a: (f32, f32), b: (f32, f32), r: f32| {
-        let c = cartridge(fx, fy, a, b, r)?;
-        shape(x, y, c, |fx, fy| cartridge(fx, fy, a, b, r).is_some())
-    };
-    match i {
-        0 => round((10.0, 23.0), (22.0, 10.0), 4.0),
-        1 => round((8.0, 26.0), (25.0, 6.0), 2.2),
-        2 => {
-            let (a, b) = ((5.0, 28.0), (28.0, 4.0));
-            let p = round(a, b, 3.0)?;
-            // The black armour-piercing tip.
-            let t = ((fx - a.0) * (b.0 - a.0) + (fy - a.1) * (b.1 - a.1)) / ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2));
-            Some(if t > 0.86 && p[0] > 60 { [40, 40, 44, 255] } else { p })
-        }
-        _ => {
-            // A capsule from (9,24) to (23,9): the head is brass, the hull red plastic.
-            let (a, b) = ((9.0, 24.0), (23.0, 9.0));
-            let inside = |fx: f32, fy: f32| {
-                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let len2 = dx * dx + dy * dy;
-                let t = ((fx - a.0) * dx + (fy - a.1) * dy) / len2;
-                let dist = ((fx - a.0 - t * dx).powi(2) + (fy - a.1 - t * dy).powi(2)).sqrt();
-                (0.0..=1.0).contains(&t) && dist < 4.2
-            };
-            let t = ((fx - a.0) * (b.0 - a.0) + (fy - a.1) * (b.1 - a.1)) / ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2));
-            let c = if t < 0.28 {
-                BRASS
-            } else if t > 0.95 {
-                [150.0, 30.0, 28.0]
-            } else {
-                [205.0, 42.0, 36.0]
-            };
-            shape(x, y, c, inside)
-        }
-    }
-}
-
 /// Pistol, part and bullet icons (the pistol faces right).
 fn gun_icon(l: u32, x: i32, y: i32) -> Option<[u8; 4]> {
     let (fx, fy) = (d(x), d(y));
@@ -2543,6 +2538,9 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
                 [0, 0, 0, 0]
             }
         }
+        tex::CLOUD => cloud_puff(l, x, y),
+        // Filled from the Blockbench view model's texture in `synth_pistol_view`.
+        _ if l >= tex::PISTOL_VIEW => [0, 0, 0, 0],
         tex::SHIRT_BACK => character(tex::SHIRT, x, y),
         tex::PIG => pig_skin(x, y),
         tex::LANTERN => lantern(x, y),

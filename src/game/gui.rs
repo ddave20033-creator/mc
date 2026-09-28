@@ -6,6 +6,7 @@
 //! A stack can also be dragged out of a slot and let go over another one.
 
 mod gun_station;
+pub(super) use gun_station::Pick as BenchPick;
 mod jei;
 pub(super) use jei::Jei;
 
@@ -26,10 +27,6 @@ pub(super) enum SlotRef {
     Chest(usize),
     Creative(ItemId),
     Trash,
-    /// The pistol being cleaned or tuned at the gun station.
-    GunSlot,
-    /// An attachment's place on that pistol (index into ATTACHMENTS).
-    GunMod(usize),
     /// What the player wears (helmet, chestplate, leggings, boots, vest).
     Armor(usize),
 }
@@ -195,7 +192,7 @@ impl Tab {
         match self {
             Tab::Blocks => GRASS as ItemId,
             Tab::Functional => CRAFTING_TABLE as ItemId,
-            Tab::Tools => M16,
+            Tab::Tools => PISTOL,
             Tab::Armor => armor_id(2, 1),
             Tab::All => GUIDE_BOOK,
             Tab::Food => COOKED_PORKCHOP,
@@ -238,7 +235,7 @@ impl Tab {
                 BULLET
                     | PISTOL_FRAME..=PISTOL_MAGAZINE
                     | SCOPE..=LASER_SIGHT
-                    | RIFLE_ROUND..=SHOTGUN_SHELL
+                    | FLASHLIGHT
                     | FRAG_GRENADE
                     | SMOKE_GRENADE
             )
@@ -303,12 +300,11 @@ impl Tab {
                 tools(ToolKind::Shovel),
                 tools(ToolKind::Sword),
                 vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE, GUIDE_BOOK],
-                // The guns, then their ammunition in the same order, grenades, attachments
-                // and pistol parts.
-                vec![PISTOL, DESERT_EAGLE, M16, SHOTGUN, SNIPER_RIFLE],
-                vec![BULLET, MAGNUM_ROUND, RIFLE_ROUND, SHOTGUN_SHELL, BMG_ROUND],
+                // The pistol, its ammunition and the extended magazine, grenades, attachments
+                // and pistol parts (the last one is the magazine).
+                vec![PISTOL, BULLET, EXTENDED_MAGAZINE],
                 vec![FRAG_GRENADE, SMOKE_GRENADE],
-                vec![SCOPE, SILENCER, EXTENDED_MAGAZINE, LASER_SIGHT],
+                vec![SCOPE, SILENCER, LASER_SIGHT, FLASHLIGHT],
                 vec![
                     PISTOL_FRAME,
                     PISTOL_BARREL,
@@ -434,7 +430,9 @@ pub fn draw_stack(ui: &mut Ui, x: f32, y: f32, size: f32, st: &Stack) {
     }
     let px = (size / 16.0).max(1.0);
     let max = max_damage(st.item);
-    if max > 0 && st.damage > 0 {
+    // A gun's dirt shows on the gun itself, not as a bar.
+    let dirt = GunKind::of(st.item).is_some() || (PISTOL_FRAME..=PISTOL_MAGAZINE).contains(&st.item) || st.item == EXTENDED_MAGAZINE;
+    if max > 0 && st.damage > 0 && !dirt {
         let f = 1.0 - st.damage as f32 / max as f32;
         let (bx, by, bw) = (x + 2.0 * px, y + size - 3.0 * px, size - 4.0 * px);
         ui.solid(bx, by, bw, 2.0 * px, rgba(0, 0, 0, 255));
@@ -601,8 +599,8 @@ impl Game {
     /// The block a container screen belongs to.
     pub(super) fn container_pos(c: Container) -> Option<IVec3> {
         match c {
-            Container::Crafting(p) | Container::Chest(p) => Some(p),
-            Container::Inventory | Container::Creative | Container::GunStation(_) => None,
+            Container::Crafting(p) | Container::Chest(p) | Container::GunStation(p) => Some(p),
+            Container::Inventory | Container::Creative => None,
         }
     }
 
@@ -658,10 +656,6 @@ impl Game {
                 _ => None,
             },
             SlotRef::Armor(i) => Some(&mut self.inventory.armor[i]),
-            SlotRef::GunSlot => match c {
-                Container::GunStation(_) => Some(&mut self.guns.bench.gun),
-                _ => None,
-            },
             _ => None,
         }
     }
@@ -745,38 +739,6 @@ impl Game {
                 self.set_chest_slots(p, &slots);
                 left
             }
-            // A gun goes onto the table to be cleaned or tuned (swapped with the one there).
-            (Container::GunStation(_), SlotRef::Inv(i))
-                if GunKind::of(stack.item).is_some()
-                    && self.guns.bench.mode != super::guns::BenchMode::Assemble
-                    && self.guns.bench.fit.is_none() =>
-            {
-                let old = self.guns.bench.gun.replace(stack);
-                let bench = &mut self.guns.bench;
-                bench.placed_at = self.time;
-                bench.from_slot = Some(i);
-                bench.had_gun = true;
-                old
-            }
-            // An attachment goes onto the pistol being tuned, if it does not have one yet.
-            (Container::GunStation(_), SlotRef::Inv(i))
-                if self.guns.bench.mode == super::guns::BenchMode::Tune
-                    && self.guns.bench.gun.is_some_and(|g| {
-                        ATTACHMENTS
-                            .iter()
-                            .any(|&(bit, item)| {
-                                item == stack.item
-                                    && gun_mods(&g) & bit == 0
-                                    && GunKind::of(g.item).is_some_and(|k| k.fits(bit))
-                            })
-                    }) =>
-            {
-                // Back in its slot: the hand takes one from there and fits it.
-                self.inventory.slots[i] = Some(stack);
-                let index = ATTACHMENTS.iter().position(|a| a.1 == stack.item).unwrap();
-                self.click_gun_mod(index, false);
-                None
-            }
             (_, SlotRef::Inv(i)) => self.move_within_inventory(i, stack),
             _ => self.inventory.add(stack),
         };
@@ -858,9 +820,6 @@ impl Game {
                 self.cursor = cursor;
                 self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
             }
-            // Only a pistol goes in.
-            SlotRef::GunSlot if self.cursor.is_some_and(|c| GunKind::of(c.item).is_none()) => {}
-            SlotRef::GunMod(i) => self.click_gun_mod(i, shift),
             _ => {
                 if shift {
                     self.quick_move(c, r);
@@ -978,14 +937,22 @@ impl Game {
         let mut text = name(st.item);
         let max = max_damage(st.item);
         if let Some(kind) = GunKind::of(st.item) {
-            let clean = 100 - st.damage as u32 * 100 / max as u32;
             let size = kind.magazine_size(gun_mods(st));
+            let rounds = if gun_has_mag(st) {
+                tf("gun.magazine", &[&gun_ready_rounds(st), &size])
+            } else {
+                crate::lang::t("gun.no_mag").split('!').next().unwrap_or("").to_string()
+            };
+            text = format!("{text}  ({rounds})");
+        } else if st.item == AMMO_BOX {
+            text = format!("{text}  ({}/{})", box_rounds(st), AMMO_BOX_ROUNDS);
+        } else if let Some(cap) = magazine_capacity(st.item) {
             text = format!(
                 "{text}  ({}, {})",
-                tf("gun.cleanliness", &[&clean]),
-                tf("gun.magazine", &[&gun_rounds(st), &size])
+                tf("gun.magazine", &[&gun_rounds(st), &cap]),
+                crate::lang::t("gun.mag_hint")
             );
-        } else if max > 0 && st.damage > 0 {
+        } else if max > 0 && st.damage > 0 && !(PISTOL_FRAME..=PISTOL_SLIDE).contains(&st.item) {
             text = format!(
                 "{text}  ({})",
                 tf("gui.durability", &[&(max - st.damage), &max])
@@ -1697,8 +1664,6 @@ impl Game {
                         SlotRef::CraftOut
                             | SlotRef::Creative(_)
                             | SlotRef::Trash
-                            | SlotRef::GunSlot
-                            | SlotRef::GunMod(_)
                             | SlotRef::Armor(_)
                     )
                 {
@@ -1733,8 +1698,12 @@ impl Game {
             }
         }
 
-        // Stack on the mouse cursor.
-        if let Some(st) = self.cursor {
+        // Stack on the mouse cursor (over a gun station's table it is shown there, in 3D).
+        // (only what may lie there: anything else stays a picture on the mouse)
+        let on_bench = matches!(c, Container::GunStation(_))
+            && (self.bench_spot.is_some() || self.bench_drawer_spot.is_some())
+            && self.cursor.is_some_and(|st| gun_station::belongs_on_bench(st.item));
+        if let (Some(st), false) = (self.cursor, on_bench) {
             let m = self.ui.mouse;
             draw_stack(&mut self.ui, m.x - 8.0 * s, m.y - 8.0 * s, 16.0 * s, &st);
         }

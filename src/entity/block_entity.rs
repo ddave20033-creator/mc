@@ -297,6 +297,86 @@ impl Furnace {
     }
 }
 
+/// Something lying on a gun station's table: where on it (blocks from the middle of its top,
+/// `x` to the right, `z` toward the front), and turned how far about the up axis (radians).
+/// `id` tells it apart while things on the table move (the animations follow it).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BenchItem {
+    pub id: u16,
+    pub stack: Stack,
+    pub x: f32,
+    pub z: f32,
+    pub turn: f32,
+}
+
+/// What happened last on a gun station's table, for everyone to play out (`bench_event`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BenchEvent {
+    /// Counts up with every change; 0: none yet.
+    pub serial: u16,
+    pub kind: u8,
+    /// The gun it happened to (by id: taken apart, put together, an attachment on or off).
+    pub gun: u16,
+    /// The attachment put on or taken off (`gun_mod` bit).
+    pub bit: u8,
+    /// What was on the table before and is not now (the gun taken apart, the parts put
+    /// together, the attachment put on), as it lay.
+    pub gone: Vec<BenchItem>,
+    /// What came of it (the parts taken apart, the attachment taken off), by id.
+    pub made: Vec<u16>,
+}
+
+/// `BenchEvent::kind`.
+pub mod bench_event {
+    pub const NONE: u8 = 0;
+    pub const STRIP: u8 = 1;
+    pub const ASSEMBLE: u8 = 2;
+    pub const FIT: u8 = 3;
+    pub const UNFIT: u8 = 4;
+    /// Rounds pushed into a magazine (`gun`), `bit` of them.
+    pub const LOAD: u8 = 5;
+    /// A gun's magazine taken out of it (it lies beside it: `made`), or one put into it
+    /// (`gone`: as it lay).
+    pub const MAG_OUT: u8 = 6;
+    pub const MAG_IN: u8 = 7;
+}
+
+/// A gun station: what lies on its table, the boxes of rounds in the three places for them in
+/// its drawer (the rounds in each; None: taken out), and the last change there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GunBench {
+    pub items: Vec<BenchItem>,
+    pub next_id: u16,
+    pub boxes: [Option<u16>; 3],
+    pub event: BenchEvent,
+}
+
+impl Default for GunBench {
+    /// A new one: three empty boxes in the drawer.
+    fn default() -> Self {
+        GunBench { items: Vec::new(), next_id: 0, boxes: [Some(0); 3], event: BenchEvent::default() }
+    }
+}
+
+impl GunBench {
+    /// Puts a stack on the table; returns its id.
+    pub fn add(&mut self, stack: Stack, x: f32, z: f32, turn: f32) -> u16 {
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        let id = self.next_id;
+        self.items.push(BenchItem { id, stack, x, z, turn });
+        id
+    }
+
+    pub fn get(&self, id: u16) -> Option<&BenchItem> {
+        self.items.iter().find(|i| i.id == id)
+    }
+
+    pub fn take(&mut self, id: u16) -> Option<BenchItem> {
+        let i = self.items.iter().position(|i| i.id == id)?;
+        Some(self.items.remove(i))
+    }
+}
+
 /// Block entities that hold items.
 #[derive(Default)]
 pub struct BlockEntities {
@@ -304,6 +384,8 @@ pub struct BlockEntities {
     pub chests: FastMap<IVec3, Box<[Slot; 27]>>,
     /// Crafting tables keep whatever is left in their 3x3 grid.
     pub tables: FastMap<IVec3, [Slot; 9]>,
+    /// Gun stations (by their left half) and what lies on them.
+    pub benches: FastMap<IVec3, GunBench>,
 }
 
 impl BlockEntities {
@@ -318,6 +400,19 @@ impl BlockEntities {
         }
         if let Some(t) = self.tables.remove(&p) {
             out.extend(t.iter().flatten().copied());
+        }
+        if let Some(b) = self.benches.remove(&p) {
+            // What lies on it (the boxes of rounds belong to it: their rounds drop), and the
+            // rounds in the boxes in the drawer.
+            let boxes = b.items.iter().filter(|i| i.stack.item == crate::item::AMMO_BOX);
+            let mut rounds: u32 = boxes.map(|i| crate::item::box_rounds(&i.stack) as u32).sum();
+            rounds += b.boxes.iter().flatten().map(|&n| n as u32).sum::<u32>();
+            out.extend(b.items.iter().filter(|i| i.stack.item != crate::item::AMMO_BOX).map(|i| i.stack));
+            while rounds > 0 {
+                let n = rounds.min(64) as u8;
+                out.push(Stack::new(crate::item::BULLET, n));
+                rounds -= n as u32;
+            }
         }
         out
     }
@@ -435,11 +530,11 @@ fn lying_item(
                 * Mat4::from_scale(Vec3::splat(size))
         }
     };
-    crate::model::emit_lying(out, m, st.item, light, flags::ENTITY);
+    crate::model::emit_lying(out, m, st, light, flags::ENTITY);
     // A second copy on top for a stack, like a small pile.
     if st.count > 1 && matches!(icon(st.item), Icon::Flat(_)) {
         let pile = Mat4::from_translation(Vec3::new(size * 0.06, size * 0.1, -size * 0.06));
-        crate::model::emit_lying(out, pile * m, st.item, light, flags::ENTITY);
+        crate::model::emit_lying(out, pile * m, st, light, flags::ENTITY);
     }
 }
 

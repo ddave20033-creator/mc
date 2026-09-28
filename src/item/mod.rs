@@ -78,54 +78,106 @@ pub const PISTOL_BARREL: ItemId = 284;
 pub const PISTOL_SPRING: ItemId = 285;
 pub const PISTOL_SLIDE: ItemId = 286;
 pub const PISTOL_MAGAZINE: ItemId = 287;
-/// The guns (see `firearm`), put together at the gun station. A gun's `damage` is how dirty
-/// it is (one per shot; cleaned at the gun station), its `data` holds the rounds in its
-/// magazine and its attachments.
+/// The gun (see `firearm`), put together at the gun station. Its `damage` is how dirty it is
+/// (one per shot; cleaned at the gun station), its `data` holds the rounds in its magazine
+/// and its attachments.
 pub const PISTOL: ItemId = 288;
-pub const DESERT_EAGLE: ItemId = 324;
-pub const M16: ItemId = 325;
-pub const SNIPER_RIFLE: ItemId = 326;
-pub const SHOTGUN: ItemId = 327;
-/// Ammunition of the other guns: 5.56 mm (M16), .50 AE (Desert Eagle), .50 BMG (sniper
-/// rifle) and 12 gauge shells (shotgun).
-pub const RIFLE_ROUND: ItemId = 320;
-pub const MAGNUM_ROUND: ItemId = 321;
-pub const BMG_ROUND: ItemId = 322;
-pub const SHOTGUN_SHELL: ItemId = 323;
 /// Pistol attachments, fitted at the gun station: a scope (zooms in far when aiming), a
-/// silencer (no muzzle flash), an extended magazine and a laser sight (steadier from the hip).
+/// silencer (no muzzle flash) and a laser sight (steadier from the hip). The extended magazine
+/// is a magazine (20 rounds), like `PISTOL_MAGAZINE` (12).
 pub const SCOPE: ItemId = 289;
 pub const SILENCER: ItemId = 290;
 pub const EXTENDED_MAGAZINE: ItemId = 291;
 pub const LASER_SIGHT: ItemId = 292;
+/// A box of pistol rounds (an ammo can): its `data` is the rounds in it, up to
+/// `AMMO_BOX_ROUNDS`. It belongs to a gun station (three in its drawer, where magazines are
+/// loaded): taken out onto its table and put back, never into an inventory, and not made.
+pub const AMMO_BOX: ItemId = 361;
+/// A weapon light for the pistol's accessory rail (instead of a laser sight): switched on and
+/// off in the hand, it lights up what the gun points at. Only in creative (it is not made).
+pub const FLASHLIGHT: ItemId = 362;
+pub const AMMO_BOX_ROUNDS: u16 = 128;
 
-/// A gun's attachments as bits of `gun_mods`, with their items.
+/// Rounds in a box of them.
+pub fn box_rounds(st: &Stack) -> u16 {
+    st.data.min(AMMO_BOX_ROUNDS)
+}
+
+/// A gun's attachments as bits of `gun_mods`, with their items. `EXTENDED_MAGAZINE` is not
+/// fitted: it says the magazine in the gun is an extended one.
 pub mod gun_mod {
     pub const SCOPE: u8 = 1;
     pub const SILENCER: u8 = 2;
     pub const EXTENDED_MAGAZINE: u8 = 4;
     pub const LASER: u8 = 8;
+    /// A weapon light on the accessory rail (where the laser sight goes: one or the other),
+    /// and whether it is switched on (not an attachment: its state).
+    pub const LIGHT: u8 = 16;
+    pub const LIGHT_ON: u8 = 32;
+    /// What the accessory rail holds.
+    pub const RAIL: u8 = LASER | LIGHT;
 }
 pub const ATTACHMENTS: [(u8, ItemId); 4] = [
     (gun_mod::SCOPE, SCOPE),
     (gun_mod::SILENCER, SILENCER),
-    (gun_mod::EXTENDED_MAGAZINE, EXTENDED_MAGAZINE),
     (gun_mod::LASER, LASER_SIGHT),
+    (gun_mod::LIGHT, FLASHLIGHT),
 ];
 
-/// Rounds in a gun's magazine (the low 6 bits of its data).
+/// Whether an attachment (`gun_mod` bit) can go on a gun with `mods`: not one it has, and the
+/// accessory rail holds one thing (a laser sight or a weapon light).
+pub fn attachment_fits(mods: u8, bit: u8) -> bool {
+    mods & bit == 0 && !(bit & gun_mod::RAIL != 0 && mods & gun_mod::RAIL != 0)
+}
+
+/// A gun's state besides its rounds (bits of its data; a gun without them has a magazine in,
+/// a round in the chamber and its slide forward): no magazine in it, nothing in the chamber,
+/// the slide held back (by an empty magazine, after its last round).
+pub mod gun_state {
+    pub const NO_MAG: u16 = 0x40;
+    pub const CHAMBER_EMPTY: u16 = 0x80;
+    pub const LOCKED: u16 = 0x1000;
+}
+pub fn gun_has_mag(s: &Stack) -> bool {
+    s.data & gun_state::NO_MAG == 0
+}
+pub fn gun_chambered(s: &Stack) -> bool {
+    s.data & gun_state::CHAMBER_EMPTY == 0
+}
+pub fn gun_locked(s: &Stack) -> bool {
+    s.data & gun_state::LOCKED != 0
+}
+pub fn set_gun_state(s: &mut Stack, bit: u16, on: bool) {
+    s.data = if on { s.data | bit } else { s.data & !bit };
+}
+/// Rounds ready to fire: in the magazine and in the chamber.
+pub fn gun_ready_rounds(s: &Stack) -> u8 {
+    (if gun_has_mag(s) { gun_rounds(s) } else { 0 }) + gun_chambered(s) as u8
+}
+
+/// A magazine: how many rounds it holds. Its data is the rounds in it.
+pub fn magazine_capacity(item: ItemId) -> Option<u8> {
+    match item {
+        PISTOL_MAGAZINE => Some(12),
+        EXTENDED_MAGAZINE => Some(20),
+        _ => None,
+    }
+}
+
+/// Rounds in a gun's magazine (the low 6 bits of its data), or in a magazine.
 pub fn gun_rounds(s: &Stack) -> u8 {
     (s.data & 0x3f) as u8
 }
 pub fn set_gun_rounds(s: &mut Stack, n: u8) {
     s.data = (s.data & !0x3f) | (n as u16 & 0x3f);
 }
-/// A gun's attachments (`gun_mod` bits, in the data's high byte).
+/// A gun's attachments (`gun_mod` bits, in the low half of the data's high byte).
+/// (the first four in bits 8-11 of the data, the weapon light and its switch in bits 13-14)
 pub fn gun_mods(s: &Stack) -> u8 {
-    (s.data >> 8) as u8
+    ((s.data >> 8) & 0x0f) as u8 | ((s.data >> 9) & 0x30) as u8
 }
 pub fn set_gun_mods(s: &mut Stack, mods: u8) {
-    s.data = (s.data & 0xff) | ((mods as u16) << 8);
+    s.data = (s.data & !0x6f00) | ((mods as u16 & 0x0f) << 8) | ((mods as u16 & 0x30) << 9);
 }
 /// Minecraft's shears durability.
 const SHEARS_DURABILITY: u16 = 238;
@@ -286,8 +338,9 @@ pub fn max_stack(id: ItemId) -> u8 {
         _ if tool_of(id).is_some() => 1,
         WATER_BUCKET | LAVA_BUCKET | SHEARS | GUIDE_BOOK => 1,
         FRAG_GRENADE | SMOKE_GRENADE => 16,
+        AMMO_BOX => 1,
         _ if armor_of(id).is_some() => 1,
-        _ if GunKind::of(id).is_some() => 1,
+        _ if GunKind::of(id).is_some() || magazine_capacity(id).is_some() => 1,
         _ if id == BED as ItemId => 1,
         BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
         _ => 64,
@@ -426,6 +479,10 @@ pub fn max_damage(id: ItemId) -> u16 {
     }
     if let Some(k) = GunKind::of(id) {
         return k.stats().dirt_max;
+    }
+    // A gun's parts get dirty with it (taken apart, each is cleaned on its own).
+    if (PISTOL_FRAME..=PISTOL_MAGAZINE).contains(&id) || id == EXTENDED_MAGAZINE {
+        return GunKind::Pistol.stats().dirt_max;
     }
     if armor_of(id).is_some() {
         return armor_durability(id);
@@ -890,50 +947,6 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Pisztolytár",
         tex::PISTOL_PARTS + 4,
     ),
-    (
-        DESERT_EAGLE,
-        "desert_eagle",
-        "Desert Eagle",
-        "Desert Eagle",
-        tex::GUN_ICONS,
-    ),
-    (M16, "m16", "M16 Rifle", "M16 gépkarabély", tex::GUN_ICONS + 1),
-    (
-        SNIPER_RIFLE,
-        "sniper_rifle",
-        "Sniper Rifle",
-        "Mesterlövész puska",
-        tex::GUN_ICONS + 2,
-    ),
-    (SHOTGUN, "shotgun", "Shotgun", "Sörétes puska", tex::GUN_ICONS + 3),
-    (
-        MAGNUM_ROUND,
-        "magnum_round",
-        ".50 AE Round",
-        ".50 AE töltény",
-        tex::AMMO_ICONS,
-    ),
-    (
-        RIFLE_ROUND,
-        "rifle_round",
-        "5.56 mm Round",
-        "5.56 mm-es töltény",
-        tex::AMMO_ICONS + 1,
-    ),
-    (
-        BMG_ROUND,
-        "bmg_round",
-        ".50 BMG Round",
-        ".50 BMG töltény",
-        tex::AMMO_ICONS + 2,
-    ),
-    (
-        SHOTGUN_SHELL,
-        "shotgun_shell",
-        "Shotgun Shell",
-        "Sörétes patron",
-        tex::AMMO_ICONS + 3,
-    ),
     (SCOPE, "scope", "Scope", "Távcső", tex::GUN_ATTACHMENTS),
     (
         SILENCER,
@@ -956,12 +969,14 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Lézeres célzó",
         tex::GUN_ATTACHMENTS + 3,
     ),
+    (AMMO_BOX, "ammo_box", "Ammo Box", "Töltényes doboz", tex::AMMO_BOX),
+    (FLASHLIGHT, "weapon_light", "Weapon Light", "Fegyverlámpa", tex::FLASHLIGHT),
 ];
 
 /// Creative inventory order: blocks, other items, then the tools.
 pub fn all_items() -> Vec<ItemId> {
     let mut v: Vec<ItemId> = BLOCK_ITEMS.iter().map(|e| e.0 as ItemId).collect();
-    v.extend(ITEMS.iter().map(|e| e.0));
+    v.extend(ITEMS.iter().map(|e| e.0).filter(|&id| id != AMMO_BOX));
     for tier in TIER_ORDER {
         for kind in KINDS {
             v.push(tool_id(kind, tier));
@@ -995,6 +1010,7 @@ pub fn item_of_block(b: u8) -> Option<ItemId> {
         _ if is_door(b) => OAK_DOOR,
         _ if is_stairs(b) => OAK_STAIRS,
         _ if is_bed(b) => BED,
+        _ if is_gun_bench(b) => GUN_STATION,
         _ if is_log(b) => log_base(b),
         _ if is_water(b) => return Some(WATER_BUCKET),
         _ if is_lava(b) => return Some(LAVA_BUCKET),
@@ -1050,7 +1066,8 @@ pub fn key(id: ItemId) -> String {
 
 pub fn from_key(k: &str) -> Option<ItemId> {
     let k = k.strip_prefix("minecraft:").unwrap_or(k);
-    all_items().into_iter().find(|&id| key(id) == k)
+    // (the box of rounds too: it is not listed, but lies on gun stations in save files)
+    all_items().into_iter().chain([AMMO_BOX]).find(|&id| key(id) == k)
 }
 
 /// Display name in the current language.
@@ -1099,7 +1116,9 @@ mod tests {
             assert_eq!(from_key(&k), Some(id));
             assert_ne!(name(id), "Unknown", "item {id} has no name");
         }
-        assert_eq!(all.len(), BLOCK_ITEMS.len() + ITEMS.len() + 4 * TIERS.len());
+        // (all but the box of rounds, which belongs to the gun station and is not listed)
+        assert_eq!(all.len(), BLOCK_ITEMS.len() + ITEMS.len() - 1 + 4 * TIERS.len());
+        assert_eq!(from_key(&key(AMMO_BOX)), Some(AMMO_BOX));
         // Keys stored in save files must not change.
         assert_eq!(key(GRASS as ItemId), "grass_block");
         assert_eq!(key(PURIFIED_WATER), "purified_water");

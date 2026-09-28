@@ -426,62 +426,6 @@ fn make(sound: Sound) -> Vec<f32> {
             echoes: &[(0.42, 0.08)],
             action: Some((0.028, 2700.0, 0.16, false)),
         }),
-        Sound::ShotMagnum => gunshot(&Report {
-            seed: 12,
-            crack: 0.35,
-            crack_ms: 0.35,
-            blast_tau: 0.02,
-            blast_hz: 1050.0,
-            boom_hz: 80.0,
-            boom_tau: 0.05,
-            boom: 0.8,
-            tail: 1.9,
-            wet: 0.36,
-            echoes: &[(0.45, 0.12), (0.9, 0.06)],
-            action: Some((0.032, 2100.0, 0.18, false)),
-        }),
-        Sound::ShotRifle => gunshot(&Report {
-            seed: 13,
-            crack: 0.8,
-            crack_ms: 0.35,
-            blast_tau: 0.01,
-            blast_hz: 2200.0,
-            boom_hz: 95.0,
-            boom_tau: 0.032,
-            boom: 0.5,
-            tail: 1.7,
-            wet: 0.32,
-            echoes: &[(0.4, 0.1)],
-            action: Some((0.018, 2900.0, 0.1, true)),
-        }),
-        Sound::ShotSniper => gunshot(&Report {
-            seed: 14,
-            crack: 1.0,
-            crack_ms: 0.6,
-            blast_tau: 0.03,
-            blast_hz: 800.0,
-            boom_hz: 52.0,
-            boom_tau: 0.09,
-            boom: 1.0,
-            tail: 3.0,
-            wet: 0.45,
-            echoes: &[(0.55, 0.22), (1.1, 0.15), (1.8, 0.08)],
-            action: None,
-        }),
-        Sound::ShotShotgun => gunshot(&Report {
-            seed: 15,
-            crack: 0.0,
-            crack_ms: 0.0,
-            blast_tau: 0.024,
-            blast_hz: 900.0,
-            boom_hz: 66.0,
-            boom_tau: 0.07,
-            boom: 0.95,
-            tail: 2.2,
-            wet: 0.4,
-            echoes: &[(0.5, 0.14), (1.0, 0.07)],
-            action: None,
-        }),
         Sound::ShotSilenced => {
             // A suppressed shot is still a sharp crack, only short and without the boom:
             // a quick snap of gas, a dull thud, and the slide working loudly after it.
@@ -526,49 +470,10 @@ fn make(sound: Sound) -> Vec<f32> {
             ],
             0.75,
         ),
-        Sound::BoltCycle => sequence(
-            &[
-                (clack(28, 2300.0, 0.02), 0.0, 0.9),
-                (scrape(29, 0.12, 1500.0), 0.03, 0.8),
-                (clack(30, 2000.0, 0.03), 0.16, 1.0),
-                (scrape(31, 0.1, 1700.0), 0.3, 0.8),
-                (clack(32, 2500.0, 0.04), 0.42, 1.2),
-            ],
-            0.75,
-        ),
-        Sound::PumpCycle => {
-            let mut back = noise(samples(0.09), 33);
-            bandpass(&mut back, 1000.0, 0.9);
-            let mut fwd = noise(samples(0.08), 34);
-            bandpass(&mut fwd, 1300.0, 0.9);
-            sequence(
-                &[
-                    (back, 0.0, 0.7),
-                    (clack(35, 1800.0, 0.03), 0.1, 1.2),
-                    (fwd, 0.19, 0.7),
-                    (clack(36, 2300.0, 0.04), 0.28, 1.3),
-                ],
-                0.8,
-            )
-        }
-        Sound::ShellIn => sequence(
-            &[
-                (scrape(37, 0.05, 1200.0), 0.0, 0.8),
-                (clack(38, 1600.0, 0.02), 0.055, 1.0),
-            ],
-            0.55,
-        ),
         Sound::CaseBrass => {
             let r = ring_of(&[(3150.0, 0.5), (4790.0, 0.35), (6950.0, 0.25), (9240.0, 0.15)], 0.06);
             sequence(&[(clack(39, 5000.0, 0.01), 0.0, 0.5), (r, 0.0, 1.0)], 0.45)
         }
-        Sound::CaseShell => sequence(
-            &[
-                (thud(40, 900.0, 0.04), 0.0, 1.0),
-                (ring_of(&[(820.0, 0.4), (1650.0, 0.2)], 0.015), 0.0, 0.6),
-            ],
-            0.4,
-        ),
         Sound::Impact => {
             let mut chip = noise(samples(0.03), 41);
             for (i, x) in chip.iter_mut().enumerate() {

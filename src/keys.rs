@@ -16,6 +16,10 @@ pub enum Bind {
     Inventory,
     Drop,
     Reload,
+    /// Look the held gun over (CS's inspect).
+    Inspect,
+    /// Switch the held gun's weapon light on or off.
+    GunLight,
     Chat,
     Command,
     PlayerList,
@@ -37,7 +41,7 @@ pub enum Bind {
 
 /// (action, name in options.txt and the translation key `key.<name>`, default key), in the
 /// order the options list them.
-pub const BINDS: [(Bind, &str, KeyCode); 28] = [
+pub const BINDS: [(Bind, &str, KeyCode); 30] = [
     (Bind::Forward, "forward", KeyCode::KeyW),
     (Bind::Back, "back", KeyCode::KeyS),
     (Bind::Left, "left", KeyCode::KeyA),
@@ -49,6 +53,9 @@ pub const BINDS: [(Bind, &str, KeyCode); 28] = [
     (Bind::Inventory, "inventory", KeyCode::KeyE),
     (Bind::Drop, "drop", KeyCode::KeyQ),
     (Bind::Reload, "reload", KeyCode::KeyR),
+    // The same key as flying: holding a gun it inspects the gun instead.
+    (Bind::Inspect, "inspect", KeyCode::KeyF),
+    (Bind::GunLight, "gunlight", KeyCode::KeyL),
     (Bind::Chat, "chat", KeyCode::KeyT),
     (Bind::Command, "command", KeyCode::Slash),
     (Bind::PlayerList, "playerlist", KeyCode::Tab),
@@ -91,6 +98,8 @@ pub const CATEGORIES: [(&str, &[Bind]); 4] = [
             Bind::Inventory,
             Bind::Drop,
             Bind::Reload,
+            Bind::Inspect,
+            Bind::GunLight,
             Bind::Hotbar1,
             Bind::Hotbar2,
             Bind::Hotbar3,
@@ -149,10 +158,15 @@ impl KeyMap {
         self.get(b) == code
     }
 
-    /// Another action on the same key.
+    /// Another action on the same key (flying and inspecting a gun may share one: holding a
+    /// gun, the key inspects it).
     pub fn conflicts(&self, i: usize) -> bool {
         let k = self.0[i];
-        self.0.iter().enumerate().any(|(j, &o)| j != i && o == k)
+        let pair = [Bind::Fly as usize, Bind::Inspect as usize];
+        self.0
+            .iter()
+            .enumerate()
+            .any(|(j, &o)| j != i && o == k && !(pair.contains(&i) && pair.contains(&j)))
     }
 }
 

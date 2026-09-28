@@ -42,6 +42,8 @@ struct App {
     bench: bool,
     /// `--aa-shots <folder>`: anti-aliasing comparison pictures.
     shots: Option<std::path::PathBuf>,
+    /// `--gun-shots <folder>`: pictures of every gun's animations, frame by frame.
+    gun_shots: Option<std::path::PathBuf>,
 }
 
 impl App {
@@ -75,7 +77,12 @@ impl ApplicationHandler for App {
                 .create_window(attrs)
                 .expect("failed to create window"),
         );
-        self.game = Some(game::Game::new(window, self.bench, self.shots.clone()));
+        self.game = Some(game::Game::new(
+            window,
+            self.bench,
+            self.shots.clone(),
+            self.gun_shots.clone(),
+        ));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -176,6 +183,8 @@ fn main() {
         bench: args.get(1).map(String::as_str) == Some("--bench"),
         shots: (args.get(1).map(String::as_str) == Some("--aa-shots"))
             .then(|| args.get(2).map(Into::into).unwrap_or_else(|| "aa-shots".into())),
+        gun_shots: (args.get(1).map(String::as_str) == Some("--gun-shots"))
+            .then(|| args.get(2).map(Into::into).unwrap_or_else(|| "gun-shots".into())),
         game: None,
     };
     event_loop.run_app(&mut app).expect("event loop error");

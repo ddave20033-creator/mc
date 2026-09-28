@@ -46,10 +46,6 @@ impl Game {
         for s in grid.iter().chain(held.iter()).flatten() {
             let _ = inventory::add_to(&mut slots, *s);
         }
-        // What is on an open gun station goes back to the player when it closes.
-        for s in self.guns.bench.items() {
-            let _ = inventory::add_to(&mut slots, s);
-        }
         slots
     }
 
@@ -67,6 +63,10 @@ impl Game {
             return;
         }
         if self.throw_grenade() {
+            return;
+        }
+        // A magazine in hand does nothing (it is loaded at the gun station).
+        if magazine_capacity(held).is_some() {
             return;
         }
         // Armor in hand: put it on (swapping with what is worn).
@@ -91,6 +91,7 @@ impl Game {
             // Opening things (tables, chests, doors, beds...) takes a fresh click: holding the
             // button (blocking with a sword, placing blocks) and looking at one does nothing.
             let opens = hb == CRAFTING_TABLE
+                || is_gun_bench(hb)
                 || hb == GUN_STATION
                 || is_furnace(hb)
                 || is_door(hb)
@@ -117,8 +118,27 @@ impl Game {
                     self.open_container(Container::Crafting(hit));
                     return;
                 }
+                if is_gun_bench(hb) {
+                    self.open_gun_station(gun_bench_main(hit, hb));
+                    return;
+                }
                 if hb == GUN_STATION {
-                    self.open_gun_station(hit);
+                    // An old one-block station: it becomes the two-block one (reaching to the
+                    // right, facing the player) where there is room, and opens.
+                    let d = look_dir(self.yaw, 0.0);
+                    let facing = (facing_of(d.x, d.z) + 2) & 3;
+                    let w = &self.terrain.world;
+                    let right = hit + chest_right(facing);
+                    let front = facing_dir(facing);
+                    let room = is_replaceable(w.geti(right))
+                        && !self.player.intersects(right)
+                        && !is_solid(w.geti(hit + front))
+                        && !is_solid(w.geti(right + front));
+                    if room {
+                        self.edit_block(hit, gun_bench_id(facing, false));
+                        self.edit_block(right, gun_bench_id(facing, true));
+                        self.open_gun_station(hit);
+                    }
                     return;
                 }
                 if is_furnace(hb) {
@@ -185,7 +205,7 @@ impl Game {
             && self.target.is_some_and(|(hit, _)| {
                 let b = self.terrain.world.geti(hit);
                 b == CRAFTING_TABLE
-                    || b == GUN_STATION
+                    || is_gun_bench(b)
                     || is_furnace(b)
                     || is_chest(b)
                     || is_door(b)
@@ -325,6 +345,10 @@ impl Game {
             self.place_big_furnace(at, base, facing);
             return;
         }
+        if base == GUN_STATION {
+            self.place_gun_bench(at, facing);
+            return;
+        }
         let b = if base == TORCH {
             let support = hit - at;
             if at == hit || support == IVec3::NEG_Y {
@@ -369,7 +393,7 @@ impl Game {
         } else {
             base
         };
-        if is_solid(b) && self.player.intersects(at) {
+        if is_solid(b) && (self.player.intersects(at) || self.drawer_room(at)) {
             return;
         }
         if needs_support(b) && !Self::supported(w, at, b) {
@@ -391,7 +415,7 @@ impl Game {
         let w = &self.terrain.world;
         let room = cells.iter().all(|&(o, _)| {
             let q = at + o;
-            q.y < HEIGHT as i32 && is_replaceable(w.geti(q)) && !self.player.intersects(q)
+            q.y < HEIGHT as i32 && is_replaceable(w.geti(q)) && !self.player.intersects(q) && !self.drawer_room(q)
         });
         if !room {
             return;
@@ -408,6 +432,39 @@ impl Game {
         self.action_cooldown = 0.2;
     }
 
+    /// A gun station, two blocks wide: its left half at `at`, its right one beside it (to
+    /// the right seen from its front), its front (the drawer) facing the player. The cells in
+    /// front of it must be free, for the drawer.
+    fn place_gun_bench(&mut self, at: IVec3, facing: u8) {
+        let w = &self.terrain.world;
+        let right = at + chest_right(facing);
+        let front = facing_dir(facing);
+        let room = [at, right].iter().all(|&q| {
+            is_replaceable(w.geti(q)) && !self.player.intersects(q) && !self.drawer_room(q) && !is_solid(w.geti(q + front))
+        });
+        if !room {
+            return;
+        }
+        self.edit_block(at, gun_bench_id(facing, false));
+        self.edit_block(right, gun_bench_id(facing, true));
+        if !self.creative() {
+            let slot = self.hotbar_slot;
+            take(&mut self.inventory.slots[slot], 1);
+        }
+        self.hand.swing();
+        self.action_cooldown = 0.2;
+    }
+
+    /// Whether `q` is in front of a gun station, where its drawer slides out (nothing solid
+    /// may be put there).
+    pub(super) fn drawer_room(&self, q: IVec3) -> bool {
+        let w = &self.terrain.world;
+        (0..4u8).any(|f| {
+            let b = w.geti(q - facing_dir(f));
+            is_gun_bench(b) && facing(b) == Some(f)
+        })
+    }
+
     /// A door at `at` (lower half) and above it, for a player looking toward `facing`.
     fn place_door(&mut self, at: IVec3, facing: u8) {
         let w = &self.terrain.world;
@@ -419,6 +476,8 @@ impl Game {
             || is_door(below)
             || self.player.intersects(at)
             || self.player.intersects(top)
+            || self.drawer_room(at)
+            || self.drawer_room(top)
         {
             return;
         }
@@ -443,6 +502,8 @@ impl Game {
             || !is_solid(w.geti(head - IVec3::Y))
             || self.player.intersects(at)
             || self.player.intersects(head)
+            || self.drawer_room(at)
+            || self.drawer_room(head)
         {
             return;
         }

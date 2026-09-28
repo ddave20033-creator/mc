@@ -159,6 +159,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("key.inventory", "Inventory", "Inventory"),
     ("key.drop", "Drop Item", "Tárgy eldobása"),
     ("key.reload", "Reload Gun", "Fegyver újratöltése"),
+    ("key.inspect", "Inspect Gun", "Fegyver megnézése"),
+    ("key.gunlight", "Weapon Light", "Fegyverlámpa ki/be"),
     ("key.chat", "Open Chat", "Chat"),
     ("key.command", "Open Command", "Parancs"),
     ("key.playerlist", "List Players", "Játékoslista"),
@@ -535,14 +537,6 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("gun.part.spring", "Spring", "Rugó"),
     ("gun.part.slide", "Slide", "Szán"),
     ("gun.part.magazine", "Magazine", "Tár"),
-    ("gun.part.lower", "Lower", "Alsó tok"),
-    ("gun.part.upper", "Upper", "Felső tok"),
-    ("gun.part.bolt", "Bolt", "Závárzat"),
-    ("gun.part.stock", "Stock", "Tus"),
-    ("gun.part.scoped_upper", "Scoped upper", "Tok+távcső"),
-    ("gun.part.receiver", "Receiver", "Tok"),
-    ("gun.part.tube", "Tube", "Csőtár"),
-    ("gun.part.pump", "Pump", "Előagy"),
     ("gun.gun", "Gun", "Fegyver"),
     ("gun.next", "Next: {} - click it!", "Következő: {} - kattints rá!"),
     (
@@ -567,7 +561,6 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Tartsd lenyomva a bal egérgombot az alkatrészeken a sikáláshoz!",
     ),
     ("gun.clean", "The gun is clean!", "A fegyver tiszta!"),
-    ("gun.pistol", "Pistol", "Pisztoly"),
     ("gun.cleanliness", "Clean: {}%", "Tisztaság: {}%"),
     ("gun.rotate", "Right drag: turn", "Jobb gomb: forgatás"),
     (
@@ -603,8 +596,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("gun.mod.silencer", "Silencer: no muzzle flash", "Hangtompító: nincs torkolattűz"),
     (
         "gun.mod.extended",
-        "Extended magazine: 20 rounds",
-        "Bővített tár: 20 töltény",
+        "Extended magazine: 20 rounds instead of 12",
+        "Bővített tár: 12 helyett 20 töltény",
     ),
     (
         "gun.mod.laser",
@@ -613,6 +606,14 @@ const TABLE: &[(&str, &str, &str)] = &[
     ),
     ("gun.reloading", "Reloading...", "Újratöltés..."),
     ("gun.empty", "Empty! Press {} to reload.", "Üres a tár! {} = újratöltés"),
+    ("gun.no_mag", "No magazine! {} = put one in", "Nincs tár a fegyverben! {} = tár be"),
+    (
+        "gun.no_mags",
+        "No loaded magazine! Right-click with a magazine to fill it.",
+        "Nincs töltött tárad! Tárral a kezedben jobb klikk: megtöltöd.",
+    ),
+    ("gun.mag_full", "The magazine is full.", "A tár tele van."),
+    ("gun.mag_hint", "load it at the gun station", "a fegyverasztalon töltheted meg"),
     (
         "gun.controls",
         "LMB: shoot  |  RMB: aim  |  {}: reload",

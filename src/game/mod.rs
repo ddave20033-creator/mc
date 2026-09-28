@@ -6,6 +6,7 @@ mod commands;
 mod frame;
 mod furnace;
 mod grenades;
+mod gun_shots;
 mod gui;
 mod guns;
 mod health;
@@ -48,7 +49,7 @@ use crate::world::terrain::{Terrain, TerrainEvent};
 use crate::world::*;
 use glam::{IVec3, Mat4, Vec2, Vec3};
 use std::collections::HashSet;
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use winit::dpi::PhysicalPosition;
@@ -228,6 +229,40 @@ pub struct Game {
     chest_open: crate::world::FastMap<IVec3, f32>,
     /// How far each door half is swung open (0..1), easing toward its state.
     door_swing: crate::world::FastMap<IVec3, f32>,
+    /// How far each gun station's drawer is out (0..1): it slides out while one is used.
+    bench_drawer: crate::world::FastMap<IVec3, f32>,
+    /// At the open gun station: holding its brush, and where it is; the camera's sway with
+    /// the mouse (-1 .. 1); something picked up off the table (where the mouse was, to drag
+    /// it); what the mouse points at there; scrubbing now, the dirt scrubbed off not yet
+    /// taken off, and whether that is not sent yet; when the table was last sent.
+    bench_brush: bool,
+    bench_brush_at: Option<Vec3>,
+    /// Where on the open gun station's table the mouse points (x, z), if it does.
+    bench_spot: Option<(f32, f32)>,
+    /// Where what is held on the mouse would lie on the open gun station's table.
+    bench_held_spot: Option<(f32, f32)>,
+    /// Where in the open drawer the mouse points (on its floor), if it does.
+    bench_drawer_spot: Option<Vec3>,
+    /// Where what is held on the mouse shows over the open gun station (world), for the
+    /// others to see it there too.
+    bench_hold_at: Option<Vec3>,
+    bench_pan: f32,
+    /// At the open gun station: looking into its drawer (the mouse went down to it), and how
+    /// far the camera has gone down to it (0 over the table .. 1 over the drawer).
+    bench_in_drawer: bool,
+    bench_focus: f32,
+    /// How long the mouse has stayed where it opens (or closes) the drawer.
+    bench_dwell: f32,
+    bench_drag: Option<Vec2>,
+    bench_hover: Option<gui::BenchPick>,
+    bench_scrubbing: bool,
+    /// What the mouse is on at the gun station is where what is held goes (it lights green).
+    bench_hover_ok: bool,
+    bench_scrub: f32,
+    bench_scrub_dirty: bool,
+    bench_sent: f32,
+    /// The last change seen on each gun station's table and when it started (it plays out).
+    bench_anims: crate::world::FastMap<IVec3, (u16, f32)>,
     /// Slot drag in progress (Minecraft-style stack spreading).
     drag: Option<gui::Drag>,
     /// The slot a stack was just picked up from with the button still held: letting go
@@ -322,6 +357,8 @@ pub struct Game {
     bench: Option<bench::Bench>,
     /// `--aa-shots`: anti-aliasing comparison pictures (runs in bench mode).
     shots: Option<bench::Shots>,
+    /// `--gun-shots`: pictures of the guns' animations (runs in bench mode).
+    gun_shots: Option<gun_shots::GunShots>,
     /// Max FPS: when the next frame may start.
     next_frame: Option<Instant>,
     /// Last frame's CPU time in ms: update, build, submit (without waiting), waiting for the GPU.
@@ -353,6 +390,8 @@ pub struct Game {
     spectating: Option<u8>,
     /// Last frame's camera matrix (for name tags).
     view_proj: Mat4,
+    /// This frame's view bobbing (camera space), taken off a held gun again.
+    view_bob: Mat4,
     /// Swing of the lantern in this player's hand (third person and body model).
     lantern_swing: crate::model::lantern::SmoothSwing,
     /// Open tab of the options screen.
@@ -369,8 +408,13 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn new(window: Arc<Window>, bench: bool, shots: Option<std::path::PathBuf>) -> Self {
-        let bench = bench || shots.is_some();
+    pub fn new(
+        window: Arc<Window>,
+        bench: bool,
+        shots: Option<std::path::PathBuf>,
+        gun_shots: Option<std::path::PathBuf>,
+    ) -> Self {
+        let bench = bench || shots.is_some() || gun_shots.is_some();
         let mut settings = Settings::load();
         let mut custom_skins = std::collections::HashMap::new();
         let mut skin_pngs = std::collections::HashMap::new();
@@ -482,6 +526,25 @@ impl Game {
             creative_tab: 0,
             chest_open: Default::default(),
             door_swing: Default::default(),
+            bench_drawer: Default::default(),
+            bench_brush: false,
+            bench_brush_at: None,
+            bench_spot: None,
+            bench_held_spot: None,
+            bench_drawer_spot: None,
+            bench_hold_at: None,
+            bench_pan: 0.0,
+            bench_in_drawer: false,
+            bench_focus: 0.0,
+            bench_dwell: 0.0,
+            bench_drag: None,
+            bench_hover: None,
+            bench_scrubbing: false,
+            bench_hover_ok: false,
+            bench_scrub: 0.0,
+            bench_scrub_dirty: false,
+            bench_sent: 0.0,
+            bench_anims: Default::default(),
             drag: None,
             press_pick: None,
             station: None,
@@ -544,6 +607,7 @@ impl Game {
             show_debug: false,
             bench: bench.then(Default::default),
             shots: shots.map(bench::Shots::new),
+            gun_shots: gun_shots.map(gun_shots::GunShots::new),
             next_frame: None,
             cpu_ms: [0.0; 4],
             frame_end: Instant::now(),
@@ -564,6 +628,7 @@ impl Game {
             player_target: None,
             spectating: None,
             view_proj: Mat4::IDENTITY,
+            view_bob: Mat4::IDENTITY,
             lantern_swing: Default::default(),
             options: Default::default(),
             pack_screen: Default::default(),
@@ -856,6 +921,10 @@ impl Game {
         let perspective = is(Bind::Perspective);
         let inventory = is(Bind::Inventory);
         let reload = is(Bind::Reload);
+        let inspect = is(Bind::Inspect);
+        if is(Bind::GunLight) && self.screen == Screen::Playing {
+            self.toggle_gun_light();
+        }
         if code == KeyCode::Escape {
             match self.screen {
                 Screen::Playing => self.pause(),
@@ -941,6 +1010,11 @@ impl Game {
         if reload {
             self.guns.reload_pressed = true;
         }
+        // Holding a gun, the inspect key (which may be the fly key) looks it over.
+        let inspecting = inspect && self.holding_gun();
+        if inspecting {
+            self.start_inspect();
+        }
         // Double tap forward to sprint.
         if forward && !self.keys.contains(&code) {
             if self.time - self.last_w < 0.3 {
@@ -958,7 +1032,7 @@ impl Game {
                 || self.keys.contains(&KeyCode::ControlRight);
             self.drop_held(all);
         }
-        if fly && self.creative() {
+        if fly && self.creative() && !inspecting {
             self.player.flying = !self.player.flying;
         }
         if jump && self.creative() {

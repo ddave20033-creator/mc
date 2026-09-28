@@ -199,7 +199,8 @@ void main() {
         coverage = clamp((tex.a - 0.5) / max(fwidth(tex.a), 1e-4) + 0.5, 0.0, 1.0);
         coverage *= plantFade;
         if (coverage <= 0.0) discard;
-    } else if (!water && tex.a < 0.5) {
+    } else if (!water && tex.a < ((pc.params.x == 1.0 || pc.params.x == 4.0) ? 0.05 : 0.5)) {
+        // (Blended, glass shows as see-through as its texture; elsewhere it is cut out.)
         discard;
     } else if (plantFade < bayer4(gl_FragCoord.xy)) {
         discard;
@@ -266,6 +267,22 @@ void main() {
         float falloff = max(0.0, 1.0 - distance(vWorld, held.xyz) / 7.0);
         light += vec3(1.0, 0.65, 0.34) * falloff * falloff * 1.8 * held.w;
     }
+    // Weapon lights: a cool white cone, bright in its middle, reaching far; lighting what
+    // faces it.
+    for (int i = 0; i < 4; i++) {
+        vec4 sp = frame.spots[2 * i];
+        if (sp.w <= 0.0) continue;
+        vec4 sd = frame.spots[2 * i + 1];
+        vec3 L = vWorld - sp.xyz;
+        float d = length(L);
+        L /= max(d, 1e-4);
+        float along = dot(L, sd.xyz);
+        float cone = smoothstep(sd.w, mix(sd.w, 1.0, 0.6), along);
+        float hot = smoothstep(mix(sd.w, 1.0, 0.75), 1.0, along) * 0.6;
+        float fall = max(0.0, 1.0 - d / 26.0);
+        float facing = plant ? 0.8 : max(dot(N, -L), 0.0) * 0.85 + 0.15;
+        light += vec3(0.95, 0.97, 1.0) * (cone + hot) * fall * fall * facing * 2.4 * sp.w;
+    }
     vec3 col = albedo * (light * ao + vec3(0.02));
     if (emissive) col = albedo * 1.4;
     if (torchFire) col = flame.rgb * 1.25;
@@ -276,6 +293,9 @@ void main() {
     vec3 V = toCam / max(dist, 1e-4);
     float alpha = coverage;
     if (torchFire) alpha = flame.a;
+    // Glass (the scope's lenses) drawn blended (the translucent pass, 1, and the view model's
+    // glass, 4): as see-through as its texture.
+    if (!water && !torchFire && (pc.params.x == 1.0 || pc.params.x == 4.0)) alpha *= tex.a;
 
     if (water) {
         vec3 n = N;

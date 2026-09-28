@@ -33,18 +33,6 @@ impl Inventory {
             .map(|s| s.count as u32)
             .sum()
     }
-
-    /// Uses up one `item` (from the main inventory before the hotbar). False if there is none.
-    pub fn remove_one(&mut self, item: u16) -> bool {
-        let order = (9..SIZE).chain(0..9);
-        for i in order {
-            if self.slots[i].is_some_and(|s| s.item == item) {
-                take(&mut self.slots[i], 1);
-                return true;
-            }
-        }
-        false
-    }
 }
 
 /// Adds `stack` into `slots` (merging first). Returns the leftover.

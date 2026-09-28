@@ -136,7 +136,7 @@ impl ItemEntity {
                 Vec3::new(i as f32 * 0.06, i as f32 * 0.05, -(i as f32) * 0.04) * (size / 0.3);
             let m = Mat4::from_translation(pos + off)
                 * Mat4::from_rotation_y(self.age * 1.6 + time * 0.2);
-            emit_item_flat_or_block(out, m, self.stack.item, size, light, flags::ENTITY);
+            emit_item_flat_or_block(out, m, &self.stack, size, light, flags::ENTITY);
         }
     }
 }

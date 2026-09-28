@@ -178,6 +178,22 @@ impl World {
         (sky, self.block_light_guess(p))
     }
 
+    /// (sky, block) light around the cell `c`: the brightest of it and its open neighbors.
+    /// For something just broken, whose own cell still has the dark light of the solid block
+    /// it was until the chunk is lit again.
+    pub fn light_around(&self, c: IVec3) -> (u8, u8) {
+        let mut best = self.light_estimate(c.as_vec3() + glam::Vec3::splat(0.5));
+        for d in [IVec3::Y, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z, IVec3::NEG_Y] {
+            let q = c + d;
+            if is_opaque(self.geti(q)) {
+                continue;
+            }
+            let l = self.light_estimate(q.as_vec3() + glam::Vec3::splat(0.5));
+            best = (best.0.max(l.0), best.1.max(l.1));
+        }
+        best
+    }
+
     /// Block light (0..15) at `p`.
     pub fn block_light_estimate(&self, p: glam::Vec3) -> u8 {
         self.light_estimate(p).1

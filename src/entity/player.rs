@@ -21,6 +21,8 @@ pub struct MoveInput {
     pub sneak: bool,
     /// Using an item (blocking with a sword): walk at a fifth of the speed, no sprinting.
     pub using: bool,
+    /// Aiming a gun down its sights: a careful walk, no sprinting.
+    pub aiming: bool,
 }
 
 #[derive(Default)]
@@ -212,7 +214,12 @@ impl Player {
         let in_lava = is_lava(fluid);
         self.sneaking = input.sneak && !self.flying && !in_fluid;
         self.sprinting =
-            input.sprint && input.forward > 0.0 && !in_fluid && !self.sneaking && !input.using;
+            input.sprint
+                && input.forward > 0.0
+                && !in_fluid
+                && !self.sneaking
+                && !input.using
+                && !input.aiming;
         let target = if self.sneaking { 1.0 } else { 0.0 };
         self.crouch += (target - self.crouch) * (1.0 - (-14.0 * dt).exp());
 
@@ -233,7 +240,13 @@ impl Player {
                 1.3
             } else {
                 4.3
-            } * if input.using { 0.2 } else { 1.0 };
+            } * if input.using {
+                0.2
+            } else if input.aiming {
+                0.6
+            } else {
+                1.0
+            };
             let accel = if self.on_ground || in_fluid {
                 14.0
             } else {
@@ -513,6 +526,7 @@ mod tests {
             sprint: false,
             sneak: false,
             using: false,
+            aiming: false,
         };
         let mut player = Player {
             pos: from,
@@ -591,6 +605,7 @@ mod tests {
             sprint: false,
             sneak: true,
             using: false,
+            aiming: false,
         };
         for yaw in [0.0, std::f32::consts::FRAC_PI_4] {
             let mut player = Player {

@@ -73,8 +73,6 @@ impl Game {
         }
         loose.extend(self.craft_out.take());
         self.craft_fx = None;
-        loose.extend(self.guns.bench.items());
-        self.guns.bench.clear();
         if !self.creative() {
             let center = self.player.pos + Vec3::Y * 0.8;
             let mut stacks: Vec<Stack> = self

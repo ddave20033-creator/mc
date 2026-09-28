@@ -370,6 +370,16 @@ pub fn save_entities(
     for (p, t) in &be.tables {
         s += &format!("table:{}:{}\n", pos_str(*p), slots_str(&t[..]));
     }
+    // What lies on the gun stations: each thing's stack and where (x/z/turn), `|` between.
+    for (p, b) in &be.benches {
+        let items: Vec<String> = b
+            .items
+            .iter()
+            .map(|i| format!("{}/{}/{}/{}", slot_str(&Some(i.stack)), i.x, i.z, i.turn))
+            .collect();
+        let boxes: Vec<String> = b.boxes.iter().map(|n| n.map_or("-".to_string(), |n| n.to_string())).collect();
+        s += &format!("bench:{}:{}:{}\n", pos_str(*p), items.join("|"), boxes.join(","));
+    }
     for (p, t) in saplings {
         s += &format!("sapling:{}:{}\n", pos_str(*p), t);
     }
@@ -456,6 +466,22 @@ pub fn load_entities(
                 let mut slots = [None; 9];
                 parse_slots(parts[2], &mut slots);
                 be.tables.insert(p, slots);
+            }
+            "bench" if parts.len() >= 3 => {
+                let mut bench = crate::entity::GunBench::default();
+                for item in parts[2].split('|').filter(|i| !i.is_empty()) {
+                    let f: Vec<&str> = item.split('/').collect();
+                    let num = |i: usize| f.get(i).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+                    if let Some(st) = parse_slot(f[0]) {
+                        bench.add(st, num(1), num(2), num(3));
+                    }
+                }
+                if let Some(a) = parts.get(3) {
+                    for (i, n) in a.split(',').take(3).enumerate() {
+                        bench.boxes[i] = n.parse::<u16>().ok().map(|n| n.min(crate::item::AMMO_BOX_ROUNDS));
+                    }
+                }
+                be.benches.insert(p, bench);
             }
             "sapling" if parts.len() >= 3 => saplings.push((p, parts[2].parse().unwrap_or(60.0))),
             _ => {}
@@ -556,4 +582,32 @@ pub fn load_chunks(folder: &str) -> Vec<(ChunkPos, ChunkData)> {
         o += len;
     }
     out
+}
+
+#[cfg(test)]
+mod bench_tests {
+    use super::*;
+
+    #[test]
+    fn a_gun_station_keeps_what_lies_on_it_and_its_boxes() {
+        let folder = "zz_bench_save_test";
+        let _ = fs::create_dir_all(dir(folder));
+        let mut be = BlockEntities::default();
+        let mut bench = crate::entity::GunBench::default();
+        let mut mag = Stack::one(crate::item::PISTOL_MAGAZINE);
+        crate::item::set_gun_rounds(&mut mag, 7);
+        bench.add(mag, 0.25, -0.1, 0.0);
+        bench.add(Stack { data: 40, ..Stack::one(crate::item::AMMO_BOX) }, -0.5, 0.2, 0.3);
+        bench.boxes = [Some(128), None, Some(3)];
+        be.benches.insert(IVec3::new(4, 70, -9), bench.clone());
+        save_entities(folder, &be, &[], &[], &[]);
+        let mut back = BlockEntities::default();
+        load_entities(folder, &mut back, &mut Vec::new(), &mut Vec::new(), &mut Vec::new());
+        let _ = fs::remove_dir_all(dir(folder));
+        let got = back.benches.get(&IVec3::new(4, 70, -9)).expect("saved");
+        assert_eq!(got.boxes, bench.boxes);
+        assert_eq!(got.items.len(), 2);
+        assert_eq!(got.items[0].stack, mag);
+        assert_eq!(crate::item::box_rounds(&got.items[1].stack), 40);
+    }
 }

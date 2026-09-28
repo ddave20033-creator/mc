@@ -53,8 +53,7 @@ impl Particles {
     /// Burst of debris from a broken (or hit) block.
     pub fn burst(&mut self, world: &World, p: glam::IVec3, b: u8, count: usize, tint: [u8; 3]) {
         let layer = face_texture(b, 0);
-        let sky = world.sky_estimate(p.as_vec3() + Vec3::splat(0.5));
-        let blk = world.block_light_estimate(p.as_vec3() + Vec3::splat(0.5));
+        let (sky, blk) = world.light_around(p);
         for _ in 0..count {
             let off = Vec3::new(self.rand(), self.rand(), self.rand());
             let pos = p.as_vec3() + off * 0.8 + Vec3::splat(0.1);
@@ -272,7 +271,7 @@ impl Particles {
             vel,
             life,
             max_life: life,
-            layer: tex::SMOKE,
+            layer: tex::CLOUD,
             uv0: [0.0, 0.0],
             size,
             tint: [gray; 3],
@@ -304,7 +303,7 @@ impl Particles {
         for _ in 0..24 {
             let dir = Vec3::new(self.rand() - 0.5, self.rand() * 0.8, self.rand() - 0.5).normalize_or_zero();
             let life = 2.5 + self.rand() * 2.5;
-            let gray = (45.0 + self.rand() * 45.0) as u8;
+            let gray = (70.0 + self.rand() * 50.0) as u8;
             let size = 0.4 + self.rand() * 0.5;
             let vel = dir * (2.0 + self.rand() * 4.0) + Vec3::Y * 0.8;
             self.list.push(Particle {
@@ -313,7 +312,7 @@ impl Particles {
                 vel,
                 life,
                 max_life: life,
-                layer: tex::SMOKE,
+                layer: tex::CLOUD,
                 uv0: [0.0, 0.0],
                 size,
                 tint: [gray; 3],
@@ -372,10 +371,9 @@ impl Particles {
                     (p.size, p.layer + frame, 1.0, 0)
                 }
                 Kind::Cloud => {
-                    // The biggest puff, growing; it breaks up over the last fifth.
+                    // A round puff, growing; it thins away over the last fifth.
                     let end = ((t - 0.8) / 0.2).max(0.0);
-                    let frame = SMOKE_FRAMES - 1 - ((end * SMOKE_FRAMES as f32) as u32).min(SMOKE_FRAMES - 1);
-                    (p.size * (0.7 + 0.8 * t.min(0.6)), p.layer + frame, 1.0, 0)
+                    (p.size * (0.7 + 0.8 * t.min(0.6)) * (1.0 - 0.8 * end), p.layer, 1.0, 0)
                 }
             };
             let (r, u) = (right * size, up * size);

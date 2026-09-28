@@ -202,12 +202,8 @@ pub mod tex {
     pub const RAW_BURNT_MUTTON: u32 = GUN_GLASS + 4;
     /// Wood of the gun stocks.
     pub const GUN_WOOD: u32 = RAW_BURNT_MUTTON + 1;
-    /// Icons of the Desert Eagle, the M16, the sniper rifle and the shotgun (drawn from their
-    /// 3D models), and of their ammunition (.50 AE, 5.56 mm, .50 BMG, 12 gauge).
-    pub const GUN_ICONS: u32 = GUN_WOOD + 1;
-    pub const AMMO_ICONS: u32 = GUN_ICONS + 4;
     /// Copper: the ore, the storage block and the ingot.
-    pub const COPPER_ORE: u32 = AMMO_ICONS + 4;
+    pub const COPPER_ORE: u32 = GUN_WOOD + 1;
     pub const COPPER_BLOCK: u32 = COPPER_ORE + 1;
     pub const COPPER_INGOT: u32 = COPPER_ORE + 2;
     /// The tools of the tiers added after the first five (copper): 4 each, like `TOOLS`
@@ -244,7 +240,11 @@ pub mod tex {
     pub const FRAG_GRENADE: u32 = CERAMIC_PLATE + 1;
     pub const SMOKE_GRENADE: u32 = FRAG_GRENADE + 1;
     /// Armor: the icons (sixteen pieces, then the vest) and what the pieces look like worn.
-    pub const ARMOR_ICONS: u32 = SMOKE_GRENADE + 1;
+    /// A box of rounds (an ammo can), as an item.
+    pub const AMMO_BOX: u32 = SMOKE_GRENADE + 1;
+    /// The weapon light, as an item (drawn from its model, `render_item_icons`).
+    pub const FLASHLIGHT: u32 = AMMO_BOX + 1;
+    pub const ARMOR_ICONS: u32 = FLASHLIGHT + 1;
     pub const ARMOR_WOOL: u32 = ARMOR_ICONS + 17;
     pub const ARMOR_METAL: u32 = ARMOR_WOOL + 1;
     pub const VEST: u32 = ARMOR_METAL + 1;
@@ -260,7 +260,18 @@ pub mod tex {
     pub const BOOK_SHEET_COUNT: u32 = 12;
     /// The chapter tabs along the top of this player's guide book (`model::book::TAB_LAYERS`).
     pub const BOOK_TABS: u32 = BOOK_SHEETS + BOOK_SHEET_COUNT * 6;
-    pub const LAYERS: usize = (BOOK_TABS + 4) as usize;
+    /// A round puff for big smoke clouds (smoke grenades, explosions): Minecraft's smoke
+    /// sprites are small pixel blotches that turn into squares when drawn a block wide.
+    pub const CLOUD: u32 = BOOK_TABS + 4;
+    /// The pistol made in Blockbench: its texture pages (`model::pistol_vm`), clean, then
+    /// the same with more and more grime on them (`PISTOL_DIRT_LEVELS` sets in all).
+    pub const PISTOL_VIEW: u32 = CLOUD + 1;
+    pub const PISTOL_DIRT_LEVELS: u32 = 4;
+    /// The gun station block made in Blockbench: its texture pages (`model::gun_station`).
+    pub const GUN_STATION_MODEL: u32 = PISTOL_VIEW + crate::model::pistol_vm::PAGES * PISTOL_DIRT_LEVELS;
+    /// The grenades made in Blockbench: their texture pages (`model::grenade`).
+    pub const GRENADE_MODEL: u32 = GUN_STATION_MODEL + crate::model::gun_station::PAGES;
+    pub const LAYERS: usize = (GRENADE_MODEL + crate::model::grenade::PAGES) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -337,6 +348,219 @@ pub fn decode_skin_png(data: &[u8]) -> Result<Image, &'static str> {
     crate::pack::decode_png(data).ok_or("Nem sikerült beolvasni a skin PNG-t.")
 }
 
+/// The Blockbench models' texture pages, made by `tools/blockbench/bbmodel_to_rust.py`:
+/// 128x128 pages one under the other, from layer `first`.
+fn synth_model_pages(base: &mut [u8], png: &[u8], pages: u32, first: u32) {
+    let Some(img) = crate::pack::decode_png(png) else {
+        return;
+    };
+    let layer_bytes = TILE * TILE * 4;
+    for page in 0..pages as usize {
+        let dst = (first as usize + page) * layer_bytes;
+        for y in 0..TILE {
+            let sy = page * TILE + y;
+            if sy >= img.h as usize || img.w as usize != TILE {
+                return;
+            }
+            let src = sy * TILE * 4;
+            base[dst + y * TILE * 4..dst + (y + 1) * TILE * 4]
+                .copy_from_slice(&img.rgba[src..src + TILE * 4]);
+        }
+    }
+}
+
+/// The guns' and grenades' item icons, drawn from their 3D models (the Blockbench pistol and
+/// grenades) as they are held: turned a little to show them in 3D, lit from the upper left,
+/// drawn at twice the size and scaled down for smooth edges.
+fn render_item_icons(base: &mut [u8]) {
+    use crate::item::*;
+    let mut loaded = Stack::one(PISTOL);
+    set_gun_rounds(&mut loaded, 12);
+    let mut full = Stack::one(PISTOL_MAGAZINE);
+    set_gun_rounds(&mut full, 12);
+    let mut ext = Stack::one(EXTENDED_MAGAZINE);
+    set_gun_rounds(&mut ext, 20);
+    let icons = [
+        (tex::PISTOL, loaded),
+        (tex::PISTOL_PARTS, Stack::one(PISTOL_FRAME)),
+        (tex::PISTOL_PARTS + 1, Stack::one(PISTOL_BARREL)),
+        (tex::PISTOL_PARTS + 2, Stack::one(PISTOL_SPRING)),
+        (tex::PISTOL_PARTS + 3, Stack::one(PISTOL_SLIDE)),
+        (tex::PISTOL_PARTS + 4, full),
+        (tex::BULLET, Stack::one(BULLET)),
+        (tex::GUN_ATTACHMENTS, Stack::one(SCOPE)),
+        (tex::GUN_ATTACHMENTS + 1, Stack::one(SILENCER)),
+        (tex::GUN_ATTACHMENTS + 2, ext),
+        (tex::GUN_ATTACHMENTS + 3, Stack::one(LASER_SIGHT)),
+        (tex::FLASHLIGHT, Stack::one(FLASHLIGHT)),
+        (tex::FRAG_GRENADE, Stack::one(FRAG_GRENADE)),
+        (tex::SMOKE_GRENADE, Stack::one(SMOKE_GRENADE)),
+    ];
+    for (layer, st) in icons {
+        let mut verts = Vec::new();
+        // A three-quarter view: turned toward the viewer's left, looked at a little from above.
+        let turn = -0.4;
+        let view = glam::Mat4::from_rotation_x(0.35) * glam::Mat4::from_rotation_y(turn);
+        crate::model::emit_held_data(&mut verts, view, &st, [255, 255, 255, 0], 0);
+        let img = rasterize(base, &verts, TILE);
+        let dst = layer as usize * TILE * TILE * 4;
+        base[dst..dst + TILE * TILE * 4].copy_from_slice(&img);
+    }
+}
+
+/// Draws triangles (x right, y up, z toward the viewer) looking straight at them, fitted into
+/// a `size` square with a small margin: each pixel the nearest triangle's texel from the
+/// texture layers, shaded by which way its face looks. Rendered twice as big and averaged
+/// down, so edges are smooth; what is not covered is clear.
+fn rasterize(base: &[u8], verts: &[crate::world::mesh::Vertex], size: usize) -> Vec<u8> {
+    use glam::{Vec2, Vec3};
+    let big = size * 2;
+    let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+    for v in verts {
+        let p = Vec2::new(v.pos[0], v.pos[1]);
+        lo = lo.min(p);
+        hi = hi.max(p);
+    }
+    let mut out = vec![0u8; size * size * 4];
+    if lo.x > hi.x {
+        return out;
+    }
+    let margin = big as f32 * 0.06;
+    let scale = (big as f32 - 2.0 * margin) / (hi - lo).max_element().max(1e-6);
+    let center = (lo + hi) * 0.5;
+    let to_px = |p: Vec3| {
+        Vec3::new(
+            big as f32 * 0.5 + (p.x - center.x) * scale,
+            big as f32 * 0.5 - (p.y - center.y) * scale,
+            p.z,
+        )
+    };
+    let mut color = vec![[0f32; 4]; big * big];
+    let mut depth = vec![f32::MIN; big * big];
+    let light = Vec3::new(-0.45, 0.75, 0.5).normalize();
+    let layer_bytes = TILE * TILE * 4;
+    for tri in verts.chunks_exact(3) {
+        let p: Vec<Vec3> = tri.iter().map(|v| to_px(Vec3::from(v.pos))).collect();
+        let world: Vec<Vec3> = tri.iter().map(|v| Vec3::from(v.pos)).collect();
+        let n = (world[1] - world[0]).cross(world[2] - world[0]).normalize_or_zero();
+        // Faces seen from behind are not drawn (the cubes are closed).
+        let n = if n.z < 0.0 { continue } else { n };
+        let shade = 0.5 + 0.5 * n.dot(light).max(0.0);
+        let area = (p[1].x - p[0].x) * (p[2].y - p[0].y) - (p[2].x - p[0].x) * (p[1].y - p[0].y);
+        if area.abs() < 1e-8 {
+            continue;
+        }
+        let x0 = p.iter().map(|q| q.x).fold(f32::MAX, f32::min).floor().max(0.0) as usize;
+        let x1 = (p.iter().map(|q| q.x).fold(f32::MIN, f32::max).ceil() as usize).min(big - 1);
+        let y0 = p.iter().map(|q| q.y).fold(f32::MAX, f32::min).floor().max(0.0) as usize;
+        let y1 = (p.iter().map(|q| q.y).fold(f32::MIN, f32::max).ceil() as usize).min(big - 1);
+        let layer = tri[0].layer as usize;
+        let tint = tri[0].tint;
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let w0 = ((p[1].x - fx) * (p[2].y - fy) - (p[2].x - fx) * (p[1].y - fy)) / area;
+                let w1 = ((p[2].x - fx) * (p[0].y - fy) - (p[0].x - fx) * (p[2].y - fy)) / area;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                    continue;
+                }
+                let z = w0 * p[0].z + w1 * p[1].z + w2 * p[2].z;
+                let i = y * big + x;
+                if z <= depth[i] {
+                    continue;
+                }
+                let u = w0 * tri[0].uv[0] + w1 * tri[1].uv[0] + w2 * tri[2].uv[0];
+                let v = w0 * tri[0].uv[1] + w1 * tri[1].uv[1] + w2 * tri[2].uv[1];
+                let tx = ((u * TILE as f32) as usize).min(TILE - 1);
+                let ty = ((v * TILE as f32) as usize).min(TILE - 1);
+                let t = layer * layer_bytes + (ty * TILE + tx) * 4;
+                if t + 3 >= base.len() || base[t + 3] < 128 {
+                    continue;
+                }
+                depth[i] = z;
+                color[i] = [
+                    base[t] as f32 * tint[0] as f32 / 255.0 * shade,
+                    base[t + 1] as f32 * tint[1] as f32 / 255.0 * shade,
+                    base[t + 2] as f32 * tint[2] as f32 / 255.0 * shade,
+                    255.0,
+                ];
+            }
+        }
+    }
+    // Averaged down (the colour weighted by coverage).
+    for y in 0..size {
+        for x in 0..size {
+            let mut sum = [0f32; 4];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let c = color[(y * 2 + dy) * big + x * 2 + dx];
+                for k in 0..3 {
+                    sum[k] += c[k] * c[3] / 255.0;
+                }
+                sum[3] += c[3];
+            }
+            let a = sum[3] / 4.0;
+            let o = (y * size + x) * 4;
+            if a > 0.0 {
+                for k in 0..3 {
+                    out[o + k] = (sum[k] / (sum[3] / 255.0)).clamp(0.0, 255.0) as u8;
+                }
+                out[o + 3] = a.round() as u8;
+            }
+        }
+    }
+    out
+}
+
+/// A dirty copy of the pistol's pages (`level` of `tex::PISTOL_DIRT_LEVELS - 1`): carbon and
+/// old oil in blotches over everything, heavier the dirtier, the metal duller. The glass stays
+/// clear.
+fn synth_grime(base: &mut [u8], first: u32, pages: u32, level: u32) {
+    let layer_bytes = TILE * TILE * 4;
+    let amount = level as f32 / (tex::PISTOL_DIRT_LEVELS - 1) as f32;
+    // Smooth blotches: value noise on a coarse grid, and a finer one on top.
+    let hash = |x: i32, y: i32, s: u32| -> f32 {
+        let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77) ^ s.wrapping_mul(0xC2B2_AE3D);
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2C1B_3C6D);
+        h ^= h >> 12;
+        (h & 0xffff) as f32 / 65535.0
+    };
+    let noise = |x: f32, y: f32, cell: f32, s: u32| -> f32 {
+        let (gx, gy) = (x / cell, y / cell);
+        let (ix, iy) = (gx.floor() as i32, gy.floor() as i32);
+        let (fx, fy) = (gx - ix as f32, gy - iy as f32);
+        let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+        let a = hash(ix, iy, s) + (hash(ix + 1, iy, s) - hash(ix, iy, s)) * sx;
+        let b = hash(ix, iy + 1, s) + (hash(ix + 1, iy + 1, s) - hash(ix, iy + 1, s)) * sx;
+        a + (b - a) * sy
+    };
+    let grime = [52.0, 44.0, 34.0];
+    for page in 0..pages as usize {
+        let src = (first as usize + page) * layer_bytes;
+        let dst = (first as usize + (level * pages) as usize + page) * layer_bytes;
+        for y in 0..TILE {
+            for x in 0..TILE {
+                let i = (y * TILE + x) * 4;
+                let mut px = [base[src + i], base[src + i + 1], base[src + i + 2], base[src + i + 3]];
+                if px[3] == 255 {
+                    let (fx, fy) = (x as f32, y as f32 + page as f32 * TILE as f32);
+                    let n = noise(fx, fy, 11.0, 1) * 0.65 + noise(fx, fy, 3.0, 2) * 0.35;
+                    let speck = hash(x as i32, y as i32 + page as i32 * 1000, 3);
+                    let k = ((n - 0.62 + 0.55 * amount) * 1.8).clamp(0.0, 0.85)
+                        + if speck < 0.05 * amount { 0.35 } else { 0.0 };
+                    let dull = 1.0 - 0.22 * amount;
+                    for c in 0..3 {
+                        let v = px[c] as f32 * dull;
+                        px[c] = (v + (grime[c] - v) * k.min(0.9)).clamp(0.0, 255.0) as u8;
+                    }
+                }
+                base[dst + i..dst + i + 4].copy_from_slice(&px);
+            }
+        }
+    }
+}
+
 /// Smoke particle sprites, like Minecraft's generic_0..7.
 pub const SMOKE_FRAMES: u32 = 8;
 
@@ -349,9 +573,8 @@ fn is_item_icon(l: u32) -> bool {
         || (tex::HALF_COOKED_PORKCHOP..=tex::BURNT_MUTTON).contains(&l)
         || (tex::HALF_BURNT_PORKCHOP..=tex::RAW_BURNT_MUTTON).contains(&l)
         || (tex::PISTOL..tex::GUN_GLASS).contains(&l)
-        || (tex::GUN_ICONS..tex::AMMO_ICONS + 4).contains(&l)
         || l == tex::COPPER_INGOT
-        || (tex::STEEL_INGOT..=tex::SMOKE_GRENADE).contains(&l)
+        || (tex::STEEL_INGOT..=tex::FLASHLIGHT).contains(&l)
         || (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l)
         || l == tex::BOOK
         || (tex::MORE_TOOLS..tex::MORE_TOOLS + 4).contains(&l)
@@ -424,6 +647,7 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::BLAST_FRONT_CUT
         || l == tex::ADV_FRONT_CUT
         || (tex::SMOKE..tex::SMOKE + SMOKE_FRAMES).contains(&l)
+        || l == tex::CLOUD
 }
 
 /// Resolution of the opaque-pixel masks used to extrude flat item sprites into 3D models: the
@@ -493,6 +717,14 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
         }
     });
     apply_pack(packs, &mut base);
+    use crate::model::{gun_station, pistol_vm};
+    synth_model_pages(&mut base, pistol_vm::PNG, pistol_vm::PAGES, tex::PISTOL_VIEW);
+    for level in 1..tex::PISTOL_DIRT_LEVELS {
+        synth_grime(&mut base, tex::PISTOL_VIEW, pistol_vm::PAGES, level);
+    }
+    synth_model_pages(&mut base, gun_station::PNG, gun_station::PAGES, tex::GUN_STATION_MODEL);
+    synth_model_pages(&mut base, crate::model::grenade::PNG, crate::model::grenade::PAGES, tex::GRENADE_MODEL);
+    render_item_icons(&mut base);
     synth_doors(&mut base);
     synth_grilled(&mut base);
     synth_glow(&mut base);

@@ -224,6 +224,16 @@ impl Game {
             }
             return contents;
         }
+        if is_gun_bench(b) {
+            // The other half goes too; what lay on the table (kept by the left half) drops.
+            let q = p + gun_bench_other_half(b);
+            let main = gun_bench_main(p, b);
+            let contents = if main != p { self.block_entities.remove(main) } else { Vec::new() };
+            if is_gun_bench(self.terrain.world.geti(q)) {
+                self.set_block(q, AIR);
+            }
+            return contents;
+        }
         let q = if is_door(b) {
             p + door_other_half(b)
         } else if is_bed(b) {

@@ -21,6 +21,9 @@ impl Game {
             }
         }
         self.hand.equip(self.held());
+        let st = self.inventory.slots[self.hotbar_slot];
+        self.hand.held_data = st.map_or(0, |s| s.data);
+        self.hand.held_damage = st.map_or(0, |s| s.damage);
         if self.sleep.is_some() {
             self.update_sleep(dt, control);
             return;
@@ -38,6 +41,12 @@ impl Game {
         self.hand.blocking = self.blocking;
         self.update_using(dt, control);
 
+        // Aiming a gun (right button held): no sprinting, and the double-tap sprint ends.
+        let aiming = control && self.right_down && self.holding_gun();
+        let firing = self.guns.no_sprint > 0.0;
+        if aiming {
+            self.w_sprint = false;
+        }
         let k = |b: Bind| control && self.bind_down(b);
         let axis = |a: bool, b: bool| (a as i32 - b as i32) as f32;
         let input = MoveInput {
@@ -46,9 +55,11 @@ impl Game {
             up: k(Bind::Jump),
             down: k(Bind::Sneak),
             sprint: (k(Bind::Sprint) || (self.w_sprint && k(Bind::Forward)))
-                && (self.creative() || self.needs.can_sprint()),
+                && (self.creative() || self.needs.can_sprint())
+                && !firing,
             sneak: k(Bind::Sneak),
             using: self.blocking || self.using.is_some(),
+            aiming,
         };
         let was_on_ground = self.player.on_ground;
         self.player

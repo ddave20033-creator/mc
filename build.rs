@@ -49,6 +49,7 @@ const SHADERS: &[&str] = &[
     "sky.frag",
     "ui.vert",
     "ui.frag",
+    "lens.frag",
 ];
 const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl"];
 

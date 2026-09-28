@@ -204,6 +204,7 @@ impl Game {
                 output,
                 grill,
             } => self.apply_furnace(p, burn, cook, [input, fuel, output], grill),
+            Msg::Bench { p, bench } => self.set_bench(p, bench),
             Msg::Container { p, kind, slots } => {
                 let msg = Msg::Container {
                     p,

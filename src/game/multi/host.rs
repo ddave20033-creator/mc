@@ -529,6 +529,11 @@ impl Game {
                 } else {
                     // Make sure the block entity exists.
                     let b = self.terrain.world.geti(p);
+                    if let Some(bench) = self.block_entities.benches.get(&p).filter(|_| is_gun_bench(b)) {
+                        // What lies on the gun station, as it is now.
+                        let msg = Msg::Bench { p, bench: bench.clone() };
+                        self.send_to(id, &msg);
+                    }
                     if is_chest(b) {
                         let (a, other) = self.chest_halves(p);
                         for q in std::iter::once(a).chain(other) {
@@ -551,6 +556,13 @@ impl Game {
                 take,
                 offered,
             } => self.remote_use_furnace(id, p, part, take, offered),
+            Msg::Bench { p, bench } => {
+                // A player changed what lies on a gun station: the others see it too.
+                if is_gun_bench(self.terrain.world.geti(p)) {
+                    self.set_bench(p, bench.clone());
+                    self.broadcast(&Msg::Bench { p, bench }, Some(id));
+                }
+            }
             Msg::Container { p, kind, slots } => {
                 // Only the slots this player changed (from what they last got) are taken, so
                 // two players working in the same chest do not undo each other.
@@ -687,6 +699,13 @@ impl Game {
             id,
             png: png.clone(),
         }));
+        // What lies on the gun stations.
+        others.extend(
+            self.block_entities
+                .benches
+                .iter()
+                .map(|(p, b)| Msg::Bench { p: *p, bench: b.clone() }),
+        );
         // Items lying on crafting tables, and the furnaces.
         others.extend(
             self.table_grids()

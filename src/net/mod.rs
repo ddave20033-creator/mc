@@ -12,12 +12,12 @@ mod conn;
 
 pub use conn::{local_ip, Conn, Finder, Server, DEFAULT_PORT};
 
-use crate::entity::Grilled;
+use crate::entity::{BenchEvent, BenchItem, GunBench, Grilled};
 use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 21;
+pub const PROTOCOL: u16 = 26;
 
 // ---------------------------------------------------------------------------- data
 
@@ -47,8 +47,10 @@ pub struct Pose {
     pub open: IVec3,
     /// What the player is busy with (`status`), shown in a bubble above their head.
     pub status: u8,
-    /// The attachments on the held gun (`gun_mod` bits).
+    /// The attachments on the held gun (`gun_mod` bits), and what it is doing
+    /// (`model::pistol_view::GunAnim::pack`: its slide and magazine, for the others to see).
     pub gun_mods: u8,
+    pub gun_state: u16,
     /// What they wear (`item::armor_code`).
     pub armor: u16,
     /// Holding the guide book open (`book` bits): open, and the page turns so far.
@@ -57,6 +59,17 @@ pub struct Pose {
     pub book_page: u8,
     /// In spectator mode: flies through blocks, and only other spectators see them.
     pub spectator: bool,
+    /// How dirty the held gun is (`model::pistol_view::dirt_level`), for its look.
+    pub gun_dirt: u8,
+    /// At a gun station: the cleaning brush in the hand, where it is; looking into its
+    /// drawer (it is out).
+    pub brush: Option<Vec3>,
+    pub drawer: bool,
+    /// The held stack's `data` (a magazine's rounds, a gun's state).
+    pub held_data: u16,
+    /// At a gun station: what is held on the mouse over its table or drawer, and where it
+    /// shows (world).
+    pub bench_hold: Option<(Stack, Vec3)>,
 }
 
 /// `Pose::book`: the book is held open; the last page turn went back; the number of page
@@ -289,6 +302,11 @@ pub enum Msg {
     },
 
     // Both ways
+    /// What lies on a gun station (at its left half) and the last change there.
+    Bench {
+        p: IVec3,
+        bench: GunBench,
+    },
     /// Contents of a chest or crafting table.
     Container {
         p: IVec3,
@@ -401,10 +419,59 @@ impl W {
         self.ivec3(p.open);
         self.u8(p.status);
         self.u8(p.gun_mods);
+        self.u16(p.gun_state);
         self.u16(p.armor);
         self.u8(p.book);
         self.u8(p.book_page);
         self.bool(p.spectator);
+        self.u8(p.gun_dirt);
+        match p.brush {
+            Some(b) => {
+                self.bool(true);
+                self.vec3(b);
+            }
+            None => self.bool(false),
+        }
+        self.bool(p.drawer);
+        self.u16(p.held_data);
+        match p.bench_hold {
+            Some((st, at)) => {
+                self.bool(true);
+                self.stack(st);
+                self.vec3(at);
+            }
+            None => self.bool(false),
+        }
+    }
+    fn bench_item(&mut self, i: &BenchItem) {
+        self.u16(i.id);
+        self.stack(i.stack);
+        self.f32(i.x);
+        self.f32(i.z);
+        self.f32(i.turn);
+    }
+    fn bench(&mut self, b: &GunBench) {
+        self.u32(b.items.len() as u32);
+        for i in &b.items {
+            self.bench_item(i);
+        }
+        self.u16(b.next_id);
+        for n in b.boxes {
+            self.u16(n.unwrap_or(u16::MAX));
+        }
+        let e = &b.event;
+        self.u16(e.serial);
+        self.u8(e.kind);
+        self.u16(e.gun);
+        self.u8(e.bit);
+        self.u32(e.gone.len() as u32);
+        for i in &e.gone {
+            self.bench_item(i);
+        }
+        self.u32(e.made.len() as u32);
+        for &m in &e.made {
+            self.u16(m);
+        }
     }
     fn state(&mut self, s: &PlayerState) {
         self.vec3(s.pos);
@@ -519,10 +586,44 @@ impl R<'_> {
             open: self.ivec3()?,
             status: self.u8()?,
             gun_mods: self.u8()?,
+            gun_state: self.u16()?,
             armor: self.u16()?,
             book: self.u8()?,
             book_page: self.u8()?,
             spectator: self.bool()?,
+            gun_dirt: self.u8()?,
+            brush: if self.bool()? { Some(self.vec3()?) } else { None },
+            drawer: self.bool()?,
+            held_data: self.u16()?,
+            bench_hold: if self.bool()? { Some((self.stack()?, self.vec3()?)) } else { None },
+        })
+    }
+    fn bench_item(&mut self) -> Option<BenchItem> {
+        Some(BenchItem {
+            id: self.u16()?,
+            stack: self.stack()?,
+            x: self.f32()?,
+            z: self.f32()?,
+            turn: self.f32()?,
+        })
+    }
+    fn bench(&mut self) -> Option<GunBench> {
+        let items = self.list(|r| r.bench_item())?;
+        let next_id = self.u16()?;
+        let slot = |v: u16| (v != u16::MAX).then_some(v);
+        let boxes = [slot(self.u16()?), slot(self.u16()?), slot(self.u16()?)];
+        Some(GunBench {
+            items,
+            next_id,
+            boxes,
+            event: BenchEvent {
+                serial: self.u16()?,
+                kind: self.u8()?,
+                gun: self.u16()?,
+                bit: self.u8()?,
+                gone: self.list(|r| r.bench_item())?,
+                made: self.list(|r| r.u16())?,
+            },
         })
     }
     fn state(&mut self) -> Option<PlayerState> {
@@ -750,6 +851,11 @@ impl Msg {
                 w.f32(*knock);
                 w.u8(*kind);
             }
+            Msg::Bench { p, bench } => {
+                w.u8(47);
+                w.ivec3(*p);
+                w.bench(bench);
+            }
             Msg::Container { p, kind, slots } => {
                 w.u8(40);
                 w.ivec3(*p);
@@ -943,6 +1049,10 @@ impl Msg {
                 knock: r.f32()?,
                 kind: r.u8()?,
             },
+            47 => Msg::Bench {
+                p: r.ivec3()?,
+                bench: r.bench()?,
+            },
             40 => Msg::Container {
                 p: r.ivec3()?,
                 kind: r.u8()?,
@@ -1054,6 +1164,7 @@ mod tests {
             flags: pose_flags::HURT,
             status: status::TYPING,
             gun_mods: 0b1001,
+            gun_state: 0x1c5,
             armor: 0x1234,
             book: book::OPEN | 5,
             book_page: book::HUNGARIAN | 7,
@@ -1127,6 +1238,10 @@ mod tests {
             }],
             falling: vec![(Vec3::Z, 4)],
         });
+        let mut bench = GunBench::default();
+        let id = bench.add(stack, 0.4, -0.1, 1.2);
+        bench.event = BenchEvent { serial: 3, kind: 1, gun: id, bit: 2, gone: bench.items.clone(), made: vec![5, 6] };
+        roundtrip(Msg::Bench { p: IVec3::new(1, 2, 3), bench });
         roundtrip(Msg::Container {
             p: IVec3::new(3, 4, 5),
             kind: container::CHEST,
