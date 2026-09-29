@@ -94,7 +94,7 @@ fn t(x: f32, y: f32, z: f32) -> Mat4 {
 
 /// A limb's frame (`upper`, from its pivot) bent `bend` radians forward at `joint` pixels down
 /// it: the lower half's frame, the same as the limb's when straight.
-pub(crate) fn bent(upper: Mat4, joint: f32, bend: f32) -> Mat4 {
+fn bent(upper: Mat4, joint: f32, bend: f32) -> Mat4 {
     upper * t(0.0, -joint, 0.0) * Mat4::from_rotation_x(bend) * t(0.0, joint, 0.0)
 }
 
@@ -165,11 +165,9 @@ fn gait(p: &PlayerPose) -> Gait {
     let gun = crate::item::GunKind::of(p.held).filter(|_| p.attack <= 0.0 && !p.blocking);
     let both_hands = p.book.is_some() || gun.is_some();
     let free = if both_hands { 0.0 } else { 1.0 };
-    // With a gun, the upper body turns with where the head looks (the gun with it).
-    let aim = if gun.is_some() { look_yaw(p) } else { 0.0 };
     Gait {
         bob,
-        twist: aim - (0.07 + 0.05 * s) * la * ls.cos() * free,
+        twist: -(0.07 + 0.05 * s) * la * ls.cos() * free,
         roll: 0.03 * la * (1.0 + s) * ls.sin() * free,
         lean: SNEAK_LEAN * c + 0.12 * s * (1.0 - c),
     }
@@ -401,9 +399,10 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
         let shoulder_y = 22.0 - SNEAK_DROP * c;
         let right_hand = (look * held.gun).transform_point3(Vec3::ZERO);
         let left_hand = look.transform_point3(held.left_hand);
-        // The shoulders turned with the upper body; a rifle's right elbow out to the side, its
-        // left one down under the handguard (the hand holding it up from below).
-        let stance = look_yaw(p);
+        // A rifle's right elbow out to the side, its left one down under the handguard (the hand
+        // holding it up from below).
+        // (The body is not twisted with a gun: it turns all of it, legs and all.)
+        let stance = 0.0;
         let turn = Mat4::from_rotation_y(stance);
         let (pole_r, pole_l) = if kind.long() {
             (Vec3::new(1.0, -0.4, 0.3), Vec3::new(-0.25, -1.0, 0.1))
@@ -458,14 +457,14 @@ impl LimbSmoother {
 }
 
 /// 0 above `from`, 1 below `to` (`from` > `to`, going down a limb), smooth in between.
-pub(crate) fn blend_down(y: f32, from: f32, to: f32) -> f32 {
+fn blend_down(y: f32, from: f32, to: f32) -> f32 {
     let x = ((from - y) / (from - to)).clamp(0.0, 1.0);
     x * x * (3.0 - 2.0 * x)
 }
 
 /// Heights (model pixels down a limb, from its pivot) where a limb's mesh has a ring of
 /// vertices: every half pixel through the bends, far apart elsewhere.
-pub(crate) fn limb_rings(top: f32, bottom: f32, bends: &[(f32, f32)]) -> Vec<f32> {
+fn limb_rings(top: f32, bottom: f32, bends: &[(f32, f32)]) -> Vec<f32> {
     let mut ys = vec![top, bottom];
     for &(from, to) in bends {
         let mut y = from;
@@ -485,7 +484,7 @@ pub(crate) fn limb_rings(top: f32, bottom: f32, bends: &[(f32, f32)]) -> Vec<f32
 /// `frame` (the limb's transform at that height: blending from one bone to the next through a
 /// joint). Its sides show the rows of their textures for their heights.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn emit_bent_limb(
+fn emit_bent_limb(
     out: &mut Vec<Vertex>,
     frame: impl Fn(f32) -> Mat4,
     min: Vec3,

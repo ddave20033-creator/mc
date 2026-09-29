@@ -209,6 +209,12 @@ pub fn loader_mount(p: IVec3, toward: Vec3, open: f32) -> Option<Mat4> {
     Some(mats[b] * Mat4::from_translation(Vec3::from(RIFLE.bones[b].origin)))
 }
 
+/// Whether a cube with this matrix is there to be found: a part put away is shrunk to nothing
+/// (its matrix cannot be undone, and every ray would seem to hit it).
+fn findable(m: Mat4) -> bool {
+    m.determinant().abs() > 1e-12
+}
+
 /// The loader's cubes where the rifle station's pose puts them (for the mouse to find it in
 /// the drawer): each cube and its matrix.
 pub fn loader_cubes(p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Mat4)> {
@@ -219,7 +225,23 @@ pub fn loader_cubes(p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Ma
         .iter()
         .filter(|c| c.name.starts_with("loader_") && !c.name.starts_with("loader_round"))
         .map(|c| (c, mats[c.bone] * cube_matrix(c)))
+        .filter(|&(_, m)| findable(m))
         .collect()
+}
+
+/// The loader's bay in the rifle station's drawer (the drawer's own pixels): across from the
+/// tools to the split before the boxes, front to back, up to above the loader.
+const LOADER_BAY: (Vec3, Vec3) = (Vec3::new(9.5, 10.6, -5.65), Vec3::new(25.1, 16.0, 7.55));
+
+/// Whether the world point `at` is in the loader's bay of the rifle station's drawer (open
+/// `open`): where the loader goes, and everything about it is found.
+pub fn in_loader_bay(p: IVec3, toward: Vec3, open: f32, at: Vec3) -> bool {
+    let there = Loader { there: true, feed: None };
+    let (mats, _) = posed(&RIFLE, root(p, toward), open, true, [Some(0); 3], there);
+    let Some(b) = find_bone(RIFLE.bones, "drawer") else { return false };
+    let q = mats[b].inverse().transform_point3(at);
+    let (lo, hi) = LOADER_BAY;
+    q.cmpge(lo).all() && q.cmple(hi).all()
 }
 
 /// The loader on its own (an item): its cubes, the unit cube centered on the origin.
@@ -300,7 +322,10 @@ pub fn ammo_boxes(rifle: bool, p: IVec3, toward: Vec3, open: f32) -> Vec<(usize,
     for i in 0..3 {
         let prefix = format!("ammo_box_{i}_");
         for c in md.cubes.iter().filter(|c| c.name.starts_with(&prefix)) {
-            out.push((i, c, mats[c.bone] * cube_matrix(c)));
+            let m = mats[c.bone] * cube_matrix(c);
+            if findable(m) {
+                out.push((i, c, m));
+            }
         }
     }
     out
@@ -323,6 +348,7 @@ pub fn drawer_handle(rifle: bool, p: IVec3, toward: Vec3, open: f32) -> Vec<(&'s
         .iter()
         .filter(|c| is_handle(c))
         .map(|c| (c, mats[c.bone] * cube_matrix(c)))
+        .filter(|&(_, m)| findable(m))
         .collect()
 }
 
@@ -336,7 +362,8 @@ fn brush_cubes(md: &'static Model) -> impl Iterator<Item = &'static Cube> {
 pub fn brush_in_drawer(rifle: bool, p: IVec3, toward: Vec3, open: f32) -> Vec<(&'static Cube, Mat4)> {
     let md = model(rifle);
     let (mats, _) = posed(md, root(p, toward), open, true, [Some(0); 3], Loader::default());
-    brush_cubes(md).map(|c| (c, mats[c.bone] * cube_matrix(c))).collect()
+    brush_cubes(md).map(|c| (c, mats[c.bone] * cube_matrix(c)))
+        .filter(|&(_, m)| findable(m)).collect()
 }
 
 /// The brush held with its bristles' middle at `at`, turned `turn` about the up axis, tipped

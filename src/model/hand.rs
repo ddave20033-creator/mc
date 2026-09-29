@@ -137,54 +137,6 @@ pub struct HandAnim {
     pub scope_across: f32,
 }
 
-/// Where a first-person arm's shoulder is from the eye (blocks: out to the side, down, back),
-/// out of the view below it.
-const FP_SHOULDER: Vec3 = Vec3::new(0.38, -0.56, 0.12);
-/// How much bigger than Minecraft's a handgun's first-person arms are (the rifle's keep 1.75).
-const FP_ARM_SCALE: f32 = 1.5;
-/// A first-person arm's forearm (the elbow to the middle of the fist), in the arm's own units
-/// (Minecraft's arm is 4 across).
-const FP_FOREARM: f32 = 12.0;
-/// How far the upper arm goes on past the shoulder, so its end is never seen.
-const FP_PAST_SHOULDER: f32 = 30.0;
-
-/// A first-person arm holding something: its fist and forearm exactly as `fist` has them (the
-/// arm's frame, the fist at its origin, the forearm running back along +Y: as the model's
-/// animations hold the gun, so it goes through the fist the way it should), then bent at the
-/// elbow, smoothly, up to `shoulder` (world), out of the view.
-fn emit_fp_arm_held(out: &mut Vec<Vertex>, shoulder: Vec3, fist: Mat4, skin: u8, light: [u8; 4], fl: u8) {
-    use super::player::{blend_down, emit_bent_limb, limb_rings};
-    use glam::Quat;
-    let u = fist.x_axis.length();
-    let (_, fore_q, _) = fist.to_scale_rotation_translation();
-    let elbow = fist.transform_point3(Vec3::new(0.0, FP_FOREARM, 0.0));
-    // The upper arm: from the elbow up to the shoulder, turned as little as it can be from the
-    // forearm (its +Y up it).
-    let up_arm = shoulder - elbow;
-    let a = (up_arm.length() / u).max(1.0);
-    let fore_y = fore_q * Vec3::Y;
-    let upper_q = Quat::from_rotation_arc(fore_y, up_arm.normalize_or(fore_y)) * fore_q;
-    const BLEND: f32 = 2.5;
-    let zone = (-a + BLEND, -a - BLEND);
-    let rings = limb_rings(FP_PAST_SHOULDER, -(a + FP_FOREARM + 2.0), &[zone]);
-    // Each ring about the elbow: the upper arm's turn above the bend, the forearm's below.
-    let frame = |y: f32| {
-        let q = upper_q.slerp(fore_q, blend_down(y, zone.0, zone.1));
-        Mat4::from_translation(elbow) * Mat4::from_quat(q) * Mat4::from_scale(Vec3::splat(u)) * Mat4::from_translation(Vec3::new(0.0, a, 0.0))
-    };
-    emit_bent_limb(
-        out,
-        frame,
-        Vec3::new(-2.0, 0.0, -2.0),
-        Vec3::new(2.0, 0.0, 2.0),
-        &rings,
-        ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-        [[255; 3]; 6],
-        light,
-        fl,
-    );
-}
-
 impl HandAnim {
     pub fn new() -> Self {
         Self {
@@ -790,55 +742,29 @@ impl HandAnim {
             let lamp = mods & gun_mod::LIGHT != 0 && mods & gun_mod::LIGHT_ON != 0;
             gun_view::emit(kind, out, Some(&mut glass), &mats, &shown, self.eyepiece.is_some(), self.gun_dirt, lamp, &self.gun_anim(), light, fl);
             self.glass = glass;
-            // The player's own arms where the model has its arms, the fist at the bone's
-            // origin (a handgun's; the rifle keeps its straight ones), reaching from the shoulder (out of the view, below and a little behind
-            // it), bent at the elbow smoothly like the body's (Minecraft's arm, 1.75 times as
-            // big).
+            // The player's own arms where the model has its arms: the fist at the bone's
+            // origin, the arm running back along the bone's +Z (Minecraft's arm, 1.75 times
+            // as big, longer so it reaches out of the view).
+            // (An arm hanging off the gun, the left one, is not held bigger with it.)
             let unit = mats[0].x_axis.length();
-            let right = base.x_axis.truncate().normalize();
-            let up = base.y_axis.truncate().normalize();
-            let back = base.z_axis.truncate().normalize();
-            for (name, side) in [("right_arm_mesh", 1.0), ("left_arm_mesh", -1.0)] {
+            for name in ["right_arm_mesh", "left_arm_mesh"] {
                 let Some(b) = bone(name).filter(|&b| shown[b]) else { continue };
-                if kind.long() {
-                    // The rifle's arms as they were made for it: straight, running back along
-                    // the bone's +Z, longer so they reach out of the view.
-                    let big = mats[b].x_axis.length() / unit.max(1e-9);
-                    let arm = mats[b]
-                        * Mat4::from_translation(Vec3::from(bones[b].origin))
-                        * Mat4::from_scale(Vec3::splat(1.0 / big.max(1e-3)))
-                        * rx(90.0)
-                        * Mat4::from_scale(Vec3::new(1.75, 2.45, 1.75));
-                    emit_box(
-                        out,
-                        arm,
-                        Vec3::new(-2.0, -2.0, -2.0),
-                        Vec3::new(2.0, 10.0, 2.0),
-                        ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-                        [[255; 3]; 6],
-                        light,
-                        fl,
-                    );
-                    continue;
-                }
-                // The fist as the model holds it: the arm's frame at the bone (Minecraft's arm,
-                // the fist at the origin, running back along +Y), not scaled with the gun.
                 let big = mats[b].x_axis.length() / unit.max(1e-9);
-                let mut fist = mats[b]
+                let arm = mats[b]
                     * Mat4::from_translation(Vec3::from(bones[b].origin))
-                    * Mat4::from_scale(Vec3::splat(FP_ARM_SCALE / big.max(1e-3)))
-                    * rx(90.0);
-                // A round being put in by hand is between the fingers: the fist just behind and
-                // below its back end, the two going in together.
-                if side < 0.0 {
-                    if let Some(r) = bone("loose_round").filter(|&r| shown[r] && mats[r].x_axis.length() > 1e-6) {
-                        let round = mats[r].transform_point3(Vec3::from(bones[r].origin));
-                        let at = round + (back * 0.02 - up * 0.035 - right * 0.012) * (unit / VIEW_PX);
-                        fist.w_axis = at.extend(1.0);
-                    }
-                }
-                let shoulder = cam + right * (side * FP_SHOULDER.x) + up * FP_SHOULDER.y + back * FP_SHOULDER.z;
-                emit_fp_arm_held(out, shoulder, fist, skin, light, fl);
+                    * Mat4::from_scale(Vec3::splat(1.0 / big.max(1e-3)))
+                    * rx(90.0)
+                    * Mat4::from_scale(Vec3::new(1.75, 2.45, 1.75));
+                emit_box(
+                    out,
+                    arm,
+                    Vec3::new(-2.0, -2.0, -2.0),
+                    Vec3::new(2.0, 10.0, 2.0),
+                    ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
+                    [[255; 3]; 6],
+                    light,
+                    fl,
+                );
             }
         }
 

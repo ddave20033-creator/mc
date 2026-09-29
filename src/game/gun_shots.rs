@@ -3,7 +3,7 @@
 //! the first-person animations can be checked frame by frame. With `GUN_SHOTS_SIDE=1`, only the
 //! player's own moves, seen from the side (standing, walking, running, sneaking, sneak-walking,
 //! aiming), with each gun and then empty-handed. With `GUN_SHOTS_FP=1`, only the first-person
-//! scenes. With `GUN_SHOTS_TURN=1`, only the three guns
+//! scenes. With `GUN_SHOTS_LIGHT=1`, the pistol's light at night against planks and glass. With `GUN_SHOTS_TURN=1`, only the three guns
 //! held (and aimed) seen from the front by a camera that stays put while the player looks
 //! around to the right and then to the left, to see what the body does. With `GUN_SHOTS_STATION=1`, the
 //! gun stations instead: an AK-47 on the rifle station taken apart and put together again,
@@ -170,6 +170,61 @@ impl Game {
         Vec3::new(x0 as f32 + 0.5, ground as f32 + 1.0, z0 as f32 + 0.5)
     }
 
+    /// `GUN_SHOTS_LIGHT`: at midnight, the pistol with its light on, pointed at a wall of planks
+    /// with a window of glass in it and a stone pillar behind: the light must go through the
+    /// glass (the pillar lit through it) and not through the planks (their shadow on the
+    /// ground and the pillar behind them dark). Pictures from the eyes, from the side, and from
+    /// above behind the player.
+    fn light_shots_step(&mut self, dt: f32, start: Vec3) {
+        use crate::world::{GLASS, PLANKS, STONE};
+        let Some(g) = self.gun_shots.as_mut() else { return };
+        let t0 = g.t;
+        g.t += dt;
+        let (t, dir) = (g.t, g.dir.clone());
+        let crossed = |at: f32| t0 < at && t >= at;
+        let base = start.floor().as_ivec3();
+        if t0 == 0.0 {
+            let (x, y) = (base.x + 4, base.y);
+            for z in base.z - 3..=base.z + 3 {
+                for dy in 0..3 {
+                    let window = (base.z - 1..=base.z).contains(&z) && dy >= 1;
+                    self.set_block(IVec3::new(x, y + dy, z), if window { GLASS } else { PLANKS });
+                }
+            }
+            for z in base.z - 2..=base.z + 1 {
+                for dy in 0..3 {
+                    self.set_block(IVec3::new(x + 5, y + dy, z), STONE);
+                }
+            }
+            let mut pistol = Stack::one(crate::item::PISTOL);
+            set_gun_mods(&mut pistol, gun_mod::LIGHT | gun_mod::LIGHT_ON);
+            set_gun_rounds(&mut pistol, 12);
+            self.inventory.slots[0] = Some(pistol);
+            self.hotbar_slot = 0;
+            self.player.pos = start;
+            self.player.vel = Vec3::ZERO;
+            self.yaw = 0.0;
+            self.pitch = -0.12;
+            self.body_yaw = 0.0;
+            self.camera.mode = 0;
+            self.keys.clear();
+            self.right_down = false;
+        }
+        for (at, name, mode) in [(2.0, "fp", 0u8), (4.0, "side", SIDE_VIEW), (6.0, "behind", 1)] {
+            if crossed(at - 1.2) {
+                self.camera.mode = mode;
+            }
+            if crossed(at) {
+                self.gpu.capture = Some(dir.join(format!("light_{name}.png")));
+            }
+        }
+        if t > 6.5 {
+            self.camera.mode = 0;
+            println!("light shots done");
+            self.quit = true;
+        }
+    }
+
     /// `GUN_SHOTS_STATION`: the stations, pictures taken at set moments (seconds, name).
     fn station_shots_step(&mut self, dt: f32, start: Vec3) {
         use crate::entity::GunBench;
@@ -231,7 +286,7 @@ impl Game {
             bench.loader_mag = Some(part);
             bench.boxes[0] = Some(box_with(0, RIFLE_ROUND, 60));
             self.block_entities.benches.insert(rifle, bench);
-            let mut pistol = Stack::one(PISTOL);
+            let mut pistol = Stack::one(crate::item::PISTOL);
             set_gun_rounds(&mut pistol, 12);
             let mut bench = GunBench::default();
             bench.add(pistol, -0.2, 0.0, 0.0);
@@ -267,6 +322,37 @@ impl Game {
                 if t > 9.2 && ((t0 - 9.2) / 0.05).floor() < ((t - 9.2) / 0.05).floor() {
                     self.gpu.capture = Some(g.dir.join(format!("station_feed_{:02}.png", ((t - 9.2) / 0.05) as u32)));
                 }
+            }
+        }
+        // What a click would do everywhere in the view of the drawer (`bench_pick_map`), with
+        // the loader as it is (a magazine on it) and with nothing, a magazine and the loader in
+        // hand: the loader must only answer in its bay.
+        if crossed(8.6) {
+            if let Some(dir) = self.gun_shots.as_ref().map(|g| g.dir.clone()) {
+                let keep = self.block_entities.benches.get(&rifle).map(|b| (b.loader, b.loader_mag));
+                let set = |g: &mut Self, loader: bool, mag: Option<Stack>| {
+                    if let Some(b) = g.block_entities.benches.get_mut(&rifle) {
+                        b.loader = loader;
+                        b.loader_mag = mag;
+                    }
+                };
+                let held_mag = Some(Stack::one(AK_MAGAZINE));
+                let cases: [(&str, bool, bool, Option<Stack>); 4] = [
+                    ("empty_hand_mag_on", true, true, None),
+                    ("empty_hand_bare", true, false, None),
+                    ("holding_mag", true, false, held_mag),
+                    ("holding_loader", false, false, Some(Stack::one(MAG_LOADER))),
+                ];
+                for (name, loader, mag_on, cursor) in cases {
+                    set(self, loader, if mag_on { keep.and_then(|k| k.1) } else { None });
+                    self.cursor = cursor;
+                    self.bench_pick_map(rifle, &dir.join(format!("station_pickmap_{name}.png")));
+                }
+                self.cursor = None;
+                if let Some((loader, mag)) = keep {
+                    set(self, loader, mag);
+                }
+                self.gpu.capture = Some(dir.join("station_pickmap_view.png"));
             }
         }
         if crossed(10.6) {
@@ -346,7 +432,9 @@ impl Game {
     /// Gun shot mode, every frame while playing.
     pub(super) fn gun_shots_step(&mut self, dt: f32) {
         self.hide_hud = false;
-        self.time_of_day = 0.25;
+        let lamp_test = std::env::var("GUN_SHOTS_LIGHT").is_ok();
+        // (the weapon light is looked at at midnight)
+        self.time_of_day = if lamp_test { 0.75 } else { 0.25 };
         self.mouse_delta = Vec2::ZERO;
         let Some(g) = self.gun_shots.as_mut() else {
             return;
@@ -372,6 +460,10 @@ impl Game {
         }
         if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_STATION").is_ok()) {
             self.station_shots_step(dt, start);
+            return;
+        }
+        if let (Some(start), true) = (g.start, lamp_test) {
+            self.light_shots_step(dt, start);
             return;
         }
         let side = std::env::var("GUN_SHOTS_SIDE").is_ok();

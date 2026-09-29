@@ -533,6 +533,7 @@ impl Game {
         } else {
             (view_distance * 0.6, view_distance - 8.0)
         };
+        let spots = self.gun_spots(in_world, cam);
         let ubo = FrameUbo {
             view_proj: view.view_proj.to_cols_array(),
             inv_view_proj: view.view_proj.inverse().to_cols_array(),
@@ -571,7 +572,8 @@ impl Game {
                 self.time,
             ],
             held_lights: self.held_lights(in_world, cam),
-            spots: self.gun_spots(in_world, cam),
+            spots: spots.0,
+            spot_view_proj: spots.1,
             detail: [
                 self.gpu.extent.height as f32 * 0.5
                     / (self.detail_fov.to_radians() * 0.5).tan(),
@@ -593,7 +595,9 @@ impl Game {
     /// (each with its own phase).
     /// Weapon lights switched on (this player's and the others'), nearest first: each a pair
     /// of (position, 1) and (direction, the cosine of the cone's edge).
-    fn gun_spots(&self, in_world: bool, cam: Vec3) -> [[f32; 4]; 2 * crate::render::MAX_SPOTS] {
+    /// And each one's view, for its shadow map: a little wider than its cone, out to its reach.
+    #[allow(clippy::type_complexity)]
+    fn gun_spots(&self, in_world: bool, cam: Vec3) -> ([[f32; 4]; 2 * crate::render::MAX_SPOTS], [[f32; 16]; crate::render::MAX_SPOTS]) {
         let mut spots: Vec<(Vec3, Vec3)> = Vec::new();
         if in_world && self.player.spawned && !self.spectator() {
             spots.extend(self.own_gun_light());
@@ -613,11 +617,17 @@ impl Game {
         }
         let edge = 17f32.to_radians().cos();
         let mut out = [[0.0; 4]; 2 * crate::render::MAX_SPOTS];
+        let mut views = [[0.0; 16]; crate::render::MAX_SPOTS];
+        let fov = 2.0 * (17f32 + 3.0).to_radians();
+        let proj = Mat4::perspective_rh(fov, 1.0, 0.2, crate::render::SPOT_REACH);
         for (i, (p, d)) in spots.into_iter().take(crate::render::MAX_SPOTS).enumerate() {
             out[2 * i] = [p.x, p.y, p.z, 1.0];
             out[2 * i + 1] = [d.x, d.y, d.z, edge];
+            let d = d.normalize_or(Vec3::NEG_Z);
+            let up = if d.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
+            views[i] = (proj * Mat4::look_to_rh(p, d, up)).to_cols_array();
         }
-        out
+        (out, views)
     }
 
     fn held_lights(&self, in_world: bool, cam: Vec3) -> [[f32; 4]; MAX_HELD_LIGHTS] {

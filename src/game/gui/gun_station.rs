@@ -1195,6 +1195,28 @@ fn pick(table: &Table, pieces: &[Piece], flats: &[BenchItem], o: Vec3, d: Vec3) 
     best
 }
 
+/// How far along the ray `o`, `d` it meets the level plane at height `y` (ahead of it).
+fn hit_plane_t(o: Vec3, d: Vec3, y: f32) -> Option<f32> {
+    (d.y.abs() > 1e-6).then(|| (y - o.y) / d.y).filter(|&t| t > 0.0)
+}
+
+/// Whether something `t` along the ray `o`, `d` is behind the table's top (its slab, top and
+/// front edge): what lies in the drawer under it. A ray that is below the slab's underside
+/// inside the table's outline went through the slab.
+fn hidden_by_top(table: &Table, o: Vec3, d: Vec3, t: f32) -> bool {
+    /// How thick the table's top is (blocks).
+    const SLAB: f32 = 0.12;
+    if d.y.abs() < 1e-6 {
+        return false;
+    }
+    let under = (table.center.y - SLAB - o.y) / d.y;
+    if under <= 0.0 || t <= under + 1e-3 {
+        return false;
+    }
+    let (x, z) = table.local(o + d * under);
+    x.abs() <= table.wide * 0.5 && z.abs() <= 0.5
+}
+
 /// A box of rounds standing on the table: from the box's pixels (its bottom's middle at the
 /// origin, its front toward +Z) to the world; its front toward the table's front.
 fn box_matrix(table: &Table, it: &BenchItem) -> Mat4 {
@@ -1502,59 +1524,7 @@ impl Game {
         let mut drawer_spot = None;
         let drawer = self.bench_drawer.get(&p).copied().unwrap_or(0.0);
         if ready && !over_inventory {
-            found = pick(&table, &pieces, &flats, o, d);
-            if !self.bench_brush && drawer > 0.8 {
-                for (i, c, m) in crate::model::gun_station::ammo_boxes(table.rifle(), p, table.toward, drawer) {
-                    let inv = m.inverse();
-                    let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
-                    if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
-                        if found.is_none_or(|(_, bt)| t < bt) {
-                            found = Some((Pick::Ammo(i as u8), t));
-                        }
-                    }
-                }
-            }
-            if !self.bench_brush && drawer > 0.8 && bench.loader && table.rifle() {
-                // The loader itself (its feed tower); its flat base, where a magazine lies, looks
-                // like the drawer's floor: only with a magazine in hand to lay on it.
-                let laying = self.cursor.is_some_and(|st| is_gun_magazine(st.item)) && bench.loader_mag.is_none();
-                for (c, m) in crate::model::gun_station::loader_cubes(p, table.toward, drawer) {
-                    if c.name == "loader_base" && !laying {
-                        continue;
-                    }
-                    let inv = m.inverse();
-                    let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
-                    if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
-                        if found.is_none_or(|(_, bt)| t < bt) {
-                            found = Some((Pick::Loader, t));
-                        }
-                    }
-                }
-            }
-            if !self.bench_brush && self.cursor.is_none() && drawer > 0.8 {
-                for (c, m) in crate::model::gun_station::brush_in_drawer(table.rifle(), p, table.toward, drawer) {
-                    let inv = m.inverse();
-                    let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
-                    if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
-                        if found.is_none_or(|(_, bt)| t < bt) {
-                            found = Some((Pick::Brush, t));
-                        }
-                    }
-                }
-            }
-            // The handle shuts the drawer (with something held too): the mouse on it is always
-            // on it, whatever lies in the drawer behind it.
-            if !self.bench_brush {
-                for (c, m) in crate::model::gun_station::drawer_handle(table.rifle(), p, table.toward, drawer) {
-                    let inv = m.inverse();
-                    let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
-                    if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
-                        if !matches!(found, Some((Pick::Handle, bt)) if bt <= t) {
-                            found = Some((Pick::Handle, t));
-                        }
-                    }
-                }
-            }
+            found = self.bench_pick(p, &table, &bench, &pieces, &flats, drawer, o, d);
             spot = hit_plane(o, d, table.center.y)
                 .map(|q| table.local(q))
                 .filter(|&(x, z)| table.on(x, z));
@@ -1616,9 +1586,6 @@ impl Game {
         self.bench_hover_ok = self.cursor.is_some() && ok;
 
         let (left, right) = (self.ui.pressed, self.ui.right_pressed);
-        // The loader's place: the middle of the rifle station's drawer floor, under the mouse.
-        let loader_place = table.rifle()
-            && drawer_spot.map(|q| table.local(q)).is_some_and(|(x, _)| (-0.45..0.6).contains(&x));
         self.bench_scrubbing = false;
         if self.bench_brush {
             // The brush: where the mouse points, scrubbing what it is held down on.
@@ -1642,7 +1609,6 @@ impl Game {
                     (Some(r), _) if over_inventory => self.click_slot(Container::GunStation(p), r, false, false),
                     (_, Some(Pick::Ammo(i))) => self.bench_box_slot(p, i as usize, false),
                     (_, Some(Pick::Loader)) => self.bench_loader_click(p, &table),
-                    _ if loader_place && self.cursor.is_some_and(|st| st.item == MAG_LOADER) => self.bench_loader_click(p, &table),
                     _ => self.bench_put(p, &table, pick, spot, false),
                 }
             }
@@ -1650,7 +1616,6 @@ impl Game {
             match (self.cursor, pick) {
                 (_, Some(Pick::Ammo(i))) => self.bench_box_slot(p, i as usize, right),
                 (_, Some(Pick::Loader)) => self.bench_loader_click(p, &table),
-                (Some(st), None) if loader_place && st.item == MAG_LOADER => self.bench_loader_click(p, &table),
                 (_, Some(Pick::Handle)) => {
                     self.bench_in_drawer = !self.bench_in_drawer;
                     self.bench_dwell = 0.0;
@@ -1711,8 +1676,8 @@ impl Game {
         let Some(st) = self.cursor else { return pick.is_some() };
         let item = |id: u16| bench.get(id).map(|i| i.stack);
         match pick {
-            // A magazine onto the loader when there is none on it.
-            Some(Pick::Loader) => is_gun_magazine(st.item) && bench.loader_mag.is_none(),
+            // A magazine onto the loader when there is none on it; the loader into its bay.
+            Some(Pick::Loader) => self.loader_can(bench),
             Some(Pick::Item(id) | Pick::Mod(id, _) | Pick::Mag(id)) => {
                 let Some(t) = item(id) else { return false };
                 if let Some(bit) = attachment_bit(st.item) {
@@ -1945,6 +1910,122 @@ impl Game {
         self.bench_changed(p, None);
     }
 
+    /// What the mouse is on at the station whose left block is `p` (the ray `o`, `d`): the
+    /// nearest thing there is to click, and how far along the ray. What lies in the drawer is
+    /// only found with the drawer out; what the table's top hides is not found.
+    #[allow(clippy::too_many_arguments)]
+    fn bench_pick(&self, p: IVec3, table: &Table, bench: &GunBench, pieces: &[Piece], flats: &[BenchItem], drawer: f32, o: Vec3, d: Vec3) -> Option<(Pick, f32)> {
+    let mut found = pick(table, pieces, flats, o, d);
+    if !self.bench_brush && drawer > 0.8 {
+        for (i, c, m) in crate::model::gun_station::ammo_boxes(table.rifle(), p, table.toward, drawer) {
+            let inv = m.inverse();
+            let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
+            if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
+                if found.is_none_or(|(_, bt)| t < bt) {
+                    found = Some((Pick::Ammo(i as u8), t));
+                }
+            }
+        }
+    }
+    // The loader's bay, the middle of the rifle station's drawer: the mouse on anything
+    // in it (the loader, the magazine on it, the bay's floor) is on the loader, when
+    // there is something to do with it; nowhere else is.
+    if !self.bench_brush && drawer > 0.8 && table.rifle() && self.loader_can(bench) {
+        let mut near = hit_plane_t(o, d, table.center.y - DRAWER_DEPTH);
+        if bench.loader {
+            for (c, m) in crate::model::gun_station::loader_cubes(p, table.toward, drawer) {
+                let inv = m.inverse();
+                let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
+                if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
+                    near = Some(near.map_or(t, |n: f32| n.min(t)));
+                }
+            }
+        }
+        if let Some(t) = near.filter(|&t| crate::model::gun_station::in_loader_bay(p, table.toward, drawer, o + d * t)) {
+            if found.is_none_or(|(k, bt)| k == Pick::Loader || t < bt) {
+                found = Some((Pick::Loader, t));
+            }
+        }
+    }
+    if !self.bench_brush && self.cursor.is_none() && drawer > 0.8 {
+        for (c, m) in crate::model::gun_station::brush_in_drawer(table.rifle(), p, table.toward, drawer) {
+            let inv = m.inverse();
+            let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
+            if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
+                if found.is_none_or(|(_, bt)| t < bt) {
+                    found = Some((Pick::Brush, t));
+                }
+            }
+        }
+    }
+    // The handle shuts the drawer (with something held too): the mouse on it is always
+    // on it, whatever lies in the drawer behind it.
+    if !self.bench_brush {
+        for (c, m) in crate::model::gun_station::drawer_handle(table.rifle(), p, table.toward, drawer) {
+            let inv = m.inverse();
+            let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
+            if let Some(t) = ray_box(inv.transform_point3(o), inv.transform_vector3(d), a.min(b), a.max(b), 64.0) {
+                if !matches!(found, Some((Pick::Handle, bt)) if bt <= t) {
+                    found = Some((Pick::Handle, t));
+                }
+            }
+        }
+    }
+    // The table's top hides what is behind it: what is in the drawer (under the top) is
+    // not there to click where the mouse is on the top.
+    if found.is_some_and(|(_, t)| hidden_by_top(table, o, d, t)) {
+        found = None;
+    }
+    found
+    }
+
+    /// `GUN_SHOTS_STATION`: a map of what a click would do at every point of the view (the
+    /// station at `p`, with what is on the mouse now), written as a picture beside the view's
+    /// own: the loader's bay green, the boxes of rounds orange, the brush blue, the handle
+    /// white, what lies on the table red, nothing black.
+    pub(in crate::game) fn bench_pick_map(&self, p: IVec3, path: &std::path::Path) {
+        let Some(table) = self.bench_table(p) else { return };
+        let (w, h) = (self.ui.w, self.ui.h);
+        let view = Screen2 { view_proj: self.view_proj, w, h };
+        let bench = self.block_entities.benches.get(&p).cloned().unwrap_or_default();
+        let (pieces, flats) = scene(&table, &bench, self.bench_time(p));
+        let drawer = self.bench_drawer.get(&p).copied().unwrap_or(0.0);
+        let (mw, mh) = ((w / 4.0) as u32, (h / 4.0) as u32);
+        let mut px = Vec::with_capacity((mw * mh * 3) as usize);
+        for y in 0..mh {
+            for x in 0..mw {
+                let (o, d) = view.ray(Vec2::new(x as f32 * 4.0 + 2.0, y as f32 * 4.0 + 2.0));
+                let c = match self.bench_pick(p, &table, &bench, &pieces, &flats, drawer, o, d).map(|(k, _)| k) {
+                    Some(Pick::Loader) => [40, 220, 60],
+                    Some(Pick::Ammo(_)) => [240, 150, 30],
+                    Some(Pick::Brush) => [60, 120, 250],
+                    Some(Pick::Handle) => [240, 240, 240],
+                    Some(_) => [220, 40, 40],
+                    None => [0, 0, 0],
+                };
+                px.extend_from_slice(&c);
+            }
+        }
+        if let Ok(f) = std::fs::File::create(path) {
+            let mut e = png::Encoder::new(std::io::BufWriter::new(f), mw, mh);
+            e.set_color(png::ColorType::Rgb);
+            if let Ok(mut wr) = e.write_header() {
+                let _ = wr.write_image_data(&px);
+            }
+        }
+    }
+
+    /// Whether a click in the loader's bay does something, with what is held: the loader put
+    /// in (held, none there), a magazine laid on it (held, the loader there and bare), or taken
+    /// out (empty-handed: the magazine on it, or the loader).
+    fn loader_can(&self, bench: &GunBench) -> bool {
+        match self.cursor {
+            None => bench.loader,
+            Some(st) if st.item == MAG_LOADER => !bench.loader,
+            Some(st) => is_gun_magazine(st.item) && bench.loader && bench.loader_mag.is_none(),
+        }
+    }
+
     /// A click on the rifle station's magazine loader (or with one held, in its drawer): the
     /// loader put in the middle of the drawer, a magazine laid on it (it fills it from the
     /// boxes beside it), the magazine taken off it, or the loader itself taken out when it is
@@ -2120,6 +2201,23 @@ mod tests {
             }
         }
         (lo, hi)
+    }
+
+    #[test]
+    fn the_top_hides_the_drawer_under_it() {
+        let t = table();
+        // Looking down onto the top's middle: something under the top's slab there is hidden,
+        // what lies on the top is not.
+        let o = t.center + Vec3::new(0.0, 1.0, 0.8);
+        let d = (t.center - o).normalize();
+        let top = (o - t.center).length();
+        assert!(hidden_by_top(&t, o, d, top + 0.3));
+        assert!(!hidden_by_top(&t, o, d, top - 0.02));
+        // Out in front of the table, looking into the open drawer below the top's level: seen.
+        let drawer = t.center + t.toward * 0.7 - Vec3::Y * 0.2;
+        let o = drawer + Vec3::new(0.0, 0.6, 0.6);
+        let d = (drawer - o).normalize();
+        assert!(!hidden_by_top(&t, o, d, (drawer - o).length()));
     }
 
     #[test]

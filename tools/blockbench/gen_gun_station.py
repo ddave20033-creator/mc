@@ -284,6 +284,10 @@ drawer = [
     cube("drawer_side_r", [DR - 0.65, 10.95, -6], [DR - 0.3, 13.6, 7.56], "drawer", [dark("west")]),
     cube("drawer_back", [DL + 0.65, 10.95, -6], [DR - 0.65, 13.6, -5.65], "drawer", [dark("south")]),
     cube("drawer_split", [9.1 + W, 10.95, -5.65], [9.3 + W, 12.3, 7.56], "drawer"),
+] + ([
+    # (the rifle station's loader has its own bay in the middle: split off from the tools too)
+    cube("drawer_split_tools", [9.1, 10.95, -5.65], [9.3, 12.3, 7.56], "drawer"),
+] if RIFLE else []) + [
     # the left side: cleaning (a rod, oil, punches, patches; the brush is its own group)
     cube("rod", [-5.6, 10.95, -4.8], [-5.2, 11.35, 5.2], "metal", [brushed]),
     cube("rod_handle", [-5.8, 10.95, 5.2], [-5.0, 11.75, 7.0], "wood", [wood_grain]),

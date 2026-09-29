@@ -81,17 +81,40 @@ float shadowAt(vec3 p, vec3 n) {
     vec2 uv = c.xy * 0.5 + 0.5;
     if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 || c.z >= 1.0) return 1.0;
     float t = frame.misc.z;
+    // (the sun's square is the top of the shadow image)
+    uv.y *= SHADOW_SUN_V;
     // 4x4 grid of bilinear-filtered comparisons: soft, stable edges.
     float s = 0.0;
     for (int x = 0; x < 4; x++) {
         for (int y = 0; y < 4; y++) {
-            vec2 o = (vec2(x, y) - 1.5) * t;
+            vec2 o = (vec2(x, y) - 1.5) * t * vec2(1.0, SHADOW_SUN_V);
             s += texture(shadowMap, vec3(uv + o, c.z - 0.0003));
         }
     }
     s /= 16.0;
     float edge = max(abs(c.x), abs(c.y));
     return mix(s, 1.0, smoothstep(0.8, 1.0, edge));
+}
+
+// How much of weapon light `i`'s light gets to the point `p` (surface normal `n`): its shadow
+// map, a 3x3 grid of filtered comparisons for a soft edge.
+float spotShadow(int i, vec3 p, vec3 n) {
+    vec4 lp = frame.spotViewProj[i] * vec4(p + n * 0.05, 1.0);
+    if (lp.w <= 0.0) return 0.0;
+    vec3 c = lp.xyz / lp.w;
+    vec2 uv = c.xy * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 || c.z >= 1.0) return 1.0;
+    // (kept off the square's edge, so the filter does not reach the next one)
+    uv = clamp(uv, vec2(2.0 / 1024.0), vec2(1.0 - 2.0 / 1024.0));
+    vec2 at = vec2((float(i) + uv.x) * SHADOW_SPOT_U, SHADOW_SUN_V + uv.y * SHADOW_SPOT_V);
+    vec2 texel = vec2(SHADOW_SPOT_U, SHADOW_SPOT_V) / 1024.0;
+    float s = 0.0;
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            s += texture(shadowMap, vec3(at + vec2(x, y) * texel, c.z - 0.00004));
+        }
+    }
+    return s / 9.0;
 }
 
 void main() {
@@ -281,7 +304,9 @@ void main() {
         float hot = smoothstep(mix(sd.w, 1.0, 0.75), 1.0, along) * 0.6;
         float fall = max(0.0, 1.0 - d / 26.0);
         float facing = plant ? 0.8 : max(dot(N, -L), 0.0) * 0.85 + 0.15;
-        light += vec3(0.95, 0.97, 1.0) * (cone + hot) * fall * fall * facing * 2.4 * sp.w;
+        // Not through blocks (glass lets it through): its shadow map.
+        float seen = spotShadow(i, vWorld, N);
+        light += vec3(0.95, 0.97, 1.0) * (cone + hot) * fall * fall * facing * 2.4 * sp.w * seen;
     }
     vec3 col = albedo * (light * ao + vec3(0.02));
     if (emissive) col = albedo * 1.4;

@@ -1,9 +1,10 @@
-//! Sound: the effects are synthesized when the game starts (there are no sound files) and
-//! played through the default output device by a small mixer. A sound placed in the world
+//! Sound: the effects are synthesized when the game starts, the guns' from recordings (`samples`)
+//! built into the game, and played through the default output device by a small mixer. A sound placed in the world
 //! is panned between the ears, gets quieter with distance and arrives a little late from
 //! far away; looping sounds (a burning furnace) fade in and out as their sources come and
 //! go. Without an output device everything here quietly does nothing.
 
+mod samples;
 mod synth;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -38,9 +39,19 @@ pub enum Sound {
     SmeltDone,
     ArmorEquip,
     ArmorHit,
+    ShotRevolver,
+    /// The rifle's: its magazine out and in, its bolt let go.
+    MagOutRifle,
+    MagInRifle,
+    BoltRifle,
+    /// The revolver's: a speedloader letting its rounds go, one round pushed in, the cylinder
+    /// swung shut.
+    SpeedloaderIn,
+    RoundIn,
+    CylinderShut,
 }
 
-pub const SOUNDS: [Sound; 19] = [
+pub const SOUNDS: [Sound; 26] = [
     Sound::ShotPistol,
     Sound::ShotRifle,
     Sound::ShotSilenced,
@@ -60,6 +71,13 @@ pub const SOUNDS: [Sound; 19] = [
     Sound::SmeltDone,
     Sound::ArmorEquip,
     Sound::ArmorHit,
+    Sound::ShotRevolver,
+    Sound::MagOutRifle,
+    Sound::MagInRifle,
+    Sound::BoltRifle,
+    Sound::SpeedloaderIn,
+    Sound::RoundIn,
+    Sound::CylinderShut,
 ];
 
 impl Sound {
@@ -67,7 +85,7 @@ impl Sound {
     fn reach(self) -> (f32, f32) {
         match self {
             Sound::Explosion => (12.0, 260.0),
-            Sound::ShotPistol => (7.0, 170.0),
+            Sound::ShotPistol | Sound::ShotRevolver => (7.0, 170.0),
             Sound::ShotRifle => (10.0, 240.0),
             Sound::ShotSilenced => (2.0, 32.0),
             Sound::CaseBrass | Sound::DryFire => (1.0, 14.0),

@@ -165,7 +165,8 @@ fn shot_sound(kind: GunKind, silenced: bool) -> Sound {
         return Sound::ShotSilenced;
     }
     match kind {
-        GunKind::Pistol | GunKind::Revolver => Sound::ShotPistol,
+        GunKind::Pistol => Sound::ShotPistol,
+        GunKind::Revolver => Sound::ShotRevolver,
         GunKind::Ak => Sound::ShotRifle,
     }
 }
@@ -308,21 +309,23 @@ impl Game {
             let finished = t + dt >= length;
             let at = self.player.eye();
             let due = |k: f32| (was < k && now >= k) || finished;
+            // A rifle's magazine and bolt sound its own.
+            let rifle = held.is_some_and(|(_, k)| k.long());
             let takes_out = matches!(kind, ReloadKind::Swap | ReloadKind::Eject);
             if takes_out && !self.guns.plan.out_done && due(RELOAD_MAG_OUT) {
                 self.guns.plan.out_done = true;
-                self.audio.play(Sound::MagOut, Some(at), 0.8);
+                self.audio.play(if rifle { Sound::MagOutRifle } else { Sound::MagOut }, Some(at), 0.8);
                 self.magazine_out();
             }
             let puts_in = matches!(kind, ReloadKind::Swap | ReloadKind::Insert);
             if puts_in && !self.guns.plan.in_done && due(RELOAD_MAG_IN) {
                 self.guns.plan.in_done = true;
-                self.audio.play(Sound::MagIn, Some(at), 0.9);
+                self.audio.play(if rifle { Sound::MagInRifle } else { Sound::MagIn }, Some(at), 0.9);
                 self.magazine_in();
             }
             if rack && !self.guns.plan.rack_done && due(RELOAD_SLIDE) {
                 self.guns.plan.rack_done = true;
-                self.audio.play(Sound::SlideRelease, Some(at), 0.9);
+                self.audio.play(if rifle { Sound::BoltRifle } else { Sound::SlideRelease }, Some(at), 0.9);
                 self.rack_slide();
             }
             self.guns.reload = (!finished).then_some(t + dt);

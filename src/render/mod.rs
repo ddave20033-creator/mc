@@ -42,15 +42,29 @@ fn as_bytes<T: Copy>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts(v as *const T as *const u8, size_of::<T>()) }
 }
 
+impl Default for FrameUbo {
+    fn default() -> Self {
+        // (all zero: every field is floats)
+        unsafe { std::mem::zeroed() }
+    }
+}
+
 /// Weapon lights at once (`FrameUbo::spots`).
 pub const MAX_SPOTS: usize = 4;
+/// Each weapon light's shadow map: a square this big in a strip under the sun's in the same
+/// depth image (as frame.glsl's `SHADOW_SPOT_*` reads them), one beside the other.
+pub const SPOT_SHADOW: u32 = 1024;
+/// The shadow depth image's height: the sun's square, and the weapon lights' strip under it.
+pub const SHADOW_HEIGHT: u32 = SHADOW_SIZE + SPOT_SHADOW;
+/// How far a weapon light reaches (blocks): its shadow map's far end.
+pub const SPOT_REACH: f32 = 30.0;
 
 /// Must match `heldLights` in frame.glsl.
 pub const MAX_HELD_LIGHTS: usize = 8;
 
 /// Mirrors `FrameData` in shaders/frame.glsl (std140, all vec4/mat4).
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct FrameUbo {
     pub view_proj: [f32; 16],
     pub inv_view_proj: [f32; 16],
@@ -70,6 +84,8 @@ pub struct FrameUbo {
     /// x: how many pixels a block at distance 1 covers (detail too small for the screen is
     /// simplified by it).
     pub detail: [f32; 4],
+    /// Each weapon light's view (its shadow map's): what it lights, from where it is.
+    pub spot_view_proj: [[f32; 16]; MAX_SPOTS],
 }
 
 #[repr(C)]
@@ -732,7 +748,7 @@ impl Renderer {
     pub fn new(gpu: &Gpu, block_levels: &[Vec<u8>], font_atlas: &[u8]) -> Self {
         assert_eq!(size_of::<Vertex>(), 32);
         assert_eq!(size_of::<UiVertex>(), 52);
-        assert_eq!(size_of::<FrameUbo>(), 304 + 16 * MAX_HELD_LIGHTS + 32 * MAX_SPOTS + 16);
+        assert_eq!(size_of::<FrameUbo>(), 304 + 16 * MAX_HELD_LIGHTS + 32 * MAX_SPOTS + 16 + 64 * MAX_SPOTS);
 
         let block_tex = Texture::new(
             gpu,
@@ -761,7 +777,7 @@ impl Renderer {
                 d,
                 &gpu.mem_props,
                 SHADOW_SIZE,
-                SHADOW_SIZE,
+                SHADOW_HEIGHT,
                 1,
                 1,
                 SHADOW_FORMAT,
@@ -793,7 +809,7 @@ impl Renderer {
                         .render_pass(shadow_pass)
                         .attachments(&shadow_views)
                         .width(SHADOW_SIZE)
-                        .height(SHADOW_SIZE)
+                        .height(SHADOW_HEIGHT)
                         .layers(1),
                     None,
                 )
@@ -1467,8 +1483,15 @@ impl Renderer {
             };
 
             marks[0] = std::time::Instant::now();
-            // ---- Shadow pass
+            // ---- Shadow pass (the sun's, and the weapon lights' under it)
             let area = vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D {
+                    width: SHADOW_SIZE,
+                    height: SHADOW_HEIGHT,
+                },
+            };
+            let sun_area = vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: vk::Extent2D {
                     width: SHADOW_SIZE,
@@ -1503,7 +1526,7 @@ impl Renderer {
                         max_depth: 1.0,
                     }],
                 );
-                d.cmd_set_scissor(cmd, 0, &[area]);
+                d.cmd_set_scissor(cmd, 0, &[sun_area]);
                 d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.shadow_pipe);
                 d.cmd_bind_descriptor_sets(
                     cmd,
@@ -1581,6 +1604,54 @@ impl Renderer {
                 if en > 0 {
                     d.cmd_bind_vertex_buffers(cmd, 0, &[self.dyn_bufs[slot].handle], &[0]);
                     d.cmd_draw(cmd, en, 1, e0, 0);
+                }
+            }
+            // Each weapon light's shadow map: the blocks around it, seen from it (glass, grass and
+            // flowers left out: the light goes through them), in its square of the strip.
+            for k in 0..MAX_SPOTS {
+                let at = f.ubo.spots[2 * k];
+                if at[3] <= 0.0 {
+                    continue;
+                }
+                let at = Vec3::new(at[0], at[1], at[2]);
+                let vp = Mat4::from_cols_array(&f.ubo.spot_view_proj[k]);
+                let tile = vk::Rect2D {
+                    offset: vk::Offset2D { x: (k as u32 * SPOT_SHADOW) as i32, y: SHADOW_SIZE as i32 },
+                    extent: vk::Extent2D { width: SPOT_SHADOW, height: SPOT_SHADOW },
+                };
+                d.cmd_set_viewport(
+                    cmd,
+                    0,
+                    &[vk::Viewport {
+                        x: tile.offset.x as f32,
+                        y: tile.offset.y as f32,
+                        width: SPOT_SHADOW as f32,
+                        height: SPOT_SHADOW as f32,
+                        min_depth: 0.0,
+                        max_depth: 1.0,
+                    }],
+                );
+                d.cmd_set_scissor(cmd, 0, &[tile]);
+                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.shadow_pipe);
+                d.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, self.world_layout, 0, &[world_set], &[]);
+                d.cmd_push_constants(cmd, self.world_layout, stages, 0, as_bytes(&push(vp, 5.0)));
+                let seen = Frustum::new(vp);
+                let reach = (SPOT_REACH / 16.0).ceil() as i32 + 1;
+                let (ccx, ccz) = ((at.x / 16.0).floor() as i32, (at.z / 16.0).floor() as i32);
+                for dz in -reach..=reach {
+                    for dx in -reach..=reach {
+                        let Some(c) = self.chunks.get(&(ccx + dx, ccz + dz)) else { continue };
+                        let Some(r) = c.mesh else { continue };
+                        // Only the blocks (and the outside of leaves): grass and flowers cast no
+                        // shadow of the light, nor do the faces inside leaves.
+                        if c.solid == 0 || !seen.visible(c.min, c.max) {
+                            continue;
+                        }
+                        let b = self.arena.buffer(r);
+                        d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[r.offset]);
+                        d.cmd_bind_index_buffer(cmd, b, r.offset + c.index_offset, vk::IndexType::UINT32);
+                        d.cmd_draw_indexed(cmd, c.solid, 1, 0, 0, 0);
+                    }
                 }
             }
             d.cmd_end_render_pass(cmd);

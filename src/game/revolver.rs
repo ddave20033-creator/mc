@@ -176,7 +176,7 @@ impl Game {
             Phase::Loader => {
                 if RELOAD_OPEN + c.t >= RELOAD_RELEASE && !c.released {
                     c.released = true;
-                    self.audio.play(Sound::MagIn, Some(at), 0.8);
+                    self.audio.play(Sound::SpeedloaderIn, Some(at), 0.8);
                     self.revolver_from_loader(&c);
                 }
                 if RELOAD_OPEN + c.t >= RELOAD_CLOSE {
@@ -188,7 +188,7 @@ impl Game {
             Phase::Rounds => {
                 if was < LOAD_SEAT && c.t >= LOAD_SEAT && !c.seated {
                     c.seated = true;
-                    self.audio.play(Sound::DryFire, Some(at), 0.5);
+                    self.audio.play(Sound::RoundIn, Some(at), 0.6);
                     self.revolver_seat_round();
                 }
                 if c.t >= LOAD_END {
@@ -204,7 +204,7 @@ impl Game {
             }
             Phase::Close => {
                 if c.t >= RELOAD_END - RELOAD_CLOSE {
-                    self.audio.play(Sound::SlideRelease, Some(at), 0.6);
+                    self.audio.play(Sound::CylinderShut, Some(at), 0.7);
                     self.revolver_align();
                     self.guns.cylinder = None;
                     self.guns.reload = None;

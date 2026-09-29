@@ -412,6 +412,12 @@ fn crackles(seed: u32, len: f32, per_sec: f32) -> Vec<f32> {
 
 fn make(sound: Sound) -> Vec<f32> {
     match sound {
+        // (Recorded: `samples`; made like their nearest kin in case the recording is gone.)
+        Sound::ShotRevolver => make(Sound::ShotPistol),
+        Sound::MagOutRifle => make(Sound::MagOut),
+        Sound::MagInRifle | Sound::SpeedloaderIn => make(Sound::MagIn),
+        Sound::BoltRifle | Sound::CylinderShut => make(Sound::SlideRelease),
+        Sound::RoundIn => make(Sound::DryFire),
         Sound::ShotPistol => gunshot(&Report {
             seed: 11,
             crack: 0.25,
@@ -635,7 +641,22 @@ fn make(sound: Sound) -> Vec<f32> {
     }
 }
 
-/// Every sound, in `SOUNDS` order.
+/// Every sound, in `SOUNDS` order: recorded where there is a recording (as loud at its peak as
+/// the made one, so the mix stays as it was), made otherwise.
 pub fn bank() -> Vec<Arc<[f32]>> {
-    SOUNDS.iter().map(|&s| Arc::from(make(s))).collect()
+    let peak = |x: &[f32]| x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    SOUNDS
+        .iter()
+        .map(|&s| {
+            let made = make(s);
+            match super::samples::recorded(s) {
+                Some(mut rec) => {
+                    let k = peak(&made) / peak(&rec).max(1e-6);
+                    rec.iter_mut().for_each(|v| *v *= k);
+                    Arc::from(rec)
+                }
+                None => Arc::from(made),
+            }
+        })
+        .collect()
 }

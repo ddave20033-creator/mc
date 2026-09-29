@@ -7,7 +7,16 @@ layout(location = 0) in vec2 vUV;
 layout(location = 1) flat in float vLayer;
 layout(location = 3) flat in int vGlassMask;
 
+layout(push_constant) uniform Push {
+    mat4 viewProj;
+    vec4 params;    // x: 3 the sun's shadow map, 5 a weapon light's
+} pc;
+
 void main() {
+    // A weapon light shines through glass.
+    if (pc.params.x == 5.0 && abs(vLayer - 13.0) < 0.5) {
+        discard;
+    }
     if (texture(blocks, vec3(vUV, vLayer)).a < 0.5) {
         discard;
     }
