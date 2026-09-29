@@ -805,7 +805,9 @@ impl Builder {
             let k = if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 };
             (k * 2 + (n[k] < 0.0) as usize) as u8
         };
-        let emit = |b: &mut Self, ps: [[f32; 3]; 4], uvs: [[f32; 2]; 4], n: [f32; 3], layer: u32| {
+        // A corner of the bark at `a` round: its smooth normal (see world.vert).
+        let round_n = |a: f32| (16 + axis * 64 + ((a / std::f32::consts::TAU * 64.0).round() as usize % 64)) as u8;
+        let emit = |b: &mut Self, ps: [[f32; 3]; 4], uvs: [[f32; 2]; 4], n: [f32; 3], layer: u32, ns: Option<[u8; 4]>| {
             // Wound to face `n`.
             let d = |a: [f32; 3], c: [f32; 3]| [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
             let (e1, e2) = (d(ps[0], ps[1]), d(ps[0], ps[2]));
@@ -818,7 +820,7 @@ impl Builder {
                     pos: world(ps[i]),
                     uv: uvs[i],
                     layer: layer as f32,
-                    light: [255, (s * 17) as u8, (bl * 17) as u8, face],
+                    light: [255, (s * 17) as u8, (bl * 17) as u8, ns.map_or(face, |ns| ns[i])],
                     tint: [255, 255, 255, 0],
                 });
             }
@@ -839,6 +841,7 @@ impl Builder {
                 [[u0, 1.0 - t0], [u1, 1.0 - t0], [u1, 1.0 - t1], [u0, 1.0 - t1]],
                 n,
                 side_layer,
+                Some([round_n(a0), round_n(a1), round_n(a1), round_n(a0)]),
             );
             // The end caps: a slice of the rings each.
             for (k, &(t, capped)) in ends.iter().enumerate() {
@@ -856,6 +859,7 @@ impl Builder {
                     [uv(0.0, 0.0), uv(c0, s0), uv(c1, s1), uv(0.0, 0.0)],
                     n,
                     end_layer,
+                    None,
                 );
             }
         }

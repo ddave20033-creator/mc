@@ -16,6 +16,7 @@ layout(location = 3) out vec3 vTint;
 layout(location = 4) out vec3 vWorld;
 layout(location = 5) flat out int vFlags;
 layout(location = 6) flat out int vNormal;
+layout(location = 7) out vec3 vSmoothN;
 
 void main() {
     int flags = int(inTint.a * 255.0 + 0.5);
@@ -38,5 +39,15 @@ void main() {
     vTint = inTint.rgb;
     vWorld = p;
     vFlags = flags;
-    vNormal = int(inLight.w * 255.0 + 0.5);
+    vNormal = normal;
+    vSmoothN = vec3(0.0, 1.0, 0.0);
+    if (normal >= 16) {
+        // A round surface (a log): its normal turns smoothly round the axis, given at each
+        // corner as 16 + axis * 64 + angle (64 steps round), and lit as such (normal 7).
+        int axis = (normal - 16) / 64;
+        float a = float((normal - 16) % 64) / 64.0 * 6.2831853;
+        vec2 cs = vec2(cos(a), sin(a));
+        vSmoothN = axis == 0 ? vec3(0.0, cs.y, cs.x) : (axis == 1 ? vec3(cs.x, 0.0, cs.y) : vec3(cs.x, cs.y, 0.0));
+        vNormal = 7;
+    }
 }

@@ -14,6 +14,7 @@ layout(location = 3) in vec3 vTint;
 layout(location = 4) in vec3 vWorld;
 layout(location = 5) flat in int vFlags;
 layout(location = 6) flat in int vNormal;
+layout(location = 7) in vec3 vSmoothN;
 
 layout(location = 0) out vec4 outColor;
 
@@ -321,6 +322,10 @@ void main() {
     if (derivN) {
         N = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
         if (dot(N, frame.camPos.xyz - vWorld) < 0.0) N = -N;
+    }
+    // A round surface: its own smooth normal (7, see world.vert).
+    if (vNormal == 7) {
+        N = normalize(vSmoothN);
     }
 
     // Blocks only a few pixels big: their top and side faces lit much alike (and no corner
