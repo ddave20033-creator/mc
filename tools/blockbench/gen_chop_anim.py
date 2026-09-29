@@ -74,39 +74,51 @@ def axe_frame(yaw, pitch):
 
 CHEST = [0.5, 17.0, 0.0]
 
+# The swing's key poses: (time, (handle yaw, handle pitch, grip out from the chest, grip
+# height, torso turn, hips turn, hips down, weight toward the left foot)). The body leads
+# the arms: the hips start round first, the torso follows, the axe comes last and fastest.
+KEYS = [
+    (0.00, (-22.0, 52.0, 6.0, 15.0, 0.0, 0.0, 0.0, 0.0)),      # held at rest, head up in front
+    (0.16, (-70.0, 36.0, 6.8, 17.5, -16.0, -5.0, 0.3, -0.3)),  # drawing back
+    (0.28, (-102.0, 22.0, 7.2, 18.5, -27.0, -9.0, 0.6, -0.6)), # drawn back, weight on the right
+    (0.33, (-50.0, 10.0, 7.8, 18.0, -8.0, 0.0, 0.8, 0.0)),     # swinging round
+    (0.38, (26.0, 3.0, 8.0, 17.5, 12.0, 6.0, 0.9, 0.6)),       # bites into the trunk
+    (0.41, (24.0, 3.5, 7.9, 17.5, 10.5, 5.5, 0.9, 0.55)),      # the jolt of it
+    (0.52, (25.0, 3.0, 8.0, 17.5, 11.0, 5.5, 0.85, 0.55)),     # stuck
+    (0.62, (14.0, 10.0, 7.0, 17.0, 6.0, 3.0, 0.5, 0.3)),       # pulled out
+    (0.80, (-22.0, 52.0, 6.0, 15.0, 0.0, 0.0, 0.0, 0.0)),      # back at rest
+]
+
 def state_at(t):
-    """(yaw, pitch, reach, height, torso turn) at `t` seconds."""
-    keys = [
-        (0.00, (-25.0, 55.0, 6.0, 15.0, 0.0)),     # held at rest, head up in front
-        (0.28, (-125.0, 18.0, 7.5, 19.0, -38.0)),  # drawn back out to the right, body turned
-        (0.33, (-55.0, 8.0, 8.0, 18.0, -12.0)),    # swinging round
-        (0.38, (28.0, 2.0, 8.0, 17.5, 14.0)),      # bites into the trunk
-        (0.52, (28.0, 2.0, 8.0, 17.5, 14.0)),      # stuck
-        (0.60, (18.0, 6.0, 7.0, 17.0, 8.0)),       # pulled out
-        (0.80, (-25.0, 55.0, 6.0, 15.0, 0.0)),     # back at rest
-    ]
-    for (t0, a), (t1, b) in zip(keys, keys[1:]):
+    """The swing's pose at `t` seconds: between the keys smoothly (a Catmull-Rom curve through
+    them), the stroke into the trunk speeding up."""
+    for i, ((t0, a), (t1, b)) in enumerate(zip(KEYS, KEYS[1:])):
         if t <= t1:
             k = (t - t0) / (t1 - t0)
-            if t0 >= 0.28 and t1 <= 0.38:
-                k = k * k                            # the swing speeds up into the trunk
-            else:
-                k = k * k * (3 - 2 * k)
-            return [x + (y - x) * k for x, y in zip(a, b)]
-    return list(keys[-1][1])
+            if (t0, t1) == (0.33, 0.38):
+                k = k ** 1.6
+            pa = KEYS[max(i - 1, 0)][1]
+            pb = KEYS[min(i + 2, len(KEYS) - 1)][1]
+            k2, k3 = k * k, k * k * k
+            return [0.5 * (2 * y + (-x + z) * k + (2 * x - 5 * y + 4 * z - w) * k2 + (-x + 3 * y - 3 * z + w) * k3)
+                    for x, y, z, w in zip(pa, a, b, pb)]
+    return list(KEYS[-1][1])
 
 LENGTH, SAMPLES = 0.8, 40
 
 def pose_at(t):
-    yaw, pitch, reach, height, turn = state_at(t)
+    yaw, pitch, reach, height, turn, hips, dip, weight = state_at(t)
     h, edge = axe_frame(yaw, pitch)
     p = Pose()
-    p.set("body", euler([0, 0, 0]), [0, 12, 0])
-    p.set("torso", euler([0, turn, 0]))
-    p.set("head", euler([0, -turn * 0.6, 0]))
+    p.set("body", euler([0, hips, 0]), [weight, 12 - dip, 0])
+    p.set("torso", euler([2.0 + dip, turn - hips, 0]))
+    # The head calm: it keeps looking at the trunk (a little down) whatever the body does,
+    # only nodding a touch as the axe bites.
+    nod = 1.5 * max(0.0, 1.0 - abs(t - 0.40) / 0.06)
+    p.set("head", euler([-6.0 - nod, -turn * 0.9, 0]))
     # The grip: out from the chest the way the handle points (level), at the height asked.
     flat = norm([h[0], 0.0, h[2]])
-    grip = add([CHEST[0], height, CHEST[2]], scale(flat, reach))
+    grip = add([CHEST[0] + weight, height - dip, CHEST[2]], scale(flat, reach))
     # The axe's own turn: its +Y along the handle, its -Z along the edge.
     y_ax = norm(h)
     z_ax = scale(edge, -1.0)
@@ -128,7 +140,8 @@ def pose_at(t):
         p.set(arm, ra, shoulder)
         p.set(hand, rh)
     p.set("axe", rot, grip)
-    # The legs apart, the left foot forward, standing.
+    # The feet planted apart (the left one forward), the knees giving a little as the hips go
+    # down.
     for side, foot_at in (("right", [2.6, 0, 1.5]), ("left", [-2.6, 0, -1.5])):
         leg, foot = f"{side}_leg", f"{side}_foot"
         hip = p.point("body", BONES[leg][1])
@@ -179,8 +192,8 @@ def build():
             for bone, (moved, rot) in p.keys().items():
                 k = keys.setdefault(bone, [])
                 if bone in ("body", "axe") or any(abs(v) > 1e-3 for v in moved):
-                    k.append(kf("position", t, P([round(v, 3) for v in moved]), "linear"))
-                k.append(kf("rotation", t, R([round(v, 3) for v in rot]), "linear"))
+                    k.append(kf("position", t, P([round(v, 3) for v in moved])))
+                k.append(kf("rotation", t, R([round(v, 3) for v in rot])))
         animators = {groups[b]["uuid"]: {"name": b, "type": "bone", "keyframes": k} for b, k in keys.items() if k}
         anims.append({"uuid": str(uuid.uuid4()), "name": name, "loop": "loop" if name == "chop" else "hold",
                       "override": False, "length": length, "snapping": 50, "selected": name == "chop",
