@@ -36,8 +36,8 @@ struct Bullet {
     knockback: f32,
     /// Another player's, only to be seen: what it hits is up to them.
     visual: bool,
-    /// A shotgun pellet (it leaves a smaller hole).
-    small: bool,
+    /// How big a hole it leaves (`hole_size`).
+    hole: f32,
 }
 
 #[derive(Default)]
@@ -113,20 +113,21 @@ pub(super) struct ReloadPlan {
 }
 
 /// A bullet hole: where on which face of which block (it goes when the block does), how it
-/// is turned, how big, and when it was made.
+/// is turned (and whether mirrored, so no two look alike), how big, and when it was made.
 struct Hole {
     pos: Vec3,
     normal: Vec3,
     block: IVec3,
     id: u8,
     turn: f32,
+    mirrored: bool,
     size: f32,
     born: f32,
 }
 
 /// Bullet holes kept at most, and for how long (they shrink away over the last seconds).
 const MAX_HOLES: usize = 300;
-const HOLE_LIFE: f32 = 120.0;
+const HOLE_LIFE: f32 = 60.0;
 
 impl Guns {
     /// The light of a muzzle flash going on now: where it is and how bright.
@@ -168,6 +169,19 @@ fn shot_sound(kind: GunKind, silenced: bool) -> Sound {
         GunKind::Pistol => Sound::ShotPistol,
         GunKind::Revolver => Sound::ShotRevolver,
         GunKind::Ak => Sound::ShotRifle,
+    }
+}
+
+/// How big a hole a gun's bullet leaves (blocks across): the 9 mm the smallest, the .357
+/// Magnum's bigger, the 7.62x39's (much faster) the biggest; a shotgun's pellets small ones.
+fn hole_size(kind: GunKind, pellets: u32) -> f32 {
+    if pellets > 1 {
+        return 0.07;
+    }
+    match kind {
+        GunKind::Pistol => 0.085,
+        GunKind::Revolver => 0.105,
+        GunKind::Ak => 0.125,
     }
 }
 
@@ -677,7 +691,7 @@ impl Game {
                 damage: stats.damage,
                 knockback: stats.knockback,
                 visual: false,
-                small: stats.pellets > 1,
+                hole: hole_size(kind, stats.pellets as u32),
             });
         }
         // The others see the shot too.
@@ -779,7 +793,7 @@ impl Game {
                 damage: 0.0,
                 knockback: 0.0,
                 visual: true,
-                small: stats.pellets > 1,
+                hole: hole_size(kind, stats.pellets as u32),
             });
         }
         let silenced = mods & gun_mod::SILENCER != 0;
@@ -899,18 +913,20 @@ impl Game {
                 self.particles
                     .impact(&self.terrain.world, at + n * 0.02, n, b_id, tint);
                 self.audio.play(Sound::Impact, Some(at), 0.7);
-                // A hole where it went in (smaller from a shotgun's pellets).
+                // A hole where it went in, as big as the gun's bullet makes.
                 if self.guns.holes.len() >= MAX_HOLES {
                     self.guns.holes.remove(0);
                 }
-                let size = if b.small { 0.07 } else { 0.1 } * (0.85 + 0.3 * self.random());
+                let size = b.hole * (0.85 + 0.3 * self.random());
                 let turn = self.random() * TAU;
+                let mirrored = self.random() < 0.5;
                 self.guns.holes.push(Hole {
                     pos: at,
                     normal: n,
                     block: hit,
                     id: b_id,
                     turn,
+                    mirrored,
                     size,
                     born: self.time,
                 });
@@ -994,6 +1010,7 @@ impl Game {
             let t2 = n.cross(t1);
             let (s, c) = h.turn.sin_cos();
             let (r, u) = ((t1 * c + t2 * s) * size, (t2 * c - t1 * s) * size);
+            let u = if h.mirrored { -u } else { u };
             let p = h.pos + n * 0.002;
             let corners = [p - r - u, p + r - u, p + r + u, p - r + u];
             let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
