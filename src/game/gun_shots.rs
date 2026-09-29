@@ -236,6 +236,7 @@ impl Game {
             (crate::item::WATER_BUCKET, "water", true),
             (crate::item::LAVA_BUCKET, "lava", true),
             (crate::item::WATER_BUCKET, "water_nobody", false),
+            (crate::world::LANTERN as crate::item::ItemId, "lantern", true),
         ];
         let Some(&(item, name, body)) = runs.get(g.gun) else {
             println!("bucket shots done: {}", g.dir.display());
