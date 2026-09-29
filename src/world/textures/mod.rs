@@ -321,7 +321,10 @@ pub mod tex {
     pub const COOKED_FISH: u32 = FISHING_ROD + 2;
     /// The bucket's galvanized steel (`model::bucket`).
     pub const BUCKET_METAL: u32 = COOKED_FISH + 1;
-    pub const LAYERS: usize = (BUCKET_METAL + 1) as usize;
+    /// The game's logo (`ui/logo.png`), in tiles from its left.
+    pub const LOGO: u32 = BUCKET_METAL + 1;
+    pub const LOGO_TILES: u32 = 8;
+    pub const LAYERS: usize = (LOGO + LOGO_TILES) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -399,6 +402,63 @@ pub fn decode_skin_png(data: &[u8]) -> Result<Image, &'static str> {
 }
 
 /// The Blockbench models' texture pages, made by `tools/blockbench/bbmodel_to_rust.py`:
+/// The logo (`ui/logo.png`, a row of `tex::LOGO_TILES` squares) as that many texture layers.
+pub fn logo_layers() -> Vec<u8> {
+    let layer_bytes = TILE * TILE * 4;
+    let tiles = tex::LOGO_TILES as usize;
+    let mut out = vec![0u8; layer_bytes * tiles];
+    let Some(img) = crate::pack::decode_png(include_bytes!("../../ui/logo.png")) else {
+        return out;
+    };
+    if img.w as usize != TILE * tiles || img.h as usize != TILE {
+        return out;
+    }
+    for t in 0..tiles {
+        for y in 0..TILE {
+            let src = (y * TILE * tiles + t * TILE) * 4;
+            let dst = t * layer_bytes + y * TILE * 4;
+            out[dst..dst + TILE * 4].copy_from_slice(&img.rgba[src..src + TILE * 4]);
+        }
+    }
+    out
+}
+
+/// Just the logo's layers (the first `tex::LOGO_TILES`) with their mipmaps: all the
+/// textures the start-up screen needs while the rest are made.
+pub fn logo_levels() -> Vec<Vec<u8>> {
+    let tiles = tex::LOGO_TILES as usize;
+    let mut levels = vec![logo_layers()];
+    let mut size = TILE;
+    while size > 1 {
+        let prev = levels.last().unwrap();
+        let ns = size / 2;
+        let mut next = vec![0u8; ns * ns * 4 * tiles];
+        for l in 0..tiles {
+            for y in 0..ns {
+                for x in 0..ns {
+                    let (mut rgb, mut a) = ([0.0f32; 3], 0.0f32);
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let i = ((l * size + y * 2 + dy) * size + x * 2 + dx) * 4;
+                        let w = prev[i + 3] as f32 / 255.0;
+                        for c in 0..3 {
+                            rgb[c] += prev[i + c] as f32 * w;
+                        }
+                        a += w;
+                    }
+                    let o = ((l * ns + y) * ns + x) * 4;
+                    for c in 0..3 {
+                        next[o + c] = if a > 0.0 { (rgb[c] / a) as u8 } else { 0 };
+                    }
+                    next[o + 3] = if a / 4.0 > 0.3 { 255 } else { 0 };
+                }
+            }
+        }
+        levels.push(next);
+        size = ns;
+    }
+    levels
+}
+
 /// 128x128 pages one under the other, from layer `first`.
 fn synth_model_pages(base: &mut [u8], png: &[u8], pages: u32, first: u32) {
     let Some(img) = crate::pack::decode_png(png) else {
@@ -770,6 +830,7 @@ fn preserve_leaf_coverage(base: &[u8], next: &mut [u8], size: usize, layer: usiz
 
 fn is_cutout(l: u32) -> bool {
     CUTOUT.contains(&l)
+        || (tex::LOGO..tex::LOGO + tex::LOGO_TILES).contains(&l)
         || is_crack(l)
         || is_item_icon(l)
         || l == tex::LANTERN
@@ -873,6 +934,9 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
     synth_model_pages(&mut base, crate::model::dummy::PNG, crate::model::dummy::PAGES, tex::DUMMY_MODEL);
     synth_model_pages(&mut base, crate::model::fishing_rod::PNG, crate::model::fishing_rod::PAGES, tex::FISHING_ROD_MODEL);
     render_item_icons(&mut base);
+    let logo = logo_layers();
+    let at = tex::LOGO as usize * layer_bytes;
+    base[at..at + logo.len()].copy_from_slice(&logo);
     synth_doors(&mut base);
     synth_grilled(&mut base);
     mark_materials(&mut base);

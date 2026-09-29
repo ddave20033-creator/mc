@@ -8,7 +8,7 @@ use crate::engine::resources::Image;
 use crate::engine::{Buffer, Gpu, SamplerKind, Texture, FRAMES_IN_FLIGHT};
 use crate::ui::{UiVertex, FONT_TEX_H, FONT_TEX_W};
 use crate::world::mesh::{MeshData, Vertex};
-use crate::world::textures::{tex, TILE};
+use crate::world::textures::TILE;
 use crate::world::{ChunkPos, FastMap};
 use ash::vk;
 use glam::{Mat4, Vec3, Vec4};
@@ -24,6 +24,7 @@ const SKY_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sky.frag.spv")
 const UI_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.vert.spv"));
 const UI_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.frag.spv"));
 const LENS_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lens.frag.spv"));
+const BLUR_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/blur.frag.spv"));
 
 pub const SHADOW_SIZE: u32 = 4096;
 /// The scope's view: its size in pixels (square) and format.
@@ -142,6 +143,9 @@ pub struct FrameInfo<'a> {
     pub viewmodel_glass: &'a [Vertex],
     pub lens: &'a [Vertex],
     pub scope: Option<ScopeView>,
+    /// A menu is open: `scope` is the plain view, and `lens` a quad over the whole screen
+    /// (clip space) showing it blurred behind the menu.
+    pub backdrop_blur: bool,
 }
 
 /// The view through the scope (magnified): rendered into the scope image before the main
@@ -232,6 +236,7 @@ pub struct Renderer {
     lens_set: vk::DescriptorSet,
     lens_layout: vk::PipelineLayout,
     lens_pipe: vk::Pipeline,
+    blur_pipe: vk::Pipeline,
     ubos: Vec<Buffer>,
     ui_bufs: Vec<Buffer>,
     dyn_bufs: Vec<Buffer>,
@@ -446,11 +451,32 @@ fn create_lens_pipe(
     samples: vk::SampleCountFlags,
     layout: vk::PipelineLayout,
 ) -> vk::Pipeline {
+    create_scope_view_pipe(d, render_pass, samples, layout, LENS_FRAG)
+}
+
+/// The menus' blurred backdrop (`blur.frag`), drawn like the eyepiece.
+fn create_blur_pipe(
+    d: &ash::Device,
+    render_pass: vk::RenderPass,
+    samples: vk::SampleCountFlags,
+    layout: vk::PipelineLayout,
+) -> vk::Pipeline {
+    create_scope_view_pipe(d, render_pass, samples, layout, BLUR_FRAG)
+}
+
+/// Something showing the scope's image, `frag` drawing it.
+fn create_scope_view_pipe(
+    d: &ash::Device,
+    render_pass: vk::RenderPass,
+    samples: vk::SampleCountFlags,
+    layout: vk::PipelineLayout,
+    frag: &[u8],
+) -> vk::Pipeline {
     create_pipeline(
         d,
         &PipelineDesc {
             vert: WORLD_VERT,
-            frag: LENS_FRAG,
+            frag,
             stride: size_of::<Vertex>() as u32,
             attributes: &WORLD_ATTRS,
             layout,
@@ -707,7 +733,7 @@ impl Renderer {
             gpu,
             TILE as u32,
             TILE as u32,
-            tex::LAYERS as u32,
+            (levels[0].len() / (TILE * TILE * 4)) as u32,
             vk::Format::R8G8B8A8_SRGB,
             levels,
             SamplerKind::Blocks,
@@ -750,11 +776,12 @@ impl Renderer {
         assert_eq!(size_of::<UiVertex>(), 52);
         assert_eq!(size_of::<FrameUbo>(), 304 + 16 * MAX_HELD_LIGHTS + 32 * MAX_SPOTS + 16 + 64 * MAX_SPOTS);
 
+        // (as many layers as given: the start-up screen's few, then all)
         let block_tex = Texture::new(
             gpu,
             TILE as u32,
             TILE as u32,
-            tex::LAYERS as u32,
+            (block_levels[0].len() / (TILE * TILE * 4)) as u32,
             vk::Format::R8G8B8A8_SRGB,
             block_levels,
             SamplerKind::Blocks,
@@ -1082,6 +1109,7 @@ impl Renderer {
                 create_main_pipes(d, scope_pass, vk::SampleCountFlags::TYPE_1, world_layout, ui_layout);
             let lens_layout = create_layout(d, &[world_dsl, lens_dsl], size_of::<DrawPush>() as u32);
             let lens_pipe = create_lens_pipe(d, gpu.render_pass, gpu.samples, lens_layout);
+            let blur_pipe = create_blur_pipe(d, gpu.render_pass, gpu.samples, lens_layout);
             let shadow_pipe = create_pipeline(
                 d,
                 &PipelineDesc {
@@ -1182,6 +1210,7 @@ impl Renderer {
                 lens_set,
                 lens_layout,
                 lens_pipe,
+                blur_pipe,
                 ubos,
                 ui_bufs,
                 dyn_bufs,
@@ -1364,6 +1393,8 @@ impl Renderer {
                 );
                 d.destroy_pipeline(self.lens_pipe, None);
                 self.lens_pipe = create_lens_pipe(d, gpu.render_pass, gpu.samples, self.lens_layout);
+                d.destroy_pipeline(self.blur_pipe, None);
+                self.blur_pipe = create_blur_pipe(d, gpu.render_pass, gpu.samples, self.lens_layout);
                 self.pass_version = gpu.pass_version;
             }
             // begin_frame waited for the frame recorded FRAMES_IN_FLIGHT frames ago, so chunk
@@ -2043,7 +2074,7 @@ impl Renderer {
                 }
                 // The scope's eyepiece shows its view; the glass is drawn over what is behind.
                 let (n0, nn) = range(7);
-                if nn > 0 && f.scope.is_some() {
+                if nn > 0 && f.scope.is_some() && !f.backdrop_blur {
                     d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.lens_pipe);
                     d.cmd_bind_descriptor_sets(
                         cmd,
@@ -2082,6 +2113,23 @@ impl Renderer {
                     );
                     d.cmd_draw(cmd, gn, 1, g0, 0);
                 }
+            }
+
+            // A menu's blurred backdrop: the world as the scope pass drew it, over everything.
+            let (n0, nn) = range(7);
+            if f.backdrop_blur && f.scope.is_some() && nn > 0 {
+                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.blur_pipe);
+                d.cmd_bind_descriptor_sets(
+                    cmd,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.lens_layout,
+                    0,
+                    &[self.world_sets[slot], self.lens_set],
+                    &[],
+                );
+                d.cmd_push_constants(cmd, self.lens_layout, stages, 0, as_bytes(&push(Mat4::IDENTITY, 2.0)));
+                d.cmd_bind_vertex_buffers(cmd, 0, &[self.dyn_bufs[slot].handle], &[0]);
+                d.cmd_draw(cmd, nn, 1, n0, 0);
             }
 
             stamp(d, 2);
@@ -2186,6 +2234,7 @@ impl Renderer {
                 self.shadow_pipe,
                 self.ui_pipe,
                 self.lens_pipe,
+                self.blur_pipe,
             ]
             .into_iter()
             .chain(self.scope_pipes)

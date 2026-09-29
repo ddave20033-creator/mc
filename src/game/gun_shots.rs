@@ -113,7 +113,7 @@ fn look_around(t: f32) -> f32 {
 const WARMUP: f32 = 10.0;
 
 pub struct GunShots {
-    dir: std::path::PathBuf,
+    pub(super) dir: std::path::PathBuf,
     pub(super) wait: f32,
     /// Where the lane starts (feet), set up once.
     start: Option<Vec3>,

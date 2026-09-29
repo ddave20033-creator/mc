@@ -3,7 +3,6 @@ use crate::settings::Settings;
 use crate::ui::*;
 use glam::Vec2;
 use glam::Vec3;
-use std::collections::HashSet;
 
 pub enum Action {
     None,
@@ -62,25 +61,6 @@ pub fn death(ui: &mut Ui, message: &str) -> Action {
     act
 }
 
-pub const SPLASHES: &[&str] = &[
-    "Now with Vulkan!",
-    "100% Rust!",
-    "Memory safe!",
-    "Blazingly fast!",
-    "Fearless concurrency!",
-    "Borrow checked!",
-    "Zero-cost abstractions!",
-    "Magyarul is!",
-    "Written from scratch!",
-    "Also try Minecraft!",
-    "Procedural everything!",
-    "Ambient occlusion!",
-    "cargo run --release",
-    "No unsafe (mostly)!",
-];
-
-const LOGO: &str = "RUSTCRAFT";
-
 fn hash01(a: i32, b: i32) -> f32 {
     let mut h = (a as u32).wrapping_mul(0x9E37_79B1) ^ (b as u32).wrapping_mul(0x85EB_CA77);
     h ^= h >> 15;
@@ -113,165 +93,18 @@ pub fn backdrop(ui: &mut Ui, strength: f32) {
     embers(ui);
 }
 
-/// Sparks rising slowly from the bottom of the screen, swaying, glowing and fading out.
+/// A few sparks rising slowly from the bottom of the screen, swaying and fading out.
 fn embers(ui: &mut Ui) {
     let (w, h, s) = (ui.w, ui.h, ui.s);
-    for i in 0..34 {
-        let period = 8.0 + 7.0 * hash01(i, 1);
+    for i in 0..16 {
+        let period = 11.0 + 8.0 * hash01(i, 1);
         let phase = (ui.time / period + hash01(i, 2)).fract();
-        let x = hash01(i, 3) * w + (ui.time * 0.5 + i as f32 * 1.7).sin() * 12.0 * s;
-        let y = h * (1.04 - phase * 1.12);
-        let size = (0.7 + 1.4 * hash01(i, 4)) * s;
-        let alpha = (phase * std::f32::consts::PI).sin().powf(1.5) * (0.3 + 0.45 * hash01(i, 5));
-        ui.rect_full(
-            x - size * 2.0,
-            y - size * 2.0,
-            size * 4.0,
-            size * 4.0,
-            with_alpha(ACCENT, alpha * 0.35),
-            with_alpha(ACCENT, alpha * 0.35),
-            size * 2.0,
-            size * 2.5,
-        );
-        ui.rect(x - size * 0.5, y - size * 0.5, size, size, with_alpha(rgba(255, 222, 180, 255), alpha), size * 0.5);
+        let x = hash01(i, 3) * w + (ui.time * 0.4 + i as f32 * 1.7).sin() * 10.0 * s;
+        let y = h * (1.04 - phase * 1.1);
+        let size = (0.6 + 0.8 * hash01(i, 4)) * s;
+        let alpha = (phase * std::f32::consts::PI).sin().powf(1.5) * (0.2 + 0.3 * hash01(i, 5));
+        ui.rect(x - size * 0.5, y - size * 0.5, size, size, with_alpha(rgba(255, 200, 150, 255), alpha), size * 0.5);
     }
-}
-
-fn logo_units(ui: &Ui) -> f32 {
-    LOGO.chars().map(|c| ui.font.glyph(c).adv).sum::<f32>() - 1.0
-}
-
-/// Pixel-art 3D logo built from font bitmaps; a band of light passes over it at `shine`
-/// (logo pixels from its left). Returns (width, height) in screen pixels.
-fn draw_logo(ui: &mut Ui, cx: f32, y: f32, px: f32, shine: f32) -> (f32, f32) {
-    let mut pixels: Vec<(i32, i32, bool)> = Vec::new();
-    let mut pen = 0i32;
-    for (i, ch) in LOGO.chars().enumerate() {
-        let g = *ui.font.glyph(ch);
-        for (row, bits) in g.bits.iter().enumerate() {
-            for col in g.minx..8 {
-                if bits & (1 << col) != 0 {
-                    pixels.push((pen + (col - g.minx) as i32, row as i32, i < 4));
-                }
-            }
-        }
-        pen += g.adv as i32;
-    }
-    let set: HashSet<(i32, i32)> = pixels.iter().map(|&(x, y, _)| (x, y)).collect();
-    let total_w = (pen - 1) as f32 * px;
-    let total_h = 7.0 * px;
-    let x0 = (cx - total_w * 0.5).round();
-    let y = y.round();
-
-    // A warm glow behind the logo.
-    ui.rect_full(
-        x0 - px,
-        y,
-        total_w + 2.0 * px,
-        total_h,
-        rgba(0, 0, 0, 90),
-        rgba(0, 0, 0, 90),
-        3.0 * px,
-        4.0 * px,
-    );
-    ui.rect_full(
-        x0,
-        y + px,
-        total_w * 0.45,
-        total_h - 2.0 * px,
-        with_alpha(ACCENT, 0.16),
-        with_alpha(ACCENT, 0.16),
-        3.0 * px,
-        6.0 * px,
-    );
-
-    // Extruded 3D sides
-    let depth = 4;
-    for k in (1..=depth).rev() {
-        let off = (k as f32 * px * 0.3).round();
-        let f = 1.0 - k as f32 / (depth as f32 + 2.0);
-        for &(c, r, rust) in &pixels {
-            let base: [f32; 3] = if rust {
-                [92.0, 42.0, 22.0]
-            } else {
-                [52.0, 52.0, 60.0]
-            };
-            let col = [
-                base[0] * f / 255.0,
-                base[1] * f / 255.0,
-                base[2] * f / 255.0,
-                1.0,
-            ];
-            ui.solid(
-                x0 + c as f32 * px + off,
-                y + r as f32 * px + off,
-                px,
-                px,
-                col,
-            );
-        }
-    }
-
-    // Front face with stone-like per-pixel variation and bevels, and the passing light.
-    let bevel = (px * 0.22).max(1.0).round();
-    for &(c, r, rust) in &pixels {
-        let n = hash01(c, r);
-        let base: [f32; 3] = if rust {
-            [222.0, 116.0, 62.0]
-        } else {
-            [200.0, 202.0, 210.0]
-        };
-        let v = (0.84 + 0.22 * n) * (1.12 - r as f32 * 0.04);
-        let d = c as f32 + r as f32 * 0.7 - shine;
-        let glint = (-d * d / 8.0).exp() * 0.75;
-        let col = [
-            (base[0] * v / 255.0).min(1.0),
-            (base[1] * v / 255.0).min(1.0),
-            (base[2] * v / 255.0).min(1.0),
-            1.0,
-        ];
-        let col = lerp_color(col, WHITE, glint);
-        let (px0, py0) = (x0 + c as f32 * px, y + r as f32 * px);
-        ui.solid(px0, py0, px, px, col);
-        if !set.contains(&(c, r - 1)) {
-            ui.solid(px0, py0, px, bevel, rgba(255, 255, 255, 80));
-        }
-        if !set.contains(&(c, r + 1)) {
-            ui.solid(px0, py0 + px - bevel, px, bevel, rgba(0, 0, 0, 70));
-        }
-    }
-    (total_w, total_h)
-}
-
-/// Where the light passing over the logo is (logo pixels): across it once every few seconds.
-fn logo_shine(ui: &Ui) -> f32 {
-    let units = logo_units(ui);
-    let cycle = (ui.time % 5.5) / 1.3;
-    -12.0 + cycle * (units + 24.0)
-}
-
-/// The edition badge under the logo, centered on `cx`. Returns its bottom.
-fn edition_badge(ui: &mut Ui, cx: f32, y: f32) -> f32 {
-    let s = ui.s;
-    let label = t("menu.edition");
-    let tw = ui.text_width(label, s);
-    let (pw, ph) = ((tw + 16.0 * s).round(), (12.0 * s).round());
-    let (bx, by) = ((cx - pw * 0.5).round(), y.round());
-    ui.rect_full(bx, by + s, pw, ph, rgba(0, 0, 0, 110), rgba(0, 0, 0, 110), ph * 0.5, 3.0 * s);
-    ui.rect(bx, by, pw, ph, rgba(255, 176, 100, 200), ph * 0.5);
-    let bw = (s * 0.67).max(1.0).round();
-    ui.rect_full(
-        bx + bw,
-        by + bw,
-        pw - 2.0 * bw,
-        ph - 2.0 * bw,
-        rgba(44, 30, 22, 240),
-        rgba(22, 16, 14, 240),
-        ph * 0.5,
-        0.0,
-    );
-    ui.text(label, cx - tw * 0.5, by + (ph - 7.0 * s) * 0.5, s, rgba(255, 200, 140, 255), true);
-    by + ph
 }
 
 /// A screen's title bar: a dark band along the top, the title at the left of the content
@@ -314,40 +147,27 @@ pub struct PreviewRotation {
     last_x: f32,
 }
 
-/// The title screen: a glass sidebar on the left (sliding in) with the logo, the menu and
-/// the version; the world behind on the right, the player's character standing in it on a
-/// glowing spot, with the skin button under it.
-pub fn main_menu(ui: &mut Ui, splash: &str, skin: u8, preview: &mut PreviewRotation) -> Action {
+/// The title screen: a dark sidebar on the left (sliding in) with the logo, the menu and the
+/// version; the blurred world on the right, the player's character standing in it, with the
+/// skin button under it.
+pub fn main_menu(ui: &mut Ui, skin: u8, preview: &mut PreviewRotation) -> Action {
     let (w, h, s) = (ui.w, ui.h, ui.s);
-    backdrop(ui, 0.75);
+    backdrop(ui, 0.6);
 
     // The sidebar.
-    let sw = (w * 0.34).clamp(230.0 * s, 290.0 * s).min(w - 16.0 * s).round();
+    let sw = (w * 0.3).clamp(220.0 * s, 270.0 * s).min(w - 16.0 * s).round();
     let a = ui.appear();
-    let slide = ui.style(1.0, Vec2::new(-((1.0 - a) * 40.0 * s).round(), 0.0));
-    ui.solid(0.0, 0.0, sw, h, rgba(9, 10, 15, 210));
-    ui.hgradient(sw, 0.0, 48.0 * s, h, rgba(9, 10, 15, 210), rgba(9, 10, 15, 0));
-    ui.gradient(sw - 1.0, 0.0, 1.0, h, rgba(255, 255, 255, 0), rgba(255, 255, 255, 22));
+    let slide = ui.style(1.0, Vec2::new(-((1.0 - a) * 24.0 * s).round(), 0.0));
+    ui.solid(0.0, 0.0, sw, h, rgba(9, 10, 15, 200));
+    ui.hgradient(sw, 0.0, 40.0 * s, h, rgba(9, 10, 15, 200), rgba(9, 10, 15, 0));
 
-    // The logo, floating gently, a light passing over it now and then.
-    let px = ((sw - 44.0 * s) / logo_units(ui)).floor().max(2.0);
-    let bob = ((ui.time * 1.3).sin() * 1.5 * s).round();
-    let logo_y = (40.0 * s).round() + bob;
-    let shine = logo_shine(ui);
-    let (lw, lh) = draw_logo(ui, sw * 0.5, logo_y, px, shine);
-    let badge_bottom = edition_badge(ui, sw * 0.5, logo_y + lh + 5.0 * s - bob);
-
-    // Splash text over the logo's corner.
-    let pulse = (ui.time * std::f32::consts::TAU).sin().abs() * 0.1;
-    let units = ui.text_width(splash, 1.0);
-    let size = s * (1.6 - pulse) * 100.0 / (units + 32.0);
-    let center = Vec2::new(sw * 0.5 + lw * 0.3, badge_bottom + 10.0 * s);
-    ui.text_rotated(splash, center, size, -8f32.to_radians(), rgba(255, 232, 90, 255));
+    let (bx, bw, bh) = ((20.0 * s).round(), (sw - 40.0 * s).round(), (22.0 * s).round());
+    let logo_y = (h * 0.16).round().max(16.0 * s);
+    ui.logo(crate::world::textures::tex::LOGO, sw * 0.5, logo_y, bw);
 
     // The menu.
-    let (bx, bw, bh) = ((20.0 * s).round(), (sw - 40.0 * s).round(), (22.0 * s).round());
     let gap = (27.0 * s).round();
-    let y0 = (badge_bottom + 30.0 * s).max(h * 0.36).round();
+    let y0 = (logo_y + bw / 8.0 + 34.0 * s).max(h * 0.36).round();
     let mut act = Action::None;
     if ui.button_primary(t("menu.singleplayer"), bx, y0, bw, bh, true) {
         act = Action::Singleplayer;
@@ -355,21 +175,16 @@ pub fn main_menu(ui: &mut Ui, splash: &str, skin: u8, preview: &mut PreviewRotat
     if ui.button(t("menu.multiplayer"), bx, y0 + gap, bw, bh, true) {
         act = Action::Multiplayer;
     }
-    if ui.button(t("menu.credits"), bx, y0 + 2.0 * gap, bw, bh, true) {
-        act = Action::Credits;
-    }
-    let sep = y0 + 3.0 * gap + 2.0 * s;
-    ui.hgradient(bx, sep, bw * 0.5, 1.0, rgba(255, 255, 255, 0), rgba(255, 255, 255, 34));
-    ui.hgradient(bx + bw * 0.5, sep, bw * 0.5, 1.0, rgba(255, 255, 255, 34), rgba(255, 255, 255, 0));
-    let half = ((bw - 6.0 * s) * 0.5).floor();
-    let y1 = sep + 8.0 * s;
-    if ui.button(t("menu.options"), bx, y1, half, bh, true) {
+    if ui.button(t("menu.options"), bx, y0 + 2.0 * gap, bw, bh, true) {
         act = Action::Options;
     }
-    if ui.button_ex(t("menu.quit"), bx + bw - half, y1, half, bh, true, ButtonKind::Danger) {
+    if ui.button(t("menu.credits"), bx, y0 + 3.0 * gap, bw, bh, true) {
+        act = Action::Credits;
+    }
+    if ui.button_ex(t("menu.quit"), bx, y0 + 4.0 * gap + 8.0 * s, bw, bh, true, ButtonKind::Danger) {
         act = Action::Quit;
     }
-    ui.text(VERSION, bx, h - 14.0 * s, s, rgba(150, 154, 170, 200), false);
+    ui.text(VERSION, bx, h - 14.0 * s, s, rgba(120, 124, 140, 190), false);
     ui.restore(slide);
 
     // The character, in the space to the right of the sidebar.
@@ -380,12 +195,10 @@ pub fn main_menu(ui: &mut Ui, splash: &str, skin: u8, preview: &mut PreviewRotat
         let px = ((area.0 + area.1) * 0.5 - pw * 0.5).round();
         let py = ((h - ph) * 0.5 - 6.0 * s).round();
         let a = ui.appear();
-        let rise = ui.style(a, Vec2::new(0.0, ((1.0 - a) * 16.0 * s).round()));
-        // A glowing spot under the feet, pulsing slowly.
-        let glow = 0.8 + 0.2 * (ui.time * 1.6).sin();
-        let (gx, gy, gw) = (px + pw * 0.2, py + ph * 0.86, pw * 0.6);
-        ui.rect_full(gx, gy, gw, 9.0 * s, with_alpha(ACCENT, 0.32 * glow), with_alpha(ACCENT, 0.12 * glow), 5.0 * s, 9.0 * s);
-        ui.rect_full(gx + gw * 0.15, gy + 2.0 * s, gw * 0.7, 5.0 * s, rgba(0, 0, 0, 90), rgba(0, 0, 0, 60), 3.0 * s, 4.0 * s);
+        let rise = ui.style(a, Vec2::new(0.0, ((1.0 - a) * 10.0 * s).round()));
+        // A soft shadow under the feet.
+        let (gx, gy, gw) = (px + pw * 0.28, py + ph * 0.87, pw * 0.44);
+        ui.rect_full(gx, gy, gw, 5.0 * s, rgba(0, 0, 0, 110), rgba(0, 0, 0, 70), 3.0 * s, 5.0 * s);
         draw_menu_player(ui, [px, py, pw, ph], skin, preview);
         let (sbw, sbh) = ((90.0 * s).round(), (20.0 * s).round());
         if ui.button(t("menu.skin"), (px + pw * 0.5 - sbw * 0.5).round(), (py + ph + 6.0 * s).round(), sbw, sbh, true) {
@@ -393,10 +206,6 @@ pub fn main_menu(ui: &mut Ui, splash: &str, skin: u8, preview: &mut PreviewRotat
         }
         ui.restore(rise);
     }
-
-    let right = t("menu.madewith");
-    let rw = ui.text_width(right, s);
-    ui.text(right, w - rw - 8.0 * s, h - 14.0 * s, s, rgba(200, 204, 216, 170), false);
     act
 }
 
@@ -1408,20 +1217,18 @@ pub fn pause(ui: &mut Ui, lan: PauseLan) -> Action {
 pub fn loading(ui: &mut Ui, progress: f32) {
     let (w, h, s) = (ui.w, ui.h, ui.s);
     backdrop(ui, 1.6);
-    let px = ((200.0 * s) / logo_units(ui)).floor().max(2.0);
-    let bob = ((ui.time * 1.3).sin() * 1.5 * s).round();
-    let shine = logo_shine(ui);
-    let (_, lh) = draw_logo(ui, w * 0.5, (h * 0.26).round() + bob, px, shine);
-    let cy = (h * 0.26 + lh + 34.0 * s).round();
+    let lw = (220.0 * s).round();
+    let ly = (h * 0.26).round();
+    ui.logo(crate::world::textures::tex::LOGO, w * 0.5, ly, lw);
+    let cy = (ly + lw / 8.0 + 30.0 * s).round();
     ui.text_centered(t("loading.generating"), w * 0.5, cy - 16.0 * s, s, WHITE, true);
-    let (bw, bh) = ((220.0 * s).round(), (8.0 * s).round());
+    let (bw, bh) = ((220.0 * s).round(), (4.0 * s).round());
     let x = (w * 0.5 - bw * 0.5).round();
     ui.rect_full(x, cy + s, bw, bh, rgba(0, 0, 0, 80), rgba(0, 0, 0, 80), bh * 0.5, 4.0 * s);
     ui.rect(x, cy, bw, bh, rgba(255, 255, 255, 26), bh * 0.5);
     let p = progress.clamp(0.0, 1.0);
     if p > 0.0 {
         let fw = (bw * p).max(bh);
-        ui.rect_full(x, cy, fw, bh, with_alpha(ACCENT, 0.5), with_alpha(ACCENT, 0.5), bh * 0.5, 6.0 * s);
         ui.rect_full(x, cy, fw, bh, ACCENT_LIGHT, rgba(196, 92, 42, 255), bh * 0.5, 0.0);
         // A light running along the filled part.
         let run = (ui.time * 0.7).fract();
@@ -1503,7 +1310,7 @@ pub fn credits(ui: &mut Ui, pack: Option<(&str, &str)>) -> Action {
 
         // Title
         if draw {
-            ui.text_centered("RustCraft", cx, y, 2.0 * s, gold, true);
+            ui.text_centered("Your Worlds", cx, y, 2.0 * s, gold, true);
         }
         y += 20.0 * s;
         if draw {
@@ -1617,8 +1424,10 @@ mod menu_player_tests {
         let frame = |ui: &mut Ui, preview: &mut PreviewRotation| {
             ui.begin(1920.0, 1080.0, 3.0, 0.016, 3.0);
             ui.age = 10.0;
-            main_menu(ui, "Test", 1, preview);
-            ui.verts.iter().filter(|v| v.mode == 3.0).map(|v| v.pos).collect::<Vec<_>>()
+            main_menu(ui, 1, preview);
+            // (the character's textured faces, not the logo's)
+            let logo = crate::world::textures::tex::LOGO as f32;
+            ui.verts.iter().filter(|v| v.mode == 3.0 && v.rect[0] < logo).map(|v| v.pos).collect::<Vec<_>>()
         };
         let first = frame(&mut ui, &mut preview);
         assert!(first.len() > 60);

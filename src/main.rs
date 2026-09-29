@@ -69,20 +69,21 @@ impl ApplicationHandler for App {
             size = LogicalSize::new(h * 16.0 / 9.0, h);
         }
         let attrs = Window::default_attributes()
-            .with_title("RustCraft")
+            .with_title("Your Worlds")
             .with_inner_size(size)
-            .with_min_inner_size(LogicalSize::new(480.0, 320.0));
+            .with_min_inner_size(LogicalSize::new(480.0, 320.0))
+            // (shown once the start-up screen is drawn, not blank white before it)
+            .with_visible(false);
         let window = Arc::new(
             event_loop
                 .create_window(attrs)
                 .expect("failed to create window"),
         );
-        self.game = Some(game::Game::new(
-            window,
-            self.bench,
-            self.shots.clone(),
-            self.gun_shots.clone(),
-        ));
+        let mut game = game::Game::new(window, self.bench, self.shots.clone(), self.gun_shots.clone());
+        // The first frame now: a hidden window is not asked to redraw, and this one is shown
+        // once something is drawn in it.
+        game.frame();
+        self.game = Some(game);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -137,7 +138,7 @@ fn report_crashes() {
             .map(|s| s.to_string())
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "ismeretlen hiba".into());
-        let text = format!("A RustCraft hibával leállt.\n\n{msg}\n\nHely: {place}");
+        let text = format!("A Your Worlds hibával leállt.\n\n{msg}\n\nHely: {place}");
         let _ = std::fs::write("crash.txt", &text);
         message_box(&format!("{text}\n\n(Elmentve: crash.txt)"));
     }));
@@ -150,7 +151,7 @@ fn message_box(text: &str) {
         fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, flags: u32) -> i32;
     }
     let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let (text, caption) = (wide(text), wide("RustCraft - hiba"));
+    let (text, caption) = (wide(text), wide("Your Worlds - hiba"));
     const MB_ICONERROR: u32 = 0x10;
     // SAFETY: both strings are NUL-terminated UTF-16 and outlive the call.
     unsafe {

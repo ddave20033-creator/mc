@@ -177,8 +177,22 @@ impl Game {
         self.audio.set_volumes(st.volume / 100.0, [st.volume_weapons / 100.0, st.volume_other / 100.0]);
         let medium = self.medium(&view);
         let lighting = self.lighting(&view, medium);
-        let scene = self.build_scene(&view, dt);
+        let mut scene = self.build_scene(&view, dt);
         let action = self.draw_ui(w, h, dt, view.in_world, medium);
+        // Out of a world (the title screen's and the other menus' panorama), the world
+        // behind the menu is blurred: drawn small by the scope pass, spread over the screen.
+        let blur = !view.in_world && !matches!(self.screen, Screen::Playing | Screen::Chat);
+        if blur {
+            let corner = |x: f32, y: f32| crate::world::mesh::Vertex {
+                pos: [x, y, 0.0],
+                uv: [(x + 1.0) * 0.5, (y + 1.0) * 0.5],
+                light: [255, 255, 255, 2],
+                tint: [255, 255, 255, 0],
+                ..Default::default()
+            };
+            let (a, b, c, d) = (corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0));
+            scene.lens = vec![a, b, c, a, c, d];
+        }
         self.apply(action);
 
         // Not while the camera is still gliding back from a chest or table, nor where a
@@ -218,7 +232,14 @@ impl Game {
             translucent: &scene.translucent,
             viewmodel_glass: &scene.viewmodel_glass,
             lens: &scene.lens,
-            scope: scene.scope.map(|(from, dir, up, fov, near)| {
+            backdrop_blur: blur,
+            scope: if blur {
+                let mut ubo = lighting.ubo;
+                ubo.light_dir[3] = 0.0;
+                let detail_px = crate::render::SCOPE_SIZE as f32 * 0.5 / (self.detail_fov.to_radians() * 0.5).tan();
+                ubo.detail[0] = detail_px;
+                Some(crate::render::ScopeView { ubo, view_proj: view.view_proj, cam_pos: view.cam, detail_px })
+            } else { scene.scope.map(|(from, dir, up, fov, near)| {
                 let look = Mat4::look_to_rh(from, dir, up);
                 let mut proj = Mat4::perspective_rh(fov, 1.0, near, 2500.0);
                 proj.y_axis.y *= -1.0;
@@ -232,10 +253,15 @@ impl Game {
                 let detail_px = crate::render::SCOPE_SIZE as f32 * 0.5 / (fov * 0.5).tan();
                 ubo.detail[0] = detail_px;
                 crate::render::ScopeView { ubo, view_proj, cam_pos: from, detail_px }
-            }),
+            }) },
         };
         let t_build = Instant::now();
         self.renderer.render(&mut self.gpu, &frame);
+        if !self.window_shown {
+            // The window was hidden until something was drawn in it.
+            self.window_shown = true;
+            self.window.set_visible(true);
+        }
         let t_end = Instant::now();
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
         let wait = self.gpu.wait_ms;
@@ -1163,7 +1189,8 @@ impl Game {
         // The item icons asked for last frame, drawn for things as they are.
         self.update_state_icons();
         let s = self.settings.effective_gui_scale(w, h);
-        self.ui.input_enabled = !self.cursor_grabbed;
+        let booting = self.boot_step();
+        self.ui.input_enabled = !self.cursor_grabbed && !booting;
         self.ui.mouse_down = self.left_down;
         self.ui.pressed = self.left_pressed && !self.cursor_grabbed;
         self.ui.right_pressed = self.right_pressed && !self.cursor_grabbed;
@@ -1194,7 +1221,6 @@ impl Game {
         let action = match self.screen {
             Screen::MainMenu => screens::main_menu(
                 &mut self.ui,
-                self.splash,
                 self.settings.skin,
                 &mut self.menu_preview,
             ),
@@ -1253,11 +1279,8 @@ impl Game {
             Screen::Playing | Screen::Chat => Action::None,
         };
         self.ui.restore(before);
-        // Fade in from black when the game starts.
-        if self.time < 1.2 {
-            let a = ((1.0 - self.time / 1.2) * 255.0) as u8;
-            self.ui.solid(0.0, 0.0, w, h, rgba(0, 0, 0, a));
-        }
+        // The start-up screen over it all while it is up.
+        self.draw_boot();
         self.ui.finish();
         action
     }

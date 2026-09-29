@@ -32,7 +32,7 @@ pub fn with_alpha(c: Color, a: f32) -> Color {
 }
 
 /// Shown in the main menu and on the F3 screen.
-pub const VERSION: &str = "RustCraft 0.4.0 (Vulkan)";
+pub const VERSION: &str = "Your Worlds 0.4.0";
 
 pub const WHITE: Color = rgba(255, 255, 255, 255);
 /// The menus' colours: rust orange (the logo's) on dark glass.
@@ -235,8 +235,6 @@ pub struct Ui {
     clip: Option<[f32; 4]>,
     focus: Option<u64>,
     anims: HashMap<u64, f32>,
-    /// A button's flash when it is clicked (1 .. 0).
-    flashes: HashMap<u64, f32>,
     active: Option<u64>,
     tooltip: Option<String>,
     /// Everything drawn is this see-through (0..1) and moved by `offset` (the screens'
@@ -274,7 +272,6 @@ impl Ui {
             clip: None,
             focus: None,
             anims: HashMap::new(),
-            flashes: HashMap::new(),
             active: None,
             tooltip: None,
             fade: 1.0,
@@ -328,9 +325,6 @@ impl Ui {
         self.stagger = 0;
         self.fade = 1.0;
         self.offset = Vec2::ZERO;
-        for f in self.flashes.values_mut() {
-            *f = (*f - dt * 3.5).max(0.0);
-        }
         self.tooltip = None;
         self.clicked = false;
         if !self.mouse_down {
@@ -671,22 +665,6 @@ impl Ui {
         self.text(s, cx - w * 0.5, y, size, c, shadow);
     }
 
-    pub fn text_rotated(&mut self, s: &str, center: Vec2, size: f32, angle: f32, c: Color) {
-        let rot = Vec2::from_angle(angle);
-        let w = self.text_width(s, size);
-        let (x, y) = (center.x - w * 0.5, center.y - 3.5 * size);
-        let sh = Vec2::splat(size);
-        self.draw_text(
-            s,
-            x + size,
-            y + size,
-            size,
-            Self::shadow_color(c),
-            Some((center + sh, rot)),
-        );
-        self.draw_text(s, x, y, size, c, Some((center, rot)));
-    }
-
     // ---------- widgets ----------
 
     fn anim(&mut self, id: u64, on: bool) -> f32 {
@@ -711,7 +689,7 @@ impl Ui {
             _ => ACCENT,
         };
         if enabled && t > 0.01 {
-            self.rect_full(x, y, w, h, with_alpha(tone, 0.28 * t), with_alpha(tone, 0.18 * t), r, 9.0 * s);
+            self.rect_full(x, y, w, h, with_alpha(tone, 0.12 * t), with_alpha(tone, 0.08 * t), r, 6.0 * s);
         }
         let (border, top, bot) = if !enabled {
             (rgba(255, 255, 255, 14), rgba(28, 29, 36, 150), rgba(20, 21, 26, 150))
@@ -760,13 +738,13 @@ impl Ui {
     }
 
     /// A button that comes in with the screen (after the ones before it), lights up when
-    /// hovered (a bar of the accent grows at its left, the label moves over to it), sinks
-    /// when pressed and flashes when clicked.
+    /// hovered (a bar of the accent grows at its left, the label moves over to it) and sinks
+    /// when pressed.
     #[allow(clippy::too_many_arguments)]
     pub fn button_ex(&mut self, label: &str, x: f32, y: f32, w: f32, h: f32, enabled: bool, kind: ButtonKind) -> bool {
         let s = self.s;
         let a = self.appear();
-        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 8.0 * s).round()));
+        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 5.0 * s).round()));
         let id = hash_id(label, x, y);
         let hovered = self.hit(x, y, w, h) && self.active.is_none();
         let t = self.anim(id, hovered && enabled);
@@ -777,10 +755,6 @@ impl Ui {
         if enabled && kind == ButtonKind::Normal && t > 0.01 {
             let bh = ((h - 10.0 * s) * t).max(0.0);
             self.rect(x + 3.0 * s, y + (h - bh) * 0.5, 2.0 * s, bh, ACCENT, s);
-        }
-        let flash = self.flashes.get(&id).copied().unwrap_or(0.0);
-        if flash > 0.0 {
-            self.rect(x, y, w, h, rgba(255, 255, 255, (flash * 90.0) as u8), 4.0 * s);
         }
         let tc = if !enabled {
             rgba(120, 122, 132, 255)
@@ -793,9 +767,6 @@ impl Ui {
         let shift = if kind == ButtonKind::Normal { (t * 2.0 * s).round() } else { 0.0 };
         self.text(label, x + (w - tw) * 0.5 + shift, y + (h - 7.0 * s) * 0.5, s, tc, true);
         let clicked = hovered && enabled && self.pressed;
-        if clicked {
-            self.flashes.insert(id, 1.0);
-        }
         self.clicked |= clicked;
         self.restore(old);
         clicked
@@ -818,7 +789,7 @@ impl Ui {
     ) -> bool {
         let s = self.s;
         let a = self.appear();
-        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 8.0 * s).round()));
+        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 5.0 * s).round()));
         let hid = hash_id(id, 0.0, 0.0);
         let hovered = self.hit(x, y, w, h);
         if hovered && self.pressed && self.active.is_none() {
@@ -888,7 +859,7 @@ impl Ui {
     ) -> bool {
         let s = self.s;
         let a = self.appear();
-        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 8.0 * s).round()));
+        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 5.0 * s).round()));
         let hid = hash_id(id, 0.0, 0.0);
         let hovered = self.hit(x, y, w, h);
         if self.pressed {
@@ -976,6 +947,20 @@ impl Ui {
             0.0,
             0.0,
         );
+    }
+
+    /// The game's logo (`ui/logo.png`: `tex::LOGO_TILES` square texture layers from
+    /// `first_layer`), `width` wide, its top middle at (`cx`, `y`), with a soft shadow under it.
+    pub fn logo(&mut self, first_layer: u32, cx: f32, y: f32, width: f32) {
+        let tiles = crate::world::textures::tex::LOGO_TILES;
+        let t = (width / tiles as f32).round();
+        let x0 = (cx - t * tiles as f32 * 0.5).round();
+        self.rect_full(x0 + t * 0.3, y + t * 0.35, t * (tiles as f32 - 0.6), t * 0.5, rgba(0, 0, 0, 110), rgba(0, 0, 0, 110), t * 0.25, t * 0.3);
+        for i in 0..tiles {
+            let x = x0 + i as f32 * t;
+            let p = [Vec2::new(x, y), Vec2::new(x + t, y), Vec2::new(x + t, y + t), Vec2::new(x, y + t)];
+            self.tex_quad(p, first_layer + i, 1.0);
+        }
     }
 
     /// A small rounded label: `text` on a tinted pill (a world's mode, a setting's state).

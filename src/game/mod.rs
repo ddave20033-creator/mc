@@ -1,4 +1,5 @@
 mod bench;
+mod boot;
 mod book;
 mod blocks;
 mod camera;
@@ -42,7 +43,7 @@ use crate::render::{FrameInfo, FrameUbo, Renderer, SHADOW_SIZE};
 use crate::save::{ChunkSaver, PlayerSave, WorldMeta};
 use crate::settings::Settings;
 use crate::ui::chat::{self, Chat, ChatInput};
-use crate::ui::screens::{self, Action, SPLASHES};
+use crate::ui::screens::{self, Action};
 use crate::ui::{rgba, with_alpha, Color, Ui, WHITE};
 use crate::util::{smoothstep, Rng};
 use crate::world::fluid::Fluids;
@@ -352,7 +353,6 @@ pub struct Game {
     fps: f32,
     fps_accum: f32,
     fps_frames: u32,
-    splash: &'static str,
     /// (title, description) of the resource pack in use, for the credits.
     pack_credit: Option<(String, String)>,
     /// The resource pack draws torch fire as flame/smoke particles (like Minecraft).
@@ -410,6 +410,10 @@ pub struct Game {
     menu_preview: screens::PreviewRotation,
     /// All texture layers but the uploaded skins (see `textures::generate_base`).
     texture_base: Vec<u8>,
+    /// The start-up screen, while it is up.
+    boot: Option<boot::Boot>,
+    /// Whether the window is shown yet (after the first frame).
+    window_shown: bool,
     custom_skins: std::collections::HashMap<u8, crate::pack::Image>,
     skin_pngs: std::collections::HashMap<u8, Vec<u8>>,
     local_skin_png: Option<Vec<u8>>,
@@ -442,21 +446,16 @@ impl Game {
             window.set_fullscreen(Some(Fullscreen::Borderless(None)));
         }
         let gpu = Gpu::new(&window, false, settings.msaa);
-        println!("RustCraft running on: {}", gpu.device_name);
+        println!("Your Worlds running on: {}", gpu.device_name);
         let ui = Ui::new();
-        let packs = crate::pack::Packs::load(&settings.resource_packs);
-        let texture_base = textures::generate_base(&packs);
-        let renderer = Renderer::new(
-            &gpu,
-            &textures::with_skins(&texture_base, &custom_skins),
-            &ui.font.atlas,
-        );
-        let torch_particles = packs.texture("particle/flame").is_some();
+        // The textures are made on another thread while the start-up screen shows the logo
+        // (the only textures it needs); they replace these when they are ready.
+        let boot = boot::Boot::start(settings.resource_packs.clone(), custom_skins.clone());
+        let renderer = Renderer::new(&gpu, &textures::logo_levels(), &ui.font.atlas);
+        let texture_base = Vec::new();
+        let torch_particles = false;
         // The credits name the built-in pack (always in use).
-        let pack_credit = packs
-            .0
-            .last()
-            .map(|p| (p.title().to_string(), p.description.clone()));
+        let pack_credit = None;
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u32)
@@ -611,7 +610,6 @@ impl Game {
             fps: 0.0,
             fps_accum: 0.0,
             fps_frames: 0,
-            splash: SPLASHES[seed as usize % SPLASHES.len()],
             pack_credit,
             torch_particles,
             torches: Vec::new(),
@@ -647,6 +645,8 @@ impl Game {
             pack_screen: Default::default(),
             menu_preview: Default::default(),
             texture_base,
+            boot: Some(boot),
+            window_shown: false,
             custom_skins,
             skin_pngs,
             local_skin_png,

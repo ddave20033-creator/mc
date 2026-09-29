@@ -47,7 +47,7 @@ impl Game {
         screens::backdrop(&mut self.ui, 1.3);
         let (lw, row_h, card_h) = ((300.0 * s).min(w - 24.0 * s).round(), (42.0 * s).round(), (37.0 * s).round());
         let lx = (w * 0.5 - lw * 0.5).round();
-        screen_header(&mut self.ui, t("worlds.title"), &format!("{}", self.worlds.len()), lx, lw);
+        screen_header(&mut self.ui, t("worlds.title"), "", lx, lw);
 
         // Scrollable list
         let (top, bottom) = ((44.0 * s).round(), h - 50.0 * s);
