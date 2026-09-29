@@ -14,7 +14,7 @@ impl Game {
             let sens = 0.0022 * self.settings.sensitivity / 100.0 * zoom;
             self.yaw += self.mouse_delta.x * sens;
             self.pitch = (self.pitch - self.mouse_delta.y * sens).clamp(-1.55, 1.55);
-            if self.scroll != 0.0 && !self.spectator() {
+            if self.scroll != 0.0 && !self.spectator() && !self.fishing_scroll() {
                 let d = if self.scroll > 0.0 { -1 } else { 1 };
                 self.hotbar_slot = (self.hotbar_slot as i32 + d).rem_euclid(9) as usize;
                 self.slot_name_timer = 2.0;
@@ -49,15 +49,17 @@ impl Game {
         }
         let k = |b: Bind| control && self.bind_down(b);
         let axis = |a: bool, b: bool| (a as i32 - b as i32) as f32;
+        // With a fishing rod in hand the sneak key shifts the reel's gear instead.
+        let rod = self.held() == FISHING_ROD;
         let input = MoveInput {
             forward: axis(k(Bind::Forward), k(Bind::Back)),
             strafe: axis(k(Bind::Right), k(Bind::Left)),
             up: k(Bind::Jump),
-            down: k(Bind::Sneak),
+            down: k(Bind::Sneak) && (!rod || self.player.flying),
             sprint: (k(Bind::Sprint) || (self.w_sprint && k(Bind::Forward)))
                 && (self.creative() || self.needs.can_sprint())
                 && !firing,
-            sneak: k(Bind::Sneak),
+            sneak: k(Bind::Sneak) && !rod,
             using: self.blocking || self.using.is_some(),
             aiming,
         };
@@ -147,6 +149,7 @@ impl Game {
         self.update_grenades(dt);
         let book = self.book_in_hand();
         self.update_grenade_hold(dt, control && !book);
+        self.update_fishing(dt, control);
         let mut breaking = None;
         // A sword does not break blocks at all (it only fights); with a pistol the left mouse
         // button shoots instead (one shot per click, no hitting).
@@ -296,6 +299,7 @@ impl Game {
         self.furnace_fx(dt);
         let mut loops = self.furnace_sounds();
         loops.extend(self.grenade_sounds());
+        loops.extend(self.fishing_sounds());
         self.audio.set_loops(&loops);
         if self.is_client() {
             // A LAN player's world is run by the host: only follow what it sends.

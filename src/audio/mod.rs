@@ -71,9 +71,31 @@ pub enum Sound {
     /// first rush of smoke, before `SmokeHiss` goes on).
     SpoonFly,
     SmokePop,
+    /// A wolf: barking, panting, growling (angry), whining (hurt and tame), yelping when hit.
+    WolfBark,
+    WolfPant,
+    WolfGrowl,
+    WolfWhine,
+    WolfHurt,
+    /// Fishing: the rod swished forward to cast, the reel's ratchet (a notch of the wheel),
+    /// line running off the spool, the bobber landing on the water, a fish nibbling at the
+    /// bait, the bite (the bobber pulled under), the rod creaking under the line's pull (a
+    /// loop), the line snapping, a hooked fish thrashing, a fish landed, the reel's gear
+    /// switched.
+    FishCast,
+    ReelClick,
+    LineZip,
+    BobberPlop,
+    FishNibble,
+    FishBite,
+    RodCreak,
+    LineSnap,
+    FishSplash,
+    FishLand,
+    GearClick,
 }
 
-pub const SOUNDS: [Sound; 31] = [
+pub const SOUNDS: [Sound; 47] = [
     Sound::ShotPistol,
     Sound::ShotRifle,
     Sound::ShotSilenced,
@@ -105,12 +127,40 @@ pub const SOUNDS: [Sound; 31] = [
     Sound::CaseRifle,
     Sound::SpoonFly,
     Sound::SmokePop,
+    Sound::WolfBark,
+    Sound::WolfPant,
+    Sound::WolfGrowl,
+    Sound::WolfWhine,
+    Sound::WolfHurt,
+    Sound::FishCast,
+    Sound::ReelClick,
+    Sound::LineZip,
+    Sound::BobberPlop,
+    Sound::FishNibble,
+    Sound::FishBite,
+    Sound::RodCreak,
+    Sound::LineSnap,
+    Sound::FishSplash,
+    Sound::FishLand,
+    Sound::GearClick,
 ];
 
 impl Sound {
     pub fn group(self) -> Group {
         match self {
             Sound::FireCrackle | Sound::BlastRoar | Sound::SmeltDone | Sound::ArmorEquip | Sound::ArmorHit => Group::Other,
+            Sound::WolfBark | Sound::WolfPant | Sound::WolfGrowl | Sound::WolfWhine | Sound::WolfHurt => Group::Other,
+            Sound::FishCast
+            | Sound::ReelClick
+            | Sound::LineZip
+            | Sound::BobberPlop
+            | Sound::FishNibble
+            | Sound::FishBite
+            | Sound::RodCreak
+            | Sound::LineSnap
+            | Sound::FishSplash
+            | Sound::FishLand
+            | Sound::GearClick => Group::Other,
             _ => Group::Weapons,
         }
     }
@@ -158,6 +208,12 @@ impl Sound {
             Sound::Impact | Sound::GrenadeBounce | Sound::ArmorHit => (2.0, 40.0),
             Sound::FireCrackle | Sound::BlastRoar => (1.5, 18.0),
             Sound::SmokeHiss | Sound::SmokePop => (3.0, 40.0),
+            Sound::WolfBark => (3.0, 48.0),
+            Sound::WolfGrowl | Sound::WolfHurt | Sound::WolfWhine => (2.0, 24.0),
+            Sound::WolfPant => (1.0, 12.0),
+            // (a bobber far out on the lake must still be heard)
+            Sound::BobberPlop | Sound::FishNibble | Sound::FishBite | Sound::FishSplash | Sound::FishLand => (6.0, 80.0),
+            Sound::ReelClick | Sound::GearClick | Sound::LineZip | Sound::RodCreak => (1.0, 16.0),
             _ => (1.5, 20.0),
         }
     }

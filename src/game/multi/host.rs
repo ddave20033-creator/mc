@@ -220,11 +220,12 @@ impl Game {
             }
             if let Some(pose) = pose {
                 let at = pose.pos;
+                let name = self.player_name(*id);
                 let mobs = self
                     .mobs
                     .iter()
                     .filter(|m| m.pos.distance(at) < MOB_RANGE)
-                    .map(|m| m.to_net())
+                    .map(|m| crate::net::MobNet { flags: m.wolf_flags(name.as_deref()), ..m.to_net() })
                     .collect();
                 let items = self
                     .items
@@ -476,6 +477,7 @@ impl Game {
             } => {
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                     m.hurt(dmg, Some(from), knock);
+                    self.attacked(crate::entity::mob::Foe::Mob(mob), id);
                 }
             }
             Msg::AttackPlayer {
@@ -484,6 +486,9 @@ impl Game {
                 knock,
                 kind,
             } => {
+                if kind != crate::net::hurt::BLAST {
+                    self.attacked(crate::entity::mob::Foe::Player(target), id);
+                }
                 if target == HOST_ID {
                     self.hit_by_player(dmg, from, knock, kind);
                 } else {
@@ -509,6 +514,11 @@ impl Game {
             Msg::SpawnMob { kind, pos } => {
                 if let Some(kind) = MobKind::from_u8(kind) {
                     self.spawn_mob(kind, pos);
+                }
+            }
+            Msg::UseOnMob { id: mob, item } => {
+                if let Some(i) = self.mobs.iter().position(|m| m.id == mob) {
+                    self.wolf_used(i, item, id);
                 }
             }
             Msg::BreakDummy { id: mob } => {

@@ -228,7 +228,7 @@ impl Tab {
         } else if tool_of(id).is_some()
             || matches!(
                 id,
-                BUCKET | WATER_BUCKET | LAVA_BUCKET | SHEARS | GLASS_BOTTLE | GUIDE_BOOK
+                BUCKET | WATER_BUCKET | LAVA_BUCKET | SHEARS | GLASS_BOTTLE | GUIDE_BOOK | FISHING_ROD
             )
             || GunKind::of(id).is_some()
             || matches!(
@@ -306,7 +306,7 @@ impl Tab {
                 tools(ToolKind::Axe),
                 tools(ToolKind::Shovel),
                 tools(ToolKind::Sword),
-                vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE, GUIDE_BOOK],
+                vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE, GUIDE_BOOK, FISHING_ROD],
                 // The pistol, its ammunition and the extended magazine, grenades, attachments
                 // and pistol parts (the last one is the magazine).
                 vec![PISTOL, REVOLVER, BULLET, MAGNUM_ROUND, EXTENDED_MAGAZINE, SPEEDLOADER],
@@ -335,10 +335,11 @@ impl Tab {
                 meat(PORKCHOP).unwrap().to_vec(),
                 meat(MUTTON).unwrap().to_vec(),
                 vec![WATER_BOTTLE, PURIFIED_WATER],
+                vec![RAW_FISH, COOKED_FISH],
             ],
-            Tab::Mobs => vec![vec![PIG_SPAWN_EGG, SHEEP_SPAWN_EGG], vec![TARGET_DUMMY]],
+            Tab::Mobs => vec![vec![PIG_SPAWN_EGG, SHEEP_SPAWN_EGG, WOLF_SPAWN_EGG], vec![TARGET_DUMMY]],
             Tab::Materials => vec![
-                vec![STICK, COAL, CHARCOAL, CLAY_BALL, BRICK],
+                vec![STICK, BONE, COAL, CHARCOAL, CLAY_BALL, BRICK],
                 vec![COPPER_INGOT, IRON_NUGGET, IRON_INGOT, GOLD_INGOT, DIAMOND],
                 vec![STEEL_INGOT, CERAMIC_PLATE],
             ],

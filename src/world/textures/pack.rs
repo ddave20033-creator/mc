@@ -92,6 +92,8 @@ const PACK_TEXTURES: &[(u32, &str)] = &[
     (tex::WATER_BUCKET, "item/water_bucket"),
     (tex::LAVA_BUCKET, "item/lava_bucket"),
     (tex::PIG_SPAWN_EGG, "item/pig_spawn_egg"),
+    (tex::WOLF_SPAWN_EGG, "item/wolf_spawn_egg"),
+    (tex::BONE, "item/bone"),
     (tex::PORKCHOP, "item/porkchop"),
     (tex::COOKED_PORKCHOP, "item/cooked_porkchop"),
     (tex::GLASS_BOTTLE, "item/glass_bottle"),
@@ -121,6 +123,8 @@ const PACK_TEXTURES: &[(u32, &str)] = &[
     (tex::COOKED_MUTTON, "item/cooked_mutton|item/mutton_cooked"),
     (tex::SHEARS, "item/shears"),
     (tex::SHEEP_SPAWN_EGG, "item/sheep_spawn_egg"),
+    (tex::RAW_FISH, "item/cod|item/fish_cod_raw"),
+    (tex::COOKED_FISH, "item/cooked_cod|item/fish_cod_cooked"),
 ];
 
 /// Deterministic value noise in 0..1 along one axis (period of about 1 unit).
@@ -433,16 +437,24 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
         }
     }
 
-    // Pig and sheep skins: the whole atlas, kept square (64x32 ones fill the top half).
-    for (layer, paths) in [
-        (tex::PIG, "entity/pig/pig_temperate|entity/pig/pig"),
-        (tex::SHEEP, "entity/sheep/sheep"),
-        (tex::SHEEP_WOOL, "entity/sheep/sheep_wool|entity/sheep/sheep_fur"),
-    ] {
-        if let Some(skin) = pack.texture(paths) {
-            let mut atlas = Image::blank(skin.w, skin.w);
-            atlas.blit(&skin, 0, 0, skin.w, skin.h.min(skin.w));
-            put(layer, &atlas);
+    // The wolf's, the pig's and the sheep's skins: each box's faces cut out of the atlas (64
+    // units wide, at whatever resolution) onto their pages (`entity::skin_pages`).
+    {
+        use crate::entity::mob::{pig_skin, sheep_skin, wolf_skin};
+        for (base, skin, path) in [
+            (tex::WOLF, &wolf_skin::SKIN, "entity/wolf/wolf"),
+            (tex::WOLF_TAME, &wolf_skin::SKIN, "entity/wolf/wolf_tame"),
+            (tex::WOLF_ANGRY, &wolf_skin::SKIN, "entity/wolf/wolf_angry"),
+            (tex::WOLF_COLLAR, &wolf_skin::SKIN, "entity/wolf/wolf_collar"),
+            (tex::PIG, &pig_skin::SKIN, "entity/pig/pig_temperate|entity/pig/pig"),
+            (tex::SHEEP, &sheep_skin::SKIN, "entity/sheep/sheep"),
+            (tex::SHEEP_WOOL, &sheep_skin::WOOL, "entity/sheep/sheep_wool|entity/sheep/sheep_fur"),
+        ] {
+            if let Some(atlas) = pack.texture(path) {
+                for (i, pg) in skin_pages(skin, &atlas).iter().enumerate() {
+                    put(base + i as u32, pg);
+                }
+            }
         }
     }
 
@@ -466,4 +478,29 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
             put(layer, &skin.region(64, x, y, w, h));
         }
     }
+}
+
+/// A skin's pages (`entity::skin_pages`) cut out of its atlas (64 units wide, at any
+/// resolution): each piece of a face scaled to the pages' texels per unit, its border (if the
+/// skin has one) repeating its edge.
+pub(super) fn skin_pages(skin: &crate::entity::skin_pages::SkinPages, atlas: &Image) -> Vec<Image> {
+    let k = atlas.w as f32 / 64.0;
+    let mut pages: Vec<Image> = (0..skin.pages).map(|_| Image::blank(TILE as u32, TILE as u32)).collect();
+    for p in skin.all() {
+        let (l, t, r, b) = p.rect;
+        let (x0, y0) = ((l * k).round() as u32, (t * k).round() as u32);
+        let (x1, y1) = ((r * k).round() as u32, (b * k).round() as u32);
+        if x0 >= atlas.w || y0 >= atlas.h {
+            continue;
+        }
+        let src = atlas.crop(x0, y0, (x1 - x0).max(1), (y1 - y0).max(1));
+        let (w, h) = p.size(skin.px);
+        let Some(pg) = pages.get_mut(p.page as usize) else { continue };
+        let e = skin.border;
+        if e > 0 {
+            pg.blit(&src, p.x - e, p.y - e, w + 2 * e, h + 2 * e);
+        }
+        pg.blit(&src, p.x, p.y, w, h);
+    }
+    pages
 }

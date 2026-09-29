@@ -18,6 +18,8 @@ enum Kind {
     /// A big puff of a smoke cloud (smoke grenade, explosion): drifts out, slows down and
     /// hangs in the air, growing.
     Cloud,
+    /// A drop of splashed water: flies up, falls back and is gone.
+    Drop,
 }
 
 pub struct Particle {
@@ -279,6 +281,31 @@ impl Particles {
         });
     }
 
+    /// Water splashing up at `pos` (on the surface): `count` drops thrown up and out, higher
+    /// with `strength` (0..1).
+    pub fn splash(&mut self, pos: Vec3, count: usize, strength: f32, sky: u8, blk: u8) {
+        for _ in 0..count {
+            let a = self.rand() * std::f32::consts::TAU;
+            let out = 0.4 + self.rand() * 1.6 * (0.5 + strength);
+            let up = 1.5 + self.rand() * 3.5 * (0.4 + strength);
+            let life = 0.35 + self.rand() * 0.45;
+            let shade = (215.0 + self.rand() * 40.0) as u8;
+            let size = 0.025 + self.rand() * 0.035 * (0.6 + strength);
+            self.list.push(Particle {
+                kind: Kind::Drop,
+                pos: pos + Vec3::new(a.cos(), 0.0, a.sin()) * 0.08,
+                vel: Vec3::new(a.cos() * out, up, a.sin() * out),
+                life,
+                max_life: life,
+                layer: tex::WOOL,
+                uv0: [0.3, 0.3],
+                size,
+                tint: [shade - 30, shade - 10, 255],
+                light: [sky, blk],
+            });
+        }
+    }
+
     /// An explosion: a ball of fire, sparks flying and dark smoke rolling out.
     pub fn explosion(&mut self, pos: Vec3, sky: u8, blk: u8) {
         for _ in 0..26 {
@@ -330,6 +357,11 @@ impl Particles {
                 p.pos += p.vel * dt;
                 continue;
             }
+            if p.kind == Kind::Drop {
+                p.vel.y -= 16.0 * dt;
+                p.pos += p.vel * dt;
+                continue;
+            }
             if p.kind == Kind::Spark {
                 p.vel.y -= 6.0 * dt;
                 p.vel *= 1.0 - dt * 3.0;
@@ -365,6 +397,7 @@ impl Particles {
                 Kind::Debris => (p.size, p.layer, 0.25, 0),
                 Kind::Flame => (p.size * (1.0 - t * t * 0.5), p.layer, 1.0, flags::EMISSIVE),
                 Kind::Spark => (p.size * (1.0 - t * 0.6), p.layer, 0.2, flags::EMISSIVE),
+                Kind::Drop => (p.size * (1.0 - t * 0.5), p.layer, 0.2, 0),
                 Kind::Smoke => {
                     let frame =
                         SMOKE_FRAMES - 1 - ((t * SMOKE_FRAMES as f32) as u32).min(SMOKE_FRAMES - 1);

@@ -1,6 +1,12 @@
-//! Mobs (the pig and the sheep): physics, a Minecraft-style passive animal AI and the models.
-//! The target dummy is one too: it stands where it was set up, rocks when hit and counts the
-//! damage it takes (it never dies).
+//! Mobs (the pig, the sheep and the wolf): physics, a Minecraft-style animal AI and the
+//! models. The target dummy is one too: it stands where it was set up, rocks when hit and
+//! counts the damage it takes (it never dies).
+//!
+//! The wolf is Minecraft's: wild ones roam the forests in packs and turn on whoever hurts
+//! one of them; given a bone, one may be tamed (a third of the time). A tame wolf wears a
+//! collar, follows its owner (catching up by jumping to them when far behind), sits and
+//! stands up again when its owner right clicks it, and goes for whatever its owner attacks
+//! or whoever attacks it.
 //!
 //! The AI follows Minecraft's goals for animals: panic after being hurt (run to random spots,
 //! away from whoever hit it), wander to random nearby spots (preferring grass, avoiding
@@ -8,9 +14,12 @@
 //! float in water. Mobs jump up single blocks, take fall, lava, cactus and suffocation
 //! damage, get knocked back, flash red when hurt and tip over when they die.
 //!
-//! Models use Minecraft's entity model format: cubes with box UVs into a 64x64 texel atlas
-//! (one texture layer), set up exactly like Minecraft's `PigModel`.
+//! Models use Minecraft's entity model format: cubes with box UVs into a 64 unit wide atlas,
+//! set up exactly like Minecraft's `PigModel`, `SheepModel` and `WolfModel`; the atlases are
+//! drawn at 8 texels per unit, their faces spread over several texture layers
+//! (`super::skin_pages`).
 
+use crate::entity::skin_pages::{face_uv, SkinPages};
 use crate::util::{ray_box, vertex_light, wrap_angle, Rng};
 use crate::world::mesh::{flags, Vertex};
 use crate::world::textures::tex;
@@ -23,6 +32,7 @@ pub enum MobKind {
     Pig,
     Sheep,
     Dummy,
+    Wolf,
 }
 
 impl MobKind {
@@ -31,6 +41,7 @@ impl MobKind {
             MobKind::Pig => "pig",
             MobKind::Sheep => "sheep",
             MobKind::Dummy => "target_dummy",
+            MobKind::Wolf => "wolf",
         }
     }
 
@@ -39,6 +50,7 @@ impl MobKind {
             "pig" => Some(MobKind::Pig),
             "sheep" => Some(MobKind::Sheep),
             "target_dummy" => Some(MobKind::Dummy),
+            "wolf" => Some(MobKind::Wolf),
             _ => None,
         }
     }
@@ -49,6 +61,7 @@ impl MobKind {
             0 => Some(MobKind::Pig),
             1 => Some(MobKind::Sheep),
             2 => Some(MobKind::Dummy),
+            3 => Some(MobKind::Wolf),
             _ => None,
         }
     }
@@ -58,6 +71,8 @@ impl MobKind {
             MobKind::Pig => 10.0,
             MobKind::Sheep => 8.0,
             MobKind::Dummy => 20.0,
+            // (a tame one: `TAME_HEALTH`)
+            MobKind::Wolf => 8.0,
         }
     }
 
@@ -67,6 +82,7 @@ impl MobKind {
             MobKind::Pig => (0.45, 0.9),
             MobKind::Sheep => (0.45, 1.3),
             MobKind::Dummy => (0.35, 1.95),
+            MobKind::Wolf => (0.3, 0.85),
         }
     }
 }
@@ -89,11 +105,117 @@ const HURT_TIME: f32 = 0.5;
 pub const DEATH_TIME: f32 = 1.0;
 /// Head turn limit relative to the body.
 const HEAD_LIMIT: f32 = 75.0 * PI / 180.0;
+/// A tame wolf's health; how hard a wolf bites, how often, and from how near; how fast it
+/// runs after something and after its owner; how long a wild one stays angry.
+pub const TAME_HEALTH: f32 = 20.0;
+pub const BITE: f32 = 4.0;
+const BITE_EVERY: f32 = 1.0;
+const BITE_REACH: f32 = 1.5;
+const CHASE_SPEED: f32 = WALK_SPEED * 2.1;
+const FOLLOW_SPEED: f32 = WALK_SPEED * 1.8;
+const WILD_ANGER: f32 = 25.0;
+
+/// Collar colours (Minecraft's dyes), by `Mob::collar`: red first (a new tame wolf's).
+pub const COLLARS: [[u8; 3]; 16] = [
+    [176, 46, 38], [249, 128, 29], [254, 216, 61], [128, 199, 31], [94, 124, 22], [22, 156, 156],
+    [58, 179, 218], [60, 68, 170], [137, 50, 184], [199, 78, 189], [243, 139, 170], [131, 84, 50],
+    [29, 29, 33], [71, 79, 82], [157, 157, 151], [249, 255, 254],
+];
+
+/// The wolf's skin, as detailed as the blocks: Minecraft's 64x32 unit wolf atlas at 8
+/// texels per unit (512x256), its faces on `PAGES` texture layers (`skin_pages`).
+pub mod wolf_skin {
+    use crate::entity::skin_pages::{BoxUv, SkinPages};
+
+    pub const PAGES: u32 = 8;
+    /// The model's boxes: texture offset and size (units), as in Minecraft's `WolfModel`.
+    pub const BOXES: [BoxUv; 7] = [
+        ([0.0, 0.0], [6.0, 6.0, 4.0]),
+        ([16.0, 14.0], [2.0, 2.0, 1.0]),
+        ([0.0, 10.0], [3.0, 3.0, 4.0]),
+        ([18.0, 14.0], [6.0, 9.0, 6.0]),
+        ([21.0, 0.0], [8.0, 6.0, 7.0]),
+        ([0.0, 18.0], [2.0, 8.0, 2.0]),
+        ([9.0, 18.0], [2.0, 8.0, 2.0]),
+    ];
+    pub const HEAD: usize = 0;
+    pub const EAR: usize = 1;
+    pub const SNOUT: usize = 2;
+    pub const BODY: usize = 3;
+    pub const MANE: usize = 4;
+    pub const LEG: usize = 5;
+    pub const TAIL: usize = 6;
+    pub static SKIN: SkinPages = SkinPages::new(&BOXES, 8, PAGES, 1);
+}
+
+/// The pig's skin (Minecraft's 64x64 unit `pig_temperate` atlas at 8 texels per unit, 512x512)
+/// on `PAGES` texture layers, like the wolf's.
+pub mod pig_skin {
+    use crate::entity::skin_pages::{BoxUv, SkinPages};
+
+    pub const PAGES: u32 = 6;
+    /// `PigModel`'s boxes: head, snout, body, leg.
+    pub const BOXES: [BoxUv; 4] = [
+        ([0.0, 0.0], [8.0, 8.0, 8.0]),
+        ([16.0, 16.0], [4.0, 3.0, 1.0]),
+        ([28.0, 8.0], [10.0, 16.0, 8.0]),
+        ([0.0, 16.0], [4.0, 6.0, 4.0]),
+    ];
+    pub const HEAD: usize = 0;
+    pub const SNOUT: usize = 1;
+    pub const BODY: usize = 2;
+    pub const LEG: usize = 3;
+    pub static SKIN: SkinPages = SkinPages::new(&BOXES, 8, PAGES, 0);
+}
+
+/// The sheep's skin and its wool coat (Minecraft's 64x32 unit atlases at 8 texels per unit,
+/// 512x256) on `PAGES` and `WOOL_PAGES` texture layers, like the wolf's.
+pub mod sheep_skin {
+    use crate::entity::skin_pages::{BoxUv, SkinPages};
+
+    pub const PAGES: u32 = 5;
+    pub const WOOL_PAGES: u32 = 4;
+    /// `SheepModel`'s boxes (head, body, leg), and `SheepFurModel`'s.
+    pub const BOXES: [BoxUv; 3] = [
+        ([0.0, 0.0], [6.0, 6.0, 8.0]),
+        ([28.0, 8.0], [8.0, 16.0, 6.0]),
+        ([0.0, 16.0], [4.0, 12.0, 4.0]),
+    ];
+    pub const WOOL_BOXES: [BoxUv; 3] = [
+        ([0.0, 0.0], [6.0, 6.0, 6.0]),
+        ([28.0, 8.0], [8.0, 16.0, 6.0]),
+        ([0.0, 16.0], [4.0, 6.0, 4.0]),
+    ];
+    pub const HEAD: usize = 0;
+    pub const BODY: usize = 1;
+    pub const LEG: usize = 2;
+    pub static SKIN: SkinPages = SkinPages::new(&BOXES, 8, PAGES, 0);
+    pub static WOOL: SkinPages = SkinPages::new(&WOOL_BOXES, 8, WOOL_PAGES, 0);
+}
+
+/// Someone a wolf goes for: a mob (its id) or a player (their LAN id; the host is 0).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Foe {
+    Mob(u32),
+    Player(u8),
+}
+
+/// `MobNet::flags` of a wolf: tame, sitting, angry, and tamed by whoever gets it.
+pub mod wolf_flags {
+    pub const TAME: u8 = 1;
+    pub const SITTING: u8 = 2;
+    pub const ANGRY: u8 = 4;
+    pub const YOURS: u8 = 8;
+}
 
 /// What the world around a mob looks like to its AI.
 pub struct MobCtx {
     /// Feet of every living player (the host and LAN players).
     pub players: Vec<Vec3>,
+    /// The same with who they are: their LAN id (the host 0) and name.
+    pub people: Vec<(u8, String, Vec3)>,
+    /// Where every living mob is (its id and feet), for a wolf going after one.
+    pub mobs: Vec<(u32, Vec3)>,
 }
 
 /// Something that happened to a mob during an update.
@@ -103,6 +225,8 @@ pub enum MobEvent {
     Remove,
     /// A sheep ate the grass here (a grass block turns to dirt, tall grass goes).
     EatGrass(glam::IVec3),
+    /// A wolf bit someone (`BITE` damage, from where it is).
+    Bite(Foe),
 }
 
 pub struct Mob {
@@ -160,6 +284,23 @@ pub struct Mob {
     jump_cooldown: f32,
     damage_tick: f32,
     rng: Rng,
+    /// A wolf: the name of the player who tamed it, whether it sits, its collar's colour
+    /// (`COLLARS`), whom it is going for (and, a wild one, for how much longer), and when it
+    /// may bite again. `yours`: on a LAN player's copy, tamed by that player.
+    pub owner: Option<String>,
+    pub sitting: bool,
+    pub collar: u8,
+    pub foe: Option<Foe>,
+    anger: f32,
+    bite_cooldown: f32,
+    pub yours: bool,
+    /// Walking somewhere at a speed of its own (a wolf running after something).
+    hurry: Option<f32>,
+    /// A bite to report from this update.
+    bite: Option<Foe>,
+    /// When it may make its next sound, and whether this hurt was already yelped.
+    sound_wait: f32,
+    yelped: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -278,7 +419,107 @@ impl Mob {
             jump_cooldown: 0.0,
             damage_tick: 0.0,
             rng: Rng::new(seed),
+            owner: None,
+            sitting: false,
+            collar: 0,
+            foe: None,
+            anger: 0.0,
+            bite_cooldown: 0.0,
+            yours: false,
+            hurry: None,
+            bite: None,
+            sound_wait: 3.0 + (seed % 97) as f32 * 0.05,
+            yelped: false,
         }
+    }
+
+    /// A tame wolf (one with an owner).
+    pub fn tame(&self) -> bool {
+        self.owner.is_some() || (self.kind == MobKind::Wolf && self.yours_or_tame_net())
+    }
+
+    fn yours_or_tame_net(&self) -> bool {
+        self.net_target.is_some_and(|s| s.flags & wolf_flags::TAME != 0)
+    }
+
+    /// Its greatest health (a tame wolf's is more).
+    pub fn max_health(&self) -> f32 {
+        if self.kind == MobKind::Wolf && self.owner.is_some() {
+            TAME_HEALTH
+        } else {
+            self.kind.max_health()
+        }
+    }
+
+    /// Given a bone by `name`: a wild wolf is tamed a third of the time (it sits down and
+    /// gets its collar). Returns whether it took to them.
+    pub fn feed_bone(&mut self, name: &str) -> bool {
+        if self.kind != MobKind::Wolf || self.owner.is_some() || !self.alive() {
+            return false;
+        }
+        if self.rand() >= 1.0 / 3.0 {
+            return false;
+        }
+        self.owner = Some(name.to_string());
+        self.sitting = true;
+        self.foe = None;
+        self.target = None;
+        self.health = TAME_HEALTH;
+        true
+    }
+
+    /// Right clicked by its owner: sits down or stands up again (and lets go of whom it was
+    /// going for).
+    pub fn toggle_sit(&mut self) {
+        self.sitting = !self.sitting;
+        self.foe = None;
+        self.target = None;
+        self.vel.x = 0.0;
+        self.vel.z = 0.0;
+    }
+
+    /// Attacked by `foe` (a player's id for players): a wolf goes for them, unless it is its
+    /// owner's or it sits. `owner_of_foe`: that player's name.
+    pub fn provoke(&mut self, foe: Foe, foe_name: Option<&str>) {
+        if self.kind != MobKind::Wolf || !self.alive() || self.sitting {
+            return;
+        }
+        if foe_name.is_some() && foe_name == self.owner.as_deref() {
+            return;
+        }
+        self.foe = Some(foe);
+        self.anger = WILD_ANGER;
+    }
+
+    /// The sound it makes now, if any: a wolf barks and pants now and then (a tame one
+    /// low on health whines, an angry one growls), and yelps when hurt.
+    pub fn sound(&mut self, dt: f32) -> Option<crate::audio::Sound> {
+        use crate::audio::Sound;
+        if self.kind != MobKind::Wolf {
+            return None;
+        }
+        if self.hurt_time > 0.0 && !self.yelped && self.alive() {
+            self.yelped = true;
+            return Some(Sound::WolfHurt);
+        }
+        if self.hurt_time <= 0.0 {
+            self.yelped = false;
+        }
+        self.sound_wait -= dt;
+        if self.sound_wait > 0.0 || !self.alive() {
+            return None;
+        }
+        self.sound_wait = 4.0 + self.rand() * 6.0;
+        let angry = self.foe.is_some() || self.net_target.is_some_and(|s| s.flags & wolf_flags::ANGRY != 0);
+        Some(if angry {
+            Sound::WolfGrowl
+        } else if self.tame() && self.health < 8.0 {
+            Sound::WolfWhine
+        } else if self.rand() < 0.35 {
+            Sound::WolfBark
+        } else {
+            Sound::WolfPant
+        })
     }
 
     /// What LAN players need to draw this mob.
@@ -298,7 +539,28 @@ impl Mob {
             sheared: self.sheared,
             taken: self.taken,
             last_hit: self.last_hit,
+            flags: self.wolf_flags(None),
+            collar: self.collar,
         }
+    }
+
+    /// A wolf's `MobNet::flags`, for the player named `to` (`YOURS` if it is theirs).
+    pub fn wolf_flags(&self, to: Option<&str>) -> u8 {
+        use wolf_flags::*;
+        let mut f = 0;
+        if self.owner.is_some() {
+            f |= TAME;
+        }
+        if self.sitting {
+            f |= SITTING;
+        }
+        if self.foe.is_some() {
+            f |= ANGRY;
+        }
+        if to.is_some() && to == self.owner.as_deref() {
+            f |= YOURS;
+        }
+        f
     }
 
     /// A LAN player's copy of a host mob.
@@ -321,6 +583,9 @@ impl Mob {
         }
         self.taken = s.taken;
         self.last_hit = s.last_hit;
+        self.sitting = s.flags & wolf_flags::SITTING != 0;
+        self.yours = s.flags & wolf_flags::YOURS != 0;
+        self.collar = s.collar;
     }
 
     /// Half width and height of its bounding box.
@@ -393,10 +658,15 @@ impl Mob {
         }
         self.health -= amount;
         self.hurt_time = HURT_TIME;
-        self.panic = 4.0 + self.rand() * 2.0;
-        self.target = None;
+        // (a wolf does not run away: it turns on whoever hurt it, `provoke`)
+        if self.kind != MobKind::Wolf {
+            self.panic = 4.0 + self.rand() * 2.0;
+            self.target = None;
+        }
         if let Some(src) = from {
-            self.flee_from = Some(src);
+            if self.kind != MobKind::Wolf {
+                self.flee_from = Some(src);
+            }
             // Minecraft's knockback: pushed away, and up a bit (when on the ground).
             let away = (self.pos - src) * Vec3::new(1.0, 0.0, 1.0);
             let away = away.try_normalize().unwrap_or(Vec3::X);
@@ -556,7 +826,102 @@ impl Mob {
             .min_by(|a, b| a.distance(self.pos).total_cmp(&b.distance(self.pos)))
     }
 
+    /// Where someone a wolf goes for is (their feet), if they are still around.
+    fn foe_pos(&self, ctx: &MobCtx) -> Option<Vec3> {
+        match self.foe? {
+            Foe::Mob(id) => ctx.mobs.iter().find(|(i, _)| *i == id).map(|(_, p)| *p),
+            Foe::Player(id) => ctx.people.iter().find(|(i, _, _)| *i == id).map(|(_, _, p)| *p),
+        }
+    }
+
+    /// Where a tame wolf's owner is, if they are around.
+    fn owner_pos(&self, ctx: &MobCtx) -> Option<Vec3> {
+        let name = self.owner.as_deref()?;
+        ctx.people.iter().find(|(_, n, _)| n == name).map(|(_, _, p)| *p)
+    }
+
+    /// A wolf's own goals (Minecraft's SitWhenOrderedTo, MeleeAttack, FollowOwner): Some
+    /// when they decide what it does now.
+    fn wolf_think(&mut self, dt: f32, w: &World, ctx: &MobCtx) -> Option<Option<(Vec3, f32)>> {
+        self.bite_cooldown -= dt;
+        self.hurry = None;
+        if self.sitting {
+            self.target = None;
+            if self.owner_pos(ctx).is_some() && self.look_time <= 0.0 {
+                self.look = Look::Player;
+                self.look_time = 2.0;
+            }
+            return Some(None);
+        }
+        // Going for someone: runs to them and bites when near (a wild one calms down in
+        // a while; anyone gone or far away is let go).
+        if self.foe.is_some() {
+            if self.owner.is_none() {
+                self.anger -= dt;
+            }
+            match self.foe_pos(ctx) {
+                Some(p) if p.distance(self.pos) < 24.0 && (self.owner.is_some() || self.anger > 0.0) => {
+                    let d = Vec2::new(p.x - self.pos.x, p.z - self.pos.z);
+                    self.look = Look::Ahead;
+                    if d.length() < BITE_REACH && (p.y - self.pos.y).abs() < 1.5 {
+                        self.target = None;
+                        self.body_yaw = turn(self.body_yaw, d.y.atan2(d.x), 12.0 * dt);
+                        if self.bite_cooldown <= 0.0 {
+                            self.bite_cooldown = BITE_EVERY;
+                            self.bite = self.foe;
+                        }
+                        return Some(None);
+                    }
+                    self.target = Some(p);
+                    self.target_time = 1.0;
+                    self.hurry = Some(CHASE_SPEED);
+                    return Some(self.walk(w));
+                }
+                _ => {
+                    self.foe = None;
+                    self.target = None;
+                }
+            }
+        }
+        // A tame one keeps up with its owner: runs after them, and jumps to their side when
+        // left far behind.
+        if let Some(o) = self.owner_pos(ctx) {
+            let d = o.distance(self.pos);
+            if d > 14.0 {
+                for k in 0..10 {
+                    let a = k as f32 * 0.7 + self.rand();
+                    let (x, z) = ((o.x + a.cos() * 2.0).floor() as i32, (o.z + a.sin() * 2.0).floor() as i32);
+                    if let Some((p, ground)) = standable(w, x, z, o.y.round() as i32, 2) {
+                        if !is_lava(ground) {
+                            self.pos = p;
+                            self.vel = Vec3::ZERO;
+                            self.fall_peak = p.y;
+                            self.target = None;
+                            break;
+                        }
+                    }
+                }
+                return Some(None);
+            }
+            if d > 4.0 {
+                self.target = Some(o);
+                self.target_time = 1.0;
+                self.hurry = Some(if d > 8.0 { FOLLOW_SPEED * 1.3 } else { FOLLOW_SPEED });
+                return Some(self.walk(w));
+            }
+            if self.target.is_some() && d < 2.5 {
+                self.target = None;
+            }
+        }
+        None
+    }
+
     fn think(&mut self, dt: f32, w: &World, ctx: &MobCtx) -> Option<(Vec3, f32)> {
+        if self.kind == MobKind::Wolf {
+            if let Some(r) = self.wolf_think(dt, w, ctx) {
+                return r;
+            }
+        }
         // Looking: at a nearby player now and then, or around (Minecraft's LookAtPlayerGoal
         // and RandomLookAroundGoal, each started with a 2% chance per tick).
         self.look_time -= dt;
@@ -596,15 +961,23 @@ impl Mob {
                 }
             }
         }
-        let target = self.target?;
         self.target_time -= dt;
+        self.walk(w)
+    }
+
+    /// Walks toward `target` (at its `hurry`, or its pace), looking out for drops, lava,
+    /// water and walls, jumping up single blocks.
+    fn walk(&mut self, w: &World) -> Option<(Vec3, f32)> {
+        let target = self.target?;
         let to = Vec2::new(target.x - self.pos.x, target.z - self.pos.z);
         if to.length() < 0.4 || self.target_time <= 0.0 || self.stuck > 1.5 {
             self.target = None;
             self.idle = 1.0 + self.rand() * 4.0;
             return None;
         }
-        let speed = if self.panic > 0.0 {
+        let speed = if let Some(s) = self.hurry {
+            s
+        } else if self.panic > 0.0 {
             PANIC_SPEED
         } else {
             WALK_SPEED
@@ -880,6 +1253,9 @@ impl Mob {
                 return MobEvent::EatGrass(p);
             }
         }
+        if let (Some(f), true) = (self.bite.take(), self.alive()) {
+            return MobEvent::Bite(f);
+        }
         MobEvent::None
     }
 
@@ -912,7 +1288,94 @@ impl Mob {
         match self.kind {
             MobKind::Pig => self.build_pig(out, root, tint, light),
             MobKind::Sheep => self.build_sheep(out, root, tint, light),
+            MobKind::Wolf => self.build_wolf(out, root, tint, light),
             MobKind::Dummy => {}
+        }
+    }
+
+    /// Minecraft's `WolfModel`: head (with its ears and snout), body, mane, four legs and
+    /// the tail; sitting, the body tips back onto its haunches. The wild, tame or angry
+    /// wolf's texture, and a tame one's collar over it in its colour.
+    fn build_wolf(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
+        let part = |px: f32, py: f32, pz: f32, rot: Mat4| {
+            root * Mat4::from_translation(Vec3::new(-px, 24.0 - py, pz))
+                * rot
+                * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
+        };
+        let rx = |a: f32| Mat4::from_rotation_x(-a);
+        let flags = self.net_target.map(|s| s.flags);
+        let tame = self.owner.is_some() || flags.is_some_and(|f| f & wolf_flags::TAME != 0);
+        let angry = self.foe.is_some() || flags.is_some_and(|f| f & wolf_flags::ANGRY != 0);
+        let sit = self.sitting;
+        let ls = self.limb_swing * 0.6662;
+        let la = self.limb_amount;
+
+        let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
+        let head = part(-1.0, 13.5, -7.0, Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(self.pitch));
+        let (body, mane, tail_at, legs) = if sit {
+            (
+                part(0.0, 18.0, 0.0, rx(PI / 4.0)),
+                part(-1.0, 16.0, -3.0, rx(1.256_637)),
+                (-1.0, 21.0, 6.0),
+                [
+                    part(-2.5, 22.7, 2.0, rx(PI * 1.5)),
+                    part(0.5, 22.7, 2.0, rx(PI * 1.5)),
+                    part(-2.49, 17.0, -4.0, rx(5.811_947)),
+                    part(0.51, 17.0, -4.0, rx(5.811_947)),
+                ],
+            )
+        } else {
+            (
+                part(0.0, 14.0, 2.0, rx(FRAC_PI_2)),
+                part(-1.0, 14.0, -3.0, rx(FRAC_PI_2)),
+                (-1.0, 12.0, 8.0),
+                [
+                    part(-2.5, 16.0, 7.0, rx(ls.cos() * 1.4 * la)),
+                    part(0.5, 16.0, 7.0, rx((ls + PI).cos() * 1.4 * la)),
+                    part(-2.5, 16.0, -4.0, rx((ls + PI).cos() * 1.4 * la)),
+                    part(0.5, 16.0, -4.0, rx(ls.cos() * 1.4 * la)),
+                ],
+            )
+        };
+        // The tail: high and wagging on a tame one (lower the more it is hurt), straight up
+        // on an angry one, hanging on a wild one.
+        let tail_up = if angry {
+            1.539_380_4
+        } else if tame {
+            (0.55 - (TAME_HEALTH - self.health).max(0.0) * 0.02) * PI
+        } else {
+            PI / 5.0
+        };
+        let wag = if angry { 0.0 } else { ls.cos() * 1.4 * la };
+        let tail = part(tail_at.0, tail_at.1, tail_at.2, Mat4::from_rotation_y(-wag) * rx(tail_up));
+
+        use wolf_skin::*;
+        let skin = if angry {
+            tex::WOLF_ANGRY
+        } else if tame {
+            tex::WOLF_TAME
+        } else {
+            tex::WOLF
+        };
+        let c = |out: &mut Vec<Vertex>, m: Mat4, o: [f32; 3], b: usize| {
+            emit_paged(out, m, o, &SKIN, b, 0.0, skin, tint, light);
+        };
+        c(out, head, [-2.0, -3.0, -2.0], HEAD);
+        c(out, head, [-2.0, -5.0, 0.0], EAR);
+        c(out, head, [2.0, -5.0, 0.0], EAR);
+        c(out, head, [-0.5, 0.0, -5.0], SNOUT);
+        c(out, body, [-3.0, -2.0, -3.0], BODY);
+        c(out, mane, [-3.0, -3.0, -3.0], MANE);
+        for leg in legs {
+            c(out, leg, [0.0, 0.0, -1.0], LEG);
+        }
+        c(out, tail, [0.0, 0.0, -1.0], TAIL);
+        if tame {
+            // The collar round the mane (where its texture has it), in its colour, clearly
+            // over the fur: a layer just on it would flicker through it.
+            let col = COLLARS[self.collar as usize % COLLARS.len()];
+            let tinted = std::array::from_fn(|i| (col[i] as u16 * tint[i] as u16 / 255) as u8);
+            emit_paged(out, mane, [-3.0, -3.0, -3.0], &SKIN, MANE, 0.25, tex::WOLF_COLLAR, tinted, light);
         }
     }
 
@@ -942,26 +1405,31 @@ impl Mob {
         ]
         .map(|(x, z, swing)| part(x, 12.0, z, Mat4::from_rotation_x(-swing * 1.4 * la)));
 
-        let skin = tex::SHEEP;
-        emit_cube(out, head, [-3.0, -4.0, -6.0], [6.0, 6.0, 8.0], [0.0, 0.0], 0.0, skin, tint, light);
-        emit_cube(out, body, [-4.0, -10.0, -7.0], [8.0, 16.0, 6.0], [28.0, 8.0], 0.0, skin, tint, light);
+        use sheep_skin::*;
+        let skin = |out: &mut Vec<Vertex>, m: Mat4, o: [f32; 3], b: usize| {
+            emit_paged(out, m, o, &SKIN, b, 0.0, tex::SHEEP, tint, light);
+        };
+        skin(out, head, [-3.0, -4.0, -6.0], HEAD);
+        skin(out, body, [-4.0, -10.0, -7.0], BODY);
         for leg in legs {
-            emit_cube(out, leg, [-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], [0.0, 16.0], 0.0, skin, tint, light);
+            skin(out, leg, [-2.0, 0.0, -2.0], LEG);
         }
         if self.sheared {
             return;
         }
-        let wool = tex::SHEEP_WOOL;
-        emit_cube(out, head, [-3.0, -4.0, -4.0], [6.0, 6.0, 6.0], [0.0, 0.0], 0.6, wool, tint, light);
-        emit_cube(out, body, [-4.0, -10.0, -7.0], [8.0, 16.0, 6.0], [28.0, 8.0], 1.75, wool, tint, light);
+        let wool = |out: &mut Vec<Vertex>, m: Mat4, o: [f32; 3], b: usize, grow: f32| {
+            emit_paged(out, m, o, &WOOL, b, grow, tex::SHEEP_WOOL, tint, light);
+        };
+        wool(out, head, [-3.0, -4.0, -4.0], HEAD, 0.6);
+        wool(out, body, [-4.0, -10.0, -7.0], BODY, 1.75);
         for leg in legs {
-            emit_cube(out, leg, [-2.0, 0.0, -2.0], [4.0, 6.0, 4.0], [0.0, 16.0], 0.5, wool, tint, light);
+            wool(out, leg, [-2.0, 0.0, -2.0], LEG, 0.5);
         }
     }
 
     /// Minecraft's `PigModel` (a `QuadrupedModel` with leg height 6), in model pixels.
     fn build_pig(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
-        let layer = tex::PIG;
+        use pig_skin::*;
         // A part's pivot, given in Minecraft's model coordinates (Y down from 24 = the ground,
         // X mirrored), then its rotation in ours.
         let part = |px: f32, py: f32, pz: f32, rot: Mat4| {
@@ -969,8 +1437,8 @@ impl Mob {
                 * rot
                 * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
         };
-        let cube = |out: &mut Vec<Vertex>, m: Mat4, o: [f32; 3], s: [f32; 3], uv: [f32; 2]| {
-            emit_cube(out, m, o, s, uv, 0.0, layer, tint, light);
+        let cube = |out: &mut Vec<Vertex>, m: Mat4, o: [f32; 3], b: usize| {
+            emit_paged(out, m, o, &SKIN, b, 0.0, tex::PIG, tint, light);
         };
 
         let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
@@ -980,17 +1448,11 @@ impl Mob {
             -6.0,
             Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(self.pitch),
         );
-        cube(out, head, [-4.0, -4.0, -8.0], [8.0, 8.0, 8.0], [0.0, 0.0]);
-        cube(out, head, [-2.0, 0.0, -9.0], [4.0, 3.0, 1.0], [16.0, 16.0]);
+        cube(out, head, [-4.0, -4.0, -8.0], HEAD);
+        cube(out, head, [-2.0, 0.0, -9.0], SNOUT);
 
         let body = part(0.0, 11.0, 2.0, Mat4::from_rotation_x(-FRAC_PI_2));
-        cube(
-            out,
-            body,
-            [-5.0, -10.0, -7.0],
-            [10.0, 16.0, 8.0],
-            [28.0, 8.0],
-        );
+        cube(out, body, [-5.0, -10.0, -7.0], BODY);
 
         let ls = self.limb_swing * 0.6662;
         let la = self.limb_amount;
@@ -1002,33 +1464,30 @@ impl Mob {
         ];
         for (x, z, swing) in legs {
             let leg = part(x, 18.0, z, Mat4::from_rotation_x(-swing * 1.4 * la));
-            cube(out, leg, [-2.0, 0.0, -2.0], [4.0, 6.0, 4.0], [0.0, 16.0]);
+            cube(out, leg, [-2.0, 0.0, -2.0], LEG);
         }
     }
 }
 
-/// One cube of a Minecraft entity model: origin and size in model pixels, `uv` the texture
-/// offset of its box UV layout in a 64x64 atlas (Minecraft's `ModelPart.Cube`). `grow` makes
-/// it bigger on every side without changing its texture (Minecraft's `CubeDeformation`).
+/// One cube of a Minecraft entity model (Minecraft's `ModelPart.Cube`): box `b` of a skin
+/// (its size and box UV), at `o` in model pixels, textured from the skin's pages from layer
+/// `base`. `grow` makes it bigger on every side without changing its texture (Minecraft's
+/// `CubeDeformation`).
 #[allow(clippy::too_many_arguments)]
-fn emit_cube(
+fn emit_paged(
     out: &mut Vec<Vertex>,
     m: Mat4,
     o: [f32; 3],
-    s: [f32; 3],
-    uv: [f32; 2],
+    skin: &SkinPages,
+    b: usize,
     grow: f32,
-    layer: u32,
+    base: u32,
     tint: [u8; 3],
     light: [u8; 4],
 ) {
+    let (uv, s) = skin.boxes[b];
     let (x0, y0, z0) = (o[0] - grow, o[1] - grow, o[2] - grow);
-    let (x1, y1, z1) = (
-        o[0] + s[0] + grow,
-        o[1] + s[1] + grow,
-        o[2] + s[2] + grow,
-    );
-    let (dx, dy, dz) = (s[0], s[1], s[2]);
+    let (x1, y1, z1) = (o[0] + s[0] + grow, o[1] + s[1] + grow, o[2] + s[2] + grow);
     let v = [
         Vec3::new(x0, y0, z0),
         Vec3::new(x1, y0, z0),
@@ -1039,44 +1498,39 @@ fn emit_cube(
         Vec3::new(x1, y1, z1),
         Vec3::new(x0, y1, z1),
     ];
-    let (u, w) = (uv[0], uv[1]);
-    let (u0, u1, u2, u3, u4, u5) = (
-        u,
-        u + dz,
-        u + dz + dx,
-        u + dz + dx + dx,
-        u + dz + dx + dz,
-        u + dz + dx + dz + dx,
-    );
-    let (w0, w1, w2) = (w, w + dz, w + dz + dy);
-    // (corners, u1, v1, u2, v2) per face, as in ModelPart.Cube.
-    let faces: [([usize; 4], f32, f32, f32, f32); 6] = [
-        ([5, 4, 0, 1], u1, w0, u2, w1),
-        ([2, 3, 7, 6], u2, w1, u3, w0),
-        ([0, 4, 7, 3], u0, w1, u1, w2),
-        ([1, 0, 3, 2], u1, w1, u2, w2),
-        ([5, 1, 2, 6], u2, w1, u4, w2),
-        ([4, 5, 6, 7], u4, w1, u5, w2),
-    ];
+    // Corners of each face, as in ModelPart.Cube.
+    let corners: [[usize; 4]; 6] = [[5, 4, 0, 1], [2, 3, 7, 6], [0, 4, 7, 3], [1, 0, 3, 2], [5, 1, 2, 6], [4, 5, 6, 7]];
     let center = m.transform_point3((v[0] + v[6]) * 0.5);
-    let k = 1.0 / 64.0;
-    for (idx, ua, va, ub, vb) in faces {
-        let uvs = [[ub, va], [ua, va], [ua, vb], [ub, vb]];
+    for (f, idx) in corners.into_iter().enumerate() {
+        // The corners run (ub, va), (ua, va), (ua, vb), (ub, vb) over the texture.
+        let (ua, va, ub, vb) = face_uv(uv, s, f);
         let p: [Vec3; 4] = std::array::from_fn(|i| m.transform_point3(v[idx[i]]));
-        let quad: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-            pos: p[i].to_array(),
-            uv: [uvs[i][0] * k, uvs[i][1] * k],
-            layer: layer as f32,
-            light,
-            tint: [tint[0], tint[1], tint[2], flags::ENTITY],
-        });
+        // A point of the face by its texture point (the face is a rectangle).
+        let at = |u: f32, w: f32| {
+            let su = if ub != ua { (u - ub) / (ua - ub) } else { 0.0 };
+            let sv = if vb != va { (w - va) / (vb - va) } else { 0.0 };
+            p[0] + (p[1] - p[0]) * su + (p[3] - p[0]) * sv
+        };
         // Counter-clockwise seen from outside, like the rest of the game's geometry.
         let n = (p[1] - p[0]).cross(p[2] - p[0]);
-        let face_center = (p[0] + p[2]) * 0.5;
-        if n.dot(face_center - center) >= 0.0 {
-            out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
-        } else {
-            out.extend_from_slice(&[quad[0], quad[2], quad[1], quad[0], quad[3], quad[2]]);
+        let outward = n.dot((p[0] + p[2]) * 0.5 - center) >= 0.0;
+        for piece in skin.pieces(b, f) {
+            let (l, t, r, bt) = piece.rect;
+            let (pa, pb) = if ua <= ub { (l, r) } else { (r, l) };
+            let (qa, qb) = if va <= vb { (t, bt) } else { (bt, t) };
+            let uvs = [[pb, qa], [pa, qa], [pa, qb], [pb, qb]];
+            let quad: [Vertex; 4] = std::array::from_fn(|i| Vertex {
+                pos: at(uvs[i][0], uvs[i][1]).to_array(),
+                uv: skin.page_uv(piece, uvs[i][0], uvs[i][1]),
+                layer: (base + piece.page) as f32,
+                light,
+                tint: [tint[0], tint[1], tint[2], flags::ENTITY],
+            });
+            if outward {
+                out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
+            } else {
+                out.extend_from_slice(&[quad[0], quad[2], quad[1], quad[0], quad[3], quad[2]]);
+            }
         }
     }
 }
@@ -1119,6 +1573,49 @@ mod tests {
         assert!(!sheep.can_shear());
         let net = sheep.to_net();
         assert!(Mob::from_net(&net).is_some_and(|m| m.sheared && m.kind == MobKind::Sheep));
+    }
+
+    #[test]
+    fn a_wolf_is_built_and_a_tame_one_wears_its_collar() {
+        let mut wolf = Mob::new(MobKind::Wolf, Vec3::ZERO, 0.0, 7);
+        let mut out = Vec::new();
+        wolf.build(&mut out, 15, 0);
+        // Head, two ears, snout, body, mane, four legs and the tail.
+        assert_eq!(out.len(), 11 * 6 * 6);
+        let max_y = out.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
+        assert!(max_y > 0.8 && max_y < 1.1, "top at {max_y}");
+        wolf.owner = Some("Alby".into());
+        out.clear();
+        wolf.build(&mut out, 15, 0);
+        assert_eq!(out.len(), 12 * 6 * 6);
+        assert!(out.iter().any(|v| v.layer == tex::WOLF_COLLAR as f32));
+        let net = wolf.to_net();
+        assert!(net.flags & wolf_flags::TAME != 0 && net.flags & wolf_flags::YOURS == 0);
+        assert!(wolf.wolf_flags(Some("Alby")) & wolf_flags::YOURS != 0);
+        let copy = Mob::from_net(&net).expect("a wolf");
+        assert!(copy.tame() && copy.kind == MobKind::Wolf);
+    }
+
+    #[test]
+    fn a_wolf_bites_what_it_goes_for_but_never_its_owner() {
+        let w = World::new();
+        let mut wolf = Mob::new(MobKind::Wolf, Vec3::new(0.5, 70.0, 0.5), 0.0, 7);
+        wolf.owner = Some("Alby".into());
+        wolf.provoke(Foe::Player(0), Some("Alby"));
+        assert!(wolf.foe.is_none(), "turned on its owner");
+        wolf.provoke(Foe::Mob(9), None);
+        let ctx = MobCtx {
+            players: vec![],
+            people: vec![(0, "Alby".into(), Vec3::new(3.0, 70.0, 0.5))],
+            mobs: vec![(9, Vec3::new(1.2, 70.0, 0.5))],
+        };
+        // (in an empty world: what matters is the goal)
+        let r = wolf.wolf_think(0.05, &w, &ctx);
+        assert!(matches!(r, Some(None)));
+        assert_eq!(wolf.bite, Some(Foe::Mob(9)));
+        // Sitting, it goes for nothing.
+        wolf.toggle_sit();
+        assert!(wolf.sitting && wolf.foe.is_none());
     }
 
     #[test]

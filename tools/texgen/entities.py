@@ -1,10 +1,11 @@
-"""Entity atlases (chest, player, pig, sheep) and particles (flame, smoke), in the look of
+"""Entity atlases (chest, player, pig, sheep, wolf) and particles (flame, smoke), in the look of
 Faithful 64x redrawn at our sizes.
 
 Atlases use Minecraft's box UV layout (`ModelPart.Cube`, see `src/entity/mob.rs`) in a 64 unit
-wide atlas: chest and player at 8 px per unit (512 x 512), pig and sheep at 2 px per unit.
-Faithful's atlases are 4 px per unit, so shapes measured on them ("ref px") are scaled by
-`k / 4` here. Faces are painted in atlas orientation (the chest is stored upside down).
+wide atlas, all at 8 px per unit (chest, player and pig 512 x 512; sheep, its wool and the wolf
+512 x 256; the game cuts the mobs' faces onto several texture layers, `src/entity/skin_pages.rs`).
+Faithful's atlases are 4 px per unit, so shapes measured on them ("ref px") are doubled here.
+Faces are painted in atlas orientation (the chest is stored upside down).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage
 
-from common import Ramp, blank, ellipse, grid, grow, hexc, noise, paint, pix, polygon, rng, thick_line
+from common import Ramp, blank, ellipse, grid, grow, hexc, noise, pix, polygon, rng, shrink, thick_line
 
 # ---------------------------------------------------------------------------- helpers
 
@@ -282,7 +283,10 @@ def hair(seed, h, w):
 
 
 def set_(img, mask, color):
-    img[mask, :3] = hexc(color) if isinstance(color, str) else color[mask]
+    if isinstance(color, str):
+        color = hexc(color)
+    color = np.asarray(color, np.float32)
+    img[mask, :3] = color[mask][..., :3] if color.ndim == 3 else color
     img[mask, 3] = 255
 
 
@@ -534,341 +538,925 @@ def steve(seed: int) -> np.ndarray:
 
 # ---------------------------------------------------------------------------- pig
 
+# Faithful's pig: soft pink contour bands (a rounded, pillowy shading quantized to 8 tones),
+# painted here at 8 px per unit (512 x 512). Faces are described in "ref px" (Faithful's 4 per
+# unit); every field is evaluated per our pixel, so the band edges are twice as fine.
 PIG = Ramp("#be504d", "#c6615a", "#e4686a", "#e67973", "#e68583", "#e6918b", "#f19e98", "#eea5a4")
-
-
-def pig_face(w, h, field):
-    """A pig face: `field(u, v)` (0..1 over the face) quantized to the pig palette."""
-    yy, xx = grid(h, w)
-    return canvas(h, w, PIG.shade(np.clip(field(xx / w, yy / h), 0, 1), 0.0))
+PIG_DARK = "#894746"
+PIG_HI = "#fbbebe"
+PK = 8
 
 
 def P(i):
     return PIG.at(i)
 
 
+def sup(rx, ry, cx, cy, ax, ay, p=2.0):
+    """Superellipse radius (1 on its outline)."""
+    return ((np.abs(rx - cx) / ax) ** p + (np.abs(ry - cy) / ay) ** p) ** (1.0 / p)
+
+
+def tone_face(ramp, seed, wu, hu, field, wob=0.35):
+    """A face `wu` x `hu` units: `field(rx, ry)` (ref px coordinates in the face) gives the tone
+    0..n-1 of `ramp`, its band edges wobbling a little so they look hand drawn."""
+    h, w = hu * PK, wu * PK
+    yy, xx = grid(h, w)
+    ry, rx = yy / 2.0, xx / 2.0
+    t = field(rx, ry) + (aniso(seed, h, w, 7, 7) - 0.5) * wob
+    idx = np.clip(np.round(t), 0, len(ramp) - 1).astype(int)
+    return canvas(h, w, ramp.colors[idx]), rx, ry
+
+
+def pig_face(seed, wu, hu, field, wob=0.35):
+    return tone_face(PIG, seed, wu, hu, field, wob)
+
+
+def pline(img, pts, color, width=0.5):
+    """A thin crease through `pts` (ref px, a polyline), `width` ref px wide."""
+    m = np.zeros(img.shape[:2], bool)
+    for (x0, y0), (x1, y1) in zip(pts[:-1], pts[1:]):
+        m |= thick_line((x0 * 2, y0 * 2), (x1 * 2, y1 * 2), width * 2, *img.shape[:2])
+    set_(img, m, color)
+
+
 def pig(seed: int) -> np.ndarray:
-    k = 2
-    a = blank(128, 128)
+    a = blank(64 * PK, 64 * PK)
     hd = box_uv(0, 0, 8, 8, 8)
 
-    def lit(u, v, base=5, top=1.2, edge=1.0):
-        """Rounded pillow: lighter toward the top center, darker to the sides/bottom (in steps)."""
-        return (base + top * np.clip(0.6 - v, 0, 1) * (1 - np.abs(u - 0.5) * 1.6)
-                - edge * np.clip(np.abs(u - 0.5) * 2 - 0.75, 0, 1) * 4) / 7
+    def at(img, face):
+        put(a, img, face[0], face[1], PK)
 
-    put(a, pig_face(16, 16, lambda u, v: lit(u, v, 5.4, 3.0) + np.sin(u * 22) * 0.02), *hd["top"][:2], k)
-    put(a, pig_face(16, 16, lambda u, v: (1.4 + 0 * u - 0.3 * v) / 7), *hd["bottom"][:2], k)
-    put(a, pig_face(16, 16, lambda u, v: (5.3 - 1.5 * np.clip(np.hypot(u - 0.5, v - 0.1) - 0.6, 0, 1) * 4) / 7),
-        *hd["back"][:2], k)
+    # ---- head top: light, a paler rim darkening into the corners, faint lengthwise creases
+    img, rx, ry = pig_face(seed + 1, 8, 8, lambda x, y: 7.4 - np.clip((sup(x, y, 16, 16, 15.5, 16.5, 4) - 0.86) * 9, 0, 2.4))
+    for pts in (((8, 1), (8.5, 12), (8, 24)), ((17, 0), (17, 7)), ((24, 19), (24.5, 30))):
+        pline(img, pts, P(6))
+    at(img, hd["top"])
+    # ---- under the chin: flat and dark
+    img, rx, ry = pig_face(seed + 2, 8, 8, lambda x, y: 1.0 + 0 * x, 0.0)
+    at(img, hd["bottom"])
 
-    def front(u, v):
-        t = 5.4 + 1.6 * np.clip(0.45 - v, 0, 1) * 2 * (np.abs(u - 0.5) < 0.3)
-        t -= 1.0 * (np.abs(u - 0.5) > 0.44) * (v > 0.5)
-        # rounded lower cheeks (only the lower half: the top of the face stays smooth)
-        t -= 2.0 * np.clip(np.hypot(np.abs(u - 0.5) - 0.3, v - 0.75) - 0.18, 0, 1) * 5 * (v > 0.5)
-        return t / 7
+    # ---- head sides: lit toward the front top, a heavy jowl shadow low at the back, the ear
+    def side(x, y):
+        t = 5.0 + 1.9 * np.clip((x - 6) / 26 - y / 13, 0, 1)
+        t -= np.clip((sup(x, y, 21, 6, 20.5, 21.5, 2.6) - 0.97) * 16, 0, None)
+        t -= (x < 1) * (y < 20) * 1.0
+        t -= np.clip(y - 29.5, 0, None) * 0.5
+        return t
 
-    fr = pig_face(16, 16, front)
-    fr[8:10, 4:12, :3] = P(4)  # the snout's base between the eyes
-    fr[7:8, 4:12, :3] = P(6)
-    fr[8:10, 0:2, :3] = hexc("#020001")
-    fr[8:10, 2:4, :3] = 255
-    fr[8:10, 12:14, :3] = 255
-    fr[8:10, 14:16, :3] = hexc("#020001")
-    put(a, fr, *hd["front"][:2], k)
+    sd, rx, ry = pig_face(seed + 3, 8, 8, side)
+    e = sup(rx, ry, 19.5, 16.5, 4.2, 7.2)
+    sh = np.clip((rx - 19.5) / 4, -1, 1)
+    set_(sd, e < 1.0, P(2))
+    set_(sd, (e < 0.82) & (sh > -0.3), P(3))
+    set_(sd, e < 0.66, P(2))
+    set_(sd, e < 0.5, P(1))
+    set_(sd, (e < 0.5) & (e > 0.36) & (sh > 0.4), P(2))
+    at(sd, hd["right"])
+    at(sd[:, ::-1].copy(), hd["left"])
 
-    def side(u, v):
-        d = np.hypot(u - 1.0, v)
-        t = 5.3 + 1.2 * (v < 0.35) * (u > 0.5) - np.clip((d - 0.9) / 0.35, 0, 1) * 4.4
-        return t / 7
+    # ---- face: light brow, eyes, the snout's frame, round cheeks
+    def front(x, y):
+        t = 5.0 + 1.25 * np.clip((10.5 - y) / 4.0, 0, 1)
+        t -= np.clip((sup(x, y, 16, 13, 17, 14.5, 3) - 0.92) * 10, 0, 1)
+        t -= np.clip((sup(x, y, 16, 11, 18.5, 20.5, 3) - 0.97) * 10, 0, 1)
+        return t
 
-    sd = pig_face(16, 16, side)
-    ear_o = ellipse(8.5, 10, 3.5, 1.8, 16, 16)
-    ear_i = ellipse(8.5, 10, 2.5, 0.9, 16, 16)
-    sd[ear_o, :3] = P(2)
-    sd[ear_i, :3] = P(1)
-    put(a, sd, *hd["right"][:2], k)
-    put(a, sd[:, ::-1].copy(), *hd["left"][:2], k)
+    fr, rx, ry = pig_face(seed + 4, 8, 8, front)
+    for x0, wd in ((0.5, 1.8), (8, 4.6), (24, 4.6), (31.5, 1.8)):  # pale petals running into the brow
+        cx_ = x0 + (16 - x0) * ry / 13
+        set_(fr, (np.abs(rx - cx_) < wd * np.clip(1 - ry / 10.5, 0, 1) ** 0.6) & (ry < 10.5), P(7))
+    set_(fr, (ry >= 16) & (ry < 17) & (np.abs(rx - 16) < 8), P(6))
+    for xs in (8, 23.5):
+        pline(fr, ((xs, 16.5), (xs + (xs - 16) * 0.05, 22), (xs + (xs - 16) * 0.12, 27)), P(4))
+    bridge = sup(rx, ry, 16, 14, 5.5, 2.1, 4) < 1
+    set_(fr, bridge, P(4))
+    set_(fr, bridge & (ry < 13), P(3))
+    for x0, c in ((0, "#020001"), (4, "#ffffff"), (24, "#ffffff"), (28, "#020001")):
+        set_(fr, (rx >= x0) & (rx < x0 + 4) & (ry >= 12) & (ry < 16), c)
+    set_(fr, (rx >= 4) & (rx < 8) & (ry >= 15.5) & (ry < 16), "#e9dcdc")
+    set_(fr, (rx >= 24) & (rx < 28) & (ry >= 15.5) & (ry < 16), "#e9dcdc")
+    set_(fr, (rx >= 0.5) & (rx < 1.5) & (ry >= 12.5) & (ry < 13.5), "#2a2426")
+    set_(fr, (rx >= 28.5) & (rx < 29.5) & (ry >= 12.5) & (ry < 13.5), "#2a2426")
+    at(fr, hd["front"])
 
+    # ---- back of the head
+    img, rx, ry = pig_face(seed + 5, 8, 8, lambda x, y: 5.0 - np.clip((sup(x, y, 16, 9, 16.5, 19, 3) - 0.97) * 12, 0, 4)
+                           - ((x < 1) | (x > 31)) * 0.8)
+    at(img, hd["back"])
+
+    # ---- snout (16, 16): 4 x 3 x 1
     sn = box_uv(16, 16, 4, 3, 1)
-    snf = pig_face(8, 6, lambda u, v: (6.3 - 0.8 * (v > 0.8)) / 7 + 0 * u)
-    snf[2:4, 1:3, :3] = P(0)
-    snf[2:4, 5:7, :3] = P(0)
-    snf[2:3, 2:3, :3] = P(1)
-    snf[2:3, 5:6, :3] = P(1)
-    put(a, snf, *sn["front"][:2], k)
-    put(a, pig_face(8, 2, lambda u, v: 7 / 7 + 0 * u), *sn["top"][:2], k)
-    put(a, pig_face(8, 2, lambda u, v: 3 / 7 + 0 * u), *sn["bottom"][:2], k)
+    img, rx, ry = pig_face(seed + 6, 4, 1, lambda x, y: 6.3 + 0.5 * (x > 3) * (x < 12) + 0 * y, 0.2)
+    set_(img, (rx < 4) & (ry < 2 + rx * 0.3), PIG_HI)
+    set_(img, (rx < 2) & (ry >= 2), P(7))
+    at(img, sn["top"])
+    img, rx, ry = pig_face(seed + 7, 4, 1, lambda x, y: 2.0 + ((x < 1) | (x > 15)) * 1 + 0 * y, 0.0)
+    at(img, sn["bottom"])
+
+    def snf(x, y):
+        s_ = sup(x, y, 8, 6.2, 8.2, 6.3, 3)
+        t = 5.0 + (s_ < 0.93) * 1.0 - (s_ < 0.7) * 1.0 - ((x < 1) | (x > 15)) * 1.0
+        t -= (y > 11) * 0.6 * ((x < 3) | (x > 13))
+        return t
+
+    img, rx, ry = pig_face(seed + 8, 4, 3, snf, 0.2)
+    for cx in (4.5, 11.5):  # nostrils: dark rounded crosses on a slightly darker patch
+        set_(img, sup(rx, ry, cx, 5.8, 2.6, 2.6, 1.6) < 1, P(3))
+        m = (sup(rx, ry, cx, 5.8, 2.0, 0.9, 3) < 1) | (sup(rx, ry, cx, 5.8, 0.9, 2.1, 3) < 1)
+        set_(img, m, PIG_DARK)
+        set_(img, m & (rx < cx - 0.4) & (ry < 5.3), "#a0564f")
+    at(img, sn["front"])
     for n in ("right", "left"):
-        put(a, pig_face(2, 6, lambda u, v: (5 - v) / 7 + 0 * u), *sn[n][:2], k)
-    put(a, pig_face(8, 6, lambda u, v: 4 / 7 + 0 * u), *sn["back"][:2], k)
+        img, rx, ry = pig_face(seed + 9, 1, 3, lambda x, y: 5.4 - (y > 9) * 0.8 + 0 * x, 0.25)
+        at(img, sn[n])
+    img, rx, ry = pig_face(seed + 10, 4, 3, lambda x, y: 4.0 + 0 * x * y, 0.0)
+    at(img, sn["back"])
 
+    # ---- body (28, 8): 10 x 16 x 8, lying along the model's Y
     bd = box_uv(28, 8, 10, 16, 8)
-    r = rng(seed)
 
-    def flank(to_belly):
-        def fn(u, v):
-            b = u if to_belly > 0 else 1 - u
-            t = 6.6 - 1.6 * np.clip(b - 0.55, 0, 1) * 2.5
-            t -= 1.5 * np.clip(np.abs(v - 0.5) * 2 - 0.8, 0, 1) * 5
-            return t / 7
-        img = pig_face(16, 32, fn)
-        for _ in range(3):
-            x = int(r.integers(2, 13))
-            y0 = int(r.integers(3, 12))
-            img[y0 : y0 + int(r.integers(10, 18)), x, :3] = P(5)
-        return img
+    def flank(x, y):
+        """The right flank: light along its upper edge (left), darker toward the belly."""
+        t = np.interp(x, [0, 3, 17, 22, 29, 32], [7.4, 6.4, 6.2, 4.8, 3.9, 3.0])
+        t -= np.clip((sup(x, y, 4, 32, 30, 32.5, 2.5) - 0.9) * 10, 0, 4)
+        return t
 
-    put(a, flank(1), *bd["right"][:2], k)
-    put(a, flank(-1), *bd["left"][:2], k)
-    belly = pig_face(20, 32, lambda u, v: (2.3 - 1.2 * np.clip(np.abs(u - 0.5) * 2 - 0.8, 0, 1) * 5
-                                          + 0.9 * (np.abs(u - 0.5) > 0.35) * (np.abs(v - 0.5) < 0.42)) / 7)
-    yy, xx = grid(32, 20)
-    band = (np.abs(xx - 10) < 1.2) & (yy > 5) & (yy < 28)
-    for cy in (8, 14.5, 21, 26):
-        band |= (np.abs(xx - 10) / 3.2 + np.abs(yy - cy) / 2.6) < 1
-    belly[band, :3] = P(1)
-    put(a, belly, *bd["front"][:2], k)
+    for n, flip in (("right", False), ("left", True)):
+        img, rx, ry = pig_face(seed + 11 + flip, 8, 16, flank)
+        pline(img, ((9.5, 6), (9, 30), (9.5, 56)), P(5))
+        pline(img, ((18.5, 12), (18, 30), (18.5, 48)), P(4))
+        r = rng(seed + 13 + flip)
+        for _ in range(2):
+            x0 = r.uniform(3, 16)
+            y0 = r.uniform(10, 30)
+            pline(img, ((x0, y0), (x0 + r.uniform(-0.5, 0.5), y0 + r.uniform(8, 16))), P(6))
+        at(img if not flip else img[:, ::-1].copy(), bd[n])
 
-    def back(u, v):
-        t = 6.8 - 1.2 * np.clip(np.abs(u - 0.5) * 2 - 0.6, 0, 1) * 2.5
-        t -= 1.5 * np.clip(np.abs(v - 0.5) * 2 - 0.85, 0, 1) * 6
-        return t / 7
+    def belly(x, y):
+        t = 2.0 + np.clip(1 - sup(x, y, 20, -2, 12, 5, 2), 0, 1) * 1.5
+        t -= np.clip((sup(x, y, 20, 32, 21, 33, 3) - 0.93) * 8, 0, 1.2)
+        t += np.clip(1 - sup(x, y, 20, 64, 9, 6, 2), 0, 1) * 2
+        return t
 
-    bk = pig_face(20, 32, back)
-    for x in (4, 9, 15):
-        bk[4 : 4 + int(r.integers(12, 22)), x, :3] = P(5)
-    put(a, bk, *bd["back"][:2], k)
-    put(a, pig_face(20, 16, lambda u, v: (3.5 + 1.8 * np.clip(0.9 - np.hypot(u - 0.5, (v - 1.0) * 0.8) * 1.4, 0, 1)) / 7),
-        *bd["top"][:2], k)
-    rear = pig_face(20, 16, lambda u, v: (4.8 + 0.8 * (v < 0.5) - 1.5 * np.clip(np.abs(u - 0.5) * 2 - 0.85, 0, 1) * 5) / 7)
-    yy, xx = grid(16, 20)
-    cx, cy = 10.5, 7.5
-    ang = np.arctan2(yy - cy, xx - cx)
-    rad = np.hypot(yy - cy, xx - cx)
-    spiral = (np.abs(((rad - (ang + np.pi) / (2 * np.pi) * 2.6) % 2.6) - 1.3) < 0.5) & (rad < 5.2) & (rad > 0.6)
-    rear[spiral, :3] = P(0)
-    put(a, rear, *bd["bottom"][:2], k)
+    img, rx, ry = pig_face(seed + 15, 10, 16, belly)
+    # the dark stripe down the belly: forked at the chest, dark diamonds along its sides
+    band = (np.abs(rx - 19.5) < 7.0) & (ry > 13.5 - np.abs(rx - 19.5) * 0.25) & (ry < 58.5)
+    band &= ~((ry < 16) & (np.abs(rx - 19.5) < 2.5 - (ry - 13.5)))
+    band |= polygon([(2 * 12.6, 2 * 16), (2 * 9.2, 2 * 7.5), (2 * 11.2, 2 * 7.5), (2 * 16.5, 2 * 14.5)], *img.shape[:2])
+    band |= polygon([(2 * 26.4, 2 * 16), (2 * 29.8, 2 * 7.5), (2 * 27.8, 2 * 7.5), (2 * 22.5, 2 * 14.5)], *img.shape[:2])
+    set_(img, band, P(1))
+    for cy in (21, 33, 45.5):
+        for sx in (-1, 1):
+            c_ = 19.5 + sx * 7.5
+            set_(img, (np.abs(rx - c_) / 3.3 + np.abs(ry - cy) / 3.3) < 1, P(1))
+            set_(img, (np.abs(rx - c_) / 2.4 + np.abs(ry - cy) / 2.4) < 1, P(0))
+    at(img, bd["front"])
 
+    def back(x, y):
+        t = 7.3 - np.clip((sup(x, y, 20, 26, 18, 30, 2.6) - 0.85) * 9, 0, 1.4)
+        t -= np.clip((sup(x, y, 20, 24, 21, 40, 2.6) - 0.93) * 9, 0, 4)
+        return t
+
+    img, rx, ry = pig_face(seed + 16, 10, 16, back)
+    for x0, y0, y1 in ((13, 3, 42), (24, 5, 40), (34, 3, 30)):
+        pline(img, ((x0, y0), (x0 - 0.3, (y0 + y1) / 2), (x0, y1)), P(5))
+    at(img, bd["back"])
+
+    def neck(x, y):  # the body's front end (its top in the atlas): a bowl of bands round the neck
+        d = np.hypot(x - 20, (y - 14) / 1.05)
+        t = np.where((d < 17.6) & (y > 11), 4.0, 3.0)
+        t = np.where((d > 13.5) & (d < 16.3) & (y > 20), 5.0, t)
+        t = np.where(sup(x, y, 20, 6, 16, 18.5) < 1, 3.0, t)
+        return t - np.clip((sup(x, y, 20, 5, 22.5, 27, 2.3) - 0.93) * 7, 0, 2.2)
+
+    img, rx, ry = pig_face(seed + 17, 10, 8, neck)
+    at(img, bd["top"])
+
+    def rear(x, y):
+        t = 4.0 + np.clip(1 - sup(x, y, 20, -4, 12, 11, 2), 0, 1) * 3
+        t -= np.clip((sup(x, y, 20, 8, 21, 25, 2.5) - 0.97) * 8, 0, 3)
+        t -= (x > 39) * 1.0
+        return t
+
+    img, rx, ry = pig_face(seed + 18, 10, 8, rear)
+    # the curly tail: a dark ring (its root) round a spiral
+    cx, cy = 19.5, 17.5
+    d = np.hypot(rx - cx, ry - cy)
+    ang = np.arctan2(ry - cy, rx - cx)
+    set_(img, (np.abs(d - 8.2) < 0.55) & ~((ang > -0.9) & (ang < 0.1)), P(0))
+    set_(img, (np.abs(d - 8.9) < 0.4) & ((ang > 0.6) & (ang < 2.5)), P(1))
+    turn = (ang + np.pi) / (2 * np.pi)
+    arm = 1.0 + (turn + np.floor((d - 1.0 - turn * 2.8) / 2.8)) * 2.8
+    spiral = (np.abs(d - arm) < 0.5) & (d < 5.4) & (d > 0.7)
+    spiral |= (np.abs(d - (5.5 + (ang - 0.3) * 0.8)) < 0.5) & (ang > 0.3) & (ang < 1.4)
+    set_(img, spiral, PIG_DARK)
+    at(img, bd["bottom"])
+
+    # ---- legs (0, 16): 4 x 6 x 4, blotchy
     lg = box_uv(0, 16, 4, 6, 4)
     for i, n in enumerate(("right", "front", "left", "back")):
-        m = aniso(seed + 5 + i, 12, 8, 3, 3)
-        leg = canvas(12, 8, PIG.shade(np.clip((4.4 + (m > 0.6) * 1.5 - (m < 0.3) * 1.0) / 7, 0, 1), 0.0))
-        leg[11, 1:7:2, :3] = P(0)
-        put(a, leg, *lg[n][:2], k)
-    put(a, pig_face(8, 8, lambda u, v: 5.5 / 7 + 0 * u), *lg["top"][:2], k)
-    hoof = pig_face(8, 8, lambda u, v: 5 / 7 + 0 * u)
-    for x in (1, 3, 5, 7):
-        hoof[1:7, x - 1 if x == 7 else x, :3] = P(0)
-    put(a, hoof, *lg["bottom"][:2], k)
+        def blot(x, y, i=i):
+            m2 = aniso(seed + 50 + i, 6 * PK, 4 * PK, 7, 6)
+            m = aniso(seed + 40 + i, 6 * PK, 4 * PK, 22, 18) + (m2 - 0.5) * 0.25
+            return 5.0 + (m > 0.6) * 1.0 + (m > 0.78) * 0.6 - (m < 0.4) * 1.0 - (m < 0.26) * 1.0 + 0 * x
+        img, rx, ry = pig_face(seed + 30 + i, 4, 6, blot, 0.25)
+        if n in ("front", "back"):  # the hoof's toe lines along the bottom
+            for k_ in range(4):
+                xk = k_ * 4 + (0.5 if n == "front" else 3.5)
+                set_(img, (np.abs(rx - xk) < 0.5) & (ry >= 22), PIG_DARK)
+        at(img, lg[n])
+    img, rx, ry = pig_face(seed + 35, 4, 4, lambda x, y: 6.0 - np.clip((sup(x, y, 0, 0, 16, 16, 2) - 0.75) * 6, 0, 1))
+    at(img, lg["top"])
+    img, rx, ry = pig_face(seed + 36, 4, 4, lambda x, y: 3.0 + 0 * x * y, 0.0)
+    set_(img, (rx % 4) < 1, PIG_DARK)
+    set_(img, ((rx % 4) >= 3) & ((rx % 4) < 3.5), P(2))
+    at(img, lg["bottom"])
     return a
 
 
 # ---------------------------------------------------------------------------- sheep
 
+# Faithful's sheep at 8 px per unit (512 x 256): a marbled white fleece on the head and the
+# legs' tops, a round tan face, and sheared tan skin covered in little white fleece tufts; the
+# wool coat is white fleece with fine V marks, greyer underneath.
+SK8 = 8
 FLEECE = Ramp("#d2d2d2", "#dedede", "#ececec", "#f8f6f5")
 WOOL = Ramp("#d4d4d4", "#dfdfdf", "#efefef", "#f8f8f8", "#ffffff")
 TAN = {"d": "#af886b", "m": "#b7947b", "l": "#c09e86", "hoof": "#57463a"}
 
 
-def fleece(seed, h, w, ramp=FLEECE, bias=0.0):
-    t = noise(seed, 4, h, w, tile=False) * 0.5 + pix(seed + 1, 1, h, w) * 0.5 + bias
-    return canvas(h, w, ramp.shade(np.clip(t, 0, 1), 0.0))
-
-
-def chevrons(img, seed, density, colors, mask=None):
-    """Faithful's fur marks: little V strokes."""
-    h, w = img.shape[:2]
-    r = rng(seed)
-    n = int(h * w * density / 4)
-    c = cols(*colors)
-    for _ in range(n):
-        y, x = int(r.integers(0, h - 1)), int(r.integers(0, w - 2))
-        if mask is not None and not mask[y, x]:
-            continue
-        col = c[r.integers(0, len(c))]
-        if r.random() < 0.6:  # V
-            pts = [(y, x), (y + 1, x + 1), (y, x + 2)]
-        else:  # slash
-            pts = [(y, x), (y + 1, x + 1)] if r.random() < 0.5 else [(y + 1, x), (y, x + 1)]
-        for py, px in pts:
-            if py < h and px < w:
-                img[py, px, :3] = col
-
-
-def streaks(img, seed, density, colors):
-    """Fleece stubble on sheared skin: little upward strokes and carets, 1 px wide."""
-    h, w = img.shape[:2]
-    r = rng(seed)
-    c = cols(*colors)
-    shapes = [[(0, 0), (1, 0)], [(0, 0), (1, 0), (2, 0)], [(0, 1), (1, 0), (1, 2)],
-              [(0, 1), (1, 0), (1, 2), (2, 0)], [(0, 1), (1, 0)], [(0, 0), (1, 1)]]
-    for _ in range(int(h * w * density / 3)):
-        y, x = int(r.integers(0, h)), int(r.integers(0, w))
-        col = c[r.integers(0, len(c))]
-        for dy, dx in shapes[r.integers(0, len(shapes))]:
-            if y + dy < h and x + dx < w:
-                img[y + dy, x + dx, :3] = col
+def fleece(seed, h, w, bias=0.0):
+    """Marbled fleece: soft light clumps parted by greyer veins, with a fine grain."""
+    t = aniso(seed, h, w, 12, 12) * 0.45 + aniso(seed + 1, h, w, 4, 4) * 0.35 + pix(seed + 2, 1, h, w) * 0.2
+    t = (t - 0.2) * 1.6 + 0.08
+    t -= np.clip(0.07 - np.abs(aniso(seed + 3, h, w, 9, 9) - 0.5), 0, None) * 4
+    return canvas(h, w, FLEECE.shade(np.clip(t + bias, 0, 1), 0.3))
 
 
 def tan(seed, h, w):
-    n = noise(seed, 6, h, w, tile=False) * 0.7 + pix(seed + 1, 1, h, w) * 0.3
-    rgb = np.where((n > 0.7)[..., None], hexc(TAN["l"]), np.where((n < 0.3)[..., None], hexc(TAN["d"]), hexc(TAN["m"])))
+    """Sheared skin: mottled tan with darker veins."""
+    n = aniso(seed, h, w, 14, 14)
+    t = 0.5 + (aniso(seed + 1, h, w, 5, 5) - 0.5) * 0.5 + (pix(seed + 2, 1, h, w) - 0.5) * 0.15
+    t -= np.clip(0.16 - np.abs(n - 0.5), 0, None) * 2.2
+    rgb = np.where((t > 0.66)[..., None], hexc(TAN["l"]), np.where((t < 0.3)[..., None], hexc(TAN["d"]), hexc(TAN["m"])))
     return canvas(h, w, rgb)
 
 
+def stroke(img, p0, p1, width, color, color2=None):
+    """A short tapering stroke (x, y) -> (x, y) drawn in its bounding box; its right side in
+    `color2` (shaded)."""
+    h, w = img.shape[:2]
+    x0 = int(max(0, min(p0[0], p1[0]) - width - 1))
+    x1 = int(min(w, max(p0[0], p1[0]) + width + 2))
+    y0 = int(max(0, min(p0[1], p1[1]) - width - 1))
+    y1 = int(min(h, max(p0[1], p1[1]) + width + 2))
+    if x1 <= x0 or y1 <= y0:
+        return
+    yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32) + 0.5
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    L2 = max(dx * dx + dy * dy, 1e-6)
+    t = np.clip(((xx - p0[0]) * dx + (yy - p0[1]) * dy) / L2, 0, 1)
+    px, py = p0[0] + t * dx, p0[1] + t * dy
+    rad = width * 0.5 * (1.0 - 0.55 * t)
+    d2 = (xx - px) ** 2 + (yy - py) ** 2
+    m = d2 <= rad * rad
+    sub = img[y0:y1, x0:x1]
+    sub[m, :3] = hexc(color)
+    sub[m, 3] = 255
+    if color2 is not None:
+        side = ((xx - px) * dy - (yy - py) * dx) > 0.35 * np.sqrt(L2)
+        sub[m & side, :3] = hexc(color2)
+
+
+def tufts(img, seed, count, region=None):
+    """Little white fleece tufts left on sheared skin: strokes and V / Y shapes, mostly
+    upright, lit on their left."""
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = region or (0, 0, w, h)
+    r = rng(seed)
+    cols_ = (("#f8f6f5", "#dedede"), ("#ececec", "#d2d2d2"), ("#f8f6f5", "#ececec"))
+    for _ in range(count):
+        x, y = r.uniform(x0 - 2, x1), r.uniform(y0 - 2, y1 + 6)
+        c, c2 = cols_[r.integers(0, len(cols_))]
+        L = r.uniform(5, 11)
+        ang = -np.pi / 2 + r.normal(0, 0.35)
+        kind = r.random()
+        if kind < 0.45:  # a V: two strokes from a bottom point
+            for sgn in (-1, 1):
+                a_ = ang + sgn * r.uniform(0.22, 0.45)
+                stroke(img, (x, y), (x + np.cos(a_) * L * 0.75, y + np.sin(a_) * L * 0.75), r.uniform(3.0, 4.0), c, c2)
+        elif kind < 0.6:  # a Y
+            mx, my = x + np.cos(ang) * L * 0.5, y + np.sin(ang) * L * 0.5
+            stroke(img, (x, y), (mx, my), 3.6, c, c2)
+            for sgn in (-1, 1):
+                a_ = ang + sgn * 0.55
+                stroke(img, (mx, my), (mx + np.cos(a_) * L * 0.5, my + np.sin(a_) * L * 0.5), 3.0, c, c2)
+        else:
+            stroke(img, (x, y), (x + np.cos(ang) * L, y + np.sin(ang) * L), r.uniform(3.2, 4.4), c, c2)
+
+
 def sheep(seed: int) -> np.ndarray:
-    k = 2
-    a = blank(64, 128)
+    k = SK8
+    a = blank(32 * k, 64 * k)
     hd = box_uv(0, 0, 6, 6, 8)
     for i, n in enumerate(("top", "bottom", "right", "left", "back")):
-        put(a, fleece(seed + i, hd[n][3] * k, hd[n][2] * k), *hd[n][:2], k)
-    # face: a rounded tan patch with eyes and a pink nose
-    fr = fleece(seed + 9, 12, 12)
-    yy, xx = grid(12, 12)
-    face = (np.abs(xx - 6) < 5.4 - np.clip(3 - yy, 0, None) * 1.0 - np.clip(yy - 9.5, 0, None) * 1.2) & (yy > 0.5)
-    fr[face, :3] = hexc(TAN["m"])
-    rim = face & ~ndimage.binary_erosion(face)
-    fr[rim & (yy > 6), :3] = hexc(TAN["d"])
-    fr[4:6, 0:2, :3] = 0
-    fr[4:6, 2:4, :3] = 255
-    fr[4:6, 8:10, :3] = 255
-    fr[4:6, 10:12, :3] = 0
-    fr[8:10, 4:8, :3] = hexc("#ffb8b8")
-    fr[9:10, 5:7, :3] = hexc("#e69494")
-    fr[8:9, 4:5, :3] = hexc("#e69494")
-    fr[8:9, 7:8, :3] = hexc("#e69494")
+        x, y, w, h = hd[n]
+        put(a, fleece(seed + i, h * k, w * k, -0.12 if n in ("bottom", "back") else 0.0), x, y, k)
+    # face: a round tan head with eyes and a pink nose
+    fr = fleece(seed + 9, 48, 48)
+    yy, xx = grid(48, 48)
+    ry, rx = yy / 2, xx / 2  # ref px (24 x 24)
+    face = sup(rx, ry, 12, 12.2, 12.3, 12.0, 2.4) < 1
+    face &= ry > 0.6
+    skin = canvas(48, 48, np.where((aniso(seed + 10, 48, 48, 6, 6) > 0.62)[..., None], hexc(TAN["l"]), hexc(TAN["m"])))
+    set_(fr, face, skin)
+    rim = face & ~shrink(face, 2)
+    set_(fr, rim & ((ry > 12) | (rx > 18)), TAN["d"])
+    set_(fr, rim & (ry <= 12) & (rx <= 18), TAN["l"])
+    set_(fr, face & (sup(rx, ry, 8.5, 5.5, 4.5, 2.5, 2) < 1) & (pix(seed + 11, 2, 48, 48) > 0.45), TAN["l"])
+    for x0, c in ((0, "#000000"), (4, "#ffffff"), (16, "#ffffff"), (20, "#000000")):
+        set_(fr, (rx >= x0) & (rx < x0 + 4) & (ry >= 8) & (ry < 12), c)
+    set_(fr, (((rx >= 4) & (rx < 8)) | ((rx >= 16) & (rx < 20))) & (ry >= 11.5) & (ry < 12), "#e2dcd8")
+    nose = sup(rx, ry, 12, 18.6, 4.2, 2.6, 2.2) < 1
+    set_(fr, nose, "#ffb8b8")
+    set_(fr, nose & ((ry > 19.6) | (sup(rx, ry, 12, 18.6, 4.2, 2.6, 2.2) > 0.78) & (ry > 18.6)), "#e69494")
+    set_(fr, nose & (sup(rx, ry, 10.6, 17.6, 1.5, 0.8) < 1), "#ffd2d2")
     put(a, fr, *hd["front"][:2], k)
-    # ears on the head sides next to the face (leaf shapes)
+    # ears on the head sides beside the face: tan leaves, pink inside, pointing up and out
     for n, flip in (("right", False), ("left", True)):
         x, y = hd[n][0] * k, hd[n][1] * k
-        ear = polygon([(9, 2), (13.5, 2.5), (13, 6), (11, 7.5)], 12, 16)
-        inner = polygon([(10, 2.7), (12.8, 3), (12, 4.8)], 12, 16)
-        img = a[y : y + 12, x : x + 16]
-        e, ii = (ear[:, ::-1], inner[:, ::-1]) if flip else (ear, inner)
-        img[e, :3] = hexc(TAN["m"])
-        img[e & ~ndimage.binary_erosion(e), :3] = hexc(TAN["d"])
-        img[ii, :3] = hexc("#ffb8b8")
+        img = a[y : y + 48, x : x + 64]
+        ey, ex = grid(48, 64)
+        ery, erx = ey / 2, ex / 2
+        if flip:
+            erx = 32 - erx
+        u = (erx - 21.5) * np.cos(0.75) + (ery - 9) * np.sin(0.75)
+        v = -(erx - 21.5) * np.sin(0.75) + (ery - 9) * np.cos(0.75)
+        ear = (u / 6.4) ** 2 + (v / (4.4 - np.clip(u, 0, None) * 0.35)) ** 2 < 1
+        set_(img, ear, TAN["m"])
+        set_(img, ear & (v > 1.6), TAN["d"])
+        set_(img, ear & ~shrink(ear, 1) & (v <= 1.6), TAN["d"])
+        inner = ((u + 2.0) / 3.6) ** 2 + ((v + 1.0) / 2.2) ** 2 < 1
+        set_(img, inner & ear, "#ffb8b8")
+        set_(img, inner & ear & (v > -0.2), "#e69494")
+    # body: sheared skin with fleece tufts
     bd = box_uv(28, 8, 8, 16, 6)
     for i, (n, (x, y, w, h)) in enumerate(bd.items()):
         img = tan(seed + 20 + i, h * k, w * k)
-        streaks(img, seed + 30 + i, 0.3, ("#f8f6f5", "#ececec", "#dedede", "#f8f6f5"))
+        tufts(img, seed + 30 + i, int(w * h * 0.55))
         put(a, img, x, y, k)
+    # legs: fleece on the upper third, tan below, the hoof's dark edge at the bottom
     lg = box_uv(0, 16, 4, 12, 4)
     for i, n in enumerate(("right", "front", "left", "back")):
         x, y, w, h = lg[n]
-        img = tan(seed + 40 + i, 24, 8)
-        img[:8] = fleece(seed + 50 + i, 8, 8)
-        img[23, :, :3] = hexc(TAN["hoof"])
+        img = tan(seed + 40 + i, 96, 32)
+        edge = 32 + np.round((pix(seed + 45 + i, 2, 1, 32)[0] - 0.5) * 3).astype(int)
+        top = fleece(seed + 50 + i, 40, 32, -0.05)
+        for c in range(32):
+            img[: edge[c], c] = top[: edge[c], c]
+            img[edge[c] : edge[c] + 2, c, :3] = hexc(TAN["d"])
+        img[94:, :, :3] = hexc(TAN["hoof"])
+        img[92:94, :, :3] = hexc("#6b5646")
         put(a, img, x, y, k)
-    put(a, fleece(seed + 60, 8, 8), *lg["top"][:2], k)
-    sole = tan(seed + 61, 8, 8)
-    sole[:, 0, :3] = sole[:, 7, :3] = sole[7, :, :3] = hexc(TAN["hoof"])
+    put(a, fleece(seed + 60, 32, 32), *lg["top"][:2], k)
+    sole = tan(seed + 61, 32, 32)
+    sole[:, :2, :3] = sole[:, 30:, :3] = hexc(TAN["hoof"])
+    sole[30:, :, :3] = sole[:2, :, :3] = hexc(TAN["hoof"])
     put(a, sole, *lg["bottom"][:2], k)
     return a
 
 
+def wool_marks(img, seed, n, colors, size=(3, 6), mask=None):
+    """Faithful's fine V marks on the wool (fur hanging down): two 1 px strokes meeting at a
+    lower point."""
+    h, w = img.shape[:2]
+    chevron_marks(img, seed, n, colors, (0, 0, w, h), size, mask)
+
+
 def wool_face(seed, h, w, shade):
-    """White fleece with fur marks; `shade(u, v)` darkens it (0 bright .. 1 grey)."""
+    """White wool with fine V marks; `shade(u, v)` greys it (0 white .. 1 grey), its edges
+    ragged like fur hanging over them."""
     yy, xx = grid(h, w)
-    t = noise(seed, 3, h, w, tile=False) * 0.3 + pix(seed + 1, 1, h, w) * 0.15 + 0.62
-    # spiky edges on the grey areas (fur hanging over them)
-    jv = (pix(seed + 3, 1, 1, w)[0][None, :] - 0.5) * 0.35
-    ju = (pix(seed + 4, 1, h, 1)[:, 0][:, None] - 0.5) * 0.25
-    ju = ju + (pix(seed + 5, 1, h, w) - 0.5) * 0.12
-    sh = shade(np.clip(xx / w + ju, 0, 1), np.clip(yy / h + jv, 0, 1))
-    t -= sh
-    img = canvas(h, w, WOOL.shade(np.clip(t, 0, 1), 0.0))
+    t = aniso(seed, h, w, 9, 9) * 0.3 + pix(seed + 1, 1, h, w) * 0.12 + 0.66
+    jv = (aniso(seed + 3, h, w, 4, 3) - 0.5) * 0.3 + (pix(seed + 4, 2, h, w) - 0.5) * 0.06
+    ju = (aniso(seed + 5, h, w, 3, 4) - 0.5) * 0.22 + (pix(seed + 6, 2, h, w) - 0.5) * 0.05
+    t -= shade(np.clip(xx / w + ju, 0, 1), np.clip(yy / h + jv, 0, 1))
+    img = canvas(h, w, WOOL.shade(np.clip(t, 0, 1), 0.15))
     marks = img.copy()
-    chevrons(marks, seed + 2, 0.22, ("#000000",))
+    wool_marks(marks, seed + 2, int(h * w / 55), ("#000000",), (3, 6))
     m = marks[..., 0] < 1
-    darker = WOOL.shade(np.clip(t - 0.3, 0, 1), 0.0)
+    darker = WOOL.shade(np.clip(t - 0.28, 0, 1), 0.0)
     img[m, :3] = darker[m]
     return img
 
 
 def sheep_wool(seed: int) -> np.ndarray:
-    k = 2
-    a = blank(64, 128)
-    flat = lambda u, v: 0.0 * u  # noqa: E731
-    grey = lambda u, v: 0.85 + 0.0 * u  # noqa: E731
+    k = SK8
+    a = blank(32 * k, 64 * k)
+    grey = lambda u, v: 0.8 + 0.0 * u  # noqa: E731
     hd = box_uv(0, 0, 6, 6, 6)
     for i, (n, (x, y, w, h)) in enumerate(hd.items()):
-        sh = {"bottom": grey, "back": lambda u, v: 0.55 + 0.0 * u}.get(n, lambda u, v: 0.4 * np.clip(v - 0.75, 0, 1) * 4)
+        sh = {"bottom": grey, "back": lambda u, v: 0.45 + 0.2 * np.clip(np.abs(u - 0.5) * 2 - 0.5, 0, 1)}.get(
+            n, lambda u, v: 0.5 * np.clip(v - 0.72, 0, 1) * 4)
         put(a, wool_face(seed + i, h * k, w * k, sh), x, y, k)
     bd = box_uv(28, 8, 8, 16, 6)
     for i, (n, (x, y, w, h)) in enumerate(bd.items()):
         if n == "front":  # the belly: a grey band along the middle
-            sh = lambda u, v: 0.8 * np.clip(1.7 - np.abs(u - 0.45) * 4.5, 0, 1) + 0.05  # noqa: E731
+            sh = lambda u, v: 0.75 * np.clip(1.45 - np.abs(u - 0.55) * 3.6, 0, 1) + 0.04  # noqa: E731
         elif n in ("top", "bottom"):
-            sh = lambda u, v: 0.6 * (v > 0.62)  # noqa: E731
+            sh = lambda u, v: 0.55 * (v > 0.64) + 0.15 * (v > 0.85)  # noqa: E731
         elif n == "back":
-            sh = flat
+            sh = lambda u, v: 0.1 * np.clip(np.abs(u - 0.5) * 2 - 0.7, 0, 1) * 3  # noqa: E731
         else:
-            sh = lambda u, v: 0.3 * np.clip(np.abs(u - 0.5) * 2 - 0.5, 0, 1) * 2  # noqa: E731
+            sh = lambda u, v: 0.06 * np.clip(np.abs(u - 0.5) * 2 - 0.5, 0, 1) * 2  # noqa: E731
         put(a, wool_face(seed + 10 + i, h * k, w * k, sh), x, y, k)
     lg = box_uv(0, 16, 4, 6, 4)
     for i, (n, (x, y, w, h)) in enumerate(lg.items()):
-        sh = grey if n == "bottom" else (lambda u, v: 0.35 * (np.abs(v - 0.55) < 0.2))
+        sh = grey if n == "bottom" else (lambda u, v: 0.3 * (np.abs(v - 0.5) < 0.2))
         put(a, wool_face(seed + 20 + i, h * k, w * k, sh), x, y, k)
+    return a
+
+
+# ---------------------------------------------------------------------------- wolf
+
+# Faithful's wolf redrawn at 8 px per unit (512 x 256, twice Faithful 64x's detail): pale grey
+# fur made of short strands, a tan muzzle with a grey arch, a black nose on a striped tan snout
+# and a pale jaw. Shapes measured on Faithful ("ref px", 4 per unit) are doubled here.
+WK = 8
+WF = {"f0": "#b9b5b4", "f1": "#c1bebe", "f2": "#cac7c8", "f3": "#d3cfcf", "f4": "#dddadb",
+      "f5": "#e6e3e4", "g1": "#b0aaa7", "g2": "#9f9a96", "g3": "#8d8782",
+      "dark": "#393835", "dark2": "#2c2b29", "dark3": "#48463f", "black": "#121416",
+      "nose_hi": "#393c3f", "glint": "#6d7278",
+      "tan": "#a78f7e", "tan_l": "#b39c8b", "tan_d": "#9a8272", "brow": "#8c6f52",
+      "arch": "#9a8c88", "arch_l": "#a69994", "arch_d": "#958679",
+      "sn_l": "#ceaf96", "sn_m": "#c4ab9c", "sn_o": "#d4b5a4", "sn_hi": "#dcc1ae",
+      "sn_d": "#947b68", "sn_dd": "#836b59", "jaw": "#e4d8d9", "jaw_d": "#d6c8c8",
+      "white": "#ffffff", "white_d": "#e9e6e6", "red_d": "#b60f0f", "red": "#e42e2e",
+      "red_dd": "#8c0b0b", "red_hi": "#ff7a6e",
+      "paw": "#a1785b", "paw_d": "#8b654b", "paw_l": "#b08a6c", "leg_top": "#2d2d28",
+      "tail_top": "#494239", "tail_top_d": "#3c362f", "tail_bot": "#81766d",
+      "tail_bot_d": "#736961", "tail_rim": "#c9c1c2"}
+WOLF_BOXES = {
+    "head": box_uv(0, 0, 6, 6, 4), "ear": box_uv(16, 14, 2, 2, 1), "snout": box_uv(0, 10, 3, 3, 4),
+    "body": box_uv(18, 14, 6, 9, 6), "mane": box_uv(21, 0, 8, 6, 7), "leg": box_uv(0, 18, 2, 8, 2),
+    "tail": box_uv(9, 18, 2, 8, 2),
+}
+
+
+def wpx(part, name):
+    """(x, y, w, h) in pixels of a wolf face."""
+    return tuple(v * WK for v in WOLF_BOXES[part][name])
+
+
+def wset(img, mask, color):
+    img[mask, :3] = hexc(color)
+    img[mask, 3] = 255
+
+
+def strands(img, seed, n, colors, region=None, length=(5, 12), angle=np.pi / 2, spread=0.35,
+            curve=0.06, width=1, weights=None, mask=None):
+    """`n` short 1-2 px fur strands (vectorized random walks) in `region` (x0, y0, x1, y1),
+    heading along `angle` (radians, screen y down) give or take `spread`, bending by `curve`.
+    Only pixels of `mask` (if given) and inside the region are painted."""
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = region or (0, 0, w, h)
+    r = rng(seed)
+    px, py = r.uniform(x0, x1, n), r.uniform(y0, y1, n)
+    th = angle + r.normal(0, spread, n)
+    L = r.integers(length[0], length[1] + 1, n)
+    cv = r.normal(0, curve, n)
+    c = cols(*colors)
+    p = None if weights is None else np.asarray(weights, np.float64) / np.sum(weights)
+    ci = r.choice(len(colors), n, p=p)
+    for t in range(int(L.max())):
+        xi, yi = np.floor(px).astype(int), np.floor(py).astype(int)
+        for dx in range(width):
+            xx = xi + dx
+            ok = (t < L) & (xx >= x0) & (xx < x1) & (yi >= y0) & (yi < y1)
+            if mask is not None:
+                ok &= mask[np.clip(yi, 0, h - 1), np.clip(xx, 0, w - 1)]
+            img[yi[ok], xx[ok], :3] = c[ci[ok]]
+        px, py, th = px + np.cos(th), py + np.sin(th), th + cv
+
+
+def chevron_marks(img, seed, n, colors, region, size=(3, 6), mask=None):
+    """Faithful's V-shaped fur marks: two strands meeting at a lower point."""
+    r = rng(seed)
+    x0, y0, x1, y1 = region
+    c = cols(*colors)
+    h, w = img.shape[:2]
+    for _ in range(n):
+        ax, ay = r.uniform(x0, x1), r.uniform(y0, y1)
+        s = int(r.integers(size[0], size[1] + 1))
+        col = c[r.integers(0, len(c))]
+        tilt = r.normal(0, 0.25)
+        for sgn in (-1, 1):
+            a = -np.pi / 2 + sgn * r.uniform(0.45, 0.8) + tilt
+            for i in range(s):
+                x, y = int(ax + np.cos(a) * i), int(ay + np.sin(a) * i)
+                if x0 <= x < x1 and y0 <= y < y1 and 0 <= x < w and 0 <= y < h and (mask is None or mask[y, x]):
+                    img[y, x, :3] = col
+
+
+def wolf_fur(seed, h, w, bias=0.0):
+    """Soft grey fur at 8 px per unit: mottled patches of the fur tones, then many short strands
+    (mostly hanging down), light V marks and a few darker hairs."""
+    t = aniso(seed, h, w, 22, 14) * 0.6 + aniso(seed + 1, h, w, 8, 5) * 0.4 + bias
+    t = (t - 0.18) / 0.56
+    img = canvas(h, w, Ramp(WF["f1"], WF["f2"], WF["f3"], WF["f3"], WF["f4"]).shade(np.clip(t, 0, 1), 0.25))
+    area = h * w
+    strands(img, seed + 2, area // 110, (WF["f2"], WF["f1"]), length=(4, 9), spread=0.35, curve=0.1, weights=(3, 1))
+    strands(img, seed + 3, area // 120, (WF["f4"], WF["f3"]), length=(4, 9), spread=0.35, curve=0.1, weights=(3, 1))
+    chevron_marks(img, seed + 4, area // 420, (WF["f4"],), (0, 0, w, h), (3, 5))
+    chevron_marks(img, seed + 5, area // 900, (WF["f1"],), (0, 0, w, h), (3, 4))
+    strands(img, seed + 6, area // 2500, (WF["g1"],), length=(3, 6), spread=0.3)
+    return img
+
+
+def tuft8(img, seed, x, y_base, height, width, lean, colors=("g1", "g2")):
+    """A grey fur flame rising from `y_base` (Faithful's tufts hanging over the body), drawn
+    only over painted pixels: tapering body, darker core line, light rim on its left."""
+    h, w = img.shape[:2]
+    yy, xx = grid(h, w)
+    i = (y_base + 1 - yy) / height  # 0 at the base .. 1 at the tip
+    cx = x + lean * height * i ** 2
+    half = width / 2 * np.clip(1 - i, 0, 1) ** 0.75
+    m = (i >= 0) & (i <= 1) & (np.abs(xx - cx) <= half + 0.3) & (img[..., 3] > 0)
+    wset(img, m, WF[colors[0]])
+    core = m & (np.abs(xx - cx) <= np.maximum(half * 0.35, 0.5)) & (i < 0.7)
+    wset(img, core, WF[colors[1]])
+    rim = m & (xx - cx < -half + 1.2) & (i < 0.8) & (i > 0.1)
+    wset(img, rim, WF["f1"])
+
+
+def lock(img, seed, x, y, length, sign, lean, w0, colors, curl=2.5):
+    """A wavy tapering hair lock from (x, y), `sign` -1 rising, +1 hanging; its color steps
+    through `colors` (WF keys) from the root to the tip. Drawn only over painted pixels."""
+    r = rng(seed)
+    ph = r.uniform(0, 6.3)
+    n = max(2, length // 3)
+    pts = [(x + lean * j + np.sin(ph + j / 7.0) * curl * (j / length), y + sign * j)
+           for j in np.linspace(0, length, n + 1)]
+    painted = img[..., 3] > 0
+    for k in range(n):
+        f = k / n
+        col = colors[min(int(f * len(colors)), len(colors) - 1)]
+        before = img.copy()
+        stroke(img, pts[k], pts[k + 1], max(1.2, w0 * (1 - f * 0.8)), WF[col])
+        img[~painted] = before[~painted]
+
+
+def wave_line(img, seed, x, y0, y1, colors, amp=2.0, period=18.0, width=2, horizontal=False):
+    """A wavy dark fur line (vertical from y0 to y1 around column x, or horizontal)."""
+    r = rng(seed)
+    ph = r.uniform(0, 6.3)
+    c = [hexc(WF[k]) for k in colors]
+    h, w = img.shape[:2]
+    for s in range(y0, y1):
+        o = amp * np.sin(ph + s / period * 2 * np.pi) + amp * 0.4 * np.sin(ph * 2 + s / period * 5)
+        for d in range(width):
+            px, py = (int(round(x + o)) + d, s) if not horizontal else (s, int(round(x + o)) + d)
+            if 0 <= px < w and 0 <= py < h and img[py, px, 3] > 0:
+                img[py, px, :3] = c[min(d, len(c) - 1)]
+
+
+def wolf(mood="wild"):
+    def painter(seed: int) -> np.ndarray:
+        H, W = 32 * WK, 64 * WK
+        fur = wolf_fur(seed, H, W)
+        shade = wolf_fur(seed + 7, H, W, bias=-0.22)
+        a = blank(H, W)
+        B = WOLF_BOXES
+        for part in B:
+            for n in B[part]:
+                x, y, w, h = wpx(part, n)
+                a[y : y + h, x : x + w] = fur[y : y + h, x : x + w]
+        # shaded faces: under the head, the belly side, the tail's right side, the legs' backs
+        for part, n in (("head", "bottom"), ("body", "front"), ("tail", "right"), ("leg", "back"),
+                        ("mane", "front")):
+            x, y, w, h = wpx(part, n)
+            a[y : y + h, x : x + w] = shade[y : y + h, x : x + w]
+        r = rng(seed + 11)
+        yy, xx = grid(H, W)
+
+        # ---- head front: the tan muzzle (spilling onto the head sides), arch and brow
+        cx = 56.0
+        jag = (pix(seed + 12, 2, H, 1)[:, :1] - 0.5) * 3.0
+        hw = np.where(yy < 64, 24.0, 24.0 + (yy - 64) * 10.0 / 16.0) + jag
+        muzzle = (yy >= 56) & (yy < 80) & (np.abs(xx - cx) <= hw)
+        muzzle |= (yy >= 48) & (yy < 56) & (np.abs(xx - cx) <= 8)
+        # a darker fur shadow just outside the muzzle's slanted sides
+        side_sh = (yy >= 62) & (yy < 80) & (np.abs(xx - cx) <= hw + 3) & ~muzzle
+        wset(a, side_sh & (pix(seed + 13, 1, H, W) > 0.35), WF["f1"])
+        wset(a, muzzle, WF["tan"])
+        strands(a, seed + 14, 160, (WF["tan_l"], WF["tan_d"]), (0, 48, 112, 80), (3, 7), spread=0.5,
+                mask=muzzle)
+        wset(a, muzzle & ~np.roll(muzzle, 1, 0) & (yy >= 56), WF["tan_l"])
+        outer = ((xx - cx) / 26.5) ** 2 + ((yy - 80.5) / 21.5) ** 2 <= 1
+        inner = ((xx - cx) / 16.5) ** 2 + ((yy - 80.5) / 13.5) ** 2 <= 1
+        arch = outer & (yy < 80)
+        wset(a, arch, WF["arch"])
+        strands(a, seed + 15, 60, (WF["arch_l"], WF["arch_d"]), (24, 56, 88, 80), (3, 6), spread=0.6,
+                mask=arch & ~inner)
+        wset(a, arch & ~grow(inner, 0) & ~shrink(outer, 2), WF["arch_d"])
+        in_fur = inner & (yy < 80)
+        a[in_fur] = fur[in_fur]
+        wset(a, grow(in_fur, 2) & ~in_fur & arch & (yy < 80), WF["arch_d"])
+        # the brow mark between the eyes: a shallow curve
+        brow = (np.abs(xx - cx) <= 7) & (np.abs(yy - (58.5 + ((xx - cx) / 7) ** 2 * 1.5)) <= 1.1)
+        wset(a, brow, WF["brow"])
+
+        # ---- eyes (rows 48..56), pupils toward the nose
+        for sgn in (1, -1):
+            def X(x0, x1):  # a column range on the left eye mirrored for the right eye
+                return (xx >= x0) & (xx < x1) if sgn > 0 else (xx >= 112 - x1) & (xx < 112 - x0)
+            rows = (yy >= 48) & (yy < 56)
+            white, pupil = rows & X(32, 40), rows & X(40, 48)
+            if mood == "angry":
+                wset(a, white | pupil, WF["red_d"])
+                wset(a, pupil | (rows & X(38, 40)), WF["red"])
+                wset(a, (white | pupil) & (yy >= 54), WF["red_dd"])
+                wset(a, (yy >= 49) & (yy < 51) & X(42, 44), WF["red_hi"])
+                # black slanted brow: a wedge from the outer top down to the nose side
+                pts = [(32, 37), (35, 39.5), (40.5, 43), (48, 45.5), (48, 48), (35, 48), (32, 45)]
+                if sgn < 0:
+                    pts = [(112 - x, y) for x, y in pts]
+                wedge = polygon(pts, H, W)
+                wset(a, wedge, WF["black"])
+                wset(a, wedge & ~np.roll(wedge, 1, 0), WF["nose_hi"])
+                wset(a, np.roll(wedge, 1, 0) & ~wedge & (yy < 48), WF["g2"])
+            else:
+                wset(a, white, WF["white"])
+                wset(a, white & ((yy >= 54) | X(38, 40)), WF["white_d"])
+                wset(a, pupil, WF["black"])
+                wset(a, (yy >= 49) & (yy < 51) & X(41, 43), WF["glint"])
+                if mood == "tame":  # a round white lid over the pupil: soft, friendly eyes
+                    lid = (yy >= 44) & (yy < 48) & X(34, 47)
+                    lid &= ~((yy < 46) & (X(34, 36) | X(45, 47)))
+                    wset(a, lid, WF["white"])
+                    wset(a, (yy >= 44) & (yy < 45) & X(36, 45), WF["white_d"])
+                    wset(a, (yy >= 43) & (yy < 44) & X(37, 44), WF["f1"])
+                else:  # a grey lid line arching over the eye
+                    lid = (yy >= 45) & (yy < 48) & X(34, 48) & ~((yy < 46) & (X(34, 36) | X(46, 48)))
+                    wset(a, lid, WF["f1"])
+                    wset(a, (yy >= 47) & (yy < 48) & X(33, 47), WF["g1"])
+
+        # ---- snout: box (0, 10) 3 x 3 x 4
+        for n, base in (("top", "sn_o"), ("bottom", "sn_m"), ("right", "sn_l"), ("left", "sn_l"),
+                        ("front", "sn_l"), ("back", "sn_m")):
+            x, y, w, h = wpx("snout", n)
+            wset(a, (xx >= x) & (xx < x + w) & (yy >= y) & (yy < y + h), WF[base])
+        # top face (x 32..56, y 80..112): light tan left, warmer right, a stripe down the middle
+        top = (xx >= 32) & (xx < 56) & (yy >= 80) & (yy < 112)
+        wset(a, top & (xx >= 47), WF["sn_l"])
+        wset(a, top & (yy < 86) & (pix(seed + 16, 2, H, W) > 0.4), WF["sn_m"])
+        bot = (xx >= 56) & (xx < 80) & (yy >= 80) & (yy < 112)
+        wset(a, bot & (xx >= 72) & (yy >= 96), WF["sn_l"])
+        wset(a, bot & (xx < 62) & (yy < 90), WF["sn_l"])
+        for face_m, sx, s in ((top, 40, seed + 17), (bot, 64, seed + 18)):
+            off = np.round(np.sin(yy / 14.0 + s % 5) * 0.6 + (pix(s, 4, H, 1)[:, :1] - 0.5) * 0.9)
+            stripe = face_m & (xx >= sx + off) & (xx < sx + 8 + off)
+            wset(a, stripe, WF["tan"])
+            wset(a, stripe & (xx < sx + 2 + off), WF["sn_d"])
+            wset(a, stripe & (xx >= sx + 6 + off), WF["tan_d"])
+            strands(a, s + 1, 45, (WF["sn_hi"], WF["sn_m"]), (32, 80, 80, 112), (3, 6),
+                    spread=0.15, weights=(2, 1), mask=face_m & ~stripe)
+        # the pale jaw: a half disc over the snout's right side, front and left side
+        jaw = (((xx - 44) / 37.0) ** 2 + ((yy - 111.5) / 22.5) ** 2 <= 1) & (yy >= 112) & (yy < 136) & (xx < 88)
+        wset(a, jaw, WF["jaw"])
+        wset(a, jaw & (((xx - 44) / 34.0) ** 2 + ((yy - 111.5) / 20.5) ** 2 > 1) & (yy > 120), WF["jaw_d"])
+        # nose: a rounded black blob across the snout top's front edge
+        nose = ((xx - 44) / 8.6) ** 2 + ((yy - 114.3) / 6.4) ** 2 <= 1
+        wset(a, grow(nose, 1) & ~nose & (yy > 113), WF["sn_d"])
+        wset(a, nose, WF["black"])
+        hi = nose & (((xx - 42) / 6.0) ** 2 + ((yy - 111) / 3.2) ** 2 <= 1) & (yy < 113)
+        wset(a, hi, WF["nose_hi"])
+        wset(a, (xx >= 40) & (xx < 42) & (yy >= 110) & (yy < 111), WF["glint"])
+        for nx in (40, 47):  # nostrils
+            wset(a, (xx >= nx) & (xx < nx + 2) & (yy >= 116) & (yy < 118), "#050607")
+        # mouth line along the bottom edge (row 134..136)
+        mouth = (yy >= 134) & (yy < 136) & (xx < 88)
+        wset(a, mouth, WF["nose_hi"])
+        wset(a, mouth & ((xx < 8) | (xx >= 80)), WF["sn_d"])
+        wset(a, mouth & (((xx >= 8) & (xx < 16)) | ((xx >= 72) & (xx < 80))), WF["black"])
+        wset(a, (yy >= 133) & (yy < 134) & (xx >= 16) & (xx < 72), WF["jaw_d"])
+        if mood == "angry":  # a snarl: dark open mouth with pointed teeth rising from the jaw
+            wset(a, (yy >= 129) & (yy < 136) & (xx >= 18) & (xx < 70), WF["nose_hi"])
+            wset(a, (yy >= 129) & (yy < 130) & (xx >= 20) & (xx < 68), WF["black"])
+            tx = (xx - 26) % 6
+            teeth = (yy >= 131) & (yy < 135) & (xx >= 26) & (xx < 62) & (np.abs(tx - 2.5) <= (yy - 130.5) * 0.7)
+            wset(a, teeth, WF["white"])
+            wset(a, teeth & (tx >= 3.5), WF["white_d"])
+            for fx in (20, 64):  # fangs, taller
+                fang = (yy >= 129) & (xx >= fx) & (xx < fx + 4) & (np.abs(xx - fx - 1.5) <= (yy - 128.5) * 0.45)
+                wset(a, fang & (yy < 136), WF["white"])
+            wset(a, (yy >= 135) & (yy < 136) & (xx >= 18) & (xx < 70), WF["jaw_d"])
+        # back of the snout (inside the head): a brown rounded patch
+        back = (xx >= 92) & (xx < 112) & (yy >= 116) & (yy < 136)
+        back &= ~(((xx < 94) | (xx >= 110)) & (yy < 118))
+        wset(a, back, WF["sn_d"])
+        wset(a, back & ~shrink(back, 1), WF["sn_dd"])
+
+        # ---- ears: dark all round with a little texture, fur on the front and back
+        for n in ("top", "bottom", "right", "left"):
+            x, y, w, h = wpx("ear", n)
+            m = (xx >= x) & (xx < x + w) & (yy >= y) & (yy < y + h)
+            wset(a, m, WF["dark"])
+            wset(a, m & (pix(seed + 20 + x, 2, H, W) > 0.8), WF["dark2"])
+        for n in ("front", "back"):
+            x, y, w, h = wpx("ear", n)
+            m = (xx >= x) & (xx < x + w) & (yy >= y) & (yy < y + h)
+            wset(a, m & ((xx < x + 1) | (xx >= x + w - 1)), WF["f1"])
+            wset(a, m & (yy < y + 2), WF["g1"])
+
+        # ---- mane: dark streaks fanning from the top edge of its top/bottom faces
+        for n in ("top", "bottom"):
+            x, y, w, h = wpx("mane", n)
+            for i, fx in enumerate(r.choice(np.arange(4, w - 4, 5), 6, replace=False)):
+                ln = int(r.integers(14, 30))
+                lock(a, seed + 40 + i * 7 + x, x + int(fx), y, ln, 1, r.uniform(-0.2, 0.2), 3.2,
+                     ("g2", "g2", "g1", "f1"), curl=r.uniform(2, 4))
+        # grey tufts at the bottom of the mane's sides and back
+        for n, xs_ in (("right", (0.28, 0.55, 0.8)), ("left", (0.2, 0.45, 0.72)), ("back", (0.3, 0.8))):
+            x, y, w, h = wpx("mane", n)
+            for i, f in enumerate(xs_):  # a tuft: a tall dark lock and lighter ones curling beside it
+                tx = x + w * f + r.uniform(-2, 2)
+                tall = int(r.integers(20, 30))
+                lean = r.uniform(-0.25, 0.25)
+                for j, (dx_, k_, w_, cols_) in enumerate(((-4.0, 0.6, 5.0, ("g1", "g1", "f1")),
+                                                          (4.0, 0.7, 5.0, ("g1", "g1", "f1")),
+                                                          (0.0, 1.0, 7.0, ("g2", "g2", "g1", "g1")))):
+                    lock(a, seed + 50 + i * 5 + j + x, tx + dx_, y + h, int(tall * k_), -1,
+                         lean + dx_ * 0.05, w_, cols_, curl=r.uniform(1.5, 3.5))
+            strands(a, seed + 60 + x, w // 3, (WF["f4"], WF["f3"]), (x, y, x + w, y + h - 16), (4, 9))
+
+        # ---- body: tail root on the rear, a dark wavy line on the back
+        x, y, w, h = wpx("body", "bottom")
+        root = ellipse(y + 28, x + 22, 9.5, 8.5, H, W)
+        ring_ = grow(root, 3) & ~root
+        wset(a, ring_ & (pix(seed + 70, 1, H, W) > 0.4), WF["f1"])
+        wset(a, root, "#a39d99")
+        wset(a, root & ~np.roll(root, 2, 0), "#b3adaa")
+        wset(a, root & ~np.roll(root, -2, 1) & ~np.roll(root, -2, 0), "#918a86")
+        for i, (tx, lean) in enumerate(((x + 12, 0.3), (x + 31, -0.3), (x + 22, 0.0))):
+            tuft8(a, seed + 71 + i, tx, y + 44 if i < 2 else y + 20, 14 if i < 2 else 8, 4, lean, ("f1", "g1"))
+        x, y, w, h = wpx("body", "back")
+        wave_line(a, seed + 72, x + 30, y + 3, y + h - 2, ("g2", "g1", "f1"), 2.5, 60, 3)
+        for i, n in enumerate(("right", "left", "front")):
+            x, y, w, h = wpx("body", n)
+            wave_line(a, seed + 73 + i, x + int(r.integers(10, w - 10)), y + int(r.integers(4, 20)),
+                      y + h - int(r.integers(4, 20)), ("f1", "g1"), 1.5, 50, 1)
+
+        # ---- legs: dark top, brown paw pad, a grey fur fold above the paw
+        x, y, w, h = wpx("leg", "top")
+        m = (xx >= x) & (xx < x + w) & (yy >= y) & (yy < y + h)
+        wset(a, m, WF["leg_top"])
+        x, y, w, h = wpx("leg", "bottom")
+        m = (xx >= x) & (xx < x + w) & (yy >= y) & (yy < y + h)
+        wset(a, m, WF["paw"])
+        wset(a, m & ~shrink(m, 1), WF["paw_d"])
+        wset(a, m & (((xx - x - 8) / 4.0) ** 2 + ((yy - y - 9) / 3.5) ** 2 <= 1), WF["paw_l"])
+        for i in range(3):
+            wset(a, m & (np.abs(xx - (x + 3 + i * 5)) < 1.5) & (np.abs(yy - (y + 3.5)) < 1.5), WF["paw_l"])
+        x0, _, _, _ = wpx("leg", "right")
+        _, y, _, h = wpx("leg", "right")
+        # a soft fold of darker fur: a wavy band, darkest along its lower edge, lit above
+        wav = (np.sin(xx / 7.0 + seed % 5) * 1.6 + np.sin(xx / 3.1) * 0.6
+               + (pix(seed + 84, 2, 1, W)[0][None, :] - 0.5) * 1.5)
+        legs = (xx < 64) & (yy >= y) & (yy < y + h)
+        fold = legs & (yy >= y + 39 + wav) & (yy < y + 46 + wav)
+        wset(a, fold & (pix(seed + 85, 1, H, W) > 0.25), WF["g1"])
+        wset(a, legs & (yy >= y + 44 + wav) & (yy < y + 46 + wav), WF["g2"])
+        wset(a, legs & (yy >= y + 37 + wav) & (yy < y + 39 + wav) & (pix(seed + 86, 1, H, W) > 0.4), WF["f4"])
+        strands(a, seed + 87, 40, (WF["g2"], WF["f1"]), (0, y + 34, 64, y + 50), (3, 6), angle=0.0,
+                spread=0.3)
+        wset(a, (xx < 64) & (yy >= y + 47) & (yy < y + h) & (pix(seed + 83, 1, H, W) > 0.8), WF["f1"])
+
+        # ---- tail: dark top (root), grey tip, wavy lines along it
+        x, y, w, h = wpx("tail", "top")
+        m = (xx >= x) & (xx < x + w) & (yy >= y) & (yy < y + h)
+        wset(a, m, WF["tail_top"])
+        wset(a, m & (pix(seed + 90, 1, H, W) > 0.7), WF["tail_top_d"])
+        x, y, w, h = wpx("tail", "bottom")
+        m = (xx >= x) & (xx < x + w) & (yy >= y) & (yy < y + h)
+        wset(a, m, WF["tail_bot"])
+        wset(a, m & (pix(seed + 91, 1, H, W) > 0.75), WF["tail_bot_d"])
+        rim = m & (((xx - x - 8) / 8.5) ** 2 + ((yy - y - 8) / 8.5) ** 2 > 1)
+        wset(a, rim, WF["tail_rim"])
+        for i, (n, fx) in enumerate((("right", 4), ("front", 9), ("left", 7), ("back", 11))):
+            x, y, w, h = wpx("tail", n)
+            if i in (0, 1, 3):
+                wave_line(a, seed + 92 + i, x + fx, y + 4 + i * 3, y + h - 4, ("g2", "g1"), 1.2, 44, 2)
+        return a
+
+    return painter
+
+
+def wolf_collar(seed: int) -> np.ndarray:
+    """Only the collar, in neutral greys (the game tints it): a band round the top of the
+    mane's four sides and a frame round the mane's front (its `top` face), like Faithful's."""
+    H, W = 32 * WK, 64 * WK
+    a = blank(H, W)
+    tone = np.array([119, 142, 170, 186, 202, 215, 226], np.float32)
+    x, y, w, h = wpx("mane", "top")
+    yy, xx = grid(h, w)
+    frame = (xx < 4) | (xx >= w - 4) | (yy < 4) | (yy >= h - 4)
+    t = np.full((h, w), 5.0)
+    t -= ((xx >= w - 4) | (yy >= h - 4)) * 1.5  # shaded bottom/right
+    t += ((xx < 1) | (yy < 1)) * 1.0  # a lit outer edge
+    t -= ((xx >= 3) & (xx < 4) & (yy >= 3) & (yy < h - 3)) | ((yy >= 3) & (yy < 4) & (xx >= 3) & (xx < w - 3))
+    t += (pix(seed, 1, h, w) - 0.5) * 1.2
+    idx = np.clip(np.round(t), 0, 6).astype(int)
+    a[y : y + h, x : x + w, :3] = tone[idx][..., None]
+    a[y : y + h, x : x + w, 3] = np.where(frame, 255, 0)
+    # the band: 8 px along the top of the right, front, left and back faces
+    x0 = wpx("mane", "right")[0]
+    fx, _, fw, _ = wpx("mane", "front")
+    bx, _, bw, _ = wpx("mane", "back")
+    y0 = wpx("mane", "right")[1]
+    xs = np.arange(x0, bx + bw) + 0.5
+    near = np.clip(1 - np.abs(xs - (fx + fw / 2)) / (fw / 2 + 30), 0, 1)
+    rows = np.arange(8)[:, None]
+    t = 5.4 - near[None, :] * 2.8 - np.clip(rows - 4, 0, None) * 0.55 + (rows == 0) * 0.8
+    t = t - (rows == 7) * 1.0
+    t += (pix(seed + 2, 1, 8, len(xs)) - 0.5) * 1.1
+    # stitching dots along the middle
+    stitch = (rows == 3) & ((np.arange(len(xs)) % 6) < 2)[None, :]
+    t -= stitch * 1.2
+    idx = np.clip(np.round(t), 0, 6).astype(int)
+    a[y0 : y0 + 8, x0 : bx + bw, :3] = tone[idx][..., None]
+    a[y0 : y0 + 8, x0 : bx + bw, 3] = 255
     return a
 
 
 # ---------------------------------------------------------------------------- particles
 
-FIRE = {"red": "#ff0000", "orange": "#ff6a00", "yellow": "#ffd800", "core": "#fff5c6"}
+FIRE ={"red": "#ff0000", "orange": "#ff6a00", "yellow": "#ffd800", "core": "#fff5c6"}
 
 
 def flame(seed: int) -> np.ndarray:
-    """Faithful's flame: a tall drop filling the height, red tip, orange rim, yellow body and a
-    pale core low down (32 px reference scaled by 4 in shape, drawn at full resolution)."""
+    """Faithful's flame at twice its detail: a tall drop filling the height, a red tip that
+    runs down its left rim, an orange rim, a yellow body and a pale core low down on the left
+    (shapes in 32 px "ref" coordinates)."""
     h = w = 128
     ry, rx = refgrid(h, w, 4)
-    L = np.interp(ry, [0, 5, 10, 15, 20, 24, 27, 29, 30.5, 32], [15, 13, 12, 11, 9, 8, 8, 8.6, 9.6, 11.5])
-    R = np.interp(ry, [0, 3, 5, 10, 15, 20, 24, 27, 29, 30.5, 32], [16, 17, 17, 19, 20, 21.5, 23, 24, 23.5, 22, 20.5])
-    wob = (noise(seed, 8, h, w, tile=False) - 0.5) * 0.6
+    wob = (noise(seed, 8, h, w, tile=False) - 0.5) * 0.5
+    L = np.interp(ry, [0, 21, 26, 29, 32], [15.2, 8, 8, 9, 11.4])
+    R = np.interp(ry, [0, 2, 22, 27, 29, 32], [16, 16.4, 24, 24, 23.2, 20.4])
     body = (rx >= L + wob) & (rx < R + wob) & (ry < 31.9)
     img = blank(h, w)
     set_(img, body, FIRE["yellow"])
     d = ndimage.distance_transform_edt(body)
-    set_(img, body & (d <= 3.5), FIRE["orange"])
-    set_(img, body & (ry < 4.5), FIRE["red"])
-    set_(img, body & (ry < 10) & (d <= 2.5) & (rx < 16.5), FIRE["red"])
-    core = (((rx - 15.8) / 5.6) ** 2 + ((ry - 25.5) / 4.8) ** 2 < 1) | (((rx - 13) / 2.6) ** 2 + ((ry - 21.5) / 3.2) ** 2 < 1)
-    set_(img, core & body & (d > 5), FIRE["core"])
-    # a few flicker pixels at the rim of the core
-    fl = grow(core & body & (d > 5), 2) & ~core & body & (pix(seed + 1, 2, h, w) > 0.7) & (d > 5)
+    right = rx > (L + R) / 2
+    rim = body & (d <= np.where(right, 4.5, 3.5))
+    rim &= ~((ry > 19.5) & (ry < 25.5) & ~right)  # the lit left flank has no rim
+    set_(img, rim, FIRE["orange"])
+    set_(img, body & (ry < 3.5), FIRE["red"])
+    set_(img, rim & (ry < 9.5) & ~right, FIRE["red"])
+    set_(img, rim & (ry > 6.5) & (ry < 9.2) & right & (d <= 2), FIRE["red"])
+    core = polygon([(4 * x, 4 * y) for x, y in ((11, 20), (12.8, 19.8), (14.2, 21.5), (16, 23), (19, 25),
+                                                (22, 26.8), (21.3, 28.4), (19.5, 29.6), (12, 29.6),
+                                                (10.2, 28.2), (10, 22.4))], h, w)
+    core &= body & (d > 3)
+    set_(img, core, FIRE["core"])
+    # a few flicker pixels at the core's rim
+    fl = grow(core, 2) & ~core & body & (d > 4) & (pix(seed + 1, 2, h, w) > 0.72)
     set_(img, fl, FIRE["core"])
     return img
 
 
-# (radius of the dense center, outer radius) per smoke stage, in our pixels (Faithful x4)
-SMOKE = [(3, 5), (6, 14), (9, 22), (11, 26), (15, 36), (19, 44), (26, 58), (34, 70)]
+# Per smoke stage: how far the puff reaches (in 2 px cells) and how many cells it covers
+# (about Faithful's sizes, at twice its detail).
+SMOKE = [(1.5, 16), (7.5, 76), (12.5, 108), (14, 228), (17, 480), (20.5, 640), (27, 1232), (31, 1800)]
 
 
 def smoke(i: int):
+    """Faithful's smoke puffs: chunky ragged white blobs, dense in the middle with a few
+    holes, drawn in 2 px cells with 4 px lumps along the edge."""
     def painter(seed: int) -> np.ndarray:
         h = w = 128
         img = blank(h, w)
-        yy, xx = grid(h, w)
-        c0, c1 = SMOKE[i]
-        cy, cx = 67.0, 66.0
         if i == 0:
-            set_(img, (np.abs(yy - cy) < 4) & (np.abs(xx - cx) < 4), "#ffffff")
+            yy, xx = grid(h, w)
+            set_(img, (np.abs(yy - 67) < 4) & (np.abs(xx - 66) < 4), "#ffffff")
             return img
+        reach, cells = SMOKE[i]
+        g = 64
+        yy, xx = grid(g, g)
+        cy, cx = 33.5, 33.0
         r = rng(seed + 9)
         ang = np.arctan2(yy - cy, xx - cx)
-        lobes = 1 + 0.22 * np.sin(3 * ang + r.uniform(0, 6.3)) + 0.14 * np.sin(5 * ang + r.uniform(0, 6.3))
-        rad = np.hypot(yy - cy, xx - cx) / (c1 * lobes)
-        n = (noise(seed, max(4, c1 / 2.2), h, w, tile=False) * 0.42
-             + noise(seed + 7, max(3, c1 / 5), h, w, tile=False) * 0.25 + pix(seed + 1, 3, h, w) * 0.33)
-        edge = np.clip((rad - c0 / c1 * 0.5) / (1.1 - c0 / c1 * 0.5), 0, 1)
-        m = n > 0.28 + edge * 0.5
-        m &= rad < 1.2
-        # stray specks around the puff
-        m |= (pix(seed + 2, 3, h, w) > 0.975) & (rad < 1.1) & (rad > 0.6)
-        set_(img, m, "#ffffff")
+        lobes = 1 + 0.12 * np.sin(2 * ang + r.uniform(0, 6.3)) + 0.1 * np.sin(3 * ang + r.uniform(0, 6.3))
+        rad = np.hypot(yy - cy, xx - cx) / (reach * lobes)
+        t = (1 - rad + (noise(seed, max(2.0, reach / 2.5), g, g, tile=False) - 0.5) * 0.35
+             + (pix(seed + 1, 2, g, g) - 0.5) * 0.6 + (pix(seed + 3, 1, g, g) - 0.5) * 0.08)
+        t[(rad > 1.05) | (yy < 1) | (xx < 1) | (yy > g - 1) | (xx > g - 1)] = -9
+        thr = np.sort(t.ravel())[::-1][cells]
+        m = t > thr
+        # tidy: no lone cells; pinholes closed where the puff is dense
+        nb = sum(np.roll(np.roll(m, dy, 0), dx, 1) for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+        m = (m & (nb >= 1)) | (~m & (nb >= 4) & (rad < 0.5))
+        set_(img, np.repeat(np.repeat(m, 2, 0), 2, 1), "#ffffff")
         return img
 
     return painter
@@ -882,6 +1470,10 @@ TEXTURES = {
     "entity/pig/pig_temperate": pig,
     "entity/sheep/sheep": sheep,
     "entity/sheep/sheep_wool": sheep_wool,
+    "entity/wolf/wolf": wolf("wild"),
+    "entity/wolf/wolf_tame": wolf("tame"),
+    "entity/wolf/wolf_angry": wolf("angry"),
+    "entity/wolf/wolf_collar": wolf_collar,
     "particle/flame": flame,
     **{f"particle/generic_{i}": smoke(i) for i in range(8)},
 }
@@ -919,6 +1511,8 @@ def _previews():
                                      box_uv(0, 16, 4, 6, 4)],
         "entity/sheep/sheep": [box_uv(0, 0, 6, 6, 8), box_uv(28, 8, 8, 16, 6), box_uv(0, 16, 4, 12, 4)],
         "entity/sheep/sheep_wool": [box_uv(0, 0, 6, 6, 6), box_uv(28, 8, 8, 16, 6), box_uv(0, 16, 4, 6, 4)],
+        **{f"entity/wolf/{n}": list(WOLF_BOXES.values())
+           for n in ("wolf", "wolf_tame", "wolf_angry", "wolf_collar")},
     }
     for path, bl in boxes.items():
         img = TEXTURES[path](zlib.crc32(path.encode()) & 0x7FFFFFFF)

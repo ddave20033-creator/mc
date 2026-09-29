@@ -378,6 +378,9 @@ impl Game {
     pub(in crate::game) fn client_world(&mut self, dt: f32) {
         for m in &mut self.mobs {
             m.follow(dt);
+            if let Some(s) = m.sound(dt) {
+                self.audio.play(s, Some(m.center()), 1.0);
+            }
         }
         if let Some(Net::Client(c)) = &self.net {
             let k = 1.0 - (-15.0 * dt).exp();

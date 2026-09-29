@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 32;
+pub const PROTOCOL: u16 = 34;
 
 // ---------------------------------------------------------------------------- data
 
@@ -80,6 +80,8 @@ pub struct Pose {
     /// Readying the held grenade: hundredths of a second since the button went down, plus
     /// one (0: not).
     pub grenade: u16,
+    /// Holding a fishing rod: what it is doing, and where its bobber is.
+    pub rod: Option<crate::model::angler::RodAnim>,
 }
 
 /// `Pose::book`: the book is held open; the last page turn went back; the number of page
@@ -135,6 +137,9 @@ pub struct MobNet {
     /// A target dummy: the damage it has taken, and the last hit.
     pub taken: f32,
     pub last_hit: f32,
+    /// A wolf: `mob::wolf_flags`, and its collar's colour.
+    pub flags: u8,
+    pub collar: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -174,6 +179,8 @@ pub mod hurt {
     pub const MELEE: u8 = 0;
     pub const BULLET: u8 = 1;
     pub const BLAST: u8 = 2;
+    /// A wolf's bite (the host's wolves bite LAN players).
+    pub const WOLF: u8 = 3;
 }
 
 /// Block entity kinds in `Msg::Container`.
@@ -250,6 +257,11 @@ pub enum Msg {
     /// Took down a target dummy (the host removes it and drops it as an item).
     BreakDummy {
         id: u32,
+    },
+    /// Right clicked a mob holding `item` (a wolf: given a bone, or told to sit or stand).
+    UseOnMob {
+        id: u32,
+        item: u16,
     },
     DropItem {
         pos: Vec3,
@@ -464,6 +476,23 @@ impl W {
             None => self.bool(false),
         }
         self.u16(p.grenade);
+        match p.rod {
+            Some(r) => {
+                self.bool(true);
+                for v in [r.charge, r.cast.unwrap_or(-1.0), r.fight, r.tension, r.crank, r.lift.unwrap_or(-1.0)] {
+                    self.f32(v);
+                }
+                self.bool(r.out);
+                match r.bobber {
+                    Some(b) => {
+                        self.bool(true);
+                        self.vec3(b);
+                    }
+                    None => self.bool(false),
+                }
+            }
+            None => self.bool(false),
+        }
     }
     fn bench_item(&mut self, i: &BenchItem) {
         self.u16(i.id);
@@ -628,6 +657,20 @@ impl R<'_> {
             gun_extra: self.u32()?,
             bench_hold: if self.bool()? { Some((self.stack()?, self.vec3()?)) } else { None },
             grenade: self.u16()?,
+            rod: if self.bool()? { Some(self.rod()?) } else { None },
+        })
+    }
+    fn rod(&mut self) -> Option<crate::model::angler::RodAnim> {
+        let time = |v: f32| (v >= 0.0).then_some(v);
+        Some(crate::model::angler::RodAnim {
+            charge: self.f32()?,
+            cast: time(self.f32()?),
+            fight: self.f32()?,
+            tension: self.f32()?,
+            crank: self.f32()?,
+            lift: time(self.f32()?),
+            out: self.bool()?,
+            bobber: if self.bool()? { Some(self.vec3()?) } else { None },
         })
     }
     fn bench_item(&mut self) -> Option<BenchItem> {
@@ -736,6 +779,11 @@ impl Msg {
             Msg::BreakDummy { id } => {
                 w.u8(48);
                 w.u32(*id);
+            }
+            Msg::UseOnMob { id, item } => {
+                w.u8(49);
+                w.u32(*id);
+                w.u16(*item);
             }
             Msg::FurnaceUse {
                 p,
@@ -859,6 +907,8 @@ impl Msg {
                     w.bool(m.sheared);
                     w.f32(m.taken);
                     w.f32(m.last_hit);
+                    w.u8(m.flags);
+                    w.u8(m.collar);
                 }
                 w.u32(items.len() as u32);
                 for it in items {
@@ -1028,6 +1078,7 @@ impl Msg {
             10 => Msg::Save(r.state()?),
             11 => Msg::Shear { id: r.u32()? },
             48 => Msg::BreakDummy { id: r.u32()? },
+            49 => Msg::UseOnMob { id: r.u32()?, item: r.u16()? },
             12 => Msg::FurnaceUse {
                 p: r.ivec3()?,
                 part: r.u8()?,
@@ -1074,6 +1125,8 @@ impl Msg {
                         sheared: r.bool()?,
                         taken: r.f32()?,
                         last_hit: r.f32()?,
+                        flags: r.u8()?,
+                        collar: r.u8()?,
                     })
                 })?,
                 items: r.list(|r| {
@@ -1221,6 +1274,16 @@ mod tests {
             book_page: book::HUNGARIAN | 7,
             spectator: true,
             sprint: 0.5,
+            rod: Some(crate::model::angler::RodAnim {
+                charge: 0.25,
+                cast: Some(0.1),
+                out: true,
+                fight: 1.0,
+                tension: 0.6,
+                crank: 2.0,
+                lift: None,
+                bobber: Some(Vec3::new(3.0, 60.5, -8.0)),
+            }),
             ..Default::default()
         }));
         roundtrip(Msg::Grenade {
@@ -1266,6 +1329,7 @@ mod tests {
         roundtrip(Msg::Save(state));
         roundtrip(Msg::Shear { id: 77 });
         roundtrip(Msg::BreakDummy { id: 78 });
+        roundtrip(Msg::UseOnMob { id: 78, item: 380 });
         roundtrip(Msg::Blocks(vec![
             (IVec3::new(1, 2, 3), 7),
             (IVec3::new(-9, 0, 4), 0),
@@ -1285,6 +1349,8 @@ mod tests {
                 sheared: true,
                 taken: 12.5,
                 last_hit: 7.0,
+                flags: 5,
+                collar: 3,
             }],
             items: vec![ItemNet {
                 id: 9,

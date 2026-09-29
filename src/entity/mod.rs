@@ -4,6 +4,7 @@
 pub mod block_entity;
 pub mod dropped;
 pub mod mob;
+pub mod skin_pages;
 pub mod player;
 pub mod survival;
 

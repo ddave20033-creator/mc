@@ -64,6 +64,7 @@ pub fn smelt(id: ItemId) -> Option<ItemId> {
         BRICK => CERAMIC_PLATE,
         PORKCHOP => COOKED_PORKCHOP,
         MUTTON => COOKED_MUTTON,
+        RAW_FISH => COOKED_FISH,
         WATER_BOTTLE => PURIFIED_WATER,
         _ => match id as u8 {
             _ if id >= 256 => return None,
@@ -156,6 +157,13 @@ fn recipes() -> &'static Vec<Recipe> {
                 pattern: &[" I", "I "],
                 keys: vec![('I', vec![IRON_INGOT])],
                 result: Stack::one(SHEARS),
+            },
+            // Like Minecraft's: three sticks on the diagonal, the line (wool spun thin) hanging
+            // down from the tip.
+            Recipe {
+                pattern: &["  S", " SW", "S W"],
+                keys: vec![('S', vec![STICK]), ('W', b(WOOL))],
+                result: Stack::one(FISHING_ROD),
             },
             Recipe {
                 pattern: &["P  ", "PP ", "PPP"],

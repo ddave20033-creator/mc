@@ -1037,7 +1037,8 @@ impl Builder {
     }
 }
 
-fn fluid_height(level: u8) -> f32 {
+/// How high a fluid of this level stands in its block (0..1).
+pub fn fluid_height(level: u8) -> f32 {
     if level == 0 || level >= FALLING {
         0.875
     } else {

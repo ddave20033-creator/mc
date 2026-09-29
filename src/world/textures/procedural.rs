@@ -357,6 +357,48 @@ fn shape(x: i32, y: i32, color: [f32; 3], inside: impl Fn(f32, f32) -> bool) -> 
     Some(col(color, v, 255))
 }
 
+/// A cod lying corner to corner (head at the bottom left, tail at the top right): raw, sandy
+/// with a darker back and a pale belly; cooked, white flaky flesh between a toasted head and
+/// tail.
+fn fish_icon(cooked: bool, x: i32, y: i32, n: f32) -> Option<[u8; 4]> {
+    let (fx, fy) = (d(x), d(y));
+    // Along the fish (0 head .. 1 tail root) and across it (+ toward the back, up-left).
+    let (head, tail): ((f32, f32), (f32, f32)) = ((6.0, 26.0), (23.5, 9.5));
+    let (dx, dy) = (tail.0 - head.0, tail.1 - head.1);
+    let len = (dx * dx + dy * dy).sqrt();
+    let along = |fx: f32, fy: f32| ((fx - head.0) * dx + (fy - head.1) * dy) / (len * len);
+    let across = |fx: f32, fy: f32| ((fx - head.0) * dy - (fy - head.1) * dx) / len;
+    let body = |fx: f32, fy: f32| {
+        let t = along(fx, fy);
+        let half = 6.5 * (1.0 - ((t - 0.42) / 0.58).powi(2)).max(0.0).sqrt() + 0.6;
+        (-0.05..=1.0).contains(&t) && across(fx, fy).abs() < half
+    };
+    let fin = |fx: f32, fy: f32| {
+        // The tail: a fan past the root, notched in the middle.
+        let (t, a) = (along(fx, fy), across(fx, fy));
+        t > 0.9 && t < 1.3 && a.abs() < 1.0 + (t - 0.95).max(0.0) * 16.0 && !(t > 1.2 && a.abs() < (t - 1.2) * 16.0)
+    };
+    let inside = |fx: f32, fy: f32| body(fx, fy) || fin(fx, fy);
+    let t = along(fx, fy);
+    let a = across(fx, fy);
+    let eye = (fx - 8.5).hypot(fy - 22.0) < 1.3;
+    let c = if eye {
+        if cooked { [232.0, 226.0, 210.0] } else { [26.0, 20.0, 16.0] }
+    } else if !body(fx, fy) || t < 0.22 {
+        // tail, head
+        if cooked { [196.0, 152.0, 102.0] } else { [206.0, 176.0, 132.0] }
+    } else if cooked {
+        if (t * 10.0 + a.abs() * 0.15).fract() < 0.2 { [206.0, 190.0, 150.0] } else { [236.0, 226.0, 196.0] }
+    } else if a > 1.5 {
+        [178.0, 138.0, 90.0]
+    } else if a < -2.0 {
+        [220.0, 200.0, 164.0]
+    } else {
+        [200.0, 164.0, 116.0]
+    };
+    shape(x, y, c, inside).map(|p| if eye { col(c, 1.0, 255) } else { col([p[0] as f32, p[1] as f32, p[2] as f32], 0.95 + 0.08 * n, 255) })
+}
+
 fn in_polygon(x: f32, y: f32, points: &[(f32, f32)]) -> bool {
     let mut inside = false;
     let mut j = points.len() - 1;
@@ -800,7 +842,17 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
                 None
             }
         }
-        tex::PIG_SPAWN_EGG | tex::SHEEP_SPAWN_EGG => {
+        tex::BONE => {
+            // A pale bone lying diagonally, two knobs at each end.
+            let bone = |fx: f32, fy: f32| {
+                let off = (fx - fy).abs() / std::f32::consts::SQRT_2;
+                let along = (fx + fy) * 0.5;
+                (off < 1.8 && (7.0..25.0).contains(&along))
+                    || [(7.0, 9.5), (9.5, 7.0), (22.5, 25.0), (25.0, 22.5)].iter().any(|&(cx, cy)| (fx - cx).hypot(fy - cy) < 3.0)
+            };
+            shape(x, y, [236.0, 228.0, 206.0], bone)
+        }
+        tex::PIG_SPAWN_EGG | tex::SHEEP_SPAWN_EGG | tex::WOLF_SPAWN_EGG => {
             let egg = |fx: f32, fy: f32| {
                 // Narrower at the top, like an egg.
                 let ry = if fy < 17.0 { 11.0 } else { 9.0 };
@@ -817,6 +869,8 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
                 .iter()
                 .any(|&(sx, sy, r)| (fx - sx).hypot(fy - sy) < r);
             let c = match (l, spot) {
+                (tex::WOLF_SPAWN_EGG, true) => [196.0, 164.0, 128.0],
+                (tex::WOLF_SPAWN_EGG, false) => [216.0, 212.0, 208.0],
                 (tex::SHEEP_SPAWN_EGG, true) => [250.0, 182.0, 182.0],
                 (tex::SHEEP_SPAWN_EGG, false) => [232.0, 232.0, 232.0],
                 (_, true) => [196.0, 88.0, 96.0],
@@ -911,6 +965,7 @@ fn item_icon(l: u32, x: i32, y: i32) -> [u8; 4] {
                 })
             })
         }
+        tex::RAW_FISH | tex::COOKED_FISH => fish_icon(l == tex::COOKED_FISH, x, y, n),
         _ if (tex::PISTOL..tex::GUN_GLASS).contains(&l) => gun_icon(l, x, y),
         _ => Some(tool_icon(l, x, y)).filter(|p| p[3] > 0),
     };
@@ -969,8 +1024,8 @@ fn chain(x: i32, y: i32) -> [u8; 4] {
     }
 }
 
-/// Built-in pig skin, laid out like Minecraft's pig texture (64x64 texel atlas, 2 px per
-/// texel here): head at (0,0), snout at (16,16), legs at (0,16), body at (28,8).
+/// Built-in pig skin, laid out like Minecraft's pig texture (64x64 unit atlas, 2 px per unit
+/// here; cut onto the `tex::PIG` pages): head at (0,0), snout at (16,16), legs at (0,16), body at (28,8).
 fn pig_skin(x: i32, y: i32) -> [u8; 4] {
     let (u, v) = (x / 2, y / 2);
     let l = tex::PIG;
@@ -2541,9 +2596,36 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         }
         tex::CLOUD => cloud_puff(l, x, y),
         // Filled from the Blockbench view model's texture in `synth_pistol_view`.
-        _ if l >= tex::PISTOL_VIEW => [0, 0, 0, 0],
+        _ if (tex::PISTOL_VIEW..tex::WOLF).contains(&l) => [0, 0, 0, 0],
         tex::SHIRT_BACK => character(tex::SHIRT, x, y),
-        tex::PIG => pig_skin(x, y),
+        // The pig's and the sheep's skin pages: built-in atlases (`pig_skin`, plain colors) cut up
+        // like a pack's.
+        _ if (tex::PIG..tex::SHEEP).contains(&l) => {
+            match crate::entity::mob::pig_skin::SKIN.atlas_at(l - tex::PIG, x as u32, y as u32) {
+                Some((u, v)) => pig_skin((u * 2.0) as i32, (v * 2.0) as i32),
+                None => [0, 0, 0, 0],
+            }
+        }
+        _ if (tex::SHEEP..tex::SHEEP_WOOL).contains(&l) => {
+            match crate::entity::mob::sheep_skin::SKIN.atlas_at(l - tex::SHEEP, x as u32, y as u32) {
+                Some(_) => col([214.0, 178.0, 150.0], 0.92 + 0.08 * grain(l, x, y, 562), 255),
+                None => [0, 0, 0, 0],
+            }
+        }
+        _ if (tex::SHEEP_WOOL..tex::FISHING_ROD_MODEL).contains(&l) => {
+            match crate::entity::mob::sheep_skin::WOOL.atlas_at(l - tex::SHEEP_WOOL, x as u32, y as u32) {
+                Some(_) => col(
+                    [236.0, 236.0, 236.0],
+                    0.9 + 0.06 * fbm(l, x, y, 560) + 0.06 * grain(l, x, y, 561),
+                    255,
+                ),
+                None => [0, 0, 0, 0],
+            }
+        }
+        tex::SPARE_PIG | tex::SPARE_SHEEP | tex::SPARE_SHEEP_WOOL => [0, 0, 0, 0],
+        // The fishing rod's model pages and its icon, drawn from the model later
+        // (`synth_model_pages`, `render_item_icons`).
+        tex::FISHING_ROD_MODEL..=tex::FISHING_ROD => [0, 0, 0, 0],
         tex::LANTERN => lantern(x, y),
         tex::CHAIN => chain(x, y),
         // Made from the final planks in `synth_doors` unless a pack has them.
@@ -2560,16 +2642,19 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
         tex::ARMOR_WOOL | tex::ARMOR_METAL | tex::VEST => armor_surface(l, x, y),
         tex::BOOK_COVER | tex::BOOK_EDGE | tex::BOOK_PAGE => book_surface(l, x, y),
         // Blank until a page is drawn onto them.
-        _ if l >= tex::BOOK_SHEETS => col(BOOK_PAPER, 1.0, 255),
+        // (the guide book's pages and what follows them up to the wolf, filled in later)
+        _ if (tex::BOOK_SHEETS..tex::WOLF).contains(&l) => col(BOOK_PAPER, 1.0, 255),
         // Filled from the packs' animations, or copies of the still texture.
         _ if (tex::WATER_ANIM..tex::GUN_STATION_TOP).contains(&l) => [0, 0, 0, 0],
         // Wool: soft white fibres. The sheep atlases are plain: skin and a white coat.
-        tex::WOOL | tex::SHEEP_WOOL => col(
+        tex::WOOL => col(
             [236.0, 236.0, 236.0],
             0.9 + 0.06 * fbm(l, x, y, 560) + 0.06 * grain(l, x, y, 561),
             255,
         ),
-        tex::SHEEP => col([214.0, 178.0, 150.0], 0.92 + 0.08 * grain(l, x, y, 562), 255),
+        // The wolf: grey fur (the packs draw it); its collar only in a band round the neck.
+        _ if (tex::WOLF..tex::WOLF_COLLAR).contains(&l) => col([196.0, 192.0, 186.0], 0.9 + 0.1 * grain(l, x, y, 563), 255),
+        _ if (tex::WOLF_COLLAR..tex::BONE).contains(&l) => [0, 0, 0, 0],
         // Made in `synth_grilled`.
         tex::HALF_BURNT_PORKCHOP..=tex::RAW_BURNT_MUTTON => [0, 0, 0, 0],
         _ if is_item_icon(l) => item_icon(l, x, y),

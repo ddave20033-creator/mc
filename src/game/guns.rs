@@ -888,6 +888,7 @@ impl Game {
                 } else {
                     let kind = crate::net::hurt::BULLET;
                     self.send_to(id, &Msg::Hurt { dmg, from, knock, kind });
+                    self.attacked(crate::entity::mob::Foe::Player(id), super::multi::HOST_ID);
                 }
                 return false;
             }
@@ -901,6 +902,8 @@ impl Game {
                     self.send(Msg::AttackMob { id, dmg, knock });
                 } else {
                     self.mobs[i].hurt(dmg, Some(from), knock);
+                    let foe = crate::entity::mob::Foe::Mob(self.mobs[i].id);
+                    self.attacked(foe, super::multi::HOST_ID);
                 }
                 return false;
             }

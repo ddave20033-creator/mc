@@ -132,6 +132,31 @@ pub const AK_COVER: ItemId = 378;
 /// An automatic magazine loader for the rifle station's drawer: a magazine put on it is filled
 /// from the boxes of rounds beside it, one round after another.
 pub const MAG_LOADER: ItemId = 379;
+/// A bone (pigs and sheep drop one now and then): tames a wolf.
+pub const BONE: ItemId = 380;
+pub const WOLF_SPAWN_EGG: ItemId = 381;
+/// A fishing rod: cast with the right button held (the longer, the farther), reeled in with
+/// the mouse wheel (see `game::fishing`). Its `data` is the reel's gear (`rod_gear`).
+pub const FISHING_ROD: ItemId = 382;
+/// A fish caught with the rod (any kind), and grilled in a furnace.
+pub const RAW_FISH: ItemId = 383;
+pub const COOKED_FISH: ItemId = 384;
+/// How long a fishing rod lasts (a fish caught wears it by one, a snapped line by more).
+pub const FISHING_ROD_DURABILITY: u16 = 64;
+/// The reel's gears (1 slow and strong .. `ROD_GEARS` fast and weak).
+pub const ROD_GEARS: u8 = 5;
+
+/// The gear a fishing rod's reel is in (1..=`ROD_GEARS`; a new rod is in the middle one).
+pub fn rod_gear(s: &Stack) -> u8 {
+    match (s.data & 0x7) as u8 {
+        0 => 3,
+        g => g.min(ROD_GEARS),
+    }
+}
+
+pub fn set_rod_gear(s: &mut Stack, gear: u8) {
+    s.data = (s.data & !0x7) | gear.clamp(1, ROD_GEARS) as u16;
+}
 /// The AK's parts, in the order of `model::gun::FRAME` .. (`GunKind::parts`).
 pub const AK_PARTS: [ItemId; 5] = [AK_RECEIVER, AK_GAS_TUBE, AK_BOLT, AK_COVER, AK_MAGAZINE];
 pub const REVOLVER_PARTS: [ItemId; 5] = [REVOLVER_FRAME, REVOLVER_BARREL, REVOLVER_SPRING, REVOLVER_CYLINDER, REVOLVER_HAMMER];
@@ -520,7 +545,7 @@ pub type Slot = Option<Stack>;
 pub fn max_stack(id: ItemId) -> u8 {
     match id {
         _ if tool_of(id).is_some() => 1,
-        WATER_BUCKET | LAVA_BUCKET | SHEARS | GUIDE_BOOK => 1,
+        WATER_BUCKET | LAVA_BUCKET | SHEARS | GUIDE_BOOK | FISHING_ROD => 1,
         FRAG_GRENADE | SMOKE_GRENADE | TARGET_DUMMY => 16,
         MAG_LOADER => 1,
         AMMO_BOX => 1,
@@ -551,7 +576,17 @@ pub fn consumable(id: ItemId) -> Option<crate::entity::survival::Consumable> {
         poison: 5.0,
         nausea: 12.0,
     };
+    let food = |food, saturation, sick| Consumable {
+        food,
+        saturation,
+        thirst: 0.0,
+        sick,
+        drink: false,
+    };
     Some(match id {
+        // Raw fish can upset the stomach a little; grilled it is as good as cooked meat.
+        RAW_FISH => food(2.0, 0.4, Some(Sickness { chance: 0.2, poison: 0.0, nausea: 5.0 })),
+        COOKED_FISH => food(5.0, 6.0, None),
         WATER_BOTTLE => drink(6.0, Some(bug)),
         PURIFIED_WATER => drink(10.0, None),
         _ => return None,
@@ -661,6 +696,9 @@ pub fn attack_damage(id: ItemId) -> f32 {
 pub fn max_damage(id: ItemId) -> u16 {
     if id == SHEARS {
         return SHEARS_DURABILITY;
+    }
+    if id == FISHING_ROD {
+        return FISHING_ROD_DURABILITY;
     }
     if let Some(k) = GunKind::of(id) {
         return k.stats().dirt_max;
@@ -1102,6 +1140,11 @@ const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
         "Birka idéző tojás",
         tex::SHEEP_SPAWN_EGG,
     ),
+    (WOLF_SPAWN_EGG, "wolf_spawn_egg", "Wolf Spawn Egg", "Farkas idéző tojás", tex::WOLF_SPAWN_EGG),
+    (BONE, "bone", "Bone", "Csont", tex::BONE),
+    (FISHING_ROD, "fishing_rod", "Fishing Rod", "Horgászbot", tex::FISHING_ROD),
+    (RAW_FISH, "raw_fish", "Raw Fish", "Nyers hal", tex::RAW_FISH),
+    (COOKED_FISH, "cooked_fish", "Cooked Fish", "Sült hal", tex::COOKED_FISH),
     (PISTOL, "pistol", "Pistol", "Pisztoly", tex::PISTOL),
     (REVOLVER, "revolver", "Revolver", "Revolver", tex::REVOLVER),
     (SPEEDLOADER, "speedloader", "Speedloader", "Gyorstöltő", tex::SPEEDLOADER),

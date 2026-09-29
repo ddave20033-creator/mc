@@ -433,6 +433,7 @@ fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut Preview
         gun: Default::default(),
         armor: 0,
         grenade: None,
+        rod: None,
     };
     let mut model = Vec::new();
     build_player(&mut model, &mut Vec::new(), &pose, &limb_targets(&pose), 15, 15);

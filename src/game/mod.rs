@@ -3,6 +3,7 @@ mod book;
 mod blocks;
 mod camera;
 mod commands;
+mod fishing;
 mod frame;
 mod furnace;
 mod grenades;
@@ -302,6 +303,8 @@ pub struct Game {
     audio: crate::audio::Audio,
     furnace_heard: std::collections::HashMap<IVec3, u32>,
     grenades: grenades::Grenades,
+    /// The fishing rod's line, bobber and the fish on it.
+    fishing: fishing::Fishing,
     /// The guide book in the hands: its open page, and its pages' textures.
     book: book::Book,
     items: Vec<ItemEntity>,
@@ -570,6 +573,7 @@ impl Game {
             audio: crate::audio::Audio::new(),
             furnace_heard: Default::default(),
             grenades: Default::default(),
+            fishing: Default::default(),
             book: Default::default(),
             items: Vec::new(),
             falling: Vec::new(),

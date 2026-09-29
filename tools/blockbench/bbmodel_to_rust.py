@@ -13,6 +13,7 @@ Models (by file name):
     dummy.bbmodel        -> src/model/dummy_data.rs, src/model/dummy.png
     ak.bbmodel           -> src/model/ak_vm_data.rs, src/model/ak_vm.png
     rifle_station.bbmodel -> src/model/rifle_station_data.rs, src/model/rifle_station.png
+    fishing_rod.bbmodel  -> src/model/fishing_rod_data.rs, src/model/fishing_rod.png
     tp_*.bbmodel         -> src/model/tp_*_data.rs (third-person rigs: bones and animations only)
 
 Conventions kept from Blockbench so the game moves exactly like the Blockbench preview:
@@ -33,7 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 # The model: given on the command line (e.g. the copy you work on), or the one next to this.
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "pistol.bbmodel")
 base = os.path.basename(SRC)
-KIND = (base[:-len(".bbmodel")] if base.startswith("tp_") else "gun_station" if base.startswith("gun_station") else "rifle_station" if base.startswith("rifle_station") else "grenades" if base.startswith("grenade")
+KIND = (base[:-len(".bbmodel")] if base.startswith("tp_") else "fishing_rod" if base.startswith("fishing_rod") else "gun_station" if base.startswith("gun_station") else "rifle_station" if base.startswith("rifle_station") else "grenades" if base.startswith("grenade")
         else "revolver" if base.startswith("revolver") else "dummy" if base.startswith("dummy") else "ak" if base.startswith("ak") else "pistol")
 OUT_NAME = {"pistol": "pistol_vm", "gun_station": "gun_station", "grenades": "grenade", "revolver": "revolver_vm",
             "dummy": "dummy", "ak": "ak_vm", "rifle_station": "rifle_station"}.get(KIND, KIND)

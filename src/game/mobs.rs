@@ -1,9 +1,12 @@
 //! Mobs from the game's side: attacking mobs and other players, spawn eggs, natural
-//! spawning, and updating them (with their loot).
+//! spawning, wolves (taming, their bites, going for whoever their owner attacks), and
+//! updating them (with their loot and sounds).
 
 use super::*;
+use crate::entity::mob::{Foe, BITE};
 use crate::item::inventory::{self, take};
 use crate::item::*;
+use crate::net::hurt;
 
 impl Game {
     /// Left click on a mob (index into `mobs`) or another LAN player: damage by the held item
@@ -41,7 +44,12 @@ impl Game {
                 self.send(Msg::AttackMob { id, dmg, knock });
                 can
             }
-            (Some(i), _) => self.mobs[i].hurt(dmg, Some(from), knock),
+            (Some(i), _) => {
+                let hit = self.mobs[i].hurt(dmg, Some(from), knock);
+                let foe = Foe::Mob(self.mobs[i].id);
+                self.attacked(foe, super::multi::HOST_ID);
+                hit
+            }
             (None, Some(id)) => {
                 if self.is_client() {
                     let kind = crate::net::hurt::MELEE;
@@ -49,6 +57,7 @@ impl Game {
                 } else {
                     let kind = crate::net::hurt::MELEE;
                     self.send_to(id, &Msg::Hurt { dmg, from, knock, kind });
+                    self.attacked(Foe::Player(id), super::multi::HOST_ID);
                 }
                 true
             }
@@ -78,6 +87,122 @@ impl Game {
             // Hitting while sprinting stops the sprint (Minecraft).
             self.player.sprinting = false;
             self.w_sprint = false;
+        }
+    }
+
+    /// A player's name by their LAN id (the host's own is 0).
+    pub(super) fn player_name(&self, id: u8) -> Option<String> {
+        if id == super::multi::HOST_ID {
+            return Some(self.settings.name.clone());
+        }
+        self.remotes.iter().find(|r| r.id == id).map(|r| r.name.clone())
+    }
+
+    /// Host: player `who` attacked `foe`. A wolf hit turns on them, and so does its wild
+    /// pack; `who`'s own tame wolves go for `foe`; a player attacked is defended by theirs.
+    pub(super) fn attacked(&mut self, foe: Foe, who: u8) {
+        if self.is_client() {
+            return;
+        }
+        let Some(name) = self.player_name(who) else { return };
+        let me = Foe::Player(who);
+        if let Foe::Mob(id) = foe {
+            if let Some((at, wild)) = self.mobs.iter().find(|m| m.id == id && m.kind == MobKind::Wolf).map(|m| (m.pos, m.owner.is_none())) {
+                for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf) {
+                    let pack = wild && m.owner.is_none() && m.pos.distance(at) < 12.0;
+                    if m.id == id || pack {
+                        m.provoke(me, Some(&name));
+                    }
+                }
+            }
+        }
+        let foe_name = match foe {
+            Foe::Player(id) => self.player_name(id),
+            Foe::Mob(_) => None,
+        };
+        for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf && m.owner.is_some()) {
+            let own = m.owner.as_deref() == Some(name.as_str());
+            if own && Foe::Mob(m.id) != foe {
+                m.provoke(foe, foe_name.as_deref());
+            }
+            if foe_name.is_some() && m.owner == foe_name {
+                m.provoke(me, Some(&name));
+            }
+        }
+    }
+
+    /// Right click on a wolf: a wild one is given a bone (it may take to this player), and a
+    /// tame one of theirs sits down or stands up. True if something happened.
+    pub(super) fn use_on_wolf(&mut self, i: usize) -> bool {
+        let held = self.held();
+        let m = &self.mobs[i];
+        if m.kind != MobKind::Wolf || !m.alive() {
+            return false;
+        }
+        let wild = !m.tame();
+        let bone = held == BONE && wild && m.foe.is_none();
+        if self.is_client() {
+            if !bone && !m.yours {
+                return false;
+            }
+            let id = m.id;
+            self.send(crate::net::Msg::UseOnMob { id, item: held });
+            if !bone {
+                self.mobs[i].toggle_sit();
+            }
+        } else if self.wolf_used(i, held, super::multi::HOST_ID).is_none() {
+            return false;
+        }
+        if bone && !self.creative() {
+            take(&mut self.inventory.slots[self.hotbar_slot], 1);
+        }
+        self.hand.swing();
+        self.action_cooldown = 0.25;
+        true
+    }
+
+    /// Host: player `who` used `item` on wolf `i` (see `use_on_wolf`). Some(true) if a bone
+    /// was given, Some(false) if it sat down or stood up.
+    pub(super) fn wolf_used(&mut self, i: usize, item: ItemId, who: u8) -> Option<bool> {
+        let name = self.player_name(who)?;
+        let m = &mut self.mobs[i];
+        if m.kind != MobKind::Wolf || !m.alive() {
+            return None;
+        }
+        if item == BONE && m.owner.is_none() && m.foe.is_none() {
+            let took = m.feed_bone(&name);
+            let (c, head) = (m.center(), m.pos + Vec3::Y * 0.6);
+            let (sky, blk) = self.terrain.world.light_estimate(c);
+            self.particles.crumbs(head, crate::world::textures::tex::BONE, 6, sky, blk);
+            if took {
+                self.audio.play(crate::audio::Sound::WolfBark, Some(c), 0.8);
+            } else {
+                for _ in 0..4 {
+                    self.particles.smoke_shaded(head + Vec3::Y * 0.3, 70, sky, blk);
+                }
+            }
+            return Some(true);
+        }
+        if m.owner.as_deref() == Some(name.as_str()) {
+            m.toggle_sit();
+            return Some(false);
+        }
+        None
+    }
+
+    /// Host: a wolf (at `from`) bit `foe`.
+    fn bite(&mut self, foe: Foe, from: Vec3) {
+        match foe {
+            Foe::Mob(id) => {
+                if let Some(j) = self.mobs.iter().position(|m| m.id == id) {
+                    self.mobs[j].hurt(BITE, Some(from), 1.0);
+                }
+            }
+            Foe::Player(id) if id == super::multi::HOST_ID => self.hit_by_player(BITE, from, 1.0, hurt::WOLF),
+            Foe::Player(id) => {
+                let msg = crate::net::Msg::Hurt { dmg: BITE, from, knock: 1.0, kind: hurt::WOLF };
+                self.send_to(id, &msg);
+            }
         }
     }
 
@@ -225,19 +350,56 @@ impl Game {
                 spots.push(p);
             }
         }
-        let kind = if self.random() < 12.0 / 22.0 {
+        // In forests and taigas now and then a pack of wolves instead (on their snowy ground
+        // too).
+        let c = me + off;
+        let biome = self.terrain.gen.column(c.x.floor() as i32, c.z.floor() as i32).biome;
+        use crate::world::gen::Biome;
+        let woods = matches!(biome, Biome::Forest | Biome::BirchForest | Biome::Taiga | Biome::SnowyTaiga);
+        let kind = if woods && self.random() < 0.35 {
+            MobKind::Wolf
+        } else if self.random() < 12.0 / 22.0 {
             MobKind::Sheep
         } else {
             MobKind::Pig
         };
+        if kind == MobKind::Wolf && spots.is_empty() {
+            // (the snowy taiga's ground is snowy grass)
+            for k in 0..group * 3 {
+                let jitter = Vec3::new(k as f32 * 0.37 % 1.0 - 0.5, 0.0, k as f32 * 0.61 % 1.0 - 0.5) * 6.0;
+                let c = me + off + jitter;
+                let (x, z) = (c.x.floor() as i32, c.z.floor() as i32);
+                let w = &self.terrain.world;
+                let Some(top) = w.height_at(x, z) else { continue };
+                if w.get(x, top, z) == SNOWY_GRASS {
+                    if let Some((p, _)) = crate::entity::mob::standable(w, x, z, top + 1, 0) {
+                        spots.push(p);
+                    }
+                }
+                if spots.len() as i32 >= group {
+                    break;
+                }
+            }
+        }
         for p in spots {
             self.spawn_mob(kind, p);
         }
     }
 
     pub(super) fn update_mobs(&mut self, dt: f32) {
+        let mut people = Vec::new();
+        if self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
+            people.push((super::multi::HOST_ID, self.settings.name.clone(), self.player.pos));
+        }
+        for (id, pos) in self.remote_positions() {
+            if let Some(name) = self.player_name(id) {
+                people.push((id, name, pos));
+            }
+        }
         let ctx = MobCtx {
             players: self.player_positions(),
+            people,
+            mobs: self.mobs.iter().filter(|m| m.alive()).map(|m| (m.id, m.pos)).collect(),
         };
         let mut i = 0;
         while i < self.mobs.len() {
@@ -255,6 +417,14 @@ impl Game {
             if p.y < -64.0 {
                 self.mobs.swap_remove(i);
                 continue;
+            }
+            if let Some(s) = self.mobs[i].sound(dt) {
+                let at = self.mobs[i].center();
+                self.audio.play(s, Some(at), 1.0);
+            }
+            if let MobEvent::Bite(foe) = event {
+                let from = self.mobs[i].pos;
+                self.bite(foe, from);
             }
             if let MobEvent::EatGrass(q) = event {
                 let b = if self.terrain.world.geti(q) == GRASS {
@@ -281,11 +451,15 @@ impl Game {
                     (MobKind::Pig, true) => (COOKED_PORKCHOP, 3.0),
                     (MobKind::Sheep, false) => (MUTTON, 2.0),
                     (MobKind::Sheep, true) => (COOKED_MUTTON, 2.0),
-                    // (it never dies)
-                    (MobKind::Dummy, _) => continue,
+                    // (it never dies; a wolf leaves nothing)
+                    (MobKind::Dummy | MobKind::Wolf, _) => continue,
                 };
                 let n = 1 + (self.random() * most) as u8;
                 self.spawn_drop(c, Stack::new(meat, n.min(most as u8)));
+                // And now and then a bone (for taming wolves).
+                if self.random() < 1.0 / 3.0 {
+                    self.spawn_drop(c, Stack::one(BONE));
+                }
                 if m.kind == MobKind::Sheep && !m.sheared {
                     self.spawn_drop(c, Stack::one(WOOL as ItemId));
                 }

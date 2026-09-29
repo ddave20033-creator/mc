@@ -328,15 +328,20 @@ pub fn save_entities(
         );
     }
     for m in mobs.iter().filter(|m| m.alive()) {
+        // (a wolf's owner, its name without the separators)
+        let owner = m.owner.as_deref().map_or("-".to_string(), |o| o.replace([':', '\n'], "_"));
         s += &format!(
-            "mob:{}:{},{},{}:{}:{}:{}\n",
+            "mob:{}:{},{},{}:{}:{}:{}:{}:{}:{}\n",
             m.kind.key(),
             m.pos.x,
             m.pos.y,
             m.pos.z,
             m.body_yaw,
             m.health,
-            m.sheared as u8
+            m.sheared as u8,
+            owner,
+            m.sitting as u8,
+            m.collar
         );
     }
     for (p, f) in &be.furnaces {
@@ -422,8 +427,11 @@ pub fn load_entities(
                 let seed = (mobs.len() as u32 * 7919 + p[0].to_bits()) ^ p[2].to_bits();
                 let yaw = parts[3].parse().unwrap_or(0.0);
                 let mut m = Mob::new(kind, Vec3::new(p[0], p[1], p[2]), yaw, seed);
-                m.health = parts[4].parse().unwrap_or(kind.max_health());
                 m.sheared = parts.get(5) == Some(&"1");
+                m.owner = parts.get(6).filter(|o| !o.is_empty() && **o != "-").map(|o| o.to_string());
+                m.sitting = parts.get(7) == Some(&"1");
+                m.collar = parts.get(8).and_then(|c| c.parse().ok()).unwrap_or(0);
+                m.health = parts[4].parse().unwrap_or(m.max_health()).min(m.max_health());
                 mobs.push(m);
             }
             continue;

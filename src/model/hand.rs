@@ -77,6 +77,10 @@ pub struct HandAnim {
     /// Where the middle of the readied grenade was drawn last frame (like `torch_tip`): it
     /// is thrown from there.
     pub grenade_tip: Option<Vec3>,
+    /// The held fishing rod: what it is doing (set by the game each frame), and where its tip
+    /// was drawn last frame (like `torch_tip`: the line leaves from there).
+    pub rod: Option<super::angler::RodAnim>,
+    pub rod_tip: Option<Vec3>,
     /// With the first-person body: a held lantern hangs from the fist by its chain and swings;
     /// otherwise it is held still by its handle.
     pub fancy_lantern: bool,
@@ -171,6 +175,8 @@ impl HandAnim {
             grenade: None,
             thrown: None,
             grenade_tip: None,
+            rod: None,
+            rod_tip: None,
             fancy_lantern: false,
             lantern_swing: crate::model::lantern::SmoothSwing::default(),
             torch_tip: None,
@@ -410,6 +416,7 @@ impl HandAnim {
         let fl = flags::VIEWMODEL;
         self.torch_tip = None;
         self.grenade_tip = None;
+        self.rod_tip = None;
         self.glass.clear();
         self.eyepiece = None;
         self.muzzle_tip = None;
@@ -460,6 +467,10 @@ impl HandAnim {
         }
         if let (Some((t, power)), true) = (self.grenade, super::grenade_item(self.held)) {
             self.build_grenade_hold(out, base, t, power, light, fl, skin);
+            return;
+        }
+        if self.held == crate::item::FISHING_ROD {
+            self.build_rod(out, base, eq, light, fl, skin);
             return;
         }
         if self.held == NONE {
@@ -904,6 +915,38 @@ impl HandAnim {
             let near = ring + (shoulder - ring).normalize_or(Vec3::NEG_Y) * 0.14;
             arm(start.lerp(near, reach), shoulder);
         }
+    }
+}
+
+impl HandAnim {
+    /// The fishing rod in the right hand (see `angler`), the left hand on the reel's handle
+    /// (off it while the rod is swung). Both arms are the player's own, from below.
+    #[allow(clippy::too_many_arguments)]
+    fn build_rod(&mut self, out: &mut Vec<Vertex>, base: Mat4, eq: f32, light: [u8; 4], fl: u8, skin: u8) {
+        use super::angler;
+        let a = self.rod.unwrap_or_default();
+        let inv = base.inverse();
+        let bobber = a.bobber.map(|b| inv.transform_point3(b));
+        let (m, pose) = angler::first_person(&a, self.clock, bobber, eq);
+        let p = super::angler::emit_rod(out, base * m, &pose, light, fl);
+        self.rod_tip = Some(p.tip);
+        let layers = ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin));
+        let mut arm = |hand: Vec3, shoulder: Vec3| {
+            let along = (shoulder - hand).normalize_or(Vec3::Y);
+            let m = base
+                * Mat4::from_translation(hand)
+                * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, along))
+                * Mat4::from_scale(Vec3::splat(1.0 / 34.0));
+            emit_box(out, m, Vec3::new(-2.0, -1.5, -2.0), Vec3::new(2.0, 26.0, 2.0), layers, [[255; 3]; 6], light, fl);
+        };
+        // The right fist around the grip, a little under it.
+        let grip = inv.transform_point3(p.grip) - Vec3::new(0.0, 0.02, 0.0);
+        arm(grip, Vec3::new(0.55, -1.0, -0.1));
+        // The left hand on the handle's knob, or off to the side while the rod swings.
+        let knob = inv.transform_point3(p.crank);
+        let off = angler::hand_off_crank(&a);
+        let free = angler::first_person_free_hand() + Vec3::new(0.0, -(1.0 - eq) * 0.6, 0.0);
+        arm(knob.lerp(free, off), Vec3::new(-0.45, -1.0, -0.1));
     }
 }
 

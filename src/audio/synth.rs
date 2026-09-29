@@ -337,6 +337,24 @@ fn scrape(seed: u32, len: f32, fc: f32) -> Vec<f32> {
     s
 }
 
+/// An animal's voice for `len` seconds: a buzzy tone at `pitch(t)` Hz (t in seconds) with its
+/// overtones, `breath` of noise over it, rising quickly and dying away.
+fn voice(seed: u32, len: f32, pitch: impl Fn(f32) -> f32, breath: f32) -> Vec<f32> {
+    let n = samples(len);
+    let mut air = noise(n, seed);
+    bandpass(&mut air, 1400.0, 0.7);
+    let mut phase = 0.0f32;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / FS;
+            phase += TAU * pitch(t).max(40.0) / FS;
+            let tone: f32 = (1..=6).map(|h| (phase * h as f32).sin() / h as f32).sum();
+            let env = (t / 0.012).min(1.0) * (1.0 - t / len).max(0.0).powf(0.8);
+            (tone * 0.6 + air[i] * breath) * env
+        })
+        .collect()
+}
+
 /// A spent case landing: a tick and its ring (`pitch` scales the ring's partials).
 fn case_clink(pitch: f32, decay: f32, tick: f32, ring: f32) -> Vec<f32> {
     let r = ring_of(&[(2650.0 * pitch, 0.5), (4100.0 * pitch, 0.3), (6200.0 * pitch, 0.12)], decay);
@@ -413,6 +431,52 @@ fn crackles(seed: u32, len: f32, per_sec: f32) -> Vec<f32> {
         mix(&mut out, &pop, at, 0.3 + 0.9 * r.unit() * r.unit());
     }
     out.truncate(samples(len));
+    out
+}
+
+
+/// A bubble or a drop hitting water: a sine gliding up from `f0` to `f1` Hz as it dies away
+/// over `len` seconds (the "plip" of water).
+fn bubble(f0: f32, f1: f32, len: f32) -> Vec<f32> {
+    let n = samples(len);
+    let mut phase = 0.0f32;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / FS;
+            let k = t / len;
+            phase += TAU * (f0 + (f1 - f0) * k.sqrt()) / FS;
+            phase.sin() * (1.0 - (-t / 0.002).exp()) * (1.0 - k).powf(2.2)
+        })
+        .collect()
+}
+
+/// Water thrown about for `len` seconds: a hiss of noise around `fc` Hz, with `drops` little
+/// drops falling back into it.
+fn splash(seed: u32, len: f32, fc: f32, drops: usize) -> Vec<f32> {
+    let n = samples(len);
+    let mut wash = noise(n, seed);
+    bandpass(&mut wash, fc, 0.6);
+    for (i, x) in wash.iter_mut().enumerate() {
+        let t = i as f32 / FS;
+        *x *= (1.0 - (-t / 0.004).exp()) * (-t / (len * 0.28)).exp();
+    }
+    let mut out = wash;
+    let mut r = Noise(seed ^ 0x5151);
+    for _ in 0..drops {
+        let at = 0.02 + r.unit() * len * 0.8;
+        let f0 = 500.0 + 900.0 * r.unit();
+        let b = bubble(f0, f0 * (1.6 + r.unit()), 0.03 + 0.04 * r.unit());
+        mix(&mut out, &b, at, 0.15 + 0.35 * r.unit());
+    }
+    out
+}
+
+/// The reel's pawl clicking over its ratchet: `n` ticks `gap` seconds apart around `fc` Hz.
+fn ratchet(seed: u32, n: usize, gap: f32, fc: f32) -> Vec<f32> {
+    let mut out = Vec::new();
+    for k in 0..n {
+        mix(&mut out, &clack(seed + k as u32, fc * (1.0 + 0.04 * k as f32), 0.006), k as f32 * gap, 1.0 - 0.1 * k as f32);
+    }
     out
 }
 
@@ -537,6 +601,183 @@ fn make(sound: Sound) -> Vec<f32> {
         ),
         // (the recording, `samples`; made here only to have its level)
         Sound::SmokePop => make(Sound::SmokeHiss),
+        Sound::WolfBark => {
+            // Two quick barks: a voiced burst falling in pitch, rough with breath.
+            let mut out = Vec::new();
+            for (k, at) in [(0u32, 0.0f32), (1, 0.22)] {
+                mix(&mut out, &voice(60 + k, 0.13, |t| 520.0 - 900.0 * t, 0.5), at, 1.0);
+            }
+            sequence(&[(out, 0.0, 1.0)], 0.7)
+        }
+        Sound::WolfPant => {
+            // Quick breaths in and out.
+            let mut out = Vec::new();
+            for k in 0..6 {
+                let mut b = noise(samples(0.09), 70 + k);
+                bandpass(&mut b, if k % 2 == 0 { 1900.0 } else { 1500.0 }, 1.2);
+                let n = b.len() as f32;
+                for (i, x) in b.iter_mut().enumerate() {
+                    *x *= (i as f32 / n * std::f32::consts::PI).sin();
+                }
+                mix(&mut out, &b, k as f32 * 0.15, 0.8);
+            }
+            normalize(&mut out, 0.35);
+            fade_ends(&mut out);
+            out
+        }
+        Sound::WolfGrowl => {
+            // A low, rolling growl: a rough low voice, trembling.
+            let mut g = voice(80, 1.1, |t| 105.0 + 12.0 * (t * 9.0).sin(), 0.9);
+            for (i, x) in g.iter_mut().enumerate() {
+                let t = i as f32 / FS;
+                *x *= 0.65 + 0.35 * (TAU * 23.0 * t).sin();
+            }
+            lowpass(&mut g, 900.0);
+            normalize(&mut g, 0.6);
+            fade_ends(&mut g);
+            g
+        }
+        Sound::WolfWhine => {
+            // A thin whine rising and falling.
+            let mut w = voice(90, 0.8, |t| 820.0 + 380.0 * (t * std::f32::consts::PI).sin(), 0.08);
+            normalize(&mut w, 0.4);
+            fade_ends(&mut w);
+            w
+        }
+        Sound::WolfHurt => {
+            // A yelp: high, sharp, dropping.
+            let mut y = voice(95, 0.2, |t| 1250.0 - 2400.0 * t, 0.3);
+            normalize(&mut y, 0.6);
+            fade_ends(&mut y);
+            y
+        }
+        // The rod swished through the air (a long whoosh rising and falling), the line
+        // whirring off the spool behind it.
+        Sound::FishCast => {
+            let n = samples(0.45);
+            let mut w = noise(n, 101);
+            lowpass_sweep(&mut w, |t| 400.0 + 2600.0 * (t / 0.45 * std::f32::consts::PI).sin().powi(2));
+            for (i, x) in w.iter_mut().enumerate() {
+                let k = i as f32 / n as f32;
+                *x *= (k * std::f32::consts::PI).sin().powf(1.5);
+            }
+            let mut out = Vec::new();
+            mix(&mut out, &w, 0.0, 1.0);
+            mix(&mut out, &make(Sound::LineZip), 0.12, 0.35);
+            normalize(&mut out, 0.5);
+            fade_ends(&mut out);
+            out
+        }
+        // Three quick ticks of the pawl (a notch of the wheel turns the handle a bit).
+        Sound::ReelClick => sequence(&[(ratchet(110, 3, 0.022, 3300.0), 0.0, 1.0)], 0.28),
+        // Line running off the spool: a fast, buzzing run of ticks, slowing.
+        Sound::LineZip => {
+            let mut out = Vec::new();
+            let mut at = 0.0;
+            let mut gap = 0.009f32;
+            let mut k = 0;
+            while at < 0.3 {
+                mix(&mut out, &clack(120 + k, 3800.0, 0.003), at, 0.6 * (1.0 - at / 0.35));
+                at += gap;
+                gap *= 1.06;
+                k += 1;
+            }
+            let mut hiss = noise(samples(0.3), 125);
+            bandpass(&mut hiss, 5200.0, 1.0);
+            mix(&mut out, &hiss, 0.0, 0.08);
+            normalize(&mut out, 0.3);
+            fade_ends(&mut out);
+            out
+        }
+        // The bobber dropping onto the water: a deep plop with a bubble after it.
+        Sound::BobberPlop => {
+            let mut out = Vec::new();
+            mix(&mut out, &thud(130, 700.0, 0.06), 0.0, 0.8);
+            mix(&mut out, &bubble(260.0, 780.0, 0.09), 0.004, 1.0);
+            mix(&mut out, &splash(131, 0.25, 2600.0, 3), 0.0, 0.35);
+            normalize(&mut out, 0.55);
+            fade_ends(&mut out);
+            out
+        }
+        // A fish nibbling: a small quick plip.
+        Sound::FishNibble => {
+            let mut out = Vec::new();
+            mix(&mut out, &bubble(700.0, 1500.0, 0.05), 0.0, 1.0);
+            mix(&mut out, &splash(140, 0.1, 3200.0, 1), 0.0, 0.25);
+            normalize(&mut out, 0.35);
+            fade_ends(&mut out);
+            out
+        }
+        // The bite: the bobber yanked under, a heavy gulp and a splash.
+        Sound::FishBite => {
+            let mut out = Vec::new();
+            mix(&mut out, &thud(150, 400.0, 0.1), 0.0, 1.0);
+            mix(&mut out, &bubble(180.0, 520.0, 0.14), 0.01, 1.0);
+            mix(&mut out, &splash(151, 0.5, 2200.0, 6), 0.02, 0.8);
+            normalize(&mut out, 0.8);
+            fade_ends(&mut out);
+            out
+        }
+        // Wood and line under strain: slow stick-slip creaks through a woody body.
+        Sound::RodCreak => {
+            let len = 1.6;
+            let n = samples(len);
+            let mut out = vec![0.0f32; n];
+            let mut r = Noise(160);
+            let mut at = 0.0;
+            while at < len - 0.05 {
+                // A burst of quick slips (a creak), then a rest.
+                let slips = 6 + (r.unit() * 10.0) as usize;
+                let rate = 70.0 + 70.0 * r.unit();
+                for k in 0..slips {
+                    let t = at + k as f32 / rate;
+                    if t >= len - 0.02 {
+                        break;
+                    }
+                    let i = samples(t);
+                    if i < n {
+                        out[i] += 1.0 - 0.5 * (k as f32 / slips as f32);
+                    }
+                }
+                at += slips as f32 / rate + 0.05 + 0.25 * r.unit();
+            }
+            bandpass(&mut out, 620.0, 2.5);
+            let mut body = out.clone();
+            bandpass(&mut body, 1350.0, 3.0);
+            mix(&mut out, &body, 0.0, 0.5);
+            let mut out = looped(out, 0.1);
+            normalize(&mut out, 0.3);
+            out
+        }
+        // The line parting: a sharp twang, the loose end whipping away.
+        Sound::LineSnap => {
+            let twang = ring_of(&[(1650.0, 0.6), (2480.0, 0.35), (3900.0, 0.2)], 0.05);
+            let mut whip = noise(samples(0.18), 170);
+            lowpass_sweep(&mut whip, |t| 5000.0 - 20000.0 * t);
+            for (i, x) in whip.iter_mut().enumerate() {
+                *x *= (-(i as f32) / FS / 0.05).exp();
+            }
+            sequence(&[(clack(171, 4200.0, 0.01), 0.0, 1.0), (twang, 0.0, 0.8), (whip, 0.01, 0.6)], 0.75)
+        }
+        // A hooked fish thrashing at the surface.
+        Sound::FishSplash => {
+            let mut out = splash(180, 0.45, 1800.0, 7);
+            mix(&mut out, &thud(181, 500.0, 0.05), 0.05, 0.5);
+            normalize(&mut out, 0.6);
+            fade_ends(&mut out);
+            out
+        }
+        // The fish pulled out: water pouring off it, then it flops.
+        Sound::FishLand => {
+            let mut out = splash(190, 0.6, 2000.0, 10);
+            mix(&mut out, &thud(191, 300.0, 0.08), 0.45, 0.8);
+            mix(&mut out, &thud(192, 350.0, 0.06), 0.62, 0.5);
+            normalize(&mut out, 0.7);
+            fade_ends(&mut out);
+            out
+        }
+        // The gear lever: a firm double click.
+        Sound::GearClick => sequence(&[(clack(200, 2400.0, 0.02), 0.0, 1.0), (clack(201, 3000.0, 0.015), 0.035, 0.7)], 0.4),
         Sound::Throw => {
             let n = samples(0.28);
             let mut w = noise(n, 45);

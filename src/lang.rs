@@ -338,6 +338,11 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Játékos felrobbant",
     ),
     (
+        "death.wolf",
+        "Player was mauled by a wolf",
+        "Játékost széttépte egy farkas",
+    ),
+    (
         "pause.quit",
         "Save and Quit to Title",
         "Mentés és kilépés a főmenübe",
@@ -355,6 +360,13 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Nincs otthoni ágyad, vagy el van torlaszolva",
     ),
     ("bed.leave", "Sneak to leave the bed", "Guggolj a felkeléshez"),
+    // Fishing
+    ("fish.caught", "You caught a {} kg {}!", "Fogtál egy {} kg-os {}!"),
+    ("fish.bite", "A bite! Reel in!", "Kapás! Tekerj!"),
+    ("fish.missed", "Too late, the fish is gone.", "Elkésett a bevágás, a hal elúszott."),
+    ("fish.escaped", "The fish got off the hook.", "Leakadt a hal."),
+    ("fish.snap", "The line snapped!", "Elszakadt a damil!"),
+    ("fish.rod_broke", "Your fishing rod broke.", "Eltört a horgászbotod."),
     (
         "bed.waiting",
         "{} of {} players sleeping",

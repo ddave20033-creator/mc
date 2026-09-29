@@ -292,6 +292,7 @@ impl Game {
             held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
             gun_extra: if self.holding_gun() { self.hand.gun_anim().pack_extra() } else { 0 },
             grenade: self.grenades.hold.map_or(0, |h| (h.t * 100.0).round().min(65000.0) as u16 + 1),
+            rod: self.rod_anim(),
             bench_hold: match (self.screen, self.cursor, self.bench_hold_at) {
                 (Screen::Container(Container::GunStation(_)), Some(st), Some(at)) => Some((st, at)),
                 _ => None,
@@ -411,15 +412,17 @@ impl Game {
         matches!(self.net, Some(Net::Host(_)))
     }
 
-    /// Hit by another player (or blown about by a grenade they threw): damage and knockback.
-    fn hit_by_player(&mut self, dmg: f32, from: Vec3, knock: f32, kind: u8) {
+    /// Hit by another player (or blown about by a grenade they threw, or bitten by a wolf):
+    /// damage and knockback.
+    pub(super) fn hit_by_player(&mut self, dmg: f32, from: Vec3, knock: f32, kind: u8) {
         if kind == crate::net::hurt::BLAST {
             self.blast_hit(dmg, from, knock);
             return;
         }
         let dmg = self.armor_hit(dmg, kind);
         let before = self.health;
-        self.damage(dmg, "death.player");
+        let cause = if kind == crate::net::hurt::WOLF { "death.wolf" } else { "death.player" };
+        self.damage(dmg, cause);
         if self.health < before {
             let away = (self.player.pos - from) * Vec3::new(1.0, 0.0, 1.0);
             let away = away.try_normalize().unwrap_or(Vec3::X);
@@ -473,6 +476,28 @@ impl Game {
                 (_, 0) => 0,
                 (0, g) => g,
                 (g, n) => g.saturating_add((dt * 100.0).round() as u16).clamp(n.saturating_sub(10), n.saturating_add(10)),
+            };
+            // (a fishing rod's swings go on smoothly between the poses, its bobber glides)
+            p.rod = match (p.rod, t.rod) {
+                (Some(mut r), Some(n)) => {
+                    let run = |a: Option<f32>, b: Option<f32>| match (a, b) {
+                        (Some(a), Some(b)) => Some((a + dt).clamp(b - 0.1, b + 0.1)),
+                        (_, b) => b,
+                    };
+                    r.cast = run(r.cast, n.cast);
+                    r.lift = run(r.lift, n.lift);
+                    r.charge += (n.charge - r.charge) * k;
+                    r.fight += (n.fight - r.fight) * k;
+                    r.tension += (n.tension - r.tension) * k;
+                    r.crank = lerp_angle(r.crank, n.crank, k);
+                    r.bobber = match (r.bobber, n.bobber) {
+                        (Some(a), Some(b)) if a.distance_squared(b) < 25.0 => Some(a.lerp(b, k)),
+                        (_, b) => b,
+                    };
+                    r.out = n.out;
+                    Some(r)
+                }
+                (_, n) => n,
             };
         }
     }
@@ -567,6 +592,7 @@ fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
         armor: p.armor,
         book: None,
         grenade: (p.grenade > 0).then(|| (p.grenade - 1) as f32 / 100.0),
+        rod: p.rod,
     }
 }
 
@@ -592,6 +618,22 @@ impl Game {
         let pose = standing_pose(&r.pose, self.time, r.shot_at);
         let point = crate::model::gun_view::rest_point_in_gun_space(kind, point);
         Some(crate::model::player::gun_point(&pose, kind, point))
+    }
+}
+
+impl Game {
+    /// The other players fishing: where the tip of their rod is and what it is doing (for
+    /// their line and bobber).
+    pub(super) fn remote_rods(&self) -> Vec<(Vec3, crate::model::angler::RodAnim)> {
+        self.remotes
+            .iter()
+            .filter(|r| r.shown() && r.pose.flags & pose_flags::SLEEPING == 0)
+            .filter_map(|r| {
+                let rod = r.pose.rod.filter(|_| r.pose.held == crate::item::FISHING_ROD)?;
+                let pose = standing_pose(&r.pose, self.time, r.shot_at);
+                Some((crate::model::player::rod_tip(&pose)?, rod))
+            })
+            .collect()
     }
 }
 

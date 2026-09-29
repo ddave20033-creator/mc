@@ -63,6 +63,38 @@ const vec3 NORMALS[7] = vec3[7](
     vec3(0, 0, 1), vec3(0, 0, -1), vec3(0, 1, 0)
 );
 
+// Texture axes of the faces (+u, and the direction texture v grows), as the mesher's FACE_U
+// and -FACE_V.
+const vec3 FACE_TU[6] = vec3[6](
+    vec3(0, 0, -1), vec3(0, 0, 1), vec3(1, 0, 0), vec3(1, 0, 0), vec3(1, 0, 0), vec3(-1, 0, 0)
+);
+const vec3 FACE_TV[6] = vec3[6](
+    vec3(0, -1, 0), vec3(0, -1, 0), vec3(0, 0, 1), vec3(0, 0, -1), vec3(0, -1, 0), vec3(0, -1, 0)
+);
+// Ore nuggets are set into their block this deep (blocks = texture units).
+const float PIT_DEPTH = 1.0 / 32.0;
+const int PIT_STEPS = 24;
+// Floor and bottom of the walls of a pit this much darker.
+const float PIT_SHADE = 0.68;
+
+// A texel's surface material, from its alpha at full size (textures/mod.rs `Material`):
+// alpha = 255 - code, code = pit | metal << 1 | shine << 2. Plain textures (alpha 255) give 0.
+int materialCode(vec2 uv, float layer) {
+    ivec2 size = textureSize(blocks, 0).xy;
+    ivec2 t = ivec2(fract(uv) * vec2(size)) % size;
+    float a = texelFetch(blocks, ivec3(t, int(layer + 0.5)), 0).a;
+    return a > 0.74 ? int(round((1.0 - a) * 255.0)) : 0;
+}
+
+bool isPit(vec2 uv, float layer) {
+    return (materialCode(uv, layer) & 1) != 0;
+}
+
+// Blinn-Phong highlight of a light from direction l.
+float highlight(vec3 n, vec3 l, vec3 v, float power) {
+    return pow(max(dot(n, normalize(l + v)), 0.0), power) * step(0.0, dot(n, l));
+}
+
 // Minecraft-like light falloff: 15 -> 1.0, 8 -> ~0.2, 0 -> 0.
 float lightCurve(float l) {
     return l / (4.0 - 3.0 * l);
@@ -125,6 +157,9 @@ void main() {
     }
 
     float time = frame.camPos.w;
+    // Block textures whose alpha may carry a material (not ones using alpha for other things).
+    bool materialLayer = abs(vLayer - GRASS_SIDE_LAYER) > 0.5 && abs(vLayer - SNOWY_GRASS_SIDE_LAYER) > 0.5
+        && abs(vLayer - GLASS_LAYER) > 0.5 && abs(vLayer - FURNACE_LIT_LAYER) > 0.5;
     bool water = (vFlags & F_WATER) != 0;
     bool emissive = (vFlags & F_EMISSIVE) != 0;
     bool vm = (vFlags & F_VIEWMODEL) != 0;
@@ -171,7 +206,36 @@ void main() {
         float frame = mod(floor(time * fps), FLUID_FRAMES);
         tex = texture(blocks, vec3(uv, (lava ? LAVA_ANIM_LAYER : WATER_ANIM_LAYER) + frame));
     } else {
-        tex = texture(blocks, vec3(uv, vLayer));
+        // Sunk ore nuggets (parallax): through a pit texel the eye ray goes on down into the
+        // block until it meets a pit wall (the stone texel there) or the pit's floor.
+        float pitShade = 1.0;
+        bool faceUV = vNormal < 6 && (vFlags & (F_VIEWMODEL | F_ENTITY | F_PLANT | F_LEAVES)) == 0
+            && materialLayer;
+        if (faceUV && isPit(uv, vLayer)) {
+            vec3 toEye = frame.camPos.xyz - vWorld;
+            float px = frame.detail.x / max(length(toEye), 1e-3);
+            // Flat far away (the pits only darker), deep up close.
+            float depth = PIT_DEPTH * smoothstep(12.0, 32.0, px);
+            float d = 1.0;
+            if (depth > 0.0) {
+                vec3 e = normalize(toEye);
+                float up = max(dot(e, NORMALS[vNormal]), 0.2);
+                vec2 dir = -vec2(dot(e, FACE_TU[vNormal]), dot(e, FACE_TV[vNormal])) / up * depth;
+                vec2 start = uv;
+                for (int i = 1; i <= PIT_STEPS; i++) {
+                    float k = float(i) / float(PIT_STEPS);
+                    if (!isPit(start + dir * k, vLayer)) {
+                        d = k;
+                        break;
+                    }
+                }
+                uv = start + dir * d;
+            }
+            pitShade = mix(1.0, PIT_SHADE, d);
+        }
+        // (The face's own derivatives, so the mip level does not jump at the pits' edges.)
+        tex = textureGrad(blocks, vec3(uv, vLayer), dFdx(vUV), dFdy(vUV));
+        tex.rgb *= pitShade;
     }
 
     // Detail too small for the screen: the texture turns into its average color (its smallest
@@ -309,6 +373,65 @@ void main() {
         light += vec3(0.95, 0.97, 1.0) * (cone + hot) * fall * fall * facing * 2.4 * sp.w * seen;
     }
     vec3 col = albedo * (light * ao + vec3(0.02));
+
+    // Shine: highlights of the sun or moon, held lights and weapon lights on shiny texels,
+    // a soft sheen near torches, and a little of the sky mirrored. Metal takes its own colour,
+    // gems and polished stone white. Up close a few texels of a shiny surface are tilted
+    // facets that flash as the eye moves past the right angle.
+    int mat = (materialLayer && !derivN && !fluid && !water && !emissive && (vFlags & F_PLANT) == 0) ? materialCode(uv, vLayer) : 0;
+    float shine = float(mat >> 2) / 15.0;
+    if (shine > 0.0) {
+        bool metal = (mat & 2) != 0;
+        vec3 V = normalize(frame.camPos.xyz - vWorld);
+        float power = exp2(mix(4.0, 8.0, shine));
+        float gain = mix(0.25, 1.6, shine * shine);
+        // Facets: about one texel in sixteen, more on the shiniest surfaces.
+        vec3 Nf = N;
+        float facet = 0.0;
+        if (vNormal < 6) {
+            ivec2 size = textureSize(blocks, 0).xy;
+            vec2 t = floor(fract(uv) * vec2(size));
+            float pick = hash12(t + vLayer * 17.0);
+            if (pick > 1.0 - 0.07 * shine) {
+                vec2 h = vec2(hash12(t.yx + 31.7 + vLayer), hash12(t + 7.3)) - 0.5;
+                Nf = normalize(N + (FACE_TU[vNormal] * h.x + FACE_TV[vNormal] * h.y) * 0.9);
+                facet = smoothstep(14.0, 32.0, blockPx);
+            }
+        }
+        // A light's highlight: the surface's broad one, or a facet's sharp flash.
+        float sun = highlight(N, L, V, power);
+        float flash = facet * pow(max(dot(Nf, normalize(L + V)), 0.0), 900.0) * 6.0;
+        vec3 spec = frame.sunColor.rgb * strength * vis * (sun + flash);
+        spec += vec3(1.0, 0.72, 0.42) * blk * 0.2 * pow(max(dot(N, V), 0.0), power * 0.25);
+        for (int i = 0; i < 8; i++) {
+            vec4 held = frame.heldLights[i];
+            if (held.w <= 0.0) continue;
+            vec3 toL = held.xyz - vWorld;
+            float falloff = max(0.0, 1.0 - length(toL) / 7.0);
+            vec3 l = normalize(toL);
+            float f = facet * pow(max(dot(Nf, normalize(l + V)), 0.0), 900.0) * 6.0;
+            spec += vec3(1.0, 0.65, 0.34) * falloff * falloff * 1.8 * held.w * (highlight(N, l, V, power) + f);
+        }
+        for (int i = 0; i < 4; i++) {
+            vec4 sp = frame.spots[2 * i];
+            if (sp.w <= 0.0) continue;
+            vec4 sd = frame.spots[2 * i + 1];
+            vec3 toL = sp.xyz - vWorld;
+            float d = length(toL);
+            toL /= max(d, 1e-4);
+            float cone = smoothstep(sd.w, mix(sd.w, 1.0, 0.6), dot(-toL, sd.xyz));
+            float fall = max(0.0, 1.0 - d / 26.0);
+            float f = facet * pow(max(dot(Nf, normalize(toL + V)), 0.0), 900.0) * 6.0;
+            spec += vec3(0.95, 0.97, 1.0) * cone * fall * fall * 2.4 * sp.w * spotShadow(i, vWorld, N)
+                * (highlight(N, toL, V, power) + f);
+        }
+        vec3 R = reflect(-V, N);
+        R.y = abs(R.y);
+        float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
+        vec3 env = skyColor(R, frame.sunDir.xyz) * sky * mix(metal ? 0.15 : 0.02, 0.5, fres);
+        vec3 tintSpec = metal ? albedo * 1.8 + 0.04 : vec3(1.0);
+        col += tintSpec * (spec * gain + env * shine * ao) * (1.0 - far);
+    }
     if (emissive) col = albedo * 1.4;
     if (torchFire) col = flame.rgb * 1.25;
     if (furnaceFire) col = mix(col, flame.rgb * 0.88, flame.a);

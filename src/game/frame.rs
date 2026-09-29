@@ -715,7 +715,9 @@ impl Game {
         // so is a pistol (the body's arm would point it at the ground when looking down), and
         // a grenade being readied (both hands on it).
         let lantern = self.held() == LANTERN as ItemId;
-        let pistol = self.holding_gun() || self.grenades.hold.is_some();
+        // (and so is a fishing rod: both hands on it)
+        let rod = self.held() == crate::item::FISHING_ROD;
+        let pistol = self.holding_gun() || self.grenades.hold.is_some() || rod;
         // The guide book is always held open in both first-person hands.
         let book = self.held() == crate::item::GUIDE_BOOK;
         let down = -self.pitch.to_degrees();
@@ -753,6 +755,7 @@ impl Game {
                 cam_to_world
             };
             self.hand.fancy_lantern = fp_body;
+            self.hand.rod = self.rod_anim();
             self.hand.book = self.book_view().map(|v| (self.book_read(), v));
             self.hand.build(
                 &mut scene.viewmodel,
@@ -823,6 +826,7 @@ impl Game {
             self.guns.laser_from = self.hand.laser_tip.map(to_world_view);
             self.guns.light_from = self.hand.light_tip.map(to_world_view);
             self.grenades.hand_fp = self.hand.grenade_tip.map(to_world_view);
+            self.fishing.tip_fp = self.hand.rod_tip.map(to_world_view);
             let hit = self.hand.book_hit;
             self.set_book_hit(hit);
         } else {
@@ -832,6 +836,7 @@ impl Game {
             self.guns.laser_from = None;
             self.guns.light_from = None;
             self.guns.gun_dir = None;
+            self.fishing.tip_fp = None;
             self.set_book_hit(None);
         }
         if in_world {
@@ -877,6 +882,7 @@ impl Game {
                 armor: crate::item::armor_code(&self.inventory.armor),
                 book: self.book_view(),
                 grenade: self.grenades.hold.map(|h| h.t),
+                rod: self.rod_anim(),
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {
@@ -899,6 +905,8 @@ impl Game {
             // Where a readied grenade is in the model's hand (thrown from there, seen from
             // outside).
             self.grenades.hand_tp = pose.grenade.map(|_| crate::model::player::held_center(&pose, &limbs));
+            // Where the fishing rod's tip is on the model (the line leaves from there).
+            self.fishing.tip_tp = crate::model::player::rod_tip(&pose);
             // A held lantern swings from the hand.
             let lantern_dir = if pose.held == LANTERN as ItemId {
                 let pivot = hand_pivot(&pose, &limbs);
@@ -948,6 +956,9 @@ impl Game {
             }
         }
         self.held_torch_tip = held_torch_tip;
+        if in_world {
+            self.build_fishing(&mut scene.particles, cam);
+        }
         if in_world {
             self.build_world_entities(&mut scene, third_person, dt);
         }

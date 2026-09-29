@@ -62,6 +62,8 @@ pub struct PlayerPose {
     /// Readying the held grenade: seconds since the button went down (raised, the pin pulled
     /// by the left hand, drawn back higher the harder it will be thrown).
     pub grenade: Option<f32>,
+    /// Holding a fishing rod: what it is doing (cast, line out, fighting a fish...).
+    pub rod: Option<super::angler::RodAnim>,
 }
 
 // Face order for layers: +X, -X, +Y, -Y, +Z (back), -Z (front)
@@ -166,7 +168,7 @@ fn gait(p: &PlayerPose) -> Gait {
     // Not with both hands on something held: they would come off it. A gun's stance turns
     // the body instead.
     let gun = crate::item::GunKind::of(p.held).filter(|_| p.attack <= 0.0 && !p.blocking);
-    let both_hands = p.book.is_some() || gun.is_some() || readying(p);
+    let both_hands = p.book.is_some() || gun.is_some() || readying(p) || rod_anim(p).is_some();
     let free = if both_hands { 0.0 } else { 1.0 };
     Gait {
         bob,
@@ -432,6 +434,17 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
         let sr = Vec3::new(5.0, 22.0 - SNEAK_DROP * c, 0.0);
         (l.right_arm, l.right_elbow, l.right_shift) =
             reach_bent(sr, look_turn(p).transform_point3(hand), Vec3::new(1.0, -1.0, 0.35), 0.0);
+    } else if let Some((rod, pose)) = rod_on_torso(p) {
+        // Holding a fishing rod: the right hand on its grip, the left on the reel's handle
+        // (off it to the side while the rod is swung).
+        let pts = super::angler::points(rod, &pose);
+        let a = rod_anim(p).unwrap_or_default();
+        let shoulder_y = 22.0 - SNEAK_DROP * c;
+        let free = super::angler::model_free_hand() - Vec3::Y * SNEAK_DROP * c;
+        let left = pts.crank.lerp(free, super::angler::hand_off_crank(&a));
+        let (sr, sl) = (Vec3::new(5.0, shoulder_y, 0.0), Vec3::new(-5.0, shoulder_y, 0.0));
+        (l.right_arm, l.right_elbow, l.right_shift) = reach_bent(sr, pts.grip, Vec3::new(1.0, -1.0, 0.35), 0.0);
+        (l.left_arm, l.left_elbow, l.left_shift) = reach_bent(sl, left, Vec3::new(-1.0, -1.0, 0.35), 0.0);
     } else if let (Some(kind), false, false) =
         (crate::item::GunKind::of(p.held), swinging, p.blocking)
     {
@@ -758,6 +771,9 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         let (mats, shown) = gun_matrices(p, kind, root * gun_on_model(p, kind));
         let lamp = p.gun_mods & crate::item::gun_mod::LIGHT != 0 && p.gun_mods & crate::item::gun_mod::LIGHT_ON != 0;
         super::gun_view::emit(kind, out, Some(glass), &mats, &shown, false, p.gun_dirt, lamp, &p.gun, light, fl);
+    } else if let (Some((rod, pose)), true) = (rod_on_torso(p), show_right) {
+        // The fishing rod, where the hands hold it.
+        super::angler::emit_rod(out, torso * rod, &pose, light, fl);
     } else if throwing(p) && p.attack > 0.0 {
         // (it has just left the hand)
     } else if let (Some(t), true) = (p.grenade.filter(|_| readying(p)), show_right) {
@@ -858,6 +874,31 @@ fn held_item(p: &PlayerPose, right: Mat4) -> Mat4 {
         * Mat4::from_rotation_y(deg(r[1]))
         * Mat4::from_rotation_z(deg(r[2]))
         * Mat4::from_scale(Vec3::splat(16.0 * sc))
+}
+
+/// What the held fishing rod is doing (None: no rod in the hand).
+fn rod_anim(p: &PlayerPose) -> Option<super::angler::RodAnim> {
+    (p.held == crate::item::FISHING_ROD).then(|| p.rod.unwrap_or_default())
+}
+
+/// The held fishing rod on the model: its model (blocks) to the torso's frame (model pixels),
+/// and how it bends toward the line.
+fn rod_on_torso(p: &PlayerPose) -> Option<(Mat4, super::fishing_rod::RodPose)> {
+    let a = rod_anim(p)?;
+    // Lowered with the shoulders while sneaking.
+    let sink = Mat4::from_translation(Vec3::new(0.0, -SNEAK_DROP * p.crouch, 0.0));
+    let torso = torso_of(p, model_root(p)) * sink;
+    let bobber = a.bobber.map(|b| torso.inverse().transform_point3(b));
+    let (m, pose) = super::angler::on_model(&a, p.time, (look_yaw(p), p.pitch), bobber, PX);
+    Some((sink * m, pose))
+}
+
+/// Where the tip of the held fishing rod is on the model (the line leaves from there), in the
+/// world.
+pub fn rod_tip(p: &PlayerPose) -> Option<Vec3> {
+    let (rod, pose) = rod_on_torso(p)?;
+    let torso = torso_of(p, model_root(p));
+    Some(super::angler::points(torso * rod, &pose).tip)
 }
 
 /// Whether a grenade is being readied in the hand.
@@ -969,6 +1010,7 @@ mod gun_hold_tests {
             armor: 0,
             book: None,
             grenade: None,
+            rod: None,
         }
     }
 
@@ -1032,6 +1074,7 @@ mod bend_tests {
             armor: 0,
             book: None,
             grenade: None,
+            rod: None,
         }
     }
 

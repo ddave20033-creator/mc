@@ -3,8 +3,9 @@
 //! the first-person animations can be checked frame by frame. With `GUN_SHOTS_SIDE=1`, only the
 //! player's own moves, seen from the side (standing, walking, running, sneaking, sneak-walking,
 //! aiming), with each gun and then empty-handed. With `GUN_SHOTS_FP=1`, only the first-person
-//! scenes. With `GUN_SHOTS_LIGHT=1`, the pistol's light at night against planks and glass. With
-//! `GUN_SHOTS_GRENADE=1`, a grenade readied and thrown. With `GUN_SHOTS_TURN=1`, only the three guns
+//! scenes. With `GUN_SHOTS_RELIEF=1`, a wall of ores and some flowers seen up close. With `GUN_SHOTS_LIGHT=1`, the pistol's light at night against planks and glass. With
+//! `GUN_SHOTS_GRENADE=1`, a grenade readied and thrown. With `GUN_SHOTS_FISHING=1` (or one run's
+//! name), a pond fished: cast, bite, a fish fought and landed, a line snapped. With `GUN_SHOTS_TURN=1`, only the three guns
 //! held (and aimed) seen from the front by a camera that stays put while the player looks
 //! around to the right and then to the left, to see what the body does. With `GUN_SHOTS_STATION=1`, the
 //! gun stations instead: an AK-47 on the rifle station taken apart and put together again,
@@ -227,6 +228,144 @@ impl Game {
         }
     }
 
+    /// `GUN_SHOTS_FISHING=1`: a pond is dug ahead of the lane and fished: the rod drawn back
+    /// and cast, the bobber landing, nibbles and the bite (made to come soon), the hook set and
+    /// a carp fought (a player keeping the tension bar in the middle, shifting gears with
+    /// Shift+wheel) and landed; seen from the eyes, from the side, from behind and from the
+    /// front; then a fish cranked in too hard, snapping the line. `GUN_SHOTS_FISHING=<name>`
+    /// (fp, side, behind, front, snap): only that run.
+    fn fishing_shots_step(&mut self, dt: f32, start: Vec3) {
+        use super::camera::SIDE_VIEW;
+        use super::fishing::{Bite, Fight};
+        const RUNS: [(&str, u8, bool); 5] = [("fp", 0, false), ("side", SIDE_VIEW, false), ("behind", 1, false), ("front", 2, false), ("snap", 0, true)];
+        let only = std::env::var("GUN_SHOTS_FISHING").ok().filter(|v| RUNS.iter().any(|r| r.0 == v));
+        let Some(g) = self.gun_shots.as_mut() else { return };
+        while let (Some(o), Some(r)) = (&only, RUNS.get(g.gun)) {
+            if r.0 == o {
+                break;
+            }
+            g.gun += 1;
+        }
+        let t0 = g.t;
+        g.t += dt;
+        let (t, dir, which) = (g.t, g.dir.clone(), g.gun);
+        let crossed = |at: f32| t0 < at && t >= at;
+        let Some(&(name, camera, snap)) = RUNS.get(which).filter(|_| only.is_none() || which == g.gun) else {
+            println!("fishing shots done: {}", dir.display());
+            self.camera.mode = 0;
+            self.quit = true;
+            return;
+        };
+        if only.is_some() && RUNS.get(which).map(|r| r.0) != only.as_deref() {
+            println!("fishing shots done: {}", dir.display());
+            self.quit = true;
+            return;
+        }
+        let base = start.floor().as_ivec3();
+        if t0 == 0.0 {
+            if which == 0 || only.is_some() {
+                // The pond: 3 deep, from 3 blocks ahead, walled with stone.
+                let y = base.y - 1;
+                for x in base.x + 2..=base.x + 24 {
+                    for z in base.z - 8..=base.z + 8 {
+                        for dy in -3..=0 {
+                            let edge = x == base.x + 2 || x == base.x + 24 || z.abs_diff(base.z) == 8 || dy == -3;
+                            self.set_block(IVec3::new(x, y + dy, z), if edge { STONE } else { crate::world::WATER });
+                        }
+                    }
+                }
+            }
+            let mut rod = Stack::one(crate::item::FISHING_ROD);
+            crate::item::set_rod_gear(&mut rod, 3);
+            self.inventory.slots[7] = Some(rod);
+            self.hotbar_slot = 7;
+            self.camera.mode = camera;
+            self.player.pos = start;
+            self.player.vel = Vec3::ZERO;
+            self.yaw = 0.0;
+            self.pitch = -0.12;
+            self.body_yaw = 0.0;
+            self.keys.clear();
+            self.fishing.line = None;
+            self.right_down = false;
+        }
+        self.keys.clear();
+        // Drawn back from 0.4 s, let go at 1.7 s (a full cast).
+        self.right_pressed |= crossed(0.4);
+        self.right_down = (0.4..1.7).contains(&t);
+        // Nibbles soon after it lands, then the bite.
+        if crossed(3.2) {
+            if let Some(l) = self.fishing.line.as_mut() {
+                l.bite = Bite::Nibble(2, 0.2);
+            }
+        }
+        let line = self.fishing.line.as_ref();
+        let striking = line.is_some_and(|l| matches!(l.bite, Bite::Strike(s) if s < 1.3));
+        let fighting = line.is_some_and(|l| l.fight.is_some());
+        // Set the hook a moment after the bite; a carp of 3 kg is on.
+        if striking && !fighting {
+            self.scroll = -1.0;
+        }
+        let mut hooked_now = false;
+        if let Some(l) = self.fishing.line.as_mut() {
+            if let Some(f) = l.fight.as_mut().filter(|f| f.species != 3 || f.max_stamina < 0.0) {
+                *f = Fight::of(3, 3.0, f.dist);
+                hooked_now = true;
+            }
+        }
+        if let (Some(f), false) = (self.fishing.line.as_ref().and_then(|l| l.fight.as_ref()), hooked_now) {
+            let gear = self.inventory.slots[7].map_or(3, |s| crate::item::rod_gear(&s));
+            if snap {
+                // Cranked flat out in the lowest gear.
+                self.scroll = -2.0;
+            } else {
+                // Keeping the bar in the middle, in a higher gear when it is far off
+                // (Shift+wheel).
+                let off = (0.5 - f.tension).abs();
+                let want_gear = if off > 0.25 { 5 } else if off > 0.1 { 3 } else { 1 };
+                if want_gear != gear && (t * 4.0).fract() < dt * 4.0 {
+                    self.keys.insert(self.settings.keys.get(Bind::Sneak));
+                    self.scroll = if want_gear > gear { 1.0 } else { -1.0 };
+                } else {
+                    let rate = ((0.5 - f.tension) * 30.0).clamp(-9.0, 9.0);
+                    self.scroll = -rate * dt;
+                }
+            }
+        }
+        // Pictures: the cast every 0.1 s, the bite, the fight every second, the landing.
+        let caught = self.fishing.line.is_none() && t > 4.0;
+        let every = if t < 3.0 { 0.1 } else if fighting { 1.0 } else { 0.25 };
+        if let Some(g) = self.gun_shots.as_mut() {
+            if t >= g.next && t >= 0.3 && (!caught || g.n < 1000) {
+                self.gpu.capture = Some(dir.join(format!("fish_{name}_{:03}.png", g.n)));
+                g.n += 1;
+                g.next = t + every;
+            }
+            if caught {
+                // Then every 0.1 s for a second and a half (the fish flying out, the rod
+                // swung up), and on to the next run.
+                g.next = g.next.min(t + 0.1);
+                if g.wait > -1.5 {
+                    g.wait -= dt;
+                } else {
+                    g.gun += 1;
+                    g.t = 0.0;
+                    g.n = 0;
+                    g.next = 0.0;
+                    g.wait = 0.0;
+                    self.right_down = false;
+                    self.camera.mode = 0;
+                }
+            }
+            if t > 90.0 {
+                g.gun += 1;
+                g.t = 0.0;
+                g.n = 0;
+                g.next = 0.0;
+            }
+        }
+    }
+
     fn light_shots_step(&mut self, dt: f32, start: Vec3) {
         use crate::world::{GLASS, PLANKS, STONE};
         let Some(g) = self.gun_shots.as_mut() else { return };
@@ -273,6 +412,63 @@ impl Game {
         if t > 6.5 {
             self.camera.mode = 0;
             println!("light shots done");
+            self.quit = true;
+        }
+    }
+
+    /// `GUN_SHOTS_RELIEF`: a wall of every ore with flowers in front of it, seen from a few
+    /// spots, to check their 3D details.
+    fn relief_shots_step(&mut self, dt: f32, start: Vec3) {
+        use crate::world::*;
+        let Some(g) = self.gun_shots.as_mut() else { return };
+        let t0 = g.t;
+        g.t += dt;
+        let (t, dir) = (g.t, g.dir.clone());
+        let crossed = |at: f32| t0 < at && t >= at;
+        let base = start.floor().as_ivec3();
+        if t0 == 0.0 {
+            let ores = [COAL_ORE, IRON_ORE, COPPER_ORE, GOLD_ORE, DIAMOND_ORE];
+            for (i, z) in (base.z - 2..=base.z + 2).enumerate() {
+                for dy in 0..3 {
+                    self.set_block(IVec3::new(base.x + 4, base.y + dy, z), ores[(i + dy as usize) % ores.len()]);
+                }
+            }
+            self.set_block(IVec3::new(base.x + 4, base.y, base.z + 3), STONE);
+            let flowers = [POPPY, DANDELION, OAK_SAPLING, BIRCH_SAPLING, SPRUCE_SAPLING];
+            for (i, z) in (base.z - 2..=base.z + 2).enumerate() {
+                self.set_block(IVec3::new(base.x + 2, base.y - 1, z), GRASS);
+                self.set_block(IVec3::new(base.x + 2, base.y, z), flowers[i]);
+            }
+            self.inventory.slots[0] = None;
+            self.hotbar_slot = 0;
+            self.player.pos = start;
+            self.player.vel = Vec3::ZERO;
+            self.yaw = 0.0;
+            self.pitch = -0.1;
+            self.body_yaw = 0.0;
+            self.camera.mode = 0;
+            self.keys.clear();
+        }
+        // (seconds, name, position offset, yaw, pitch)
+        let spots = [
+            (1.5, "front", Vec3::ZERO, 0.0, -0.1),
+            (2.5, "flowers", Vec3::new(0.6, 0.0, 0.0), 0.0, -0.75),
+            (3.5, "slant", Vec3::new(2.2, 0.0, -2.6), 0.9, -0.2),
+            (4.5, "close", Vec3::new(2.6, 0.0, 0.3), 0.0, 0.1),
+        ];
+        for (at, name, off, yaw, pitch) in spots {
+            if crossed(at - 0.6) {
+                self.player.pos = start + off;
+                self.player.vel = Vec3::ZERO;
+                self.yaw = yaw;
+                self.pitch = pitch;
+            }
+            if crossed(at) {
+                self.gpu.capture = Some(dir.join(format!("relief_{name}.png")));
+            }
+        }
+        if t > 5.0 {
+            println!("relief shots done");
             self.quit = true;
         }
     }
@@ -514,8 +710,16 @@ impl Game {
             self.station_shots_step(dt, start);
             return;
         }
+        if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_RELIEF").is_ok()) {
+            self.relief_shots_step(dt, start);
+            return;
+        }
         if let (Some(start), true) = (g.start, lamp_test) {
             self.light_shots_step(dt, start);
+            return;
+        }
+        if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_FISHING").is_ok()) {
+            self.fishing_shots_step(dt, start);
             return;
         }
         if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_GRENADE").is_ok()) {

@@ -425,6 +425,7 @@ impl Game {
             && !self.spectator()
         {
             self.draw_gun_hud();
+            self.draw_fishing_hud();
         }
 
         // Names of the other LAN players.

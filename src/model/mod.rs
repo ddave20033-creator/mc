@@ -3,9 +3,11 @@
 //! models made of them.
 
 pub mod ak_vm;
+pub mod angler;
 pub mod ballistics;
 pub mod book;
 pub mod dummy;
+pub mod fishing_rod;
 pub mod grenade;
 pub mod gun;
 pub mod gun_station;

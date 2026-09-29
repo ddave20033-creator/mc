@@ -10,7 +10,7 @@ import numpy as np
 from scipy import ndimage
 
 from common import (
-    S, Ramp, blank, edge_light, grid, grow, hexc, noise, fbm, paint, pix, polygon, rect,
+    S, Ramp, bayer, blank, edge_light, grid, grow, hexc, noise, paint, pix, polygon, rect,
     rgba, rng, thick_line, shrink,
 )
 
@@ -25,7 +25,8 @@ MORTAR = Ramp("8b6e67", "a2867d", "a9948d")
 IRON = Ramp("b1b0b0", "b9b9b9", "c1c1c1", "d1cfcf", "d6d6d6", "dcdcdc", "e0e0e0", "e6e6e6",
             "eaeaea", "ececec", "f2f2f2")
 COPPER = Ramp("9c4e2e", "a85634", "b45f3a", "c26b44", "c9724a", "d07b52", "d6845a", "dc8f64",
-              "e39a70", "e8a57c", "f0b890")
+              "e39a70", "e8a57c", "f0b890")  # also used by furnaces.py
+CU_BLOCK = Ramp("904931", "9a5038", "a75a40", "b26247", "c26b4c", "c87456", "d67b5b", "e3826c")
 GOLD = Ramp("cc8e27", "d39632", "f9bd23", "f5cc27", "ffd83e", "fee048", "ffec4f", "fffd90",
             "feffbd")
 DIAMOND = Ramp("0ebabd", "15c2c6", "3de0e5", "4bede6", "65f5e3", "70fbf0", "9efeeb", "d5fff6",
@@ -34,7 +35,6 @@ COAL = Ramp("050505", "0d0d0d", "151515", "1f1e1e", "292828")
 WOOL = Ramp("d1d7d8", "dbe0e1", "e4e7e8", "eeeff0", "f4f5f6", "fafbfb", "fefefe")
 RED_TOP = Ramp("6b1213", "851a1a", "902120", "a22722", "ac2922", "b53129", "bf3b33")
 LANT = Ramp("252c3d", "3e4453", "424a5e", "495065", "5a6278")
-GLOW = Ramp("814023", "8b5230", "c36322", "f09149", "f9c966", "fdfd8b", "ffffd5")
 TWOOD = Ramp("372a17", "423522", "55452e", "6d5736", "81663e", "957546", "9f7f50")
 FLAME = Ramp("ff8f00", "ffd800", "ffff97", "ffffff")
 GLASS_C = Ramp("7baeb7", "8bc1cd", "a8d0d9", "d0eae9")
@@ -195,9 +195,13 @@ def paint_glass(seed):
     paint(img, frame, GLASS_C.shade(t, 0))
     # Two thin diagonal glints (2 px staircase lines).
     glint = np.zeros((S, S), bool)
-    for (x0, y0, n) in [(38, 16, 22), (112, 94, 16)]:
+    shade = np.zeros((S, S), bool)
+    for (x0, y0, n) in [(40, 16, 24), (112, 94, 18)]:
         for k in range(n):
-            glint |= rect(y0 + k, x0 - k - 1, y0 + k + 1, x0 - k + 1)
+            glint |= rect(y0 + k, x0 - k - 2, y0 + k + 1, x0 - k + 1)
+            if 2 <= k < n - 2:
+                shade |= rect(y0 + k + 1, x0 - k - 2, y0 + k + 2, x0 - k)
+    paint(img, shade & ~glint & ~frame, GLASS_C.at(1))
     paint(img, glint & ~frame, GLASS_C.at(3))
     return img
 
@@ -232,24 +236,34 @@ def paint_bricks(seed):
 
 
 def paint_stone_bricks(seed):
+    """Two courses of long stone bricks (the lower one offset by half and wrapping around),
+    mottled with small horizontal speckle clusters, lit top/left edges, darker toward the
+    bottom, and a dark 4 px mortar."""
     yy, xx = ints()
+    # SBRICK: 0 5a595a, 1 636363, 2 6a6d6a (greenish), 3 787678, 4 7f7f7f, 5 8b898b, 6 9c999c
     row = yy // 64
     ly = yy % 64
-    lx = np.where(row == 0, xx, (xx + 64) % S) % np.where(row == 0, 128, 64)
-    bw = np.where(row == 0, 128, 64)
-    t = level(SBRICK, 4) + (fbm(seed, 32, 3) - 0.5) * 0.4
-    blot = anoise(seed + 1, 10, 16)
-    t = np.where(blot < 0.3, t - 0.12, t)
-    t = np.where(blot > 0.72, t + 0.12, t)
-    t += (pix(seed + 2, 2) - 0.5) * 0.08
-    # Darker lower part of each brick, light top/left edge, dark mortar bottom/right.
-    t -= np.clip((ly - 40) / 22.0, 0, 1) * 0.18
-    t = np.where((ly < 2) | (lx < 2), level(SBRICK, 6), t)
-    t = np.where((ly >= 2) & (ly < 4) & (lx >= 2), t + 0.1, t)
-    mort = (ly >= 60) | (lx >= bw - 4)
-    t = np.where(mort, level(SBRICK, 1) - 0.05, t)
-    t = np.where(mort & ((ly >= 62) | (lx >= bw - 2)), 0.0, t)
-    return img_of(stepped(t, SBRICK))
+    lx = np.where(row == 0, xx, (xx - 64) % S)   # 0 at each brick's left edge
+    v = 5.15 - 2.1 * (ly / 58.0)
+    v += (anoise(seed, 5, 14) - 0.5) * 1.9
+    v += (anoise(seed + 1, 3, 7) - 0.5) * 1.1
+    v += (pix(seed + 2, 1) - 0.5) * 0.35 + (anoise(seed + 8, 2, 4) - 0.5) * 0.9
+    # Darker toward each brick's right end.
+    v -= np.clip((lx - 110) / 14.0, 0, 1) * 0.6
+    idx = np.clip(np.round(v), 2, 5).astype(np.int32)
+    # Rare light specks in the upper half and greenish-dark specks low down.
+    idx = np.where(anoise(seed + 4, 4, 10) + (pix(seed + 9, 2) - 0.5) * 0.12 > 1.12 - ly / 110.0, 2, idx)
+    # Edges: 2 px light top and left, 2 px dark last row, dark right end column.
+    idx = np.where(ly < 2, 6, idx)
+    idx = np.where((ly >= 2) & (ly < 4), np.where(pix(seed + 5, 2) > 0.9, 4, 5), idx)
+    idx = np.where((lx < 2) & (ly < 60), 6, idx)
+    idx = np.where((ly >= 58) & (ly < 60), 2, idx)
+    idx = np.where((lx >= 122) & (lx < 124) & (ly < 60), np.minimum(idx, 3), idx)
+    mort = (ly >= 60) | (lx >= 124)
+    idx = np.where(mort, np.where(pix(seed + 6, 2) > 0.45, 1, 0), idx)
+    idx = np.where(mort & (ly >= 60) & (ly < 62) & (lx < 124), np.where(pix(seed + 7, 2) > 0.2,
+                                                                          1, 0), idx)
+    return img_of(SBRICK.colors[idx])
 
 
 # ---------------------------------------------------------------------------- crafting table
@@ -297,13 +311,6 @@ def table_body(seed):
     col = np.where(edge[..., None], DARKWOOD.shade(np.where(ly >= 28, 0.0, level(DARKWOOD, 1)),
                                                    0), col)
     return col
-
-
-def shaded_shape(mask, ramp, base, light=0.25, width=2, seed=0, grain=0.0):
-    t = np.full((S, S), base, np.float32) + edge_light(mask, width) * light
-    if grain:
-        t += (pix(seed, 2) - 0.5) * grain
-    return ramp.shade(t, 0)
 
 
 def paint_crafting_table_side(seed):
@@ -398,58 +405,79 @@ def paint_crafting_table_top(seed):
 # ---------------------------------------------------------------------------- furnace
 
 
-def cobble_value(seed, count=16):
-    """Rounded stones with soft dark gaps (STONE shade values)."""
-    ids, _, border, best = cells(seed, count, jitter=0.7, wobble=6, cell=32)
-    R = 0.72 * S / np.sqrt(count)
-    border = np.minimum(border, (R - best) * 1.4)
-    h = np.clip((border - 1.5) / 14.0, 0, 1)
-    dome = np.sqrt(1 - (1 - h) ** 2)
-    lit = dome - shifted(dome, 4, 4)
-    per = rng(seed + 1).uniform(-0.03, 0.03, count).astype(np.float32)
-    t = level(STONE, 3) + dome * 0.2 + lit * 0.25 + per[ids]
-    blot = anoise(seed + 2, 6, 6)
-    t = np.where(blot > 0.7, t + 0.05, t)
-    t += (pix(seed + 3, 2) - 0.5) * 0.06
-    t = np.where(border < 1.2, level(STONE, 3) - 0.04, t)
-    return t
+def on_tiled(fn, a):
+    """Applies an image operation to `a` as if it repeated (for seamless morphology)."""
+    h, w = a.shape[:2]
+    return fn(np.tile(a, (3, 3)))[h:2 * h, w:2 * w]
 
 
-def furnace_border(t):
-    yy, xx = ints()
-    b = (xx < 4) | (xx >= S - 4) | (yy < 4) | (yy >= S - 2)
-    t = np.where(b, level(STONE, 1), t)
-    t = np.where(((xx >= 2) & (xx < 4) | (xx >= S - 4) & (xx < S - 2)) & (yy >= 4) &
-                 (yy < S - 2), level(STONE, 2), t)
-    t = np.where(yy < 2, level(STONE, 0) + (pix(3, 2) > 0.5) * 0.1, t)
-    return t
+def disk_se(r):
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    return xx * xx + yy * yy <= r * r + r * 0.6
+
+
+def cobble_value(seed, count=10, gap=1.0, jitter=0.75, wobble=8):
+    """Faithful-style furnace cobbles: big round, softly domed stones (light speckled centre,
+    darker rim) packed with narrow mid-grey gaps. Returns STONE indices (floats, tiling)."""
+    ids, _, border, best = cells(seed, count, jitter=jitter, wobble=wobble, cell=32)
+    R = 0.7 * S / np.sqrt(count)
+    stone = np.minimum(border, (R - best) * 0.9) > gap
+    stone = on_tiled(lambda m: ndimage.binary_opening(m, disk_se(8)), stone)
+    d = on_tiled(ndimage.distance_transform_edt, stone)
+    near = on_tiled(ndimage.distance_transform_edt, ~stone)
+    lit = np.clip(d - shifted(d, 3, 3), -3, 3)
+    per = rng(seed + 1).uniform(-0.25, 0.25, count).astype(np.float32)
+    rim = np.select([d < 2, d < 5.5, d < 10], [3.5, 4.3, 5.0], 5.7)
+    v = rim + lit * 0.18 + per[ids]
+    v += (anoise(seed + 2, 3, 6) - 0.5) * 1.0 + (pix(seed + 3, 1) - 0.5) * 0.7
+    g = 2.0 + (pix(seed + 4, 2) - 0.5) * 0.9 + np.where(near < 1.5, 0.6, 0.0)
+    g = np.where(pix(seed + 5, 2) > 0.95, 1.0, g)
+    v = np.where(stone, v, g)
+    return np.clip(v, 0, 6.4)
+
+
+def furnace_frame(v, yy, xx, top=False):
+    """Dark 4 px frame (504e4e with 3c3b3b ticks) around a furnace face."""
+    b = (xx < 4) | (xx >= S - 4) | (yy < 4) | (yy >= S - 4)
+    v = np.where(b, 1.0, v)
+    tick = pix(17, 2) > 0.55
+    v = np.where(((yy < 2) | (yy >= S - 2)) & tick, 0.0, v)
+    v = np.where(((xx < 2) & ~top) & (pix(18, 2) > 0.7), 0.0, v)
+    return v
 
 
 def slab_value(seed, y0, y1):
-    """The smooth light slab (lower part of furnace sides)."""
+    """The smooth light slab of the furnace's lower half (STONE indices): a bright top
+    edge, pale stone with soft horizontal blotches darkening toward the bottom."""
     yy, xx = ints()
-    t = level(STONE, 7) + 0.03 + (pix(seed, 2) > 0.8) * 0.08 - (pix(seed + 1, 2) > 0.85) * 0.08
-    t = np.where(yy < y0 + 2, level(STONE, 10), t)
-    t = np.where((yy >= y0 + 2) & (yy < y0 + 4), level(STONE, 8), t)
-    t -= np.clip((yy - (y1 - 12)) / 12.0, 0, 1) * 0.3
-    t = np.where((xx < 8) & (yy > y0 + 4), t - 0.1, t)
-    return t
+    ly = (yy - y0) / float(y1 - y0)
+    v = 8.9 - ly * 2.0 + (anoise(seed, 4, 16) - 0.5) * 1.3 + (anoise(seed + 1, 2, 6) - 0.5) * 0.6
+    v += (pix(seed + 2, 1) - 0.5) * 0.3
+    v = np.where(yy < y0 + 2, 10.0, v)
+    v = np.where((yy >= y0 + 2) & (yy < y0 + 4), 9.0, v)
+    v = np.where((xx >= 4) & (xx < 6) & (yy >= y0 + 4), np.minimum(v, 7.0), v)
+    v = np.where((xx >= S - 6) & (xx < S - 4) & (yy >= y0 + 4), np.minimum(v, 6.6), v)
+    v = np.where((yy >= y1 - 4) & (yy < y1 - 2), 6.0, v)
+    v = np.where(yy >= y1 - 2, np.where(pix(seed + 3, 2) > 0.5, 3.0, 4.0), v)
+    return v
+
+
+def as_stone(v):
+    return STONE.colors[np.clip(np.round(v), 0, len(STONE) - 1).astype(np.int32)]
 
 
 def paint_furnace_side(seed):
     yy, xx = ints()
-    t = cobble_value(seed, 25)
-    t = np.where(yy >= 72, slab_value(seed + 5, 72, 124), t)
-    return img_of(stepped(furnace_border(t), STONE, 0.2))
+    v = cobble_value(seed + 2, 16)
+    v = np.where((xx < 6) | (yy < 6) | (xx >= S - 6), np.minimum(v, 2.6), v)
+    v = np.where(yy >= 72, slab_value(seed + 5, 72, 124), v)
+    return img_of(as_stone(furnace_frame(v, yy, xx)))
 
 
 def paint_furnace_top(seed):
-    t = cobble_value(seed + 9)
     yy, xx = ints()
-    b = (xx < 4) | (xx >= S - 4) | (yy < 4) | (yy >= S - 4)
-    t = np.where(b, level(STONE, 1), t)
-    t = np.where(b & ((xx < 2) | (yy < 2) | (xx >= S - 2) | (yy >= S - 2)), level(STONE, 2), t)
-    return img_of(stepped(t, STONE, 0.2))
+    v = cobble_value(seed + 9, 9)
+    return img_of(as_stone(furnace_frame(v, yy, xx, top=True)))
 
 
 UP_ARCH = (56, 64, 42, 32)   # center y, center x, rx, ry of the upper (smoke) arch
@@ -468,25 +496,34 @@ FURNACE_SEED = 5151
 def furnace_front_base():
     seed = FURNACE_SEED
     yy, xx = ints()
-    t = cobble_value(seed, 25)
-    t = np.where(yy >= 72, slab_value(seed + 5, 72, 124), t)
-    t = furnace_border(t)
-    # Lip under the upper arch.
+    v = cobble_value(seed + 2, 16)
+    v = np.where((xx < 6) | (yy < 6) | (xx >= S - 6), np.minimum(v, 2.6), v)
+    # A smooth pale ledge under the mouth, fading into the cobbles.
+    ledge = (yy >= 56) & (yy - 56 < 14 - np.maximum(np.abs(xx - 63.5) - 34, 0) * 1.5)
+    lv = 8.6 - (yy - 56) / 12.0 * 4.0 + (anoise(seed + 7, 3, 10) - 0.5) * 1.6
+    lv = np.where(yy < 58, 9.4, lv)
+    v = np.where(yy >= 72, slab_value(seed + 5, 72, 124), v)
+    v = furnace_frame(v, yy, xx)
     up = arch(*UP_ARCH, 56)
-    t = np.where((yy >= 56) & (yy < 58) & (xx >= 22) & (xx < 106), level(STONE, 9), t)
-    t = np.where((yy >= 58) & (yy < 60) & (xx >= 22) & (xx < 106), level(STONE, 6), t)
-    # Rim around the lower opening, sill below.
     low = arch(*LOW_ARCH, 124)
-    rim = grow(low, 2) & ~low & (yy < 124)
-    t = np.where(rim, level(STONE, 6), t)
-    t = np.where((yy >= 120) & (yy < 124) & ~low, level(STONE, 4), t)
-    t = np.where((yy >= 124) & (yy < 126) & (xx >= 4) & (xx < S - 4), level(STONE, 3), t)
-    col = stepped(t, STONE, 0.2)
-    dark = Ramp("111111", "212121")
-    # Upper arch: dark with a slightly lighter core.
-    core = (((yy - 56) / 13.0) ** 2 + ((xx - 64) / 24.0) ** 2 <= 1)
-    col = np.where(up[..., None], dark.shade(core.astype(np.float32), 0), col)
-    col = np.where(low[..., None], dark.at(0), col)
+    # Soft sooty rims around both openings (still lighter than the openings' outline).
+    for m in (up, low):
+        r1 = grow(m, 2) & ~m
+        r2 = grow(m, 4) & ~grow(m, 2)
+        v = np.where(r2 & (yy < 124), np.maximum(v - 2.0, 2.0), v)
+        v = np.where(r1 & (yy < 124), np.maximum(v - 4.0, 1.0), v)
+    v = np.where((yy >= 56) & (yy < 58) & (xx >= 20) & (xx < 108), 9.4, v)
+    col = as_stone(v)
+    dark = Ramp("111111", "212121", "3c3b3b")
+    # Openings: black at their outline, the back wall faintly lit low in the middle.
+    ku = np.hypot((yy - 52) / 14.0, (xx - 64) / 30.0)
+    tu = np.where(ku < 0.55, 2, np.where(ku < 1.0, 1, 0))
+    tu = np.where(shrink(up, 2), tu, 0)
+    col = np.where(up[..., None], dark.colors[tu], col)
+    kl = np.hypot((yy - 122) / 16.0, (xx - 64) / 30.0)
+    tl = np.where(kl < 1.0, 1, 0)
+    tl = np.where(shrink(low, 2), tl, 0)
+    col = np.where(low[..., None], dark.colors[tl], col)
     return img_of(col), low
 
 
@@ -494,26 +531,34 @@ def paint_furnace_front(seed):
     return furnace_front_base()[0]
 
 
+FIRE = Ramp("c35d1b", "ff8f00", "ffd800", "ffff97", "ffffff")
+
+
 def paint_furnace_front_on(seed):
+    """The unlit front with a fire filling the lower opening: pointed tongues (three tall
+    ones), orange edges with dark red seams, yellow bodies and pale rising streaks."""
     img, low = furnace_front_base()
     yy, xx = grid()
-    # Flame tongues rising from the bottom of the opening.
-    tongues = [(28, 16, 8), (40, 28, 10), (52, 20, 8), (63, 32, 10), (75, 24, 8), (87, 30, 10),
-               (99, 18, 7)]
-    height = np.zeros((S, S), np.float32)
-    for cx, hgt, w in tongues:
-        u = np.abs(xx - cx) / w
-        prof = np.clip(1 - u, 0, 1) ** 0.7 * hgt
+    iy, ix = ints()
+    peaks = [(30, 15, 14), (50, 21, 13), (70, 11, 9), (90, 23, 15), (108, 9, 8)]
+    height = np.full((S, S), 12.0, np.float32)
+    for cx, hgt, w in peaks:
+        prof = np.clip(1 - np.abs(xx - cx) / w, 0, 1) ** 1.1 * hgt + 9
         height = np.maximum(height, prof)
-    height += 10
-    rel = 124 - yy
-    flame = low & (rel < height)
-    depth = ndimage.distance_transform_edt(flame)
-    core = (anoise(FURNACE_SEED + 3, 10, 4) > 0.55) & (depth > 5)
-    tf = np.where(depth > 3, level(FLAME, 1), level(FLAME, 0))
-    tf = np.where(core, level(FLAME, 2), tf)
-    tf = np.where(core & (depth > 8), level(FLAME, 3), tf)
-    img[..., :3] = np.where(flame[..., None], FLAME.shade(tf, 0), img[..., :3])
+    height += (pix(FURNACE_SEED + 4, 2) - 0.5) * 3
+    flame = low & ((124 - yy) < height)
+    ext = flame.copy()
+    ext[124:, :] = low[123:124, :].repeat(S - 124, 0)
+    depth = ndimage.distance_transform_edt(np.pad(ext, ((0, 8), (0, 0)), mode="edge"))[:S]
+    idx = np.select([depth < 2, depth < 5, depth < 9], [1, 1, 2], 2)
+    # Dark red seams: the upper outline of each tongue and the clefts between them.
+    top_edge = flame & ~shifted(flame, 1, 0)
+    idx = np.where(top_edge & (iy < 118), 0, idx)
+    s = ((xx - 64) * 0.95 + (124 - yy) * 0.55 + anoise(FURNACE_SEED + 5, 8, 8) * 14) % 17
+    idx = np.where((s < 5) & (depth >= 3.5), 3, idx)
+    idx = np.where((s > 1) & (s < 3.2) & (depth >= 6), 4, idx)
+    idx = np.where((s > 9) & (s < 10.5) & (depth >= 3) & (depth < 12), 1, idx)
+    img[..., :3] = np.where(flame[..., None], FIRE.colors[idx], img[..., :3])
     return img
 
 
@@ -521,89 +566,151 @@ def paint_furnace_front_on(seed):
 
 
 def paint_iron_block(seed):
-    return metal_plates(seed, IRON)
+    """Smooth light plate: six soft horizontal bands (bright top edge, flat face, darker
+    groove below), a thin bevelled frame."""
+    yy, xx = ints()
+    r = rng(seed)
+    # IRON: 0 b1, 1 b9, 2 c1, 3 d1, 4 d6, 5 dc, 6 e0, 7 e6, 8 ea, 9 ec, 10 f2
+    idx = np.full((S, S), 7, np.int32)
+    fine = pix(seed + 1, 1)
+    for k in range(6):
+        y0 = 4 + 20 * k
+        ly = yy - y0
+        inb = (ly >= 0) & (ly < 20)
+        a = int(r.integers(30, 44))
+        b = a + int(r.integers(16, 30))
+        c = b + int(r.integers(6, 16))
+        # Bright top edge fading to the right (2 px steps with 1 px staircase ends).
+        e0 = inb & (ly < 2)
+        idx = np.where(e0, np.select([xx < a, xx < b, xx < c], [10, 9, 8], 7), idx)
+        e1 = inb & (ly >= 2) & (ly < 4)
+        a2 = a + int(r.integers(10, 24))
+        idx = np.where(e1, np.select([xx < a - 14, xx < a2, xx < a2 + 10], [9, 9, 8], 7), idx)
+        # One faint brushed hair line in the face.
+        hy = int(r.integers(6, 11))
+        hx0 = int(r.integers(8, 70))
+        hx1 = hx0 + int(r.integers(14, 40))
+        idx = np.where(inb & (ly == hy) & (xx >= hx0) & (xx < hx1), 8, idx)
+        hy2 = int(r.integers(11, 14))
+        hx2 = int(r.integers(40, 100))
+        idx = np.where(inb & (ly == hy2) & (xx >= hx2) & (xx < hx2 + int(r.integers(10, 24))),
+                       6, idx)
+        # Shadow above the groove, then the groove (lighter on the left).
+        idx = np.where(inb & (ly >= 14) & (ly < 16) & (xx >= S - 10), 6, idx)
+        idx = np.where(inb & (ly >= 16) & (ly < 18), 6, idx)
+        g1, g2 = int(r.integers(78, 100)), int(r.integers(96, 112))
+        idx = np.where(inb & (ly >= 18) & (ly < 20), np.where(xx < np.where(ly == 18, g1, g2), 5,
+                                                              4), idx)
+        # Frame pieces beside this band.
+        idx = np.where(inb & (xx < 4), np.select([ly < 16, ly < 18], [2, 1], 0), idx)
+        idx = np.where(inb & (ly == 19) & (xx >= 2) & (xx < 4), 1, idx)
+        idx = np.where(inb & (xx >= S - 6) & (xx < S - 4) & (ly < 16), 6, idx)
+        idx = np.where(inb & (xx >= S - 6) & (xx < S - 4) & (ly >= 16) & (ly < 18), 5, idx)
+        idx = np.where(inb & (xx >= S - 4), np.where(ly < 16, 1, 0), idx)
+        idx = np.where(inb & (xx >= S - 4) & (ly < 2) & (xx < S - 2), 2, idx)
+    # Top and bottom frame.
+    idx = np.where(yy < 4, 3, idx)
+    idx = np.where((yy < 2) & (((xx >= 2) & (xx < 14)) | (xx >= 90)), 2, idx)
+    idx = np.where((yy >= 2) & (yy < 4) & ((xx < 6) | (xx >= 102)), 2, idx)
+    idx = np.where((yy < 2) & (xx < 2), 3, idx)
+    bot = yy >= S - 4
+    idx = np.where(bot, np.where(xx < np.where(yy < S - 2, 62, 56), 2, 1), idx)
+    idx = np.where(bot & (yy < S - 2) & (xx >= 70) & (xx < 76), 2, idx)
+    idx = np.where((yy >= S - 4) & (yy < S - 2) & (xx >= S - 2), 0, idx)
+    return img_of(IRON.colors[idx])
 
 
 def paint_copper_block(seed):
-    return metal_plates(seed, COPPER)
-
-
-def metal_plates(seed, IRON):
-    """Iron-style storage block in the colors of `IRON` (a Ramp)."""
-    yy, xx = ints()
-    t = np.full((S, S), level(IRON, 7), np.float32)
-    t = np.where(pix(seed, 2) > 0.9, level(IRON, 6), t)
-    t = np.where(pix(seed + 1, 2) > 0.94, level(IRON, 8), t)
-    r = rng(seed + 2)
-    for k in range(6):
-        y0 = 4 + k * 20
-        hl = int(r.integers(52, 80))
-        t = np.where((yy >= y0) & (yy < y0 + 2) & (xx < hl), level(IRON, 10), t)
-        t = np.where((yy >= y0) & (yy < y0 + 2) & (xx >= hl), level(IRON, 9), t)
-        gl = int(r.integers(68, 96))
-        g = (yy >= y0 + 17) & (yy < y0 + 20)
-        t = np.where(g & (xx < gl), level(IRON, 3), t)
-        t = np.where(g & (xx >= gl), level(IRON, 5), t)
-        t = np.where(g & (yy >= y0 + 19), level(IRON, 2), t)
-    # Frame: darker left, right and bottom edges, top edge.
-    t = np.where(xx < 4, level(IRON, 2), t)
-    t = np.where((xx >= S - 6) & (xx < S - 4), level(IRON, 5), t)
-    t = np.where(xx >= S - 4, level(IRON, 1), t)
-    t = np.where(yy < 4, level(IRON, 3) + (xx > 12) * (xx < 90) * 0.2, t)
-    t = np.where(yy >= S - 4, level(IRON, 1), t)
-    return img_of(stepped(t, IRON, 0))
-
-
-def streaks(seed, n, angle, lengths, widths, values, tile=True):
-    """Lens-shaped strokes along `angle` (radians, 0 = right, y down). Returns (value map,
-    mask); later strokes paint over earlier ones."""
-    r = rng(seed)
+    """Smooth copper plate: soft diagonal sheen (light stripes, a dark valley across the
+    middle), four corner rivets and a lit frame."""
     yy, xx = grid()
-    ca, sa = np.cos(angle), np.sin(angle)
-    val = np.zeros((S, S), np.float32)
-    mask = np.zeros((S, S), bool)
-    offs = [(-S, -S), (-S, 0), (-S, S), (0, -S), (0, 0), (0, S), (S, -S), (S, 0), (S, S)]         if tile else [(0, 0)]
-    for _ in range(n):
-        cy, cx = r.uniform(0, S), r.uniform(0, S)
-        L = r.uniform(*lengths) / 2
-        W = r.uniform(*widths) / 2
-        v = values[int(r.integers(len(values)))]
-        a2 = angle + r.uniform(-0.12, 0.12)
-        c2, s2 = np.cos(a2), np.sin(a2)
-        m = np.zeros((S, S), bool)
-        for oy, ox in offs:
-            dy, dx = yy - cy - oy, xx - cx - ox
-            u = dx * c2 + dy * s2
-            w = -dx * s2 + dy * c2
-            m |= (np.abs(u) < L) & (np.abs(w) < W * np.sqrt(np.clip(1 - (u / L) ** 2, 0, 1)))
-        val = np.where(m, v, val)
-        mask |= m
-    return val, mask
+    s = (xx + yy) / 2.0          # 0..128 in Faithful 64 px units along the diagonal
+    d = (xx - yy) / 2.0
+    s = s + (noise(seed, 32) - 0.5) * 2.0
+    keys = [(0, 5.0), (11, 5.0), (13, 4.6), (16, 3.9), (18, 4.4), (21, 4.4), (22.5, 5.0),
+            (31, 5.0), (33, 5.6), (35, 6.3), (41, 6.3), (43, 5.6), (45, 5.0), (47, 5.3),
+            (49, 5.3), (51, 5.0), (53, 4.4), (55, 3.6), (61, 3.6), (63, 2.6), (66, 2.0),
+            (71, 2.2), (73, 2.8), (74.5, 4.0), (80, 3.9), (83, 3.5), (85, 4.0), (86.5, 5.0),
+            (97, 5.0), (99, 5.6), (101, 6.3), (107, 6.2), (109, 5.3), (111, 4.4), (113, 4.0),
+            (115, 4.5), (117, 4.0), (119, 4.4), (121, 5.0), (130, 5.0)]
+    ks, vs = zip(*keys)
+    v = np.interp(s, ks, vs).astype(np.float32)
+    # The valley is a little darker toward the top right, lighter toward the bottom left.
+    valley = np.clip(1 - np.abs(s - 62) / 12, 0, 1)
+    v -= valley * np.clip(d / 50, -1, 1) * 0.5
+    # Dashed bright stripes (7) inside the light bands, dark hairlines in the valley.
+    dash = anoise(seed + 1, 4, 4)
+    for c, w in ((36.5, 0.9), (39.5, 0.8), (103.0, 0.9), (105.8, 0.7)):
+        on = (np.abs(s - c) < w) & (np.sin((d + c * 1.7) / 5.1 + dash * 2.5) > -0.55)
+        v = np.where(on, 7.0, v)
+    for c, w in ((66.5, 0.5), (57.5, 0.4), (116.0, 0.4)):
+        on = (np.abs(s - c) < w) & (np.sin((d + c) / 4.3 + dash * 3) > 0.3)
+        v = np.where(on, v - 1.0, v)
+    idx = np.clip(np.round(v + (bayer(S, S) - 0.5) * 0.12), 0, 7).astype(np.int32)
+    # Frame: bright left/top, dark right/bottom (2 px each side).
+    iy, ix = ints()
+    idx = np.where(ix < 2, 7, idx)
+    idx = np.where((ix >= 2) & (ix < 4) & (iy >= 2), 6, idx)
+    idx = np.where(iy < 2, np.where((ix // 8) % 5 == 2, 6, 7), idx)
+    idx = np.where((iy >= 2) & (iy < 4) & (ix >= 4) & (ix < S - 4), np.clip(idx + 1, 0, 6), idx)
+    idx = np.where((ix >= S - 4) & (ix < S - 2) & (iy >= 2), 2, idx)
+    idx = np.where(ix >= S - 2, np.where(iy < 2, 3, 1), idx)
+    idx = np.where((iy >= S - 4) & (iy < S - 2) & (ix >= 2) & (ix < S - 2), 2, idx)
+    idx = np.where(iy >= S - 2, np.where(pix(seed + 3, 2) > 0.5, 1, 0), idx)
+    idx = np.where((iy >= S - 2) & (ix < 2), 6, idx)
+    # Rivets: small domed heads lit from the top left.
+    for cy, cx in ((17, 17), (17, 109), (109, 17), (109, 107)):
+        rr = np.hypot(yy - cy, xx - cx)
+        head = rr <= 5.6
+        lit = ((xx - cx) + (yy - cy)) / 1.414
+        ri = np.where(lit < -2.5, 7, np.where(lit < 0.5, 5, np.where(lit < 3, 4, 3)))
+        ri = np.where(rr > 4.3, np.where(lit < -1, 7, np.where(lit < 2, 4, 1)), ri)
+        ri = np.where(np.hypot(yy - cy + 1.5, xx - cx + 1.5) < 1.3, 7, ri)
+        idx = np.where(head, ri, idx)
+        shadow = (rr > 5.6) & (np.hypot(yy - cy - 1.5, xx - cx - 1.5) <= 5.6)
+        idx = np.where(shadow, np.clip(idx - 2, 0, 7), idx)
+    return img_of(CU_BLOCK.colors[idx])
 
 
 def gem_bands(seed, ramp):
-    """Gold/diamond block: framed, with thin diagonal streaks of light and shade."""
+    """Gold/diamond block (9-colour ramps): a bevelled frame around a polished face with
+    broad, softly stepped diagonal sheen bands and a few thin bright glints, rising to the
+    top right like Faithful's."""
     yy, xx = grid()
-    n = len(ramp) - 1
-    base = (noise(seed, 32) - 0.5) * 1.2 + 4.6
-    v = np.round(base)
-    ang = -0.62
-    sv, sm = streaks(seed + 1, 14, ang, (50, 120), (8, 22), [3, 3, 5, 5, 6, 2], tile=False)
-    v = np.where(sm, sv, v)
-    hv, hm = streaks(seed + 2, 12, ang, (30, 80), (2, 5), [7, 7, 6, 2, 8], tile=False)
-    v = np.where(hm, hv, v)
-    t = v / n
-    # Frame: dark rim, light inner line top/left.
-    rim = (yy < 4) | (xx < 4) | (yy >= S - 4) | (xx >= S - 4)
-    t = np.where(rim, level(ramp, 1), t)
-    t = np.where(((yy < 2) | (xx < 2)) & ~((yy >= S - 4) | (xx >= S - 4)), level(ramp, 2), t)
-    t = np.where((yy >= S - 2) | (xx >= S - 2), level(ramp, 0), t)
-    inner = ((yy >= 4) & (yy < 6) & (xx >= 4) & (xx < S - 4)) |         ((xx >= 4) & (xx < 6) & (yy >= 4) & (yy < S - 4))
-    t = np.where(inner, level(ramp, 7), t)
-    t = np.where(inner & (xx < 40) & (yy < 40), level(ramp, 8), t)
-    inner2 = ((yy >= S - 6) & (yy < S - 4) & (xx >= 4) & (xx < S - 4)) |         ((xx >= S - 6) & (xx < S - 4) & (yy >= 4) & (yy < S - 4))
-    t = np.where(inner2, level(ramp, 2), t)
-    return img_of(ramp.shade(t, 0))
+    iy, ix = ints()
+    q = xx - yy
+    p = xx + yy + 4 * np.sin(q / 60.0 + 0.6) + 1.5 * np.sin(q / 17.0 + 2.0)
+    v = np.full((S, S), 4.0, np.float32)
+    bands = [(-8, 18, -1.3), (30, 12, 1.2), (52, 13, 1.9), (60, 3.5, 1.4), (92, 17, -1.8),
+             (128, 20, 0.9), (150, 9, 1.8), (156, 2.5, 1.2), (184, 17, -1.6), (212, 12, 1.5),
+             (222, 3, 1.3), (248, 14, -1.1), (270, 12, 1.0)]
+    for c, w, amp in bands:
+        g = np.clip(1 - np.abs(p - c) / w, 0, 1) ** 0.8
+        v += amp * g * (1 + 0.35 * np.sin(q / 23.0 + c))
+    v += (anoise(seed, 12, 12) - 0.5) * 1.0
+    # Short bright glints along the bands.
+    r = rng(seed + 3)
+    for c, q0, ln, wd in ((58, -10, 44, 4.5), (150, 30, 50, 4.0), (220, -20, 30, 3.5),
+                          (104, 60, 24, 3.0), (190, -80, 20, 3.0)):
+        c += r.uniform(-6, 6)
+        dq = np.abs(q - q0) / ln
+        dp = np.abs(p - c) / (wd * np.sqrt(np.clip(1 - dq ** 2, 0, 1)) + 1e-3)
+        v = np.where(dp < 1, np.maximum(v + 1.6, 6.0), v)
+        v = np.where(dp < 0.45, np.maximum(v + 1.0, 7.4), v)
+    idx = np.clip(np.round(v + (bayer(S, S) - 0.5) * 0.2), 2, 8).astype(np.int32)
+    # Frame: lit top/left, shaded bottom/right, with a bright inner bevel line top/left.
+    idx = np.where((iy < 4) | (ix < 4), 3, idx)
+    idx = np.where(((iy < 2) & (ix >= 36) & (ix < 112)) | ((ix < 2) & (iy >= 36)), 2, idx)
+    idx = np.where(((iy >= 4) & (iy < 6) & (ix >= 4)) | ((ix >= 4) & (ix < 6) & (iy >= 4)),
+                   np.where((ix < 64 - iy // 2) & (iy < 64 - ix // 2), 8, 7), idx)
+    idx = np.where(((iy >= 6) & (iy < 8) & (ix >= 6)) | ((ix >= 6) & (ix < 8) & (iy >= 6)),
+                   np.where((ix < 40) & (iy < 40), 7, 6), idx)
+    idx = np.where((ix >= S - 6) & (ix < S - 4) & (iy >= 4), np.clip(idx + 1, 3, 7), idx)
+    idx = np.where((iy >= S - 6) & (iy < S - 4) & (ix >= 4), np.clip(idx - 1, 2, 6), idx)
+    idx = np.where((ix >= S - 4) | (iy >= S - 4), 1, idx)
+    idx = np.where(((ix >= S - 2) | (iy >= S - 2)) & (pix(seed + 1, 2) > 0.5), 0, idx)
+    idx = np.where(((ix >= S - 4) & (iy < 4)) | ((iy >= S - 4) & (ix < 4)), 2, idx)
+    return img_of(ramp.colors[idx])
 
 
 def paint_gold_block(seed):
@@ -614,16 +721,63 @@ def paint_diamond_block(seed):
     return gem_bands(seed, DIAMOND)
 
 
+def lumps(seed, n, angle, lengths, widths, shade_fn, base, h=S, w=S, jag=0.0):
+    """Tiling pile of rounded elongated lumps along `angle` (radians, y down). For each lump
+    `shade_fn(u, q)` gives a value from the along (-1..1) and across (-1 top .. 1 bottom)
+    coordinates; later lumps lie on top. Returns (value map, lump id map)."""
+    r = rng(seed)
+    t = np.full((h, w), base, np.float32)
+    ids = np.full((h, w), -1, np.int32)
+    jn = pix(seed + 99, 2, h, w) - 0.5
+    for k in range(n):
+        cy, cx = r.uniform(0, h), r.uniform(0, w)
+        a = angle + r.uniform(-0.12, 0.12)
+        L = r.uniform(*lengths) / 2
+        W = r.uniform(*widths) / 2
+        R = int(L + W + 2)
+        ys = np.arange(int(cy) - R, int(cy) + R + 1)
+        xs = np.arange(int(cx) - R, int(cx) + R + 1)
+        dy = (ys + 0.5 - cy)[:, None]
+        dx = (xs + 0.5 - cx)[None, :]
+        ca, sa = np.cos(a), np.sin(a)
+        u = (dx * ca + dy * sa) / L
+        q = (-dx * sa + dy * ca) / W
+        iy, ix = np.ix_(ys % h, xs % w)
+        rad = u ** 2 + q ** 2 + jn[iy, ix] * jag
+        body = rad < 1
+        cur = t[iy, ix]
+        t[iy, ix] = np.where(body, shade_fn(u, q, rad), cur)
+        ids[iy, ix] = np.where(body, k, ids[iy, ix])
+    return t, ids
+
+
 def paint_coal_block(seed):
-    t = np.full((S, S), level(COAL, 0), np.float32)
-    t = np.where(noise(seed, 16) > 0.5, level(COAL, 1), t)
-    ang = -0.5
-    v1, m1 = streaks(seed + 1, 18, ang, (40, 80), (10, 20), [1, 2, 2])
-    t = np.where(m1, v1 / 4, t)
-    v2, m2 = streaks(seed + 2, 14, ang, (20, 50), (4, 8), [3, 3, 4, 0])
-    t = np.where(m2, v2 / 4, t)
-    t = np.where(pix(seed + 3, 2) > 0.97, level(COAL, 3), t)
-    return img_of(COAL.shade(t, 0))
+    """Packed glossy coal lumps along a shallow rising diagonal: black gaps, dark bodies, a
+    lighter upper band and a small bright gloss streak on each."""
+    # COAL: 0 050505, 1 0d0d0d, 2 151515, 3 1f1e1e, 4 292828
+
+    def shade(u, q, rad):
+        v = np.full(u.shape, 1.0, np.float32)
+        v = np.where(q > 0.45, 0.0, v)
+        band = (q > -0.8) & (q < 0.15) & (np.abs(u) < 0.85) & (rad < 0.8)
+        v = np.where(band, 2.0, v)
+        band2 = (q > -0.62) & (q < -0.12) & (u > -0.7) & (u < 0.45)
+        v = np.where(band2, 3.0, v)
+        gl = (q > -0.52) & (q < -0.3) & (u > -0.5) & (u < 0.05)
+        v = np.where(gl, 4.0, v)
+        return v
+
+    t, ids = lumps(seed, 17, -0.34, (56, 96), (18, 30), shade, 0.0, jag=0.3)
+    # Outline each lump where it meets another lump or the gap.
+    edge = np.zeros((S, S), bool)
+    for dy, dx in ((1, 0), (0, 1), (-1, 0), (0, -1)):
+        edge |= shifted(ids, dy, dx) != ids
+    t = np.where(edge & (shifted(ids, 1, 0) != ids) | edge & (shifted(ids, 0, 1) != ids), 0.0, t)
+    # Rough dull fragments in the gaps.
+    gap = ids < 0
+    t = np.where(gap & (anoise(seed + 5, 4, 8) > 0.6), 1.0, t)
+    idx = np.clip(np.round(t), 0, 4).astype(np.int32)
+    return img_of(COAL.colors[idx])
 
 
 # ---------------------------------------------------------------------------- torch
@@ -656,180 +810,288 @@ def paint_torch(seed):
 # ---------------------------------------------------------------------------- lantern / chain
 
 
-def metal_part(img, mask, base=1, light=True):
-    t = np.full((S, S), level(LANT, base), np.float32)
-    if light:
-        e = edge_light(mask, 2)
-        t = np.where(e > 0, level(LANT, base + 2), t)
-        t = np.where(e < 0, level(LANT, max(0, base - 1)), t)
-    paint(img, mask, LANT.shade(t, 0))
+CHAIN_C = Ramp("252c3d", "3e4453", "495065", "5a6278")
+LGLOW = Ramp("814023", "8b5230", "c36322", "f09149", "f9c966", "fdfd8b", "ffffd5")
+
+
+def rrect_sd(yy, xx, y0, x0, y1, x1, r):
+    """Signed distance to a rounded rectangle [y0, y1) x [x0, x1) (negative inside)."""
+    cy, cx = (y0 + y1) / 2, (x0 + x1) / 2
+    hy, hx = (y1 - y0) / 2 - r, (x1 - x0) / 2 - r
+    qy, qx = np.abs(yy - cy) - hy, np.abs(xx - cx) - hx
+    out = np.hypot(np.maximum(qy, 0), np.maximum(qx, 0))
+    return out + np.minimum(np.maximum(qy, qx), 0) - r
+
+
+def tube_ring(img, y0, x0, y1, x1, wall, r, clip=None, wrap=False, ramp=CHAIN_C):
+    """A metal link seen face on: a rounded rectangular ring of round wire `wall` px thick,
+    lit from the top left (a lit ridge on the wire's upper-left side, dark lower right)."""
+    yy, xx = grid()
+    shifts = (-S, 0, S) if wrap else (0,)
+    sd = np.min([rrect_sd(yy + s, xx, y0, x0, y1, x1, r) for s in shifts], axis=0)
+    m = (sd <= 0) & (sd > -wall)
+    if clip is not None:
+        m &= clip
+    gy, gx = np.gradient(sd)
+    nl = np.hypot(gy, gx) + 1e-6
+    ny, nx = gy / nl, gx / nl
+    w = np.clip(-sd / wall, 0, 1)
+    c, s = np.cos(np.pi * w), np.sin(np.pi * w)
+    L = np.array([-0.55, -0.55, 0.63])
+    b = nx * c * L[0] + ny * c * L[1] + s * L[2]
+    idx = np.select([b > 0.9, b > 0.74, b > 0.3], [3, 2, 1], 0)
+    paint(img, m, ramp.colors[idx])
+    return m
 
 
 def paint_lantern(seed):
+    """Minecraft's lantern layout (8 px units): cap, glowing body, top/bottom, ring, handle."""
     img = blank()
     yy, xx = grid()
-    # Cap sides (1,0)-(5,2).
+    iy, ix = ints()
+    M = LANT  # 0 252c3d, 1 3e4453, 2 424a5e, 3 495065, 4 5a6278
+    # Cap sides (1,0)-(5,2): dark rim, lighter plate, a rusty band.
     cap = rect(0, 8, 16, 40)
-    metal_part(img, cap, 1)
-    paint(img, rect(0, 8, 2, 40), LANT.at(3))
-    paint(img, rect(8, 8, 12, 40), GLOW.shade(np.where(grid()[1] < 12, 0.2, 0.0), 0))
-    # Body sides (0,2)-(6,9): metal frame, round glowing window.
+    idx = np.full((S, S), 3)
+    idx = np.where((iy < 2) | (ix < 10) | (ix >= 38) | (iy >= 14), 1, idx)
+    idx = np.where(((iy < 4) | (iy >= 12)) & ((ix < 12) | (ix >= 36)), 1, idx)
+    idx = np.where((iy >= 2) & (iy < 4) & (ix >= 12) & (ix < 26), 4, idx)
+    paint(img, cap, M.colors[idx])
+    band = rect(8, 8, 12, 40)
+    paint(img, band, LGLOW.colors[np.where((ix < 10) | (ix >= 38), 1, 0)])
+    paint(img, rect(8, 12, 9, 36) & (pix(seed, 2) > 0.6), LGLOW.at(1))
+    # Body sides (0,2)-(6,9): rounded metal shoulders, rusty frame, glowing window.
     body = rect(16, 0, 72, 48)
-    metal_part(img, body, 2)
-    win = rect(24, 2, 64, 46)
-    win &= ~(rect(24, 2, 28, 6) | rect(24, 42, 28, 46) | rect(60, 2, 64, 6) | rect(60, 42, 64, 46))
-    r = np.hypot((yy - 44) / 1.0, (xx - 24) / 1.15)
-    tg = np.clip(1.0 - r / 30.0, 0, 1)
-    idx = np.select([tg < 0.12, tg < 0.22, tg < 0.32, tg < 0.55], [0, 2, 3, 4], 5)
-    streak = (np.abs((xx - 20) - (yy - 40)) < 2.5) & (r < 13)
-    idx = np.where(streak, 6, idx)
-    paint(img, win, GLOW.colors[idx])
-    # Top/bottom frame lines of the body.
-    paint(img, rect(22, 0, 24, 48), LANT.at(0))
-    paint(img, rect(64, 0, 66, 48), LANT.at(0))
-    # Body top/bottom (0,9)-(6,15), with the cap top (1,10)-(5,14) inside.
+    paint(img, body, M.at(1))
+    for y0, flip in ((16, False), (64, True)):
+        ly = iy - y0 if not flip else (y0 + 7) - iy
+        inset = np.select([ly < 2, ly < 4, ly < 6], [99, 12, 8], 6)
+        plate = rect(y0, 0, y0 + 8, 48) & (np.abs(ix - 23.5) < 24 - inset)
+        paint(img, plate, M.at(3))
+        paint(img, plate & (ly >= 2) & (ly < 4) & (ix < 24) & ~flip, M.at(4))
+    win = rect(24, 0, 64, 48)
+    paint(img, win, LGLOW.colors[np.where((ix < 2) | (ix >= 46), 0, 1)])
+    glass = rect(24, 4, 64, 44)
+    k = np.maximum(np.abs(xx - 24) / 20.0, np.abs(yy - 44) / 20.0) * 0.55 +         np.hypot((xx - 24) / 20.0, (yy - 44) / 20.0) * 0.5
+    gi = np.select([k > 0.98, k > 0.86, k > 0.62], [2, 3, 4], 5)
+    streak = (np.abs((xx - 14) - (yy - 40) * 1.1) < 2.6) & (yy > 38) & (yy < 58)
+    gi = np.where(streak & (k < 0.8), 6, gi)
+    gi = np.where((np.abs((xx - 20) - (yy - 38) * 1.1) < 1.0) & (yy > 36) & (yy < 44) & (k < 0.8),
+                  6, gi)
+    paint(img, glass, LGLOW.colors[gi])
+    # Body top/bottom (0,9)-(6,15): a plate with a raised round lid.
     top = rect(72, 0, 120, 48)
-    metal_part(img, top, 3)
-    disk_m = ((yy - 96) ** 2 + (xx - 24) ** 2) <= 21 ** 2
-    paint(img, disk_m, LANT.at(2))
-    paint(img, disk_m & ~(((yy - 97) ** 2 + (xx - 25) ** 2) <= 20 ** 2), LANT.at(1))
-    # Hanging ring (11,1)-(14,5): a rounded loop.
-    ring_o = (((yy - 24) / 16.0) ** 2 + ((xx - 100) / 12.0) ** 2 <= 1) & rect(8, 88, 40, 112)
-    ring_i = (((yy - 24) / 10.0) ** 2 + ((xx - 100) / 6.5) ** 2 <= 1)
-    ring = ring_o & ~ring_i
-    metal_part(img, ring, 1)
-    # Standing handle (11,10)-(14,12): an arch.
-    h_o = (((yy - 96) / 16.0) ** 2 + ((xx - 100) / 12.0) ** 2 <= 1) & rect(80, 88, 96, 112)
-    h_i = (((yy - 96) / 10.0) ** 2 + ((xx - 100) / 6.5) ** 2 <= 1)
-    metal_part(img, h_o & ~h_i, 1)
+    paint(img, top, M.at(1))
+    dd = np.hypot(yy - 96, xx - 24)
+    paint(img, top & (dd < 24), M.at(2))
+    paint(img, top & (dd < 22), M.at(3))
+    paint(img, top & (dd < 20) & (dd > 17) & (xx + yy < 112), M.at(4))
+    paint(img, top & (dd < 20) & (dd > 17) & (xx + yy > 128), M.at(2))
+    # Hanging ring (11,1)-(14,5), a lower loop (11,6)-(14,8), standing handle (11,10)-(14,12).
+    tube_ring(img, 8, 88, 40, 112, 6, 9)
+    tube_ring(img, 32, 88, 64, 112, 6, 9, clip=rect(48, 0, 64, S))
+    tube_ring(img, 80, 88, 112, 112, 6, 9, clip=rect(80, 0, 96, S))
     return img
 
 
 def paint_iron_chain(seed):
+    """Minecraft's chain layout: two 24 px strips (the two crossed planes), each a column of
+    round-wire links seen face on, staggered between the strips; tiles vertically."""
     img = blank()
-    yy, xx = grid()
-    for x0, phase in ((0, 0), (24, 24)):
-        for k in range(-1, 4):
-            cy = phase + 20 + k * 48
-            cx = x0 + 12
-            outer = (np.abs(xx - cx) <= 12) & (np.abs(yy - cy) <= 14)
-            outer &= ((np.maximum(np.abs(xx - cx) - 6, 0) / 6) ** 2 +
-                      (np.maximum(np.abs(yy - cy) - 8, 0) / 6) ** 2) <= 1
-            inner = (np.abs(xx - cx) < 6) & (np.abs(yy - cy) < 8)
-            inner &= ((np.maximum(np.abs(xx - cx) - 2, 0) / 4) ** 2 +
-                      (np.maximum(np.abs(yy - cy) - 4, 0) / 4) ** 2) <= 1
-            m = outer & ~inner & (xx >= x0) & (xx < x0 + 24)
-            t = np.full((S, S), level(LANT, 1))
-            e = edge_light(m, 2)
-            t = np.where(e < 0, level(LANT, 0), t)
-            hl = m & (xx < cx) & (yy < cy) & ~shrink(m, 1) & grow(inner, 2)
-            t = np.where(hl | (m & (xx < x0 + 4) & (yy > cy - 8) & (yy < cy + 6) & (xx >= x0 + 2)),
-                         level(LANT, 3), t)
-            paint(img, m, LANT.shade(t, 0))
+    for x0, links in ((0, ((8, 32), (48, 80), (96, 120))), (24, ((24, 56), (72, 104), (112, 144)))):
+        for y0, y1 in links:
+            tube_ring(img, y0, x0, y1, x0 + 24, 6, 9, clip=rect(0, x0, S, x0 + 24), wrap=True)
     return img
 
 
 # ---------------------------------------------------------------------------- door
 
 
-def door_wood(seed):
-    t = level(DOOR, 3) + 0.04 + (anoise(seed, 8, 30) - 0.5) * 0.2
-    n = anoise(seed + 1, 2, 18)
-    t = np.where(n < 0.2, t - 0.14, t)
-    t = np.where(n > 0.8, t + 0.12, t)
-    t += (pix(seed + 2, 2) - 0.5) * 0.05
-    return t
+def door_wood(seed, Y, xx):
+    """Door wood as DOOR indices: short horizontal grain streaks, dark and light."""
+    n = anoise(seed, 3, 14) * 0.75 + anoise(seed + 1, 2, 6) * 0.25
+    idx = np.select([n < 0.3, n < 0.35, n > 0.63], [2, 2.5, 4], 3)
+    idx = np.where((n < 0.24) & (pix(seed + 4, 2) > 0.5), 1, idx)
+    idx = np.where((n > 0.78) & (pix(seed + 5, 2) > 0.6), 5, idx)
+    return np.floor(idx + (pix(seed + 6, 1) > 0.5) * (idx % 1 > 0)).astype(np.int32)
+
+
+DOOR_PANELS = [(20, 48), (60, 88), (108, 136), (156, 184), (204, 232)]
 
 
 def door_panels(seed, top: bool):
-    """Door half: wood with a 2 x 4 grid of recessed panels over the whole door (windows in
-    the top two rows). Returns (value, window mask)."""
+    """Door half as DOOR indices: stiles and rails with a 2 x 5 grid of recessed panels over
+    the whole door (glass windows in the top two rows). Returns (indices, window mask)."""
     yy, xx = ints()
     Y = yy + (0 if top else S)  # door coordinates 0..255
-    t = door_wood(seed)
+    idx = door_wood(seed + (0 if top else 50), Y, xx)
     windows = np.zeros((S, S), bool)
-    rows = [(20, 48), (60, 88), (108, 150), (170, 196), (218, 246)]
-    for i, (y0, y1) in enumerate(rows):
+    for i, (y0, y1) in enumerate(DOOR_PANELS):
         for (x0, x1) in ((20, 56), (68, 104)):
             m = (Y >= y0) & (Y < y1) & (xx >= x0) & (xx < x1)
-            t = np.where(m, t - 0.05, t)
-            t = np.where(m & (Y < y0 + 4), level(DOOR, 0), t)
-            t = np.where(m & (xx < x0 + 4) & (Y >= y0 + 4), level(DOOR, 1), t)
-            t = np.where(m & (xx >= x1 - 2), level(DOOR, 6), t)
-            t = np.where((Y >= y1) & (Y < y1 + 2) & (xx >= x0) & (xx < x1 + 2), level(DOOR, 6), t)
+            idx = np.where(m, np.where((idx == 3) & (pix(seed + 11, 2) > 0.55), 2,
+                                       np.minimum(idx, 3)), idx)
+            idx = np.where(m & (Y < y0 + 2), 0, idx)
+            idx = np.where(m & (Y >= y0 + 2) & (Y < y0 + 4), 1, idx)
+            idx = np.where(m & (xx < x0 + 2) & (Y >= y0 + 2), np.where(Y < y0 + 8, 0, 1), idx)
+            idx = np.where(m & (xx >= x0 + 2) & (xx < x0 + 4) & (Y >= y0 + 4),
+                           np.minimum(idx, 2), idx)
+            idx = np.where((Y >= y0) & (Y < y1 + 4) & (xx >= x1) & (xx < x1 + 4),
+                           np.where(xx < x1 + 2, 4, 5), idx)
+            idx = np.where((Y >= y1) & (Y < y1 + 4) & (xx >= x0) & (xx < x1 + 2),
+                           np.where(Y < y1 + 2, 5, 4), idx)
             if i < 2:
-                windows |= (Y >= y0 + 4) & (Y < y1) & (xx >= x0 + 4) & (xx < x1 - 2)
-    # Outer stiles: light left edge, dark right edge.
-    t = np.where(xx < 2, level(DOOR, 6), t)
-    t = np.where((xx >= 2) & (xx < 4), level(DOOR, 4), t)
-    t = np.where(xx >= S - 2, level(DOOR, 0), t)
-    t = np.where((xx >= S - 4) & (xx < S - 2), level(DOOR, 1), t)
+                windows |= (Y >= y0 + 4) & (Y < y1) & (xx >= x0 + 4) & (xx < x1)
+    # Outer stiles: light left edge, dark right edge; top and bottom edges.
+    idx = np.where(xx < 2, np.where(pix(seed + 7, 2) > 0.5, 6, 5), idx)
+    idx = np.where((xx >= 2) & (xx < 4), 4, idx)
+    idx = np.where(xx >= S - 2, 1, idx)
+    idx = np.where((xx >= S - 4) & (xx < S - 2), 2, idx)
     if top:
-        t = np.where(yy < 2, level(DOOR, 6), t)
+        idx = np.where(yy < 2, np.where(pix(seed + 8, 2) > 0.4, 6, 3), idx)
+        idx = np.where((yy >= 2) & (yy < 4) & (xx >= 2), 4, idx)
     else:
-        t = np.where(yy >= S - 2, level(DOOR, 0), t)
-    return t, windows
+        idx = np.where(yy >= S - 4, np.where((yy >= S - 2) & (pix(seed + 9, 2) > 0.5), 0, 1), idx)
+    return idx, windows
 
 
-def hinge(img, y0, y1):
-    m = rect(y0, 0, y1, 6)
-    t = np.full((S, S), level(HINGE, 2)) + edge_light(m, 1) * 0.3
-    paint(img, m, HINGE.shade(t, 0))
-
-
-def handle(img, top: bool):
+def hinge(img, y0, y1, top_edge=True, bottom_edge=True):
+    """A grey hinge leaf on the left edge, lit on the left, a dark lower edge."""
     yy, xx = ints()
-    Y = yy + (0 if top else S)
-    ring = (Y >= 116) & (Y < 150) & (xx >= 92) & (xx < 116)
-    hole = (Y >= 122) & (Y < 144) & (xx >= 98) & (xx < 110)
-    m = ring & ~hole
-    t = np.full((S, S), level(HINGE, 2)) + edge_light(m, 2) * 0.3
-    paint(img, m, HINGE.shade(t, 0))
+    m = rect(y0, 0, y1, 8)
+    idx = np.select([xx < 2, xx < 4, xx < 6], [4, 3, 2], 1)
+    if bottom_edge:
+        idx = np.where(yy >= y1 - 2, 0, idx)
+    if top_edge:
+        idx = np.where((yy < y0 + 2) & (xx < 6), 5, idx)
+    paint(img, m, HINGE.colors[idx])
+
+
+def handle(img):
+    """The door's pull handle at the bottom right of the top half: a rounded bar on two posts
+    with a shadow on the wood."""
+    yy, xx = grid()
+    iy, ix = ints()
+    bar = (rrect_sd(yy, xx, 116, 92, 123, 118, 3) <= 0)
+    posts = rect(122, 94, 128, 98) | rect(122, 112, 128, 116)
+    shadow = (rect(123, 90, 128, 120) & ~posts) & ~bar
+    paint(img, shadow & (ix >= 98) & (ix < 112), DOOR.at(0))
+    idx = np.where(iy < 118, 5, np.where(iy < 120, 4, 2))
+    idx = np.where((ix < 94) | (ix >= 116), np.minimum(idx, 3), idx)
+    paint(img, bar, HINGE.colors[idx])
+    paint(img, posts, HINGE.colors[np.where(ix % 4 < 2, 2, 0)])
 
 
 def paint_oak_door_top(seed):
-    t, win = door_panels(seed, True)
-    img = img_of(stepped(t, DOOR, 0))
+    idx, win = door_panels(seed, True)
+    img = img_of(DOOR.colors[idx])
     img[win] = 0
-    hinge(img, 24, 44)
-    handle(img, True)
+    hinge(img, 32, 48)
+    hinge(img, 120, 128, bottom_edge=False)
+    handle(img)
     return img
 
 
 def paint_oak_door_bottom(seed):
-    t, _ = door_panels(seed, False)
-    img = img_of(stepped(t, DOOR, 0))
-    hinge(img, 80, 98)
+    idx, _ = door_panels(seed, False)
+    img = img_of(DOOR.colors[idx])
+    hinge(img, 0, 8, top_edge=False)
+    hinge(img, 80, 96)
     return img
 
 
 # ---------------------------------------------------------------------------- wool
 
 
+def fibres(seed, n, angles, lengths, widths, base=0.5, h=S, w=S, shadow=0.22, light=0.3,
+           values=(0.35, 0.75)):
+    """Tiling tangle of short lens-shaped strands (wool, fluff). Each strand is rounded:
+    lit on its upper side, darker below, with a thin dark shadow under it; later strands lie
+    on top. Returns a 0..1 value map."""
+    r = rng(seed)
+    t = np.full((h, w), base, np.float32)
+    for _ in range(n):
+        cy, cx = r.uniform(0, h), r.uniform(0, w)
+        a = angles[int(r.integers(len(angles)))] + r.uniform(-0.15, 0.15)
+        L = r.uniform(*lengths) / 2
+        W = r.uniform(*widths) / 2
+        v = r.uniform(*values)
+        R = int(L + W + 3)
+        ys = np.arange(int(cy) - R, int(cy) + R + 1)
+        xs = np.arange(int(cx) - R, int(cx) + R + 1)
+        dy = (ys + 0.5 - cy)[:, None]
+        dx = (xs + 0.5 - cx)[None, :]
+        ca, sa = np.cos(a), np.sin(a)
+        u = dx * ca + dy * sa
+        q = -dx * sa + dy * ca
+        if ca < 0:
+            q = -q
+        prof = np.sqrt(np.clip(1 - (u / L) ** 2, 0, 1))
+        half = W * prof
+        body = np.abs(q) < half
+        sh = (~body) & (q > 0) & (q < half + 1.6) & (prof > 0.15)
+        # q < 0 is the upper side of the strand (y grows downward).
+        across = np.where(half > 0, q / np.maximum(half, 1e-3), 0)
+        val = v - across * light - (u / L) ** 2 * 0.12
+        iy, ix = np.ix_(ys % h, xs % w)
+        cur = t[iy, ix]
+        cur = np.where(sh, cur - shadow, cur)
+        cur = np.where(body, val, cur)
+        t[iy, ix] = cur
+    return t
+
+
 def paint_white_wool(seed):
-    yy, xx = warp(seed + 5, 5, 32)
-    wl, amp, per = 40.0, 6.0, 14.0
-    phase = (anoise(seed, 32, 64) - 0.5) * 16
-    tri = np.abs(((xx / wl) % 1.0) - 0.5) * 2 - 0.5  # -0.5..0.5
-    u = ((yy + tri * 2 * amp + phase) / per) % 1.0
-    t = np.where(u < 0.2, 0.72, np.where(u < 0.6, 0.55, np.where(u < 0.85, 0.44, 0.34)))
-    t += (noise(seed + 1, 16) - 0.5) * 0.45 + (anoise(seed + 2, 4, 12) - 0.5) * 0.3
-    return img_of(stepped(t, WOOL, 0.15))
+    """Soft felted wool: a dense tangle of short fibre strands at shallow crossing angles."""
+    t = fibres(seed, 360, (0.45, -0.45, 0.32, -0.32), (16, 38), (4.5, 8.5), base=0.2,
+               values=(0.25, 0.62), light=0.24, shadow=0.12)
+    t += (noise(seed + 3, 32) - 0.5) * 0.16 + (pix(seed + 4, 2) - 0.5) * 0.08
+    return img_of(WOOL.shade(t, 0.45))
 
 
 # ---------------------------------------------------------------------------- bed
 
 
+BLANKET_FOLDS = [
+    # centre x, centre y, radius, start and end angle (degrees, y down), thickness, ridge side
+    (64, -70, 86, 42, 138, 13, 1),      # the sagging fold across the top
+    (-60, 64, 70, -52, 52, 12, -1),     # shade down the left edge
+    (54, 34, 26, 58, 142, 7, 1),        # crescent in the middle
+    (40, 76, 62, -44, 44, 10, 1),       # the long curve on the right
+    (50, 20, 68, 93, 152, 9, 1),        # sweep in the lower left
+    (64, 250, 130, -118, -62, 12, -1),  # fold along the bottom
+]
+
+
 def swirl_value(seed):
-    """Red blanket: smooth swirling streaks (contours of a warped field)."""
-    yy, xx = warp(seed, 18, 64)
-    f = noise(seed + 2, 64) * 0.7 + noise(seed + 3, 32) * 0.3
-    g = (f * 2.5 + (xx + yy) / 128) % 1.0
-    t = np.full((S, S), level(RED_TOP, 5), np.float32)
-    t = np.where((g > 0.02) & (g < 0.12), level(RED_TOP, 6), t)
-    t = np.where((g > 0.4) & (g < 0.68), level(RED_TOP, 4), t)
-    t = np.where((g > 0.47) & (g < 0.6), level(RED_TOP, 3), t)
-    return t
+    """Red blanket: plain cloth in broad soft light and shade, with a few long crescent folds
+    (a darker hollow with a deeper crease, a light ridge beside it). RED_TOP values."""
+    yy, xx = grid()
+    r = rng(seed)
+    wy = (noise(seed, 64) - 0.5) * 60 + (noise(seed + 5, 32) - 0.5) * 16
+    wx = (noise(seed + 1, 64) - 0.5) * 60
+    f = np.sin((yy + wy) / 70 * 2 * np.pi + (xx + wx) / 97.0 * np.pi) * 0.7
+    f += (noise(seed + 2, 64) - 0.5) * 1.1
+    idx = np.select([f < -0.62, f < 0.72], [4.0, 5.0], 6.0).astype(np.float32)
+    light = np.zeros((S, S), bool)
+    wob = (noise(seed + 9, 32) - 0.5) * 12
+    for cx, cy, rad, a0, a1, th, side in BLANKET_FOLDS:
+        cx, cy = cx + r.uniform(-3, 3), cy + r.uniform(-3, 3)
+        dy, dx = yy - cy, xx - cx
+        rr = np.hypot(dy, dx) + wob
+        ang = np.degrees(np.arctan2(dy, dx))
+        ang = np.where(ang < a0 - 90, ang + 360, ang)
+        along = np.clip((ang - a0) / (a1 - a0), 0, 1)
+        inside = (ang > a0) & (ang < a1)
+        half = th / 2 * np.maximum(np.sin(np.pi * along ** 0.8), 0) ** 1.1
+        off = rr - rad
+        body = inside & (np.abs(off) < half)
+        idx = np.where(body, np.minimum(idx, 4.0), idx)
+        crease = body & (np.abs(off + side * half * 0.3) < half * 0.35) & (half > 3)
+        idx = np.where(crease, 3.0, idx)
+        light |= inside & (off * side > half) & (off * side < half + 3) & (half > 2)
+    idx = np.where(light & (idx >= 5), 6.0, idx)
+    return idx / 6.0
 
 
 def paint_red_bed_foot_up(seed):
@@ -838,14 +1100,28 @@ def paint_red_bed_foot_up(seed):
 
 def paint_red_bed_head_up(seed):
     yy, xx = ints()
-    t = swirl_value(seed)
-    t = np.where((yy >= 64) & (yy < 82), t - 0.3, t)
-    t = np.where((yy >= 104) & (yy < 106), level(RED_TOP, 1), t)
-    t = np.where((yy >= 106) & (yy < 108), level(RED_TOP, 6), t)
+    t = swirl_value(seed + 1) - level(RED_TOP, 1)
+    # The blanket's turned-down edge (rows 64..108): darker cloth with a wavy light ridge.
+    fy, fx = grid()
+    idx = np.full((S, S), 2.0)
+    idx = np.where(anoise(seed + 4, 8, 24) > 0.62, 3.0, idx)
+    bowl = (fy >= 66) & (fy < 66 + 12 * np.clip(1 - np.abs(fx - 76) / 34, 0, 1) ** 0.7)
+    idx = np.where(bowl, 1.0, idx)
+    idx = np.where((fy >= 86) & (anoise(seed + 5, 10, 30) > 0.45), np.maximum(idx, 3.0), idx)
+    kx = [0, 30, 64, 90, 110, 128]
+    yc = np.interp(fx, kx, [95, 97, 100, 92, 82, 80]) + (noise(seed + 6, 16) - 0.5) * 3
+    th = np.interp(fx, kx, [21, 14, 6, 5, 7, 4])
+    dd = np.abs(fy - yc)
+    idx = np.where(dd < th / 2, 5.0, idx)
+    idx = np.where(dd < th * 0.3, 6.0, idx)
+    idx = np.where(yy < 66, 0.0, idx)
+    t = np.where((yy >= 64) & (yy < 108), idx / 6.0, t)
+    t = np.where((yy >= 108) & (yy < 110), np.where(pix(seed + 7, 2) > 0.5, 1, 2) / 6.0, t)
     col = stepped(t, RED_TOP, 0)
     # Sheet and the rounded pillow.
     ts = np.full((S, S), level(SHEET, 4))
-    ts = np.where((yy >= 60), level(SHEET, 2), ts)
+    ts = np.where((yy >= 58), level(SHEET, 3), ts)
+    ts = np.where((yy >= 60) & (pix(seed + 8, 2) > 0.5), level(SHEET, 2), ts)
     ts = np.where((yy >= 62), level(SHEET, 0), ts)
     pil = (np.abs(xx - 63.5) <= 47) & (yy >= 6) & (yy < 60)
     pil &= ((np.maximum(np.abs(xx - 63.5) - 31, 0) / 16) ** 2 +
@@ -864,9 +1140,14 @@ def bed_side(seed, pillow, legs):
     yy, xx = ints()
     img = blank()
     band = (yy >= 56) & (yy < 88)
-    tb = swirl_value(seed) - 3 * level(RED_TOP, 1)
-    tb = np.where(yy >= 86, level(RED_TOP, 0), tb)
-    paint(img, band, RED_TOP.shade(tb, 0))
+    # The blanket hanging over the side: darker cloth with soft horizontal folds.
+    n = anoise(seed, 6, 40) * 0.7 + anoise(seed + 1, 3, 14) * 0.3
+    bi = np.select([n < 0.3, n < 0.62, n < 0.74], [1, 2, 3], 4)
+    bi = np.where((yy >= 56) & (yy < 58), 4, bi)
+    bi = np.where((yy >= 58) & (yy < 60), np.minimum(bi + 1, 4), bi)
+    bi = np.where(yy >= 84, 1, bi)
+    bi = np.where(yy >= 86, 0, bi)
+    paint(img, band, RED_TOP.colors[bi])
     if pillow:
         pm = band & ((xx >= 64) if pillow == "right" else (xx < 64) if pillow == "left"
                      else np.ones((S, S), bool))
@@ -944,7 +1225,7 @@ def crack_field():
     import heapq
     from scipy.spatial import Voronoi
     r = rng(46)
-    n = 5
+    n = 4
     pts = []
     for i in range(n):
         for j in range(n):
@@ -996,7 +1277,7 @@ def crack_field():
         L = float(np.hypot(*(p1 - p0)))
         nseg = max(3, int(L / 6))
         nrm = np.array([-(p1 - p0)[1], (p1 - p0)[0]]) / max(L, 1e-6)
-        bend = r.uniform(-0.12, 0.12) * L
+        bend = r.uniform(-0.08, 0.08) * L
         ks = np.arange(nseg + 1)
         offs = bend * np.sin(np.pi * ks / nseg) + np.concatenate([[0], r.uniform(-1.5, 1.5, nseg - 1), [0]])
         ctrl = [p0 + (p1 - p0) * k / nseg + nrm * offs[k] for k in range(nseg + 1)]
@@ -1012,7 +1293,7 @@ def crack_field():
             sacc += seg
     # A few short dead-end spurs off the cracks.
     ys_, xs_ = np.nonzero(np.isfinite(dist))
-    for _ in range(18):
+    for _ in range(10):
         k = int(r.integers(len(ys_)))
         x, y, d = xs_[k] + 0.5, ys_[k] + 0.5, max(float(dist[ys_[k], xs_[k]]), 70.0)
         a = r.uniform(0, 2 * np.pi)
@@ -1021,14 +1302,17 @@ def crack_field():
             x, y = x + np.cos(a) * 1.5, y + np.sin(a) * 1.5
             stamp(x, y, d + q * 1.5 + 1)
     crack = np.isfinite(dist)
+    # Stage limits from the share of all crack pixels each stage shows (like Faithful's).
+    ds = np.sort(dist[crack])
+    limits = [ds[min(len(ds) - 1, int(f * len(ds)))] for f in STAGE_SHARE[:9]] + [np.inf]
     stage = np.full((S, S), 9, np.int32)
     for k in range(9, -1, -1):
-        stage = np.where(crack & (dist <= LIMITS[k]), k, stage)
+        stage = np.where(crack & (dist <= limits[k]), k, stage)
     _CRACKS["f"] = (crack, stage)
     return _CRACKS["f"]
 
 
-LIMITS = [5, 11, 18, 27, 36, 46, 58, 74, 96, 1e9]
+STAGE_SHARE = [0.025, 0.065, 0.12, 0.19, 0.25, 0.36, 0.48, 0.65, 0.87, 1.0]
 
 
 def destroy(k):
@@ -1036,7 +1320,7 @@ def destroy(k):
         crack, stage = crack_field()
         m = crack & (stage <= k)
         img = blank()
-        light = shifted(m, 2, -2) & ~m
+        light = (shifted(m, 1, 0) | shifted(m, 0, 1) | shifted(m, 2, 0) | shifted(m, 0, 2)) & ~m
         paint(img, light, hexc("9b9b9b"))
         paint(img, m, hexc("3d3d3d"))
         return img

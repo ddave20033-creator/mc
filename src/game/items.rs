@@ -70,6 +70,17 @@ impl Game {
         if super::grenades::GrenadeKind::of(held).is_some() {
             return;
         }
+        // A fishing rod casts by holding the button (`update_fishing`), unless there is
+        // something to open.
+        if held == FISHING_ROD {
+            let opens = self.target.is_some_and(|(hit, _)| {
+                let b = self.terrain.world.geti(hit);
+                b == CRAFTING_TABLE || is_gun_bench(b) || b == GUN_STATION || is_furnace(b) || is_door(b) || is_bed(b) || is_chest(b)
+            });
+            if !opens || self.fishing.line.is_some() {
+                return;
+            }
+        }
         // A magazine in hand does nothing (it is loaded at the gun station).
         if magazine_capacity(held).is_some() {
             return;
@@ -88,6 +99,9 @@ impl Game {
         if let Some(i) = self.mob_target {
             if held == SHEARS && self.mobs[i].can_shear() {
                 self.shear(i);
+                return;
+            }
+            if self.right_pressed && self.use_on_wolf(i) {
                 return;
             }
         }
@@ -175,6 +189,7 @@ impl Game {
             WATER_BUCKET | LAVA_BUCKET => self.empty_bucket(held),
             PIG_SPAWN_EGG => self.use_spawn_egg(MobKind::Pig),
             SHEEP_SPAWN_EGG => self.use_spawn_egg(MobKind::Sheep),
+            WOLF_SPAWN_EGG => self.use_spawn_egg(MobKind::Wolf),
             TARGET_DUMMY => self.use_spawn_egg(MobKind::Dummy),
             GLASS_BOTTLE => self.fill_bottle(),
             _ if block_of(held).is_some() => self.place_block(held),

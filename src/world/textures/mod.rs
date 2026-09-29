@@ -110,20 +110,19 @@ pub mod tex {
     /// Torch flame and smoke particle sprites (smoke: small to large).
     pub const FLAME_PARTICLE: u32 = FURNACE_ANIM + FURNACE_FRAMES;
     pub const SMOKE: u32 = FLAME_PARTICLE + 1;
-    /// Pig skin: a whole Minecraft entity atlas (64x64 texels) in one layer; the model picks
-    /// its faces with atlas UVs.
-    pub const PIG: u32 = SMOKE + super::SMOKE_FRAMES;
-    pub const PIG_SPAWN_EGG: u32 = PIG + 1;
-    pub const PORKCHOP: u32 = PIG + 2;
-    pub const COOKED_PORKCHOP: u32 = PIG + 3;
-    pub const GLASS_BOTTLE: u32 = PIG + 4;
-    pub const WATER_BOTTLE: u32 = PIG + 5;
-    pub const PURIFIED_WATER: u32 = PIG + 6;
-    pub const LANTERN_ITEM: u32 = PIG + 7;
-    pub const IRON_NUGGET: u32 = PIG + 8;
+    /// A spare layer (the pig's whole atlas once; its skin is on the `PIG` pages now).
+    pub const SPARE_PIG: u32 = SMOKE + super::SMOKE_FRAMES;
+    pub const PIG_SPAWN_EGG: u32 = SPARE_PIG + 1;
+    pub const PORKCHOP: u32 = SPARE_PIG + 2;
+    pub const COOKED_PORKCHOP: u32 = SPARE_PIG + 3;
+    pub const GLASS_BOTTLE: u32 = SPARE_PIG + 4;
+    pub const WATER_BOTTLE: u32 = SPARE_PIG + 5;
+    pub const PURIFIED_WATER: u32 = SPARE_PIG + 6;
+    pub const LANTERN_ITEM: u32 = SPARE_PIG + 7;
+    pub const IRON_NUGGET: u32 = SPARE_PIG + 8;
     /// Lantern block texture (Minecraft layout: body, cap, handle), and a chain.
-    pub const LANTERN: u32 = PIG + 9;
-    pub const CHAIN: u32 = PIG + 10;
+    pub const LANTERN: u32 = SPARE_PIG + 9;
+    pub const CHAIN: u32 = SPARE_PIG + 10;
     pub const SKIN_VARIANTS: u32 = CHAIN + 1;
     pub const SKIN_VARIANT_LAYERS: u32 = 5;
     pub const PRESET_SKINS: u8 = 4;
@@ -151,15 +150,15 @@ pub mod tex {
     pub const BED_FOOT_END: u32 = BED_HEAD_TOP + 7;
     pub const BED_BOTTOM: u32 = BED_HEAD_TOP + 8;
     pub const BED_ITEM: u32 = BED_HEAD_TOP + 9;
-    /// Sheep skin and its wool coat: whole Minecraft entity atlases (64 texels wide) like
-    /// `PIG`.
-    pub const SHEEP: u32 = BED_ITEM + 1;
-    pub const SHEEP_WOOL: u32 = SHEEP + 1;
-    pub const WOOL: u32 = SHEEP + 2;
-    pub const MUTTON: u32 = SHEEP + 3;
-    pub const COOKED_MUTTON: u32 = SHEEP + 4;
-    pub const SHEARS: u32 = SHEEP + 5;
-    pub const SHEEP_SPAWN_EGG: u32 = SHEEP + 6;
+    /// Two spare layers (the sheep's and its wool's whole atlases once; they are on the
+    /// `SHEEP` and `SHEEP_WOOL` pages now).
+    pub const SPARE_SHEEP: u32 = BED_ITEM + 1;
+    pub const SPARE_SHEEP_WOOL: u32 = SPARE_SHEEP + 1;
+    pub const WOOL: u32 = SPARE_SHEEP + 2;
+    pub const MUTTON: u32 = SPARE_SHEEP + 3;
+    pub const COOKED_MUTTON: u32 = SPARE_SHEEP + 4;
+    pub const SHEARS: u32 = SPARE_SHEEP + 5;
+    pub const SHEEP_SPAWN_EGG: u32 = SPARE_SHEEP + 6;
     /// Water and lava animation frames (from the packs' animated strips; must match
     /// world.frag).
     pub const WATER_ANIM: u32 = SHEEP_SPAWN_EGG + 1;
@@ -300,7 +299,27 @@ pub mod tex {
     pub const RIFLE_STATION_MODEL: u32 = AK_VIEW + crate::model::ak_vm::PAGES * PISTOL_DIRT_LEVELS;
     pub const STATE_ICONS: u32 = RIFLE_STATION_MODEL + crate::model::gun_station::RIFLE_PAGES;
     pub const STATE_ICON_COUNT: u32 = 64;
-    pub const LAYERS: usize = (STATE_ICONS + STATE_ICON_COUNT) as usize;
+    /// The wolf's atlases (wild, tame, angry, and its collar, tinted by the game), a bone and
+    /// the wolf spawn egg.
+    /// (each `entity::mob::wolf_skin::PAGES` layers, see `entity::skin_pages`)
+    pub const WOLF: u32 = STATE_ICONS + STATE_ICON_COUNT;
+    pub const WOLF_TAME: u32 = WOLF + crate::entity::mob::wolf_skin::PAGES;
+    pub const WOLF_ANGRY: u32 = WOLF_TAME + crate::entity::mob::wolf_skin::PAGES;
+    pub const WOLF_COLLAR: u32 = WOLF_ANGRY + crate::entity::mob::wolf_skin::PAGES;
+    pub const BONE: u32 = WOLF_COLLAR + crate::entity::mob::wolf_skin::PAGES;
+    pub const WOLF_SPAWN_EGG: u32 = BONE + 1;
+    /// The pig's skin, the sheep's and its wool coat, on their pages
+    /// (`entity::mob::pig_skin`, `entity::mob::sheep_skin`).
+    pub const PIG: u32 = WOLF_SPAWN_EGG + 1;
+    pub const SHEEP: u32 = PIG + crate::entity::mob::pig_skin::PAGES;
+    pub const SHEEP_WOOL: u32 = SHEEP + crate::entity::mob::sheep_skin::PAGES;
+    /// Fishing: the rod made in Blockbench (its texture pages, `model::fishing_rod`), the
+    /// rod's icon, and the fish, raw and cooked.
+    pub const FISHING_ROD_MODEL: u32 = SHEEP_WOOL + crate::entity::mob::sheep_skin::WOOL_PAGES;
+    pub const FISHING_ROD: u32 = FISHING_ROD_MODEL + crate::model::fishing_rod::PAGES;
+    pub const RAW_FISH: u32 = FISHING_ROD + 1;
+    pub const COOKED_FISH: u32 = FISHING_ROD + 2;
+    pub const LAYERS: usize = (COOKED_FISH + 1) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -455,6 +474,37 @@ fn render_item_icons(base: &mut [u8]) {
         let dst = layer as usize * TILE * TILE * 4;
         base[dst..dst + TILE * TILE * 4].copy_from_slice(&img);
     }
+    let img = fishing_rod_icon(base, TILE);
+    let dst = tex::FISHING_ROD as usize * TILE * TILE * 4;
+    base[dst..dst + TILE * TILE * 4].copy_from_slice(&img);
+}
+
+/// The fishing rod's icon (`size` square) drawn from its model: corner to corner like
+/// Minecraft's, the butt at the bottom left, the tip at the top right bending a little, the
+/// reel hanging below it with its crank toward the viewer.
+fn fishing_rod_icon(base: &[u8], size: usize) -> Vec<u8> {
+    use crate::model::fishing_rod::{emit, RodPose};
+    use glam::{Mat4, Vec3, Vec4};
+    let s = std::f32::consts::FRAC_1_SQRT_2;
+    // The rod's +Z to the upper right, its up to the upper left, its crank's side (+X) toward
+    // the viewer; turned a little about itself to show the reel's side. (That is a mirror
+    // image, a left-handed reel: the only way to show the crank with the reel under the rod
+    // and the tip at the top right. Its triangles are turned back below.)
+    let view = Mat4::from_cols(
+        Vec4::new(0.0, 0.0, 1.0, 0.0),
+        Vec4::new(-s, s, 0.0, 0.0),
+        Vec4::new(s, s, 0.0, 0.0),
+        Vec4::W,
+    ) * Mat4::from_rotation_z(-0.45)
+        // (thicker than it is, or it would be a hair across the icon)
+        * Mat4::from_scale(Vec3::new(1.8, 1.8, 1.0));
+    let pose = RodPose { crank: 2.4, bend: 0.1, bend_dir: Vec3::NEG_Y };
+    let mut verts = Vec::new();
+    emit(&mut verts, view, &pose, [255, 255, 255, 0], 0);
+    for tri in verts.chunks_exact_mut(3) {
+        tri.swap(1, 2);
+    }
+    rasterize(base, &verts, size)
 }
 
 /// An item's icon drawn from its 3D model as it is (its state: rounds, attachments, dirt), a
@@ -656,6 +706,9 @@ fn is_item_icon(l: u32) -> bool {
         || (tex::ARMOR_ICONS..tex::ARMOR_ICONS + 17).contains(&l)
         || l == tex::BOOK
         || (tex::MORE_TOOLS..tex::MORE_TOOLS + 4).contains(&l)
+        || l == tex::BONE
+        || l == tex::WOLF_SPAWN_EGG
+        || (tex::FISHING_ROD..=tex::COOKED_FISH).contains(&l)
 }
 
 fn is_crack(l: u32) -> bool {
@@ -726,6 +779,8 @@ fn is_cutout(l: u32) -> bool {
         || l == tex::ADV_FRONT_CUT
         || (tex::SMOKE..tex::SMOKE + SMOKE_FRAMES).contains(&l)
         || l == tex::CLOUD
+        // (the wolf's collar: only its band shows)
+        || (tex::WOLF_COLLAR..tex::BONE).contains(&l)
 }
 
 /// Resolution of the opaque-pixel masks used to extrude flat item sprites into 3D models: the
@@ -808,9 +863,11 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
     synth_model_pages(&mut base, gun_station::RIFLE_PNG, gun_station::RIFLE_PAGES, tex::RIFLE_STATION_MODEL);
     synth_model_pages(&mut base, crate::model::grenade::PNG, crate::model::grenade::PAGES, tex::GRENADE_MODEL);
     synth_model_pages(&mut base, crate::model::dummy::PNG, crate::model::dummy::PAGES, tex::DUMMY_MODEL);
+    synth_model_pages(&mut base, crate::model::fishing_rod::PNG, crate::model::fishing_rod::PAGES, tex::FISHING_ROD_MODEL);
     render_item_icons(&mut base);
     synth_doors(&mut base);
     synth_grilled(&mut base);
+    mark_materials(&mut base);
     synth_glow(&mut base);
     for (front, cut) in [
         (tex::FURNACE_FRONT, tex::FURNACE_FRONT_CUT),
@@ -1127,17 +1184,78 @@ fn texel_noise(x: usize, y: usize, salt: u32) -> f32 {
     ((h >> 8) & 0xFF) as f32 / 255.0
 }
 
-/// `a` over the upper right half of `b` (along a slightly ragged diagonal).
+/// Smooth value noise in 0..1 with `cell` texel wide lattice cells.
+fn value_noise(x: usize, y: usize, cell: usize, salt: u32) -> f32 {
+    let (fx, fy) = (x as f32 / cell as f32, y as f32 / cell as f32);
+    let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+    let (sx, sy) = (tx * tx * (3.0 - 2.0 * tx), ty * ty * (3.0 - 2.0 * ty));
+    let n = |a, b| texel_noise(a, b, salt);
+    let top = n(x0, y0) + (n(x0 + 1, y0) - n(x0, y0)) * sx;
+    let bot = n(x0, y0 + 1) + (n(x0 + 1, y0 + 1) - n(x0, y0 + 1)) * sx;
+    top + (bot - top) * sy
+}
+
+fn luma(c: &[u8]) -> f32 {
+    (c[0] as f32 * 0.3 + c[1] as f32 * 0.59 + c[2] as f32 * 0.11) / 255.0
+}
+
+/// `b` with its upper right half recoloured to look like `a`: `b`'s shape and drawing are
+/// kept (so the two sides always fit), each pixel's brightness is mapped onto `a`'s colours,
+/// and the two sides meet in a ragged, dithered band across the meat.
 fn half_over(a: &[u8], b: &[u8]) -> Vec<u8> {
+    // `a`'s colours by brightness: opaque pixels sorted by luma, averaged into buckets.
+    const BUCKETS: usize = 16;
+    let ramp_of = |img: &[u8]| {
+        let mut px: Vec<[f32; 4]> = img
+            .chunks_exact(4)
+            .filter(|c| c[3] > 127)
+            .map(|c| [luma(c), c[0] as f32, c[1] as f32, c[2] as f32])
+            .collect();
+        px.sort_by(|p, q| p[0].total_cmp(&q[0]));
+        (0..BUCKETS)
+            .map(|k| {
+                let s = &px[k * px.len() / BUCKETS..((k + 1) * px.len() / BUCKETS).max(k * px.len() / BUCKETS + 1)];
+                let n = s.len() as f32;
+                [0, 1, 2, 3].map(|c| s.iter().map(|p| p[c]).sum::<f32>() / n)
+            })
+            .collect::<Vec<_>>()
+    };
+    if a.chunks_exact(4).all(|c| c[3] <= 127) || b.chunks_exact(4).all(|c| c[3] <= 127) {
+        return b.to_vec();
+    }
+    let (ra, rb) = (ramp_of(a), ramp_of(b));
+    // Where a brightness of `b` falls in its own range, as a position on `a`'s ramp.
+    let recolor = |c: &[u8]| -> [u8; 3] {
+        let l = luma(c);
+        let k = rb.iter().rposition(|r| r[0] <= l).unwrap_or(0);
+        let f = if k + 1 < BUCKETS && rb[k + 1][0] > rb[k][0] {
+            ((l - rb[k][0]) / (rb[k + 1][0] - rb[k][0])).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (p, q) = (ra[k], ra[(k + 1).min(BUCKETS - 1)]);
+        [1, 2, 3].map(|ch| (p[ch] + (q[ch] - p[ch]) * f).round().clamp(0.0, 255.0) as u8)
+    };
     let mut out = b.to_vec();
     for y in 0..TILE {
         for x in 0..TILE {
-            // Across the meat (which lies from the lower left to the upper right).
-            let wobble = ((x * 7 + y * 13) % 5) as i32 - 2;
-            if x as i32 - y as i32 + wobble * 2 > 0 {
-                let i = (y * TILE + x) * 4;
-                if a[i + 3] > 127 || b[i + 3] <= 127 {
-                    out[i..i + 4].copy_from_slice(&a[i..i + 4]);
+            let i = (y * TILE + x) * 4;
+            if b[i + 3] <= 127 {
+                continue;
+            }
+            // Across the meat (which lies from the lower left to the upper right), wavy.
+            let d = (x as f32 - y as f32) / TILE as f32
+                + (value_noise(x, y, 20, 11) - 0.5) * 0.45
+                + (value_noise(x, y, 6, 12) - 0.5) * 0.1;
+            let t = ((d + 0.025) / 0.05).clamp(0.0, 1.0);
+            // Dithered: pixels flip one by one through the band, no straight line.
+            if t > texel_noise(x, y, 13) {
+                let c = recolor(&b[i..i + 4]);
+                // Seared a little darker right at the edge of the done side.
+                let edge = 1.0 - 0.3 * (1.0 - d / 0.07).clamp(0.0, 1.0);
+                for ch in 0..3 {
+                    out[i + ch] = (c[ch] as f32 * edge) as u8;
                 }
             }
         }
@@ -1164,6 +1282,108 @@ fn char_meat(roasted: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+/// Surface material, stored in the alpha of fully opaque block textures (which is 255
+/// otherwise): alpha = 255 - code, code = pit | metal << 1 | shine << 2 (0..63). The world
+/// shader reads it back (base mip level) for sunk ore nuggets and shine.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct Material {
+    /// Sunk into the block (ore nuggets, drawn deeper with parallax).
+    pit: bool,
+    /// Highlights in the surface's own colour (else white, like a gem or polished stone).
+    metal: bool,
+    /// 0 matte .. 15 mirror-like.
+    shine: u8,
+}
+
+impl Material {
+    const fn new(metal: bool, shine: u8) -> Self {
+        Self { pit: false, metal, shine }
+    }
+
+    fn alpha(self) -> u8 {
+        255 - (self.pit as u8 | (self.metal as u8) << 1 | self.shine.min(15) << 2)
+    }
+}
+
+/// Ore nuggets set into the stone, shiny: every texel of an ore whose colour is not one of the
+/// stone texture's own colours (or the stone's at that spot) is a nugget. Lone specks are left
+/// out and pinholes filled. An ore gets no nuggets if that does not give sensible ones (a pack
+/// whose ore is not drawn over its stone). Metal and gem blocks shine all over.
+fn mark_materials(base: &mut [u8]) {
+    let layer_bytes = TILE * TILE * 4;
+    for (layer, m) in [
+        (tex::IRON_BLOCK, Material::new(true, 10)),
+        (tex::COPPER_BLOCK, Material::new(true, 10)),
+        (tex::GOLD_BLOCK, Material::new(true, 13)),
+        (tex::DIAMOND_BLOCK, Material::new(false, 14)),
+        (tex::COAL_BLOCK, Material::new(false, 5)),
+        (tex::OBSIDIAN, Material::new(false, 9)),
+    ] {
+        let px = &mut base[layer as usize * layer_bytes..][..layer_bytes];
+        if px.chunks_exact(4).all(|c| c[3] == 255) {
+            for c in px.chunks_exact_mut(4) {
+                c[3] = m.alpha();
+            }
+        }
+    }
+
+    let stone = base[tex::STONE as usize * layer_bytes..][..layer_bytes].to_vec();
+    let mut palette: Vec<[u8; 3]> = Vec::new();
+    for c in stone.chunks_exact(4) {
+        let c = [c[0], c[1], c[2]];
+        if !palette.contains(&c) {
+            palette.push(c);
+            if palette.len() > 64 {
+                break;
+            }
+        }
+    }
+    let near = |a: &[u8], b: &[u8]| (0..3).map(|i| (a[i] as i32 - b[i] as i32).abs()).sum::<i32>() <= 12;
+    for (layer, nugget) in [
+        (tex::COAL_ORE, Material::new(false, 4)),
+        (tex::IRON_ORE, Material::new(true, 9)),
+        (tex::COPPER_ORE, Material::new(true, 10)),
+        (tex::GOLD_ORE, Material::new(true, 13)),
+        (tex::DIAMOND_ORE, Material::new(false, 15)),
+    ] {
+        let ore = &mut base[layer as usize * layer_bytes..][..layer_bytes];
+        if !ore.chunks_exact(4).all(|c| c[3] == 255) {
+            continue;
+        }
+        let mut pit: Vec<bool> = (0..TILE * TILE)
+            .map(|i| {
+                let c = &ore[i * 4..i * 4 + 4];
+                !(near(c, &stone[i * 4..]) || (palette.len() <= 64 && palette.iter().any(|p| near(c, p))))
+            })
+            .collect();
+        for _ in 0..2 {
+            let prev = pit.clone();
+            let count = |x: usize, y: usize| {
+                [(1, 0), (TILE - 1, 0), (0, 1), (0, TILE - 1)]
+                    .iter()
+                    .filter(|d| prev[(y + d.1) % TILE * TILE + (x + d.0) % TILE])
+                    .count()
+            };
+            for i in 0..TILE * TILE {
+                let n = count(i % TILE, i / TILE);
+                if prev[i] && n <= 1 {
+                    pit[i] = false;
+                } else if !prev[i] && n >= 3 {
+                    pit[i] = true;
+                }
+            }
+        }
+        let share = pit.iter().filter(|&&p| p).count() as f32 / (TILE * TILE) as f32;
+        if !(0.01..=0.6).contains(&share) {
+            continue;
+        }
+        for (i, &p) in pit.iter().enumerate() {
+            let m = if p { Material { pit: true, ..nugget } } else { Material::default() };
+            ore[i * 4 + 3] = m.alpha();
+        }
+    }
 }
 
 /// Grilled meat, made from the final raw and cooked textures (unless a pack has them): burnt
