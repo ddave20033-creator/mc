@@ -1,5 +1,9 @@
-//! Grenades: thrown with the right mouse button (softly while sneaking), they fly, bounce
-//! and roll. After its fuse a frag grenade explodes, hurting everything around (less behind
+//! Grenades: the right mouse button held pulls the pin (the other hand takes it out) and
+//! keeps the grenade ready in the raised hand; let go, it is thrown, the farther the longer
+//! it was held (the farthest after `FULL_POWER` seconds). Its fuse runs from the moment the
+//! button went down: held `FUSE` seconds, a frag grenade goes off in the hand (a smoke
+//! grenade is dropped at the feet). The spoon flies off as it leaves the hand. They fly,
+//! bounce and roll. After its fuse a frag grenade explodes, hurting everything around (less behind
 //! cover) and blowing blocks away; a smoke grenade pours out a thick cloud for a while.
 //!
 //! On a LAN everyone flies their own copy of every grenade, but the host's copy decides the
@@ -15,9 +19,9 @@ use crate::net::Msg;
 use crate::util::vertex_light;
 use glam::Quat;
 
-/// Seconds from the throw until a frag grenade explodes, and until a smoke grenade starts
-/// smoking; how long it smokes.
-const FUSE: f32 = 3.2;
+/// Seconds from the button going down until a frag grenade explodes, and from the throw until
+/// a smoke grenade starts smoking; how long it smokes.
+const FUSE: f32 = 5.0;
 const SMOKE_FUSE: f32 = 1.6;
 const SMOKE_TIME: f32 = 16.0;
 /// How far the blast blows blocks away and hurts, and the most it hurts (at the middle).
@@ -26,6 +30,13 @@ const HURT_RADIUS: f32 = 6.5;
 const MAX_DAMAGE: f32 = 26.0;
 /// Size of a grenade, for bouncing.
 const RADIUS: f32 = 0.08;
+/// The right button held (seconds): the grenade comes up in front, then the other hand
+/// pulls the pin and it is ready to throw once the pin is out; held until `FULL_POWER`,
+/// it is thrown the farthest (`model::grenade`, as the hands show it). How fast it leaves
+/// the hand, the least and the most.
+use crate::model::grenade::{power, RAISE_TIME};
+const PIN_OUT: f32 = RAISE_TIME + 0.35;
+const THROW_SPEED: (f32, f32) = (6.0, 21.0);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum GrenadeKind {
@@ -74,6 +85,22 @@ pub(super) struct Grenades {
     list: Vec<Grenade>,
     /// The view shaking after a blast near by.
     pub(super) shake: f32,
+    /// The grenade in the hand being readied (the right button held).
+    pub(super) hold: Option<Hold>,
+    /// Where the readied grenade is in the hand: as the first-person hand shows it, and on
+    /// the player model (set each frame; thrown from there).
+    pub(super) hand_fp: Option<Vec3>,
+    pub(super) hand_tp: Option<Vec3>,
+}
+
+/// A grenade being readied: which (the hotbar slot and the item), for how long the button
+/// has been held, and whether it has been let go (it is thrown once the pin is out).
+#[derive(Clone, Copy)]
+pub(super) struct Hold {
+    slot: usize,
+    item: ItemId,
+    pub(super) t: f32,
+    released: bool,
 }
 
 /// A hash 0..1 of a block and a seed.
@@ -163,47 +190,138 @@ fn fly(g: &mut Grenade, dt: f32, world: &World) -> f32 {
 }
 
 impl Game {
-    /// Right click with a grenade: pulls the pin and throws it (a short lob while sneaking).
-    /// False if not holding one.
-    pub(super) fn throw_grenade(&mut self) -> bool {
-        let Some(kind) = GrenadeKind::of(self.held()) else {
-            return false;
-        };
-        if self.action_cooldown > 0.0 {
-            return true;
+    /// Holding a grenade: the right button pressed raises it and pulls the pin, held keeps it
+    /// ready, let go throws it (once the pin is out; let go sooner, it is thrown as soon as
+    /// the pin comes out). Putting it away, or a menu opening, before it is thrown puts the
+    /// pin back.
+    pub(super) fn update_grenade_hold(&mut self, dt: f32, control: bool) {
+        let slot = self.hotbar_slot;
+        let item = self.held();
+        let kind = GrenadeKind::of(item).filter(|_| !self.spectator());
+        if let Some(h) = self.grenades.hold {
+            if !control || h.slot != slot || h.item != item || kind.is_none() {
+                self.grenades.hold = None;
+            }
         }
-        self.action_cooldown = 0.6;
+        match &mut self.grenades.hold {
+            None => {
+                // (on a rifle station's grenade crate, the grenade goes into it instead)
+                let crate_ = self.crate_under_crosshair().is_some();
+                if control && kind.is_some() && self.right_pressed && self.action_cooldown <= 0.0 && !crate_ {
+                    self.grenades.hold = Some(Hold { slot, item, t: 0.0, released: false });
+                }
+            }
+            Some(h) => {
+                let was = h.t;
+                h.t += dt;
+                h.released |= !self.right_down;
+                let (t, released) = (h.t, h.released);
+                // The ring is caught and the pin starts coming out.
+                let pull = RAISE_TIME + 0.08;
+                if was < pull && t >= pull {
+                    self.audio.play(Sound::PinPull, None, 0.8);
+                }
+                if released && t >= PIN_OUT {
+                    self.grenades.hold = None;
+                    self.throw_grenade(t);
+                } else if t >= FUSE {
+                    // Held too long: a frag grenade goes off in the hand; a smoke grenade is
+                    // let go at the feet.
+                    self.grenades.hold = None;
+                    self.grenade_in_hand_goes_off();
+                }
+            }
+        }
+        self.hand.grenade = self.grenades.hold.map(|h| (h.t, power(h.t)));
+    }
+
+    /// The readied grenade, held `held` seconds, leaves the hand (the farther the longer it
+    /// was held): the spoon flies off. A frag grenade's fuse has been running since the
+    /// button went down.
+    fn throw_grenade(&mut self, held: f32) {
+        let Some(kind) = GrenadeKind::of(self.held()) else {
+            return;
+        };
+        self.action_cooldown = 0.35;
         let look = look_dir(self.yaw, self.pitch);
-        let speed = if self.sneaking() { 7.0 } else { 17.0 };
-        let pos = self.player.eye() + look * 0.35 - Vec3::Y * 0.1;
-        let vel = look * speed + Vec3::Y * 2.5 + self.player.vel * 0.6;
+        let (lo, hi) = THROW_SPEED;
+        let k = power(held);
+        let speed = lo + (hi - lo) * k;
+        // From the hand, toward what the crosshair is on.
+        let pos = self.grenade_in_hand();
+        let aim = (self.player.eye() + look * 30.0 - pos).normalize_or(look);
+        let vel = aim * speed + Vec3::Y * (1.0 + 1.5 * k) + self.player.vel * 0.6;
+        let fuse = match kind {
+            GrenadeKind::Frag => (FUSE - held).max(0.05),
+            GrenadeKind::Smoke => SMOKE_FUSE,
+        };
+        self.let_go_grenade(kind, pos, vel, fuse);
+        self.hand.throw();
+        // (the body's arm swings through too, seen from outside and by the others)
+        self.hand.swing();
+        self.audio.play(Sound::Throw, None, 0.3 + 0.5 * k);
+    }
+
+    /// Held a frag grenade too long: it goes off right in the hand (a smoke grenade just
+    /// drops at the feet and starts smoking).
+    fn grenade_in_hand_goes_off(&mut self) {
+        let Some(kind) = GrenadeKind::of(self.held()) else {
+            return;
+        };
+        let hand = self.grenade_in_hand();
+        let (pos, vel, fuse) = match kind {
+            GrenadeKind::Frag => (hand, Vec3::ZERO, 0.0),
+            GrenadeKind::Smoke => (hand, self.player.vel * 0.5, 0.0),
+        };
+        self.let_go_grenade(kind, pos, vel, fuse);
+        self.hand.throw();
+    }
+
+    /// Where the readied grenade is: in the hand as it is seen (the first-person hand, or the
+    /// player model's), unless a wall is between it and the eyes (then just in front of them).
+    fn grenade_in_hand(&self) -> Vec3 {
+        let eye = self.player.eye();
+        let look = look_dir(self.yaw, self.pitch);
+        let fallback = eye + look * 0.3 - Vec3::Y * 0.1;
+        let hand = if self.camera.mode == 0 { self.grenades.hand_fp } else { self.grenades.hand_tp };
+        let Some(hand) = hand.filter(|h| h.distance(eye) < 2.0) else { return fallback };
+        let to = hand - eye;
+        let d = to.length();
+        if d > 1e-3 && raycast_solid(&self.terrain.world, eye, to / d, d + RADIUS).is_some() {
+            return fallback;
+        }
+        hand
+    }
+
+    /// A grenade leaves the hand (one fewer in the stack; the spoon flies off) and starts
+    /// flying, here and for the others.
+    fn let_go_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, fuse: f32) {
         if !self.creative() {
             let slot = self.hotbar_slot;
             take(&mut self.inventory.slots[slot], 1);
         }
-        self.hand.swing();
-        self.audio.play(Sound::PinPull, None, 0.7);
-        self.audio.play(Sound::Throw, None, 0.8);
+        self.audio.play(Sound::SpoonFly, None, 0.6);
         let seed = (self.random() * u32::MAX as f32) as u32;
         let real = !self.is_client();
-        self.spawn_grenade(kind, pos, vel, seed, real);
+        self.spawn_grenade(kind, pos, vel, seed, real, fuse);
         let msg = Msg::Grenade {
             id: super::multi::HOST_ID,
             kind: kind as u8,
             pos,
             vel,
             seed,
+            fuse,
         };
         if self.is_client() {
             self.send(msg);
         } else {
             self.broadcast(&msg, None);
         }
-        true
     }
 
-    /// A grenade starts flying (thrown here, or by someone else: `kind` as in the message).
-    pub(super) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, real: bool) {
+    /// A grenade starts flying (thrown here, or by someone else: `kind` as in the message),
+    /// going off after `fuse` seconds.
+    pub(super) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, real: bool, fuse: f32) {
         let spin = Vec3::new(
             hash3(IVec3::X, seed) - 0.5,
             hash3(IVec3::Y, seed) - 0.5,
@@ -215,10 +333,7 @@ impl Game {
             vel,
             rot: Quat::IDENTITY,
             spin,
-            fuse: match kind {
-                GrenadeKind::Frag => FUSE,
-                GrenadeKind::Smoke => SMOKE_FUSE,
-            },
+            fuse,
             smoke: None,
             real,
             seed,
@@ -227,11 +342,11 @@ impl Game {
     }
 
     /// Someone else threw a grenade (host: from player `id`, which goes on to the others).
-    pub(super) fn remote_grenade(&mut self, id: u8, kind: u8, pos: Vec3, vel: Vec3, seed: u32) {
+    pub(super) fn remote_grenade(&mut self, id: u8, kind: u8, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
         let real = self.is_host();
-        self.spawn_grenade(GrenadeKind::from_u8(kind), pos, vel, seed, real);
+        self.spawn_grenade(GrenadeKind::from_u8(kind), pos, vel, seed, real, fuse);
         if real {
-            let msg = Msg::Grenade { id, kind, pos, vel, seed };
+            let msg = Msg::Grenade { id, kind, pos, vel, seed, fuse };
             self.broadcast(&msg, Some(id));
         }
     }
@@ -249,6 +364,7 @@ impl Game {
         let mut blasts = Vec::new();
         let mut bounces = Vec::new();
         let mut puffs = Vec::new();
+        let mut catches = Vec::new();
         for g in &mut list {
             let hit = fly(g, dt, &self.terrain.world);
             if hit > 1.2 {
@@ -263,6 +379,9 @@ impl Game {
                     }
                 }
                 GrenadeKind::Smoke if g.fuse <= 0.0 => {
+                    if g.smoke.is_none() {
+                        catches.push(g.pos);
+                    }
                     let left = g.smoke.get_or_insert(SMOKE_TIME);
                     *left -= dt;
                     g.puff -= dt;
@@ -283,6 +402,10 @@ impl Game {
         self.grenades.list.extend(list);
         for (at, k) in bounces {
             self.audio.play(Sound::GrenadeBounce, Some(at), 0.3 + 0.7 * k);
+        }
+        // The first rush of smoke as it catches (the hiss goes on in `grenade_sounds`).
+        for at in catches {
+            self.audio.play(Sound::SmokePop, Some(at), 0.9);
         }
         for at in puffs {
             let (sky, blk) = self.terrain.world.light_estimate(at + Vec3::Y);
@@ -410,7 +533,8 @@ impl Game {
             let fl = crate::world::mesh::flags::ENTITY;
             // The Blockbench grenades, as big as the old ones were.
             let smoke = matches!(g.kind, GrenadeKind::Smoke);
-            crate::model::grenade::emit_sized(out, smoke, m, 0.2, light, fl);
+            use crate::model::grenade::{emit, sized, Look};
+            emit(out, smoke, sized(smoke, m, 0.2), Look::THROWN, light, fl);
         }
     }
 }

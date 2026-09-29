@@ -74,6 +74,11 @@ for n in m["outliner"]:
     walk(n, -1, False)
 if TP:
     cubes = []
+# Faces lying in one plane over each other would flicker in the game: one of each pair is drawn
+# back a little (`zfight`).
+sys.path.insert(0, HERE)
+import zfight
+fixed = zfight.resolve(cubes, bones)
 
 # ---- every face's texels onto 128x128 pages (1 texel border copied from the edge) ----
 pieces = []  # (cube index, face index, image, flip_u, flip_v)
@@ -262,4 +267,5 @@ for name, length, loop, channels in anims:
 out += ["];", ""]
 open(OUT_RS, "w", encoding="utf-8", newline="\n").write("\n".join(out))
 print(f"{len(bones)} bones, {len(cubes)} cubes, {len(pieces)} faces on {len(pages)} pages, "
-      f"{len(anims)} animations (format {'.'.join(map(str, ver))}{', old: flipped' if flip_old else ''})")
+      f"{len(anims)} animations (format {'.'.join(map(str, ver))}{', old: flipped' if flip_old else ''}), "
+      f"{fixed} faces drawn back against flickering")

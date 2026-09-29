@@ -712,9 +712,10 @@ impl Game {
         // Where the held torch burns (for its flame particles), from whichever model shows it.
         let mut held_torch_tip = None;
         // A lantern is always held by the first-person hand (hanging with the body shown), and
-        // so is a pistol (the body's arm would point it at the ground when looking down).
+        // so is a pistol (the body's arm would point it at the ground when looking down), and
+        // a grenade being readied (both hands on it).
         let lantern = self.held() == LANTERN as ItemId;
-        let pistol = self.holding_gun();
+        let pistol = self.holding_gun() || self.grenades.hold.is_some();
         // The guide book is always held open in both first-person hands.
         let book = self.held() == crate::item::GUIDE_BOOK;
         let down = -self.pitch.to_degrees();
@@ -821,6 +822,7 @@ impl Game {
             self.guns.chambers = self.hand.chamber_tips.map(|c| c.map(to_world_view));
             self.guns.laser_from = self.hand.laser_tip.map(to_world_view);
             self.guns.light_from = self.hand.light_tip.map(to_world_view);
+            self.grenades.hand_fp = self.hand.grenade_tip.map(to_world_view);
             let hit = self.hand.book_hit;
             self.set_book_hit(hit);
         } else {
@@ -874,6 +876,7 @@ impl Game {
                 gun: self.hand.gun_anim(),
                 armor: crate::item::armor_code(&self.inventory.armor),
                 book: self.book_view(),
+                grenade: self.grenades.hold.map(|h| h.t),
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {
@@ -893,6 +896,9 @@ impl Game {
                 ..pose
             });
             let limbs = self.limbs.update(target, dt);
+            // Where a readied grenade is in the model's hand (thrown from there, seen from
+            // outside).
+            self.grenades.hand_tp = pose.grenade.map(|_| crate::model::player::held_center(&pose, &limbs));
             // A held lantern swings from the hand.
             let lantern_dir = if pose.held == LANTERN as ItemId {
                 let pivot = hand_pivot(&pose, &limbs);

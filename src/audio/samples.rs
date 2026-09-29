@@ -4,8 +4,10 @@
 //! revolver's rounds from OpenGameArt's reload recordings. The handguns' shots, the pistol's
 //! magazine, slide and dry fire and the revolver's cylinder are from Sonniss' free GDC Game
 //! Audio Bundles (royalty-free, no attribution needed): a Glock 18 and a Smith & Wesson M66
-//! firing, a suppressed De Lisle carbine's shot (the silenced one), a Walther P38's magazine out, a G36C's in, a Tokarev's slide, an M1911A1's dry
-//! fire, a Smith & Wesson M29's cylinder swung out and shut.
+//! firing, a suppressed De Lisle carbine's shot (the silenced one), a Walther P38's magazine
+//! out, a G36C's in, a Tokarev's slide, an M1911A1's dry fire, a Smith & Wesson M29's
+//! cylinder swung out and shut, a grenade's explosion (Gamemaster Audio). A smoke grenade
+//! catching is a CC0 steam hiss from OpenGameArt.
 
 use super::{Sound, RATE};
 
@@ -26,6 +28,8 @@ fn wav(sound: Sound) -> Option<&'static [u8]> {
         Sound::SpeedloaderIn => include_bytes!("samples/speedloader_in.wav"),
         Sound::RoundIn => include_bytes!("samples/round_in.wav"),
         Sound::CylinderShut => include_bytes!("samples/cylinder_shut.wav"),
+        Sound::Explosion => include_bytes!("samples/explosion.wav"),
+        Sound::SmokePop => include_bytes!("samples/smoke_pop.wav"),
         _ => return None,
     })
 }

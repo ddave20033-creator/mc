@@ -3,7 +3,8 @@
 //! the first-person animations can be checked frame by frame. With `GUN_SHOTS_SIDE=1`, only the
 //! player's own moves, seen from the side (standing, walking, running, sneaking, sneak-walking,
 //! aiming), with each gun and then empty-handed. With `GUN_SHOTS_FP=1`, only the first-person
-//! scenes. With `GUN_SHOTS_LIGHT=1`, the pistol's light at night against planks and glass. With `GUN_SHOTS_TURN=1`, only the three guns
+//! scenes. With `GUN_SHOTS_LIGHT=1`, the pistol's light at night against planks and glass. With
+//! `GUN_SHOTS_GRENADE=1`, a grenade readied and thrown. With `GUN_SHOTS_TURN=1`, only the three guns
 //! held (and aimed) seen from the front by a camera that stays put while the player looks
 //! around to the right and then to the left, to see what the body does. With `GUN_SHOTS_STATION=1`, the
 //! gun stations instead: an AK-47 on the rifle station taken apart and put together again,
@@ -175,6 +176,57 @@ impl Game {
     /// glass (the pillar lit through it) and not through the planks (their shadow on the
     /// ground and the pillar behind them dark). Pictures from the eyes, from the side, and from
     /// above behind the player.
+    /// `GUN_SHOTS_GRENADE=1`: a frag grenade, then a smoke grenade, readied with the right
+    /// button held (raised, the pin pulled, drawn back higher and higher) until it would go
+    /// the farthest, and thrown (also seen from the side); then a frag grenade held until it
+    /// goes off in the hand. A picture every 0.1 s.
+    fn grenade_shots_step(&mut self, dt: f32, start: Vec3) {
+        const PRESS: f32 = 0.3;
+        let Some(g) = self.gun_shots.as_mut() else { return };
+        let t0 = g.t;
+        g.t += dt;
+        let (t, which) = (g.t, g.gun);
+        use super::camera::SIDE_VIEW;
+        let runs = [
+            (crate::item::FRAG_GRENADE, "frag", 3.6, 0),
+            (crate::item::FRAG_GRENADE, "side", 3.6, SIDE_VIEW),
+            (crate::item::SMOKE_GRENADE, "smoke", 3.6, 0),
+            (crate::item::FRAG_GRENADE, "cooked", 7.0, 0),
+        ];
+        let Some((item, name, let_go, camera)) = runs.get(which).copied() else {
+            println!("grenade shots done: {}", g.dir.display());
+            self.quit = true;
+            return;
+        };
+        if t0 == 0.0 {
+            self.inventory.slots[7] = Some(Stack::new(item, 16));
+            self.hotbar_slot = 7;
+            self.camera.mode = camera;
+            self.player.pos = start;
+            self.player.vel = Vec3::ZERO;
+            self.yaw = 0.0;
+            self.pitch = 0.05;
+            self.body_yaw = 0.0;
+            self.keys.clear();
+        }
+        self.right_pressed |= t0 < PRESS && t >= PRESS;
+        self.right_down = (PRESS..let_go).contains(&t);
+        if t >= g.next && t >= PRESS - 0.05 {
+            let shot = format!("grenade_{name}_{:02}.png", g.n);
+            self.gpu.capture = Some(g.dir.join(shot));
+            g.n += 1;
+            g.next = t + 0.1;
+        }
+        if t >= let_go + 0.8 {
+            self.camera.mode = 0;
+            g.gun += 1;
+            g.t = 0.0;
+            g.n = 0;
+            g.next = 0.0;
+            self.right_down = false;
+        }
+    }
+
     fn light_shots_step(&mut self, dt: f32, start: Vec3) {
         use crate::world::{GLASS, PLANKS, STONE};
         let Some(g) = self.gun_shots.as_mut() else { return };
@@ -464,6 +516,10 @@ impl Game {
         }
         if let (Some(start), true) = (g.start, lamp_test) {
             self.light_shots_step(dt, start);
+            return;
+        }
+        if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_GRENADE").is_ok()) {
+            self.grenade_shots_step(dt, start);
             return;
         }
         let side = std::env::var("GUN_SHOTS_SIDE").is_ok();

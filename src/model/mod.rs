@@ -39,6 +39,11 @@ pub fn is_model_item(item: ItemId) -> bool {
         || gun_view::item_rig(&crate::item::Stack::one(item)).is_some()
 }
 
+/// Whether an item is a grenade (a frag or a smoke one).
+pub fn grenade_item(item: ItemId) -> bool {
+    item == crate::item::FRAG_GRENADE || item == crate::item::SMOKE_GRENADE
+}
+
 /// Any item centered on the origin with unit size: a cube for blocks, a thin double-sided
 /// sprite for everything else.
 pub fn emit_held(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], fl: u8) {

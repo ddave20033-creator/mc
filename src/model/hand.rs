@@ -39,6 +39,8 @@ const VIEW_PX: f32 = 1.0 / 64.0;
 const SWING_TIME: f32 = 0.24;
 /// Fastest swing, used when actions follow each other very quickly.
 const MIN_SWING_TIME: f32 = 0.09;
+/// Seconds the arm follows through after throwing a grenade.
+const THROW_TIME: f32 = 0.3;
 
 pub struct HandAnim {
     swing: f32,
@@ -65,6 +67,16 @@ pub struct HandAnim {
     pub blocking: bool,
     /// Seconds spent eating or drinking the held item (None when not).
     pub eating: Option<f32>,
+    /// The held grenade being readied (the right button held: raised, its pin pulled by the
+    /// other hand, then drawn back to throw): for how long (seconds), and how hard it would
+    /// be thrown now (0..1; the hand goes up with it). Set by the game each frame.
+    pub grenade: Option<(f32, f32)>,
+    /// Seconds since a grenade left the hand (the arm follows through, then the next one
+    /// comes up).
+    thrown: Option<f32>,
+    /// Where the middle of the readied grenade was drawn last frame (like `torch_tip`): it
+    /// is thrown from there.
+    pub grenade_tip: Option<Vec3>,
     /// With the first-person body: a held lantern hangs from the fist by its chain and swings;
     /// otherwise it is held still by its handle.
     pub fancy_lantern: bool,
@@ -156,6 +168,9 @@ impl HandAnim {
             blocking: false,
             block: 0.0,
             eating: None,
+            grenade: None,
+            thrown: None,
+            grenade_tip: None,
             fancy_lantern: false,
             lantern_swing: crate::model::lantern::SmoothSwing::default(),
             torch_tip: None,
@@ -208,6 +223,12 @@ impl HandAnim {
     /// The trigger pulled with nothing in the chamber: it moves, nothing else does.
     pub fn dry_fire(&mut self) {
         self.dry = Some(0.0);
+    }
+
+    /// A grenade thrown: the empty arm follows through, then the next one comes up.
+    pub fn throw(&mut self) {
+        self.thrown = Some(0.0);
+        self.grenade = None;
     }
 
     /// What the held gun is doing, for its moving parts (also on the player model).
@@ -293,6 +314,14 @@ impl HandAnim {
             self.keep_swinging();
         }
         self.equip = (self.equip + dt * 4.0).min(1.0);
+        if let Some(t) = self.thrown {
+            let t = t + dt;
+            self.thrown = (t < THROW_TIME).then_some(t);
+            if self.thrown.is_none() {
+                // (the next grenade, if there is one, comes up from below)
+                self.equip = 0.0;
+            }
+        }
         self.shot = self.shot.map(|t| t + dt).filter(|&t| t < 1.0);
         self.dry = self.dry.map(|t| t + dt).filter(|&t| t < 1.0);
         self.flash = (self.flash - dt / 0.06).max(0.0);
@@ -380,6 +409,7 @@ impl HandAnim {
         let light = vertex_light(sky, blk);
         let fl = flags::VIEWMODEL;
         self.torch_tip = None;
+        self.grenade_tip = None;
         self.glass.clear();
         self.eyepiece = None;
         self.muzzle_tip = None;
@@ -412,6 +442,26 @@ impl HandAnim {
         let sw = self.sway.x * k;
         let base = cam_to_world * rx(sw.y) * ry(sw.x) * rz(sw.z);
 
+        if let Some(tt) = self.thrown {
+            // A grenade just thrown: the empty arm follows through.
+            let k = (tt / THROW_TIME).min(1.0);
+            let m = Self::arm_part(Self::arm_pose(base, k, k.sqrt(), 1.0));
+            emit_box(
+                out,
+                m,
+                Vec3::new(-3.0, -10.0, -2.0),
+                Vec3::new(1.0, 2.0, 2.0),
+                ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
+                [[255; 3]; 6],
+                light,
+                fl,
+            );
+            return;
+        }
+        if let (Some((t, power)), true) = (self.grenade, super::grenade_item(self.held)) {
+            self.build_grenade_hold(out, base, t, power, light, fl, skin);
+            return;
+        }
         if self.held == NONE {
             let m = Self::arm_part(Self::arm_pose(base, s, sq, eq));
             emit_box(
@@ -800,6 +850,69 @@ impl HandAnim {
 
 /// Between two rigid (uniformly scaled) transforms: position and size linearly, rotation along
 /// the shortest arc, so the item turns smoothly instead of being squashed.
+impl HandAnim {
+    /// A grenade being readied, `t` seconds after the button went down: it comes up in
+    /// front, the left hand reaches for the ring and pulls the pin out (the model's
+    /// `pull_pin`), carrying it off out of the view; then the grenade is drawn back by the
+    /// shoulder, higher and higher with the throw's `power` (0..1), up to the highest once it
+    /// would go the farthest. Both arms are the player's own, coming up from below.
+    #[allow(clippy::too_many_arguments)]
+    fn build_grenade_hold(&mut self, out: &mut Vec<Vertex>, base: Mat4, held: f32, power: f32, light: [u8; 4], fl: u8, skin: u8) {
+        use super::grenade::{self, Look, PULL_TIME, RAISE_TIME as RAISE};
+        let smooth = |x: f32| {
+            let x = x.clamp(0.0, 1.0);
+            x * x * (3.0 - 2.0 * x)
+        };
+        // Held low as always, up in front for the pull, then drawn back to throw: a little
+        // back at first, going up and further back as the throw gets harder (with a little
+        // unrest while waiting there).
+        let rest = base * rest_hold();
+        let front = base * t(0.12, -0.19, -0.58) * ry(-18.0) * rx(8.0) * rz(-4.0);
+        let wait = (held * 2.3).sin() * 0.005;
+        let low = base * t(0.28, -0.16 + wait, -0.57) * ry(-22.0) * rx(-6.0) * rz(-8.0);
+        let high = base * t(0.33, 0.07 + wait, -0.5) * ry(-30.0) * rx(-34.0) * rz(-14.0);
+        let cocked = blend(low, high, smooth(power));
+        let pull = held - RAISE;
+        let m = blend(rest, front, smooth(held / RAISE));
+        let m = blend(m, cocked, smooth((pull - 0.55) / 0.3));
+        let item = m * Mat4::from_scale(Vec3::splat(0.36));
+        let smoke = self.held == crate::item::SMOKE_GRENADE;
+        let ring = grenade::emit(out, smoke, grenade::sized(smoke, item, 0.62), Look::readied(held), light, fl);
+        self.grenade_tip = Some(item.transform_point3(Vec3::ZERO));
+
+        let inv = base.inverse();
+        let layers = ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin));
+        let mut arm = |hand: Vec3, shoulder: Vec3| {
+            let along = (shoulder - hand).normalize_or(Vec3::Y);
+            let m = base
+                * Mat4::from_translation(hand)
+                * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, along))
+                * Mat4::from_scale(Vec3::splat(1.0 / 28.0));
+            let (lo, hi) = (Vec3::new(-2.0, -1.0, -2.0), Vec3::new(2.0, 20.0, 2.0));
+            emit_box(out, m, lo, hi, layers, [[255; 3]; 6], light, fl);
+        };
+        // The right fist under it.
+        let grip = inv.transform_point3(item.transform_point3(Vec3::new(0.0, -0.36, 0.04)));
+        arm(grip, Vec3::new(0.55, -1.0, -0.15));
+        // The left hand only suggests the pull (as the revolver's loading hand does): it
+        // comes up near the ring, short of it, and goes off down with the pin.
+        if pull < PULL_TIME {
+            let start = Vec3::new(-0.35, -0.75, -0.45);
+            let reach = smooth((held - 0.05) / (RAISE + 0.08 - 0.05));
+            let shoulder = Vec3::new(-0.5, -1.0, -0.15);
+            let ring = inv.transform_point3(ring);
+            let near = ring + (shoulder - ring).normalize_or(Vec3::NEG_Y) * 0.14;
+            arm(start.lerp(near, reach), shoulder);
+        }
+    }
+}
+
+/// Where a gun's part, a magazine, a round or a grenade is held when nothing is done with it
+/// (model item space, before its scale): low in the right hand, turned a little.
+fn rest_hold() -> Mat4 {
+    t(0.3, -0.3, -0.56) * ry(-32.0) * rx(14.0) * rz(-6.0)
+}
+
 fn blend(a: Mat4, b: Mat4, k: f32) -> Mat4 {
     let (sa, ra, ta) = a.to_scale_rotation_translation();
     let (sb, rb, tb) = b.to_scale_rotation_translation();

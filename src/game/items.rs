@@ -58,11 +58,16 @@ impl Game {
 
     pub(super) fn use_item(&mut self) {
         let held = self.held();
+        // The grenade crate on a rifle station: grenades in, or one out.
+        if self.right_pressed && self.crate_click() {
+            return;
+        }
         // With a gun the right mouse button aims: no opening or placing with it.
         if GunKind::of(held).is_some() {
             return;
         }
-        if self.throw_grenade() {
+        // A grenade is readied and thrown by holding the button (`update_grenade_hold`).
+        if super::grenades::GrenadeKind::of(held).is_some() {
             return;
         }
         // A magazine in hand does nothing (it is loaded at the gun station).

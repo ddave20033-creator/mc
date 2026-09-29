@@ -67,9 +67,13 @@ pub enum Sound {
     /// Spent cases landing (`CaseBrass` is the 9 mm's): the .357 Magnum's, the 7.62x39's.
     CaseMagnum,
     CaseRifle,
+    /// A grenade's spoon flying off as it is thrown, and a smoke grenade catching (the
+    /// first rush of smoke, before `SmokeHiss` goes on).
+    SpoonFly,
+    SmokePop,
 }
 
-pub const SOUNDS: [Sound; 29] = [
+pub const SOUNDS: [Sound; 31] = [
     Sound::ShotPistol,
     Sound::ShotRifle,
     Sound::ShotSilenced,
@@ -99,6 +103,8 @@ pub const SOUNDS: [Sound; 29] = [
     Sound::CylinderOpen,
     Sound::CaseMagnum,
     Sound::CaseRifle,
+    Sound::SpoonFly,
+    Sound::SmokePop,
 ];
 
 impl Sound {
@@ -125,21 +131,33 @@ impl Sound {
             Sound::MagOutRifle | Sound::CylinderOpen => -24.0,
             Sound::RoundIn | Sound::MagOut => -25.0,
             Sound::DryFire => -26.0,
+            // The loudest there is; the smoke's first rush a little over its hiss.
+            Sound::Explosion => -8.0,
+            Sound::SmokePop => -15.0,
             _ => return None,
         })
+    }
+
+    /// How much faster than distance alone its highs are lost: a blast's crack is gone
+    /// soon and only its deep rumble carries far.
+    fn dulling(self) -> f32 {
+        match self {
+            Sound::Explosion => 1.8,
+            _ => 1.0,
+        }
     }
 
     /// How far it carries: full loudness up to about `near` blocks, gone at `far`.
     fn reach(self) -> (f32, f32) {
         match self {
-            Sound::Explosion => (12.0, 400.0),
+            Sound::Explosion => (8.0, 400.0),
             Sound::ShotPistol | Sound::ShotRevolver => (7.0, 300.0),
             Sound::ShotRifle => (10.0, 400.0),
             Sound::ShotSilenced => (2.0, 70.0),
             Sound::CaseBrass | Sound::CaseMagnum | Sound::CaseRifle | Sound::DryFire => (1.0, 14.0),
             Sound::Impact | Sound::GrenadeBounce | Sound::ArmorHit => (2.0, 40.0),
             Sound::FireCrackle | Sound::BlastRoar => (1.5, 18.0),
-            Sound::SmokeHiss => (3.0, 40.0),
+            Sound::SmokeHiss | Sound::SmokePop => (3.0, 40.0),
             _ => (1.5, 20.0),
         }
     }
@@ -367,7 +385,7 @@ impl Audio {
         } else {
             (0.0, 1.0)
         };
-        let mut highs = air_highs(d);
+        let mut highs = air_highs(d * sound.dulling());
         // From behind it is a little quieter and duller (the ears face forward).
         let behind = (-ahead).max(0.0);
         g *= 1.0 - 0.15 * behind;

@@ -291,6 +291,7 @@ impl Game {
             drawer: matches!(self.screen, Screen::Container(Container::GunStation(_))) && self.bench_in_drawer,
             held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
             gun_extra: if self.holding_gun() { self.hand.gun_anim().pack_extra() } else { 0 },
+            grenade: self.grenades.hold.map_or(0, |h| (h.t * 100.0).round().min(65000.0) as u16 + 1),
             bench_hold: match (self.screen, self.cursor, self.bench_hold_at) {
                 (Screen::Container(Container::GunStation(_)), Some(st), Some(at)) => Some((st, at)),
                 _ => None,
@@ -467,6 +468,12 @@ impl Game {
             p.book = t.book;
             p.book_page = t.book_page;
             p.spectator = t.spectator;
+            // (a readied grenade goes on smoothly between the poses)
+            p.grenade = match (p.grenade, t.grenade) {
+                (_, 0) => 0,
+                (0, g) => g,
+                (g, n) => g.saturating_add((dt * 100.0).round() as u16).clamp(n.saturating_sub(10), n.saturating_add(10)),
+            };
         }
     }
 
@@ -559,6 +566,7 @@ fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
         gun: remote_gun(p, time, shot_at),
         armor: p.armor,
         book: None,
+        grenade: (p.grenade > 0).then(|| (p.grenade - 1) as f32 / 100.0),
     }
 }
 

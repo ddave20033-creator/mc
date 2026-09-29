@@ -337,14 +337,14 @@ fn scrape(seed: u32, len: f32, fc: f32) -> Vec<f32> {
     s
 }
 
-/// A ringing piece of metal: sine partials (Hz, loudness) dying away over `decay` seconds
-/// (the high ones sooner).
 /// A spent case landing: a tick and its ring (`pitch` scales the ring's partials).
 fn case_clink(pitch: f32, decay: f32, tick: f32, ring: f32) -> Vec<f32> {
     let r = ring_of(&[(2650.0 * pitch, 0.5), (4100.0 * pitch, 0.3), (6200.0 * pitch, 0.12)], decay);
     sequence(&[(clack(39, tick, 0.008), 0.0, 1.0), (r, 0.0, ring)], 0.45)
 }
 
+/// A ringing piece of metal: sine partials (Hz, loudness) dying away over `decay` seconds
+/// (the high ones sooner).
 fn ring_of(partials: &[(f32, f32)], decay: f32) -> Vec<f32> {
     let n = samples(decay * 5.0);
     (0..n)
@@ -512,14 +512,31 @@ fn make(sound: Sound) -> Vec<f32> {
             bandpass(&mut chip, 1800.0, 0.9);
             sequence(&[(chip, 0.0, 1.0), (thud(42, 350.0, 0.06), 0.0, 1.2)], 0.5)
         }
+        // The ring caught and tugged (a tick, its jingle), the split pin scraping out of the
+        // fuse, and a last click as its end clears the hole.
         Sound::PinPull => sequence(
             &[
-                (clack(43, 3000.0, 0.02), 0.0, 0.8),
-                (ring_of(&[(2450.0, 0.5), (5150.0, 0.3)], 0.05), 0.0, 0.6),
-                (clack(44, 3800.0, 0.02), 0.12, 0.5),
+                (clack(43, 3000.0, 0.015), 0.0, 0.6),
+                (ring_of(&[(2450.0, 0.5), (5150.0, 0.3)], 0.04), 0.0, 0.35),
+                (scrape(55, 0.13, 5200.0), 0.03, 1.1),
+                (clack(44, 4200.0, 0.02), 0.155, 0.7),
+                (ring_of(&[(3350.0, 0.4), (6900.0, 0.2)], 0.03), 0.155, 0.3),
             ],
-            0.55,
+            0.5,
         ),
+        // The spoon let go: its spring snaps it off the fuse with a ping, and it flutters
+        // away.
+        Sound::SpoonFly => sequence(
+            &[
+                (clack(56, 2600.0, 0.02), 0.0, 0.8),
+                (ring_of(&[(1850.0, 0.5), (3320.0, 0.35), (5480.0, 0.2)], 0.09), 0.0, 0.7),
+                (clack(57, 3400.0, 0.01), 0.11, 0.25),
+                (clack(58, 3100.0, 0.01), 0.19, 0.15),
+            ],
+            0.45,
+        ),
+        // (the recording, `samples`; made here only to have its level)
+        Sound::SmokePop => make(Sound::SmokeHiss),
         Sound::Throw => {
             let n = samples(0.28);
             let mut w = noise(n, 45);

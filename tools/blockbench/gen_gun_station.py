@@ -417,12 +417,16 @@ shelf = [
     cube("kit_label", [13.0 + W, 2.4, 5.5], [18.5 + W, 3.8, 5.65], "cardboard", [cardboard_box]),
     cube("can2_body", [16.2 + W, 5.2, -4.0], [20.4 + W, 9.2, 4.0], "olive", [ammo_can_side, stencil(2)]),
 ] + ([
-    # a long hard case for a rifle on the shelf in the middle, its latches and handle
-    cube("case_body", [8.2, 1.6, -5.2], [24.8, 4.4, 5.8], "olive", [ammo_can_side]),
-    cube("case_lid", [8.1, 4.4, -5.3], [24.9, 5.0, 5.9], "olive"),
-    cube("case_handle", [14.6, 5.0, 0.2], [18.4, 5.5, 1.4], "black"),
-    cube("case_latch_l", [10.4, 3.6, 5.8], [11.4, 4.9, 6.1], "alu"),
-    cube("case_latch_r", [21.6, 3.6, 5.8], [22.6, 4.9, 6.1], "alu"),
+    # an open crate for grenades on the shelf in the middle: frag grenades in the left half,
+    # smoke grenades in the right (the game stands them in it and stencils the count on each
+    # half's front, `crate_front_0/1`)
+    cube("crate_floor", [8.2, 1.6, -5.2], [24.8, 2.2, 5.8], "olive", [ammo_can_side]),
+    cube("crate_back", [8.2, 2.2, -5.2], [24.8, 4.4, -4.8], "olive", [ammo_can_side]),
+    cube("crate_l", [8.2, 2.2, -4.8], [8.6, 4.4, 5.4], "olive", [ammo_can_side]),
+    cube("crate_r", [24.4, 2.2, -4.8], [24.8, 4.4, 5.4], "olive", [ammo_can_side]),
+    cube("crate_divider", [16.3, 2.2, -4.8], [16.7, 4.4, 5.4], "olive"),
+    cube("crate_front_0", [8.2, 2.2, 5.4], [16.5, 4.4, 5.8], "olive", [ammo_can_side]),
+    cube("crate_front_1", [16.5, 2.2, 5.4], [24.8, 4.4, 5.8], "olive", [ammo_can_side]),
 ] if RIFLE else [])
 
 g_brush = group("brush", brush, (0, 12, 1.6))

@@ -17,7 +17,7 @@ use crate::item::{Slot, Stack};
 use glam::{IVec3, Vec3};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 30;
+pub const PROTOCOL: u16 = 32;
 
 // ---------------------------------------------------------------------------- data
 
@@ -77,6 +77,9 @@ pub struct Pose {
     /// At a gun station: what is held on the mouse over its table or drawer, and where it
     /// shows (world).
     pub bench_hold: Option<(Stack, Vec3)>,
+    /// Readying the held grenade: hundredths of a second since the button went down, plus
+    /// one (0: not).
+    pub grenade: u16,
 }
 
 /// `Pose::book`: the book is held open; the last page turn went back; the number of page
@@ -225,13 +228,15 @@ pub enum Msg {
         seed: f32,
         bullets: Vec<Vec3>,
     },
-    /// A grenade thrown (`kind`: 0 frag, 1 smoke), the same way as `Shot`; `seed` names it.
+    /// A grenade thrown (`kind`: 0 frag, 1 smoke), the same way as `Shot`; `seed` names it,
+    /// `fuse`: seconds until it goes off (less the longer it was held).
     Grenade {
         id: u8,
         kind: u8,
         pos: Vec3,
         vel: Vec3,
         seed: u32,
+        fuse: f32,
     },
     /// Host -> players: that grenade went off here.
     Blast {
@@ -458,6 +463,7 @@ impl W {
             }
             None => self.bool(false),
         }
+        self.u16(p.grenade);
     }
     fn bench_item(&mut self, i: &BenchItem) {
         self.u16(i.id);
@@ -493,6 +499,8 @@ impl W {
         for &m in &e.made {
             self.u16(m);
         }
+        self.u8(b.grenades[0]);
+        self.u8(b.grenades[1]);
     }
     fn state(&mut self, s: &PlayerState) {
         self.vec3(s.pos);
@@ -619,6 +627,7 @@ impl R<'_> {
             held_data: self.u16()?,
             gun_extra: self.u32()?,
             bench_hold: if self.bool()? { Some((self.stack()?, self.vec3()?)) } else { None },
+            grenade: self.u16()?,
         })
     }
     fn bench_item(&mut self) -> Option<BenchItem> {
@@ -651,6 +660,7 @@ impl R<'_> {
                 gone: self.list(|r| r.bench_item())?,
                 made: self.list(|r| r.u16())?,
             },
+            grenades: [self.u8()?, self.u8()?],
         })
     }
     fn state(&mut self) -> Option<PlayerState> {
@@ -937,6 +947,7 @@ impl Msg {
                 pos,
                 vel,
                 seed,
+                fuse,
             } => {
                 w.u8(45);
                 w.u8(*id);
@@ -944,6 +955,7 @@ impl Msg {
                 w.vec3(*pos);
                 w.vec3(*vel);
                 w.u32(*seed);
+                w.f32(*fuse);
             }
             Msg::Blast { pos, seed } => {
                 w.u8(46);
@@ -1130,6 +1142,7 @@ impl Msg {
                 pos: r.vec3()?,
                 vel: r.vec3()?,
                 seed: r.u32()?,
+                fuse: r.f32()?,
             },
             46 => Msg::Blast {
                 pos: r.vec3()?,
@@ -1216,6 +1229,7 @@ mod tests {
             pos: Vec3::new(3.0, 64.0, 1.0),
             vel: Vec3::new(10.0, 2.0, -4.0),
             seed: 0xdead_beef,
+            fuse: 1.75,
         });
         roundtrip(Msg::Blast {
             pos: Vec3::new(3.0, 64.0, 1.0),

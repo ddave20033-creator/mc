@@ -503,8 +503,9 @@ impl Game {
                 pos,
                 vel,
                 seed,
+                fuse,
                 ..
-            } => self.remote_grenade(id, kind, pos, vel, seed),
+            } => self.remote_grenade(id, kind, pos, vel, seed, fuse),
             Msg::SpawnMob { kind, pos } => {
                 if let Some(kind) = MobKind::from_u8(kind) {
                     self.spawn_mob(kind, pos);

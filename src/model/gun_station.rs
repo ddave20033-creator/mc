@@ -288,7 +288,8 @@ fn emit_number(out: &mut Vec<Vertex>, m: Mat4, (lo, hi): (Vec3, Vec3), n: u16, c
     let count = text.len() as f32;
     let width = count * dw + (count - 1.0) * gap;
     let mut x = (lo.x + hi.x) * 0.5 - width * 0.5;
-    let (z0, z1) = (hi.z + 0.004, hi.z + 0.012);
+    // (standing off the face enough not to flicker through it, seen from further away too)
+    let (z0, z1) = (hi.z + 0.05, hi.z + 0.12);
     let paint = [color; 6];
     // The stencil's bridges: each stroke stops short of the next.
     let cut = t * 0.45;
@@ -311,6 +312,62 @@ fn emit_number(out: &mut Vec<Vertex>, m: Mat4, (lo, hi): (Vec3, Vec3), n: u16, c
         }
         x += dw + gap;
     }
+}
+
+/// Grenades the rifle station's crate holds of each kind (frag, smoke).
+pub const CRATE_MAX: u8 = 12;
+/// The crate's halves (frag grenades, smoke grenades) inside its walls (model pixels) and how
+/// the grenades stand in them: so many across and deep, this tall.
+const CRATE_HALVES: [(f32, f32); 2] = [(8.6, 16.3), (16.7, 24.4)];
+const CRATE_Z: (f32, f32) = (-4.8, 5.4);
+const CRATE_FLOOR: f32 = 2.2;
+const CRATE_GRID: (usize, usize) = (3, 4);
+const CRATE_GRENADE: f32 = 4.2;
+
+/// The rifle station's shelf bone matrix (it does not move).
+fn shelf(p: IVec3, toward: Vec3) -> Option<Mat4> {
+    let (mats, _) = posed(&RIFLE, root(p, toward), 0.0, true, [Some(0); 3], Loader::default());
+    find_bone(RIFLE.bones, "shelf").map(|b| mats[b])
+}
+
+/// The grenades standing in the rifle station's crate (`n`: frag and smoke grenades), filled
+/// from the back, and the count stencilled on each half's front.
+pub fn emit_crate(out: &mut Vec<Vertex>, p: IVec3, toward: Vec3, n: [u8; 2], light: [u8; 4], fl: u8) {
+    let Some(m) = shelf(p, toward) else { return };
+    let (across, deep) = CRATE_GRID;
+    for (half, &count) in n.iter().enumerate() {
+        let (x0, x1) = CRATE_HALVES[half];
+        let (dx, dz) = ((x1 - x0) / across as f32, (CRATE_Z.1 - CRATE_Z.0) / deep as f32);
+        for k in 0..(count.min(CRATE_MAX) as usize).min(across * deep) {
+            let (row, col) = (k / across, k % across);
+            let at = Vec3::new(x0 + dx * (col as f32 + 0.5), CRATE_FLOOR + CRATE_GRENADE * 0.5, CRATE_Z.0 + dz * (row as f32 + 0.5));
+            // (each turned a little its own way)
+            let turn = Mat4::from_rotation_y(((k * 47 + half * 13) % 360) as f32 * 0.35_f32.to_radians() * 7.0);
+            super::grenade::emit_sized(out, half == 1, m * Mat4::from_translation(at) * turn, CRATE_GRENADE, light, fl);
+        }
+        let name = format!("crate_front_{half}");
+        if let Some(c) = RIFLE.cubes.iter().find(|c| c.name == name) {
+            let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
+            let (lo, hi) = (a.min(b), a.max(b));
+            let face = (Vec3::new(lo.x + 1.5, lo.y + 0.45, hi.z), Vec3::new(hi.x - 1.5, hi.y - 0.45, hi.z));
+            let color = if half == 0 { STENCIL } else { STENCIL_MAGNUM };
+            emit_number(out, m, face, count as u16, color, light, fl);
+        }
+    }
+}
+
+/// The crate's halves where the station puts them (for the crosshair to find them): each
+/// half's box (model pixels, up to the grenades' tops) and the shelf's matrix.
+pub fn crate_halves(p: IVec3, toward: Vec3) -> Vec<(usize, Vec3, Vec3, Mat4)> {
+    let Some(m) = shelf(p, toward) else { return Vec::new() };
+    let (lo_x, hi_x) = (CRATE_HALVES[0].0 - 0.4, CRATE_HALVES[1].1 + 0.4);
+    let mid = (CRATE_HALVES[0].1 + CRATE_HALVES[1].0) * 0.5;
+    let (y0, y1) = (1.6, CRATE_FLOOR + CRATE_GRENADE);
+    let (z0, z1) = (CRATE_Z.0 - 0.4, CRATE_Z.1 + 0.4);
+    vec![
+        (0, Vec3::new(lo_x, y0, z0), Vec3::new(mid, y1, z1), m),
+        (1, Vec3::new(mid, y0, z0), Vec3::new(hi_x, y1, z1), m),
+    ]
 }
 
 /// The boxes of rounds' cubes where the station's pose puts them (for the mouse to find

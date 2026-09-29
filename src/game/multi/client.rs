@@ -192,7 +192,8 @@ impl Game {
                 pos,
                 vel,
                 seed,
-            } => self.remote_grenade(id, kind, pos, vel, seed),
+                fuse,
+            } => self.remote_grenade(id, kind, pos, vel, seed, fuse),
             Msg::Blast { pos, seed } => self.remote_blast(pos, seed),
             Msg::BreakFx { p, block } => self.break_fx(p, block, true, None),
             Msg::Furnace {

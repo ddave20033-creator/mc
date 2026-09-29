@@ -379,12 +379,14 @@ pub fn save_entities(
             .collect();
         let boxes: Vec<String> = b.boxes.iter().map(|n| n.map_or("-".to_string(), |n| n.to_string())).collect();
         s += &format!(
-            "bench:{}:{}:{}:{}:{}\n",
+            "bench:{}:{}:{}:{}:{}:{},{}\n",
             pos_str(*p),
             items.join("|"),
             boxes.join(","),
             b.loader as u8,
-            slot_str(&b.loader_mag)
+            slot_str(&b.loader_mag),
+            b.grenades[0],
+            b.grenades[1]
         );
     }
     for (p, t) in saplings {
@@ -492,6 +494,12 @@ pub fn load_entities(
                 }
                 bench.loader = parts.get(4) == Some(&"1");
                 bench.loader_mag = parts.get(5).and_then(|s| parse_slot(s));
+                if let Some(g) = parts.get(6) {
+                    let max = crate::model::gun_station::CRATE_MAX;
+                    for (i, n) in g.split(',').take(2).enumerate() {
+                        bench.grenades[i] = n.parse::<u8>().unwrap_or(0).min(max);
+                    }
+                }
                 be.benches.insert(p, bench);
             }
             "sapling" if parts.len() >= 3 => saplings.push((p, parts[2].parse().unwrap_or(60.0))),
@@ -611,6 +619,8 @@ mod bench_tests {
         bench.add(Stack { data: 40, ..Stack::one(crate::item::AMMO_BOX) }, -0.5, 0.2, 0.3);
         // (the last a box of magnum rounds: its kind is kept)
         bench.boxes = [Some(128), None, Some(3 | crate::item::BOX_MAGNUM)];
+        // (and grenades in the rifle station's crate)
+        bench.grenades = [5, 12];
         be.benches.insert(IVec3::new(4, 70, -9), bench.clone());
         save_entities(folder, &be, &[], &[], &[]);
         let mut back = BlockEntities::default();
@@ -618,6 +628,7 @@ mod bench_tests {
         let _ = fs::remove_dir_all(dir(folder));
         let got = back.benches.get(&IVec3::new(4, 70, -9)).expect("saved");
         assert_eq!(got.boxes, bench.boxes);
+        assert_eq!(got.grenades, [5, 12]);
         assert_eq!(got.items.len(), 2);
         assert_eq!(got.items[0].stack, mag);
         assert_eq!(crate::item::box_rounds(&got.items[1].stack), 40);

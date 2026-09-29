@@ -352,12 +352,14 @@ pub struct GunBench {
     pub loader: bool,
     pub loader_mag: Option<Stack>,
     pub event: BenchEvent,
+    /// The rifle station's grenade crate on its shelf: how many frag and smoke grenades.
+    pub grenades: [u8; 2],
 }
 
 impl Default for GunBench {
     /// A new one: three empty boxes in the drawer.
     fn default() -> Self {
-        GunBench { items: Vec::new(), next_id: 0, boxes: [Some(0); 3], loader: false, loader_mag: None, event: BenchEvent::default() }
+        GunBench { items: Vec::new(), next_id: 0, boxes: [Some(0); 3], loader: false, loader_mag: None, event: BenchEvent::default(), grenades: [0; 2] }
     }
 }
 
@@ -416,6 +418,12 @@ impl BlockEntities {
                 out.push(Stack::one(crate::item::MAG_LOADER));
             }
             out.extend(b.loader_mag);
+            // The grenades in the crate.
+            for (kind, n) in [crate::item::FRAG_GRENADE, crate::item::SMOKE_GRENADE].into_iter().zip(b.grenades) {
+                if n > 0 {
+                    out.push(Stack::new(kind, n));
+                }
+            }
             for kind in BOX_AMMO {
                 let mut rounds: u32 = all.iter().filter(|&&v| box_ammo(v) == Some(kind)).map(|&v| box_count(v) as u32).sum();
                 while rounds > 0 {

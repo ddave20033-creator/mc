@@ -19,6 +19,9 @@ Most sounds are synthesized by the game (`src/audio/synth.rs`). The guns' record
   recordings), royalty-free, <https://sonniss.com/gameaudiogdc>.
 - The AK's shot: **The Free Firearm Sound Library** (CC0). The AK's magazine and bolt, and the
   revolver's speedloader and single rounds: **OpenGameArt** reload recordings (CC0).
+- The grenade's explosion: **Sonniss GDC Game Audio Bundles** (Gamemaster Audio, Explosion
+  Sound Pack), royalty-free. A smoke grenade catching: **OpenGameArt**, "Steam release
+  sounds" (CC0), <https://opengameart.org/content/steam-release-sounds>.
 
 ## Animations
 

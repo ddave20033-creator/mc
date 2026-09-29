@@ -59,6 +59,9 @@ pub struct PlayerPose {
     pub armor: u16,
     /// Holding the guide book open: its pages (see `book::BookView`).
     pub book: Option<super::book::BookView>,
+    /// Readying the held grenade: seconds since the button went down (raised, the pin pulled
+    /// by the left hand, drawn back higher the harder it will be thrown).
+    pub grenade: Option<f32>,
 }
 
 // Face order for layers: +X, -X, +Y, -Y, +Z (back), -Z (front)
@@ -163,7 +166,7 @@ fn gait(p: &PlayerPose) -> Gait {
     // Not with both hands on something held: they would come off it. A gun's stance turns
     // the body instead.
     let gun = crate::item::GunKind::of(p.held).filter(|_| p.attack <= 0.0 && !p.blocking);
-    let both_hands = p.book.is_some() || gun.is_some();
+    let both_hands = p.book.is_some() || gun.is_some() || readying(p);
     let free = if both_hands { 0.0 } else { 1.0 };
     Gait {
         bob,
@@ -386,6 +389,49 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
         let (right, left) = if a.x >= b.x { (a, b) } else { (b, a) };
         (l.right_arm, l.right_elbow, l.right_shift) = reach_bent(Vec3::new(5.0, shoulder_y, 0.0), right, Vec3::new(1.0, -1.0, 0.35), 0.0);
         (l.left_arm, l.left_elbow, l.left_shift) = reach_bent(Vec3::new(-5.0, shoulder_y, 0.0), left, Vec3::new(-1.0, -1.0, 0.35), 0.0);
+    } else if let (Some(t), false) = (p.grenade.filter(|_| readying(p)), swinging) {
+        // Readying a grenade, as the first-person hand does (its poses brought over to the
+        // model: where the hand is before the eyes): brought up in front of the face, the
+        // left hand comes up by it and takes the pin off down to the side, then it goes a
+        // little to the right and down, and up again in front, higher the harder it will be
+        // thrown.
+        use super::grenade::{power, PULL_TIME, RAISE_TIME};
+        let smooth = |x: f32| {
+            let x = x.clamp(0.0, 1.0);
+            x * x * (3.0 - 2.0 * x)
+        };
+        let shoulder_y = 22.0 - SNEAK_DROP * c;
+        let look = look_turn(p);
+        let pull = t - RAISE_TIME;
+        let (rest, front) = (Vec3::new(5.0, 13.0, -4.0), Vec3::new(2.0, 21.0, -8.5));
+        let cock = smooth((pull - 0.55) / 0.3);
+        let right = rest.lerp(front, smooth(t / RAISE_TIME)).lerp(cocked(power(t)), cock);
+        // (the ring is up at the left of the grenade in the fist)
+        let ring = front + Vec3::new(-3.0, 4.0, -0.5);
+        let (by_side, away) = (Vec3::new(-6.0, 11.0, -1.0), Vec3::new(-7.0, 9.0, 1.5));
+        let left = if pull < 0.35 {
+            by_side.lerp(ring, smooth((t - 0.05) / (RAISE_TIME + 0.03)))
+        } else {
+            ring.lerp(away, smooth((pull - 0.35) / (PULL_TIME - 0.35)))
+        };
+        let (sr, sl) = (Vec3::new(5.0, shoulder_y, 0.0), Vec3::new(-5.0, shoulder_y, 0.0));
+        (l.right_arm, l.right_elbow, l.right_shift) =
+            reach_bent(sr, look.transform_point3(right), Vec3::new(1.0, -1.0, 0.35), 0.0);
+        (l.left_arm, l.left_elbow, l.left_shift) =
+            reach_bent(sl, look.transform_point3(left), Vec3::new(-1.0, -1.0, 0.35), 0.0);
+    } else if let (true, true) = (throwing(p), swinging) {
+        // A grenade just thrown (the swing): the arm goes on forward from where it held it
+        // and down, the hand empty.
+        let smooth = |x: f32| {
+            let x = x.clamp(0.0, 1.0);
+            x * x * (3.0 - 2.0 * x)
+        };
+        let over = Vec3::new(4.5, 26.0, -9.5);
+        let down = Vec3::new(3.5, 14.0, -7.5);
+        let hand = if a < 0.4 { cocked(0.7).lerp(over, smooth(a / 0.4)) } else { over.lerp(down, smooth((a - 0.4) / 0.6)) };
+        let sr = Vec3::new(5.0, 22.0 - SNEAK_DROP * c, 0.0);
+        (l.right_arm, l.right_elbow, l.right_shift) =
+            reach_bent(sr, look_turn(p).transform_point3(hand), Vec3::new(1.0, -1.0, 0.35), 0.0);
     } else if let (Some(kind), false, false) =
         (crate::item::GunKind::of(p.held), swinging, p.blocking)
     {
@@ -712,6 +758,13 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         let (mats, shown) = gun_matrices(p, kind, root * gun_on_model(p, kind));
         let lamp = p.gun_mods & crate::item::gun_mod::LIGHT != 0 && p.gun_mods & crate::item::gun_mod::LIGHT_ON != 0;
         super::gun_view::emit(kind, out, Some(glass), &mats, &shown, false, p.gun_dirt, lamp, &p.gun, light, fl);
+    } else if throwing(p) && p.attack > 0.0 {
+        // (it has just left the hand)
+    } else if let (Some(t), true) = (p.grenade.filter(|_| readying(p)), show_right) {
+        // A grenade being readied: its pin coming out, then gone.
+        use super::grenade::{emit, sized, Look};
+        let smoke = p.held == crate::item::SMOKE_GRENADE;
+        emit(out, smoke, sized(smoke, held_item(p, right_hand), 0.62), Look::readied(t), light, fl);
     } else if p.held != NONE && show_right {
         let st = crate::item::Stack { data: p.held_data, ..crate::item::Stack::one(p.held) };
         super::emit_held_data(out, held_item(p, right_hand), &st, light, fl);
@@ -807,6 +860,29 @@ fn held_item(p: &PlayerPose, right: Mat4) -> Mat4 {
         * Mat4::from_scale(Vec3::splat(16.0 * sc))
 }
 
+/// Whether a grenade is being readied in the hand.
+fn readying(p: &PlayerPose) -> bool {
+    p.grenade.is_some() && super::grenade_item(p.held)
+}
+
+/// A grenade in the hand and not being readied: a swing now is its throw.
+fn throwing(p: &PlayerPose) -> bool {
+    p.grenade.is_none() && super::grenade_item(p.held)
+}
+
+/// Where the right hand holds a readied grenade once the pin is out (model pixels, the
+/// torso's frame), as the first-person hand does: in front, to the right, from under the
+/// eyes up over them with the throw's `power`.
+fn cocked(power: f32) -> Vec3 {
+    let k = power * power * (3.0 - 2.0 * power);
+    Vec3::new(4.5, 21.5, -8.5).lerp(Vec3::new(5.5, 28.5, -7.0), k)
+}
+
+/// The middle of the held item (a readied grenade: where it is thrown from), in the world.
+pub fn held_center(p: &PlayerPose, limbs: &Limbs) -> Vec3 {
+    held_item(p, right_arm(p, limbs)).transform_point3(Vec3::ZERO)
+}
+
 /// Where a held torch's fire is (the tip of its glowing head), in the world.
 pub fn held_torch_tip(p: &PlayerPose, limbs: &Limbs) -> Vec3 {
     held_item(p, right_arm(p, limbs)).transform_point3(TORCH_TIP)
@@ -892,6 +968,7 @@ mod gun_hold_tests {
             gun: Default::default(),
             armor: 0,
             book: None,
+            grenade: None,
         }
     }
 
@@ -954,6 +1031,7 @@ mod bend_tests {
             gun: Default::default(),
             armor: 0,
             book: None,
+            grenade: None,
         }
     }
 

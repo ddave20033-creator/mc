@@ -145,6 +145,8 @@ impl Game {
         self.action_cooldown -= dt;
         self.update_guns(dt, control);
         self.update_grenades(dt);
+        let book = self.book_in_hand();
+        self.update_grenade_hold(dt, control && !book);
         let mut breaking = None;
         // A sword does not break blocks at all (it only fights); with a pistol the left mouse
         // button shoots instead (one shot per click, no hitting).
