@@ -313,8 +313,8 @@ pub struct Game {
     falling: Vec<FallingBlock>,
     /// Trees felled with an axe, falling over.
     falling_trees: Vec<felling::FallingTree>,
-    /// The trunk the axe swinging now is to bite into.
-    chop_at: Option<IVec3>,
+    /// A chop with an axe going on (`felling`).
+    chop: Option<crate::model::chop_rig::Swing>,
     mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
     mob_spawn_timer: f32,
@@ -585,7 +585,7 @@ impl Game {
             items: Vec::new(),
             falling: Vec::new(),
             falling_trees: Vec::new(),
-            chop_at: None,
+            chop: None,
             mobs: Vec::new(),
             mob_spawn_timer: 5.0,
             mob_target: None,

@@ -798,6 +798,14 @@ impl Game {
                 dt,
                 self.effective_skin(),
             );
+            // Chopping: the arms and the axe where the chop's rig has them in the world (the
+            // same ones the player model shows from outside).
+            if let Some(swing) = self.chop {
+                use crate::model::chop_rig::{emit, Parts};
+                let light = crate::util::vertex_light(player_sky, player_blk);
+                let fl = crate::world::mesh::flags::ENTITY;
+                emit(&mut scene.particles, self.chop_world(), &swing.pose(), Parts::Arms, self.held(), self.effective_skin(), light, fl);
+            }
             // The hand is drawn with its own 70 degree view: move its torch tip to where the
             // world's view shows the same spot, so the flame sits on the torch.
             let k = (self.fov_current.to_radians() * 0.5).tan() / 35f32.to_radians().tan();
@@ -916,7 +924,7 @@ impl Game {
                 book: self.book_view(),
                 grenade: self.grenades.hold.map(|h| h.t),
                 rod: self.rod_anim(),
-                chop: self.hand.chop_time(),
+                chop: self.chop,
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {

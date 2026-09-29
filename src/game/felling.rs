@@ -1,13 +1,15 @@
-//! Felling trees with an axe. Each chop is a swing of its own (`HandAnim::chop`): the axe
-//! bites into the trunk where it was aimed, chips fly, and the cut (`mesh::Notch`) goes a
-//! little deeper into the round trunk each time. Deep enough, the trunk breaks there and the
+//! Felling trees with an axe. Each chop is a swing of its own, as made in Blockbench
+//! (`chop_rig`): the axe drawn back and swung round level. The axe's edge is followed along
+//! its real path through the world as it swings, and only where it meets a trunk does it
+//! bite in: it stops there, chips fly, and the cut (`mesh::Notch`) is made on that side at
+//! that height, a little deeper with every chop (how much deeper, the axe decides). Deep enough, the trunk breaks there and the
 //! tree above it (its trunk, branches and leaves) falls over as one, away from the player,
 //! slowly at first and faster as it tips, until it hits the ground and breaks up into what
 //! it drops.
 
 use super::*;
 use crate::item::{inventory, tool_of, Tier, ToolKind};
-use crate::model::hand::CHOP_TIME;
+use crate::model::chop_rig::{self, ChopPose, Swing, EDGE, HIT, STROKE};
 use crate::world::mesh::{notch_at, set_notch, Notch};
 
 /// How deep (of the trunk's width) the cut goes before the trunk breaks.
@@ -53,24 +55,59 @@ fn is_trunk(b: u8) -> bool {
     is_log(b) && !is_branch(b) && log_axis(b) == 1
 }
 
-/// Chops it takes an axe to fell a tree (None: not an axe).
+/// Chops it takes an axe to fell a tree (None: not an axe): each chop cuts this much of the
+/// way through, a weak axe little, a strong one more.
 fn chops_needed(held: ItemId) -> Option<f32> {
     match tool_of(held)? {
         (ToolKind::Axe, tier) => Some(match tier {
-            Tier::Wood => 8.0,
-            Tier::Stone => 6.0,
-            Tier::Copper => 6.0,
-            Tier::Iron => 5.0,
-            Tier::Diamond => 4.0,
-            Tier::Gold => 3.0,
+            Tier::Wood => 10.0,
+            Tier::Stone => 8.0,
+            Tier::Copper => 7.0,
+            Tier::Iron => 6.0,
+            Tier::Diamond => 5.0,
+            Tier::Gold => 4.0,
         }),
         _ => None,
     }
 }
 
+/// Whether the point `q` is in the wood of an upright trunk (not in the air round it, nor in
+/// a cut already taken out of it), and which trunk.
+fn in_trunk(w: &World, q: Vec3) -> Option<IVec3> {
+    let p = q.floor().as_ivec3();
+    let b = w.geti(p);
+    if !is_trunk(b) {
+        return None;
+    }
+    let rel = Vec2::new(q.x - (p.x as f32 + 0.5), q.z - (p.z as f32 + 0.5));
+    let r = log_radius(b);
+    if rel.length() > r {
+        return None;
+    }
+    if let Some(n) = notch_at(p) {
+        let y = q.y - p.y as f32;
+        let h = n.height.clamp(0.12, 0.88);
+        if n.felled && y > h {
+            return None;
+        }
+        let deep = n.depth.clamp(0.0, 1.0) * 2.0 * r;
+        let half = (deep * 0.8).max(0.08);
+        let cut = r - deep * (1.0 - (y - h).abs() / half).max(0.0);
+        if rel.dot(Vec2::new(n.angle.cos(), n.angle.sin())) > cut {
+            return None;
+        }
+    }
+    Some(p)
+}
+
 impl Game {
-    /// The trunk the player is aiming an axe at, if any (felling is the host's; a LAN
-    /// client mines trunks like any block).
+    /// Where the chop's rig is in the world (as the player model draws it).
+    pub(super) fn chop_world(&self) -> Mat4 {
+        chop_rig::to_world(self.player.pos, self.visual_head_yaw(), self.pitch)
+    }
+
+    /// The trunk the player is aiming an axe at, if any: a swing can start (felling is the
+    /// host's; a LAN client mines trunks like any block).
     fn chop_target(&self) -> Option<IVec3> {
         chops_needed(self.held())?;
         if self.is_client() {
@@ -82,44 +119,63 @@ impl Game {
         (is_trunk(self.terrain.world.geti(hit)) && !stump).then_some(hit)
     }
 
-    /// Chopping with an axe, instead of mining: each swing its own chop, the cut deepening
-    /// when the axe bites in. True while it is going on (the normal mining is left out).
-    pub(super) fn update_chopping(&mut self, active: bool) -> bool {
-        if self.hand.chop_bit() {
-            if let Some(p) = self.chop_at.take() {
-                if is_trunk(self.terrain.world.geti(p)) {
-                    let point = match self.target {
-                        Some((hit, _)) if hit == p => self.target_point,
-                        _ => p.as_vec3() + Vec3::splat(0.5),
-                    };
-                    self.chop_hit(p, point);
+    /// Where the axe's edge first comes into a trunk's wood between the animation's times
+    /// `t0` and `t1`: the time, the trunk and the point.
+    fn edge_contact(&self, t0: f32, t1: f32) -> Option<(f32, IVec3, Vec3)> {
+        let world = self.chop_world();
+        let steps = ((t1 - t0) / 0.004).ceil().max(1.0) as usize;
+        for i in 1..=steps {
+            let t = t0 + (t1 - t0) * i as f32 / steps as f32;
+            let axe = world * ChopPose::at(t).axe();
+            for e in EDGE {
+                let q = axe.transform_point3(e);
+                if let Some(p) = in_trunk(&self.terrain.world, q) {
+                    return Some((t, p, q));
                 }
             }
         }
+        None
+    }
+
+    /// Chopping with an axe, instead of mining: a swing at a time while the button is held,
+    /// the edge followed along its path; where it meets a trunk it bites in. True while it is
+    /// going on (the normal mining is left out, and the hand is drawn by the rig).
+    pub(super) fn update_chopping(&mut self, active: bool, dt: f32) -> bool {
+        if let Some(mut sw) = self.chop {
+            let before = sw.anim_time();
+            sw.clock += dt;
+            let after = sw.anim_time();
+            if sw.hit.is_none() && after > STROKE && before < HIT {
+                if let Some((t, p, point)) = self.edge_contact(before.max(STROKE), after.min(HIT)) {
+                    // Stuck where it bit in.
+                    sw.hit = Some(t);
+                    sw.clock = t;
+                    self.chop_hit(p, point);
+                }
+            }
+            self.chop = (!sw.done()).then_some(sw);
+        }
         let target = if active { self.chop_target() } else { None };
-        if target.is_none() && !self.hand.chopping() {
-            return false;
+        if self.chop.is_none() && (target.is_none() || !self.left_down) {
+            self.hand.hidden = false;
+            return target.is_some();
         }
         self.mining = None;
-        if let (Some(p), true, false) = (target, self.left_down, self.hand.chopping()) {
-            if self.action_cooldown <= 0.0 {
-                let aim = self.target_point - self.player.eye();
-                self.hand.chop(aim);
-                self.chop_at = Some(p);
-                self.action_cooldown = CHOP_TIME * 0.9;
-            }
+        if self.chop.is_none() {
+            self.chop = Some(Swing::default());
         }
+        self.hand.hidden = true;
         true
     }
 
-    /// The axe bites into the trunk at `p` at `point`: the cut is made there, on the side of
-    /// the trunk it came in from, at the height it hit; each chop takes more wood out (a
-    /// chop a little off the cut moves it that way, weighed by how much is cut already).
-    /// Chips fly, and deep enough the tree falls.
+    /// The axe's edge has bitten into the trunk at `p` at `point`: the cut is made there, on
+    /// the side of the trunk it came in from, at the height it hit; each chop takes as much
+    /// more wood out as the axe cuts (a chop a little off the cut moves it that way, weighed
+    /// by how much is cut already). Chips fly, and cut through far enough the tree falls.
     fn chop_hit(&mut self, p: IVec3, point: Vec3) {
         let b = self.terrain.world.geti(p);
         let creative = self.creative();
-        let chops = if creative { 2.0 } else { chops_needed(self.held()).unwrap_or(8.0) };
+        let chops = if creative { 4.0 } else { chops_needed(self.held()).unwrap_or(10.0) };
         let middle = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
         // Where it bit in: round the trunk from its middle toward the point hit (or the
         // player, hit straight on), and how high.

@@ -167,7 +167,7 @@ impl Game {
         // A left click on what is in a furnace takes it out instead of mining (a pistol shoots).
         let furnace_hold = control && !gun && !reading && self.furnace_left_click();
         // An axe on a tree's trunk chops it instead.
-        let chopping = self.update_chopping(control && !reading && !sword && !gun && !furnace_hold);
+        let chopping = self.update_chopping(control && !reading && !sword && !gun && !furnace_hold, dt);
         if control
             && !chopping
             && !reading
