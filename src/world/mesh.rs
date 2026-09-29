@@ -764,6 +764,15 @@ impl Builder {
         };
         let mut step = [0i32; 3];
         step[axis] = 1;
+        // Another log comes into this one across (a branch goes on from here another way).
+        let elbow = (0..3).filter(|&k| k != axis).any(|k| {
+            [-1i32, 1].into_iter().any(|dir| {
+                let mut d = [0i32; 3];
+                d[k] = dir;
+                let nb = r.get(x + d[0], y + d[1], z + d[2]);
+                is_log(nb) && log_axis(nb) == k && log_radius(nb) <= radius + 0.01
+            })
+        });
         let mut ends = [(0.0f32, true), (1.0f32, true)];
         for (k, dir) in [-1i32, 1].into_iter().enumerate() {
             let nb = r.get(x + step[0] * dir, y + step[1] * dir, z + step[2] * dir);
@@ -773,6 +782,10 @@ impl Builder {
                 (t, radius > log_radius(nb) + 0.01)
             } else if is_log(nb) && radius <= log_radius(nb) + 0.01 {
                 (t + 0.5 * dir as f32, false)
+            } else if is_branch(b) && elbow {
+                // A branch turning (up, or aside): it stops just past the middle, where the
+                // one going on from here closes round it, not out into the air.
+                (0.5 + radius * dir as f32, true)
             } else {
                 (t, true)
             };
@@ -834,7 +847,9 @@ impl Builder {
                 }
                 let mut n = [0.0f32; 3];
                 n[axis] = if k == 0 { -1.0 } else { 1.0 };
-                let uv = |u: f32, v: f32| [0.5 + u, 0.5 + v];
+                // The whole end (rings and the bark round them) at any thickness.
+                let k = LOG_END_RIM / radius;
+                let uv = |u: f32, v: f32| [0.5 + u * k, 0.5 + v * k];
                 emit(
                     self,
                     [at(t, 0.0, 0.0), at(t, c0, s0), at(t, c1, s1), at(t, 0.0, 0.0)],
@@ -1520,3 +1535,7 @@ mod tests {
         assert_eq!(world.light_estimate(glam::Vec3::new(6.5, 1.5, 8.5)).0, 15);
     }
 }
+
+/// How far out a round log's end reaches in its end texture (0.5 is the edge): just into
+/// the bark ring round the wood.
+pub const LOG_END_RIM: f32 = 0.47;

@@ -264,6 +264,30 @@ fn double_chest_faces(left: &Image, right: &Image, put: &mut impl FnMut(u32, &Im
 }
 
 /// Replaces layers with the textures of the resource packs (anything missing stays procedural).
+/// A log's end with square rings (Minecraft's, for a square log) redrawn round, for the
+/// round logs: each point takes the ring as far out as it is (round), in its direction (the
+/// square ring there). The corners outside the outermost ring are bark.
+fn round_rings(img: &Image) -> Image {
+    let n = TILE as u32;
+    let mut out = Image::blank(n, n);
+    for y in 0..n {
+        for x in 0..n {
+            let (dx, dy) = ((x as f32 + 0.5) / n as f32 - 0.5, (y as f32 + 0.5) / n as f32 - 0.5);
+            let d = (dx * dx + dy * dy).sqrt();
+            let m = dx.abs().max(dy.abs()).max(1e-6);
+            // On the square as far out (Chebyshev) as this point is round, the edge's
+            // pixels past it.
+            let k = d.min(0.4999) / m;
+            let sx = ((0.5 + dx * k) * img.w as f32) as u32;
+            let sy = ((0.5 + dy * k) * img.h as f32) as u32;
+            let px = img.pixel(sx.min(img.w - 1), sy.min(img.h - 1));
+            let i = ((y * n + x) * 4) as usize;
+            out.rgba[i..i + 4].copy_from_slice(&px);
+        }
+    }
+    out
+}
+
 pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
     let layer_bytes = TILE * TILE * 4;
     let mut put = |layer: u32, img: &Image| {
@@ -283,6 +307,11 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
             let img = match (is_cutout(layer), img.opaque_bounds()) {
                 (false, Some((x, y, w, h))) => img.crop(x, y, w, h),
                 _ => img,
+            };
+            let img = if matches!(layer, tex::OAK_LOG_TOP | tex::SPRUCE_LOG_TOP | tex::BIRCH_LOG_TOP) {
+                round_rings(&img)
+            } else {
+                img
             };
             put(layer, &img);
         }

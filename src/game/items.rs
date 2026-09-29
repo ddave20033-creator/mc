@@ -402,7 +402,6 @@ impl Game {
             let upside_down = normal == IVec3::NEG_Y || (normal.y == 0 && upper);
             stairs_id(look, upside_down)
         } else if is_log(base) {
-            // Lies along the clicked face's normal, like Minecraft.
             let axis = if normal.x != 0 {
                 0
             } else if normal.z != 0 {
@@ -410,7 +409,19 @@ impl Game {
             } else {
                 1
             };
-            log_with_axis(base, axis)
+            let on = w.geti(hit);
+            if at != hit && is_log(on) && !self.sneaking() {
+                // Grows out of the wood clicked: up a trunk it is trunk; out of a side, or
+                // on from a branch, a branch; on along a lying log, the same log.
+                if is_branch(on) || (axis != 1 && log_axis(on) != axis) {
+                    branch_with_axis(base, axis)
+                } else {
+                    log_with_axis(base, axis)
+                }
+            } else {
+                // Lies along the clicked face's normal, like Minecraft (sneaking: always).
+                log_with_axis(base, axis)
+            }
         } else {
             base
         };

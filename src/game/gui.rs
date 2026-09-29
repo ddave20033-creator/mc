@@ -415,6 +415,47 @@ pub fn draw_stack(ui: &mut Ui, x: f32, y: f32, size: f32, st: &Stack) {
                 ui.tex_quad(side, layer, 0.62);
             }
         }
+        Icon::Block(b) if is_log(b) => {
+            // Round, upright, seen from the same corner as the cube icons: the bark toward
+            // us, the rings on top.
+            let r = size * 0.47;
+            let k = 0.866 * r;
+            let at = |x: f32, y: f32, z: f32| {
+                Vec2::new(
+                    c.x + k * (x + z - 1.0),
+                    c.y + r * (1.0 - y) - r * 0.5 * (1.0 + z - x),
+                )
+            };
+            const SIDES: usize = 12;
+            let (rad, rim) = (log_radius(OAK_LOG), crate::world::mesh::LOG_END_RIM);
+            let ang = |i: usize| i as f32 / SIDES as f32 * std::f32::consts::TAU;
+            let rim_at = |i: usize| (0.5 + ang(i).cos() * rad, 0.5 + ang(i).sin() * rad);
+            let (bark, rings) = (face_texture(b, 0), face_texture(b, 2));
+            for i in 0..SIDES {
+                let mid = (ang(i) + ang(i + 1)) * 0.5;
+                let (nc, ns) = (mid.cos(), mid.sin());
+                // Only the sides facing us (toward +x and -z).
+                if nc - ns <= 0.0 {
+                    continue;
+                }
+                let ((x0, z0), (x1, z1)) = (rim_at(i), rim_at(i + 1));
+                let (u0, u1) = ((i % 4) as f32 / 4.0, (i % 4 + 1) as f32 / 4.0);
+                let shade = 0.71 + 0.09 * (-ns - nc);
+                ui.tex_quad_uv(
+                    [at(x0, 1.0, z0), at(x1, 1.0, z1), at(x1, 0.0, z1), at(x0, 0.0, z0)],
+                    [[u0, 0.0], [u1, 0.0], [u1, 1.0], [u0, 1.0]],
+                    bark,
+                    shade,
+                );
+            }
+            let f = rim / rad;
+            let uv = |x: f32, z: f32| [0.5 + (x - 0.5) * f, 0.5 + (z - 0.5) * f];
+            for i in 0..SIDES {
+                let ((x0, z0), (x1, z1)) = (rim_at(i), rim_at(i + 1));
+                let p = [at(0.5, 1.0, 0.5), at(x0, 1.0, z0), at(x1, 1.0, z1), at(x1, 1.0, z1)];
+                ui.tex_quad_uv(p, [uv(0.5, 0.5), uv(x0, z0), uv(x1, z1), uv(x1, z1)], rings, 1.0);
+            }
+        }
         Icon::Block(b) => {
             let tint = icon_tint(b);
             let top = if tint_kind(b, 2) != TintKind::None {

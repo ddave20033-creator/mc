@@ -752,6 +752,12 @@ impl Ui {
         self.block_face(p, layer, shade, [255; 3]);
     }
 
+    /// `tex_quad` showing the part `uv` (per corner) of the texture.
+    pub fn tex_quad_uv(&mut self, p: [Vec2; 4], uv: [[f32; 2]; 4], layer: u32, shade: f32) {
+        let c = [shade, shade, shade, 1.0];
+        self.push(p, uv, [c; 4], [layer as f32, shade, 0.0, 0.0], MODE_BLOCK);
+    }
+
     /// `tex_quad` with a color tint.
     pub fn tex_quad_tint(&mut self, p: [Vec2; 4], layer: u32, shade: f32, tint: [u8; 3]) {
         self.block_face(p, layer, shade, tint);

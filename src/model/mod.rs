@@ -29,7 +29,8 @@ use crate::item::{icon, Icon, ItemId};
 use crate::world::mesh::{corner_pos, corner_uv, flags, Vertex, CORNERS};
 use crate::world::textures::{tex, ITEM_MASKS, MASK};
 use crate::world::{
-    face_texture, icon_tint, is_plant, is_stairs, is_water, tint_kind, TintKind, TORCH,
+    face_texture, icon_tint, is_log, is_plant, is_stairs, is_water, log_axis, log_radius, tint_kind,
+    TintKind, TORCH,
 };
 use glam::{Mat4, Vec3};
 /// Whether an item is drawn as a 3D model of its own (the pistol's parts, attachments,
@@ -418,6 +419,8 @@ pub fn emit_item(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8) 
     let tint = icon_tint(b);
     if is_plant(b) {
         emit_cross(out, m, face_texture(b, 0), tint, light, fl);
+    } else if is_log(b) {
+        emit_round_log(out, m, b, light, fl);
     } else if is_stairs(b) {
         let layers = [face_texture(b, 0); 6];
         let tints = [[255; 3]; 6];
@@ -443,6 +446,79 @@ pub fn emit_item(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8) 
             light,
             fl,
         );
+    }
+}
+
+/// Sides of a round log item, and how many times its bark goes round (as on the placed one).
+const LOG_ITEM_SIDES: usize = 12;
+
+/// A log (or branch) item as it looks placed: round, along its axis through the unit, its
+/// bark round it and its ends' rings.
+fn emit_round_log(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8) {
+    let axis = log_axis(b);
+    let (ua, va) = match axis {
+        0 => (2, 1),
+        1 => (0, 2),
+        _ => (0, 1),
+    };
+    let radius = log_radius(b);
+    let side = face_texture(b, if axis == 1 { 0 } else { 2 });
+    let end = face_texture(b, if axis == 1 { 2 } else { 0 });
+    let at = |t: f32, u: f32, v: f32| {
+        let mut p = [0.0f32; 3];
+        p[axis] = t;
+        p[ua] = u;
+        p[va] = v;
+        m.transform_point3(Vec3::from(p)).to_array()
+    };
+    let face_of = |n: [f32; 3]| {
+        let a = n.map(f32::abs);
+        let k = if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 };
+        (k * 2 + (n[k] < 0.0) as usize) as u8
+    };
+    let mut quad = |ps: [[f32; 3]; 4], uvs: [[f32; 2]; 4], layer: u32, n: [f32; 3]| {
+        let face = face_of(n);
+        let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
+            pos: ps[i],
+            uv: uvs[i],
+            layer: layer as f32,
+            light: [light[0], light[1], light[2], face],
+            tint: [255, 255, 255, fl],
+        });
+        // Both windings: it is turned every way in the hand.
+        out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
+        out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+    };
+    // The bark goes round as many times as on the placed log (a whole texture each time).
+    let rounds = if radius > 0.3 { 3 } else { 1 };
+    let per = LOG_ITEM_SIDES / rounds;
+    let k = crate::world::mesh::LOG_END_RIM / radius;
+    for i in 0..LOG_ITEM_SIDES {
+        let ang = |i: usize| i as f32 / LOG_ITEM_SIDES as f32 * std::f32::consts::TAU;
+        let (c0, s0) = (ang(i).cos() * radius, ang(i).sin() * radius);
+        let (c1, s1) = (ang(i + 1).cos() * radius, ang(i + 1).sin() * radius);
+        let mid = (ang(i) + ang(i + 1)) * 0.5;
+        let mut n = [0.0f32; 3];
+        n[ua] = mid.cos();
+        n[va] = mid.sin();
+        let (u0, u1) = ((i % per) as f32 / per as f32, (i % per + 1) as f32 / per as f32);
+        quad(
+            [at(-0.5, c0, s0), at(-0.5, c1, s1), at(0.5, c1, s1), at(0.5, c0, s0)],
+            [[u0, 1.0], [u1, 1.0], [u1, 0.0], [u0, 0.0]],
+            side,
+            n,
+        );
+        for t in [-0.5f32, 0.5] {
+            let mut n = [0.0f32; 3];
+            n[axis] = t * 2.0;
+            let uv = |u: f32, v: f32| [0.5 + u * k, 0.5 + v * k];
+            quad(
+                [at(t, 0.0, 0.0), at(t, c0, s0), at(t, c1, s1), at(t, 0.0, 0.0)],
+                [uv(0.0, 0.0), uv(c0, s0), uv(c1, s1), uv(0.0, 0.0)],
+                end,
+                n,
+            );
+        }
     }
 }
 
