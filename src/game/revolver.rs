@@ -161,10 +161,13 @@ impl Game {
         c.t += dt;
         match c.phase {
             Phase::Open => {
+                if was == 0.0 {
+                    self.audio.play(Sound::CylinderOpen, Some(at), 0.8);
+                }
                 if c.t >= RELOAD_EJECT && !c.ejected {
                     c.ejected = true;
                     if c.ejects {
-                        self.audio.play(Sound::MagOut, Some(at), 0.7);
+                        self.audio.play(Sound::CaseBrass, Some(at), 0.8);
                         self.revolver_empty();
                     }
                 }

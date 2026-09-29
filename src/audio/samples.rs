@@ -1,7 +1,11 @@
 //! Recorded gun sounds, built into the game (`samples/`, 16-bit mono WAV at `RATE`), used
-//! instead of the made ones. All CC0 (see CREDITS.md): the shots from The Free Firearm Sound
-//! Library (a Walther PPQ, a Smith & Wesson 642, an AK-47, recorded near, in front of the
-//! shooter), the magazines, slides, bolt and rounds from OpenGameArt's reload recordings.
+//! instead of the made ones. The rifle's and the revolver's rounds and speedloader are CC0:
+//! the AK-47's shot from The Free Firearm Sound Library, its magazine and bolt and the
+//! revolver's rounds from OpenGameArt's reload recordings. The handguns' shots, the pistol's
+//! magazine, slide and dry fire and the revolver's cylinder are from Sonniss' free GDC Game
+//! Audio Bundles (royalty-free, no attribution needed): a Glock 18 and a Smith & Wesson M66
+//! firing, a suppressed De Lisle carbine's shot (the silenced one), a Walther P38's magazine out, a G36C's in, a Tokarev's slide, an M1911A1's dry
+//! fire, a Smith & Wesson M29's cylinder swung out and shut.
 
 use super::{Sound, RATE};
 
@@ -10,9 +14,12 @@ fn wav(sound: Sound) -> Option<&'static [u8]> {
         Sound::ShotPistol => include_bytes!("samples/shot_pistol.wav"),
         Sound::ShotRevolver => include_bytes!("samples/shot_revolver.wav"),
         Sound::ShotRifle => include_bytes!("samples/shot_rifle.wav"),
+        Sound::ShotSilenced => include_bytes!("samples/shot_silenced.wav"),
         Sound::MagOut => include_bytes!("samples/mag_out.wav"),
         Sound::MagIn => include_bytes!("samples/mag_in.wav"),
         Sound::SlideRelease => include_bytes!("samples/slide_release.wav"),
+        Sound::DryFire => include_bytes!("samples/dry_fire.wav"),
+        Sound::CylinderOpen => include_bytes!("samples/cylinder_open.wav"),
         Sound::MagOutRifle => include_bytes!("samples/mag_out_rifle.wav"),
         Sound::MagInRifle => include_bytes!("samples/mag_in_rifle.wav"),
         Sound::BoltRifle => include_bytes!("samples/bolt_rifle.wav"),

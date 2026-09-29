@@ -9,6 +9,17 @@ game embeds).
 Minecraft Java resource packs put in the `resourcepacks/` folder can be layered over them
 (Options → Graphics → Resource Packs).
 
+## Sounds
+
+Most sounds are synthesized by the game (`src/audio/synth.rs`). The guns' recorded sounds
+(`src/audio/samples/`):
+
+- The pistol's and revolver's shots, the silenced shot (a suppressed De Lisle carbine), the
+  pistol's magazine, slide and dry fire, and the revolver's cylinder: **Sonniss GDC Game Audio Bundles** (Pole Position Production firearm
+  recordings), royalty-free, <https://sonniss.com/gameaudiogdc>.
+- The AK's shot: **The Free Firearm Sound Library** (CC0). The AK's magazine and bolt, and the
+  revolver's speedloader and single rounds: **OpenGameArt** reload recordings (CC0).
+
 ## Animations
 
 The player model's burning and torch-holding poses and its limb smoothing are ported from

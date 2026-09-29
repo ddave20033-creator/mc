@@ -45,13 +45,14 @@ pub enum Sound {
     MagInRifle,
     BoltRifle,
     /// The revolver's: a speedloader letting its rounds go, one round pushed in, the cylinder
-    /// swung shut.
+    /// swung shut and out.
     SpeedloaderIn,
     RoundIn,
     CylinderShut,
+    CylinderOpen,
 }
 
-pub const SOUNDS: [Sound; 26] = [
+pub const SOUNDS: [Sound; 27] = [
     Sound::ShotPistol,
     Sound::ShotRifle,
     Sound::ShotSilenced,
@@ -78,6 +79,7 @@ pub const SOUNDS: [Sound; 26] = [
     Sound::SpeedloaderIn,
     Sound::RoundIn,
     Sound::CylinderShut,
+    Sound::CylinderOpen,
 ];
 
 impl Sound {

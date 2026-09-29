@@ -562,7 +562,7 @@ impl Game {
         }
     }
 
-    /// Left click with a gun: fires (a dirty gun may jam, an empty one reloads). A shotgun
+    /// Left click with a gun: fires (a dirty gun may jam, an empty one only clicks). A shotgun
     /// being loaded stops loading to fire.
     pub(super) fn shoot(&mut self) {
         let Some((gun, kind)) = self.held_gun() else { return };
@@ -582,30 +582,23 @@ impl Game {
         self.w_sprint = false;
         let revolver = !kind.uses_magazine();
         if revolver && gun_rounds(&gun) == 0 && (self.creative() || self.inventory.count(kind.ammo()) > 0 || self.inventory.slots.iter().flatten().any(|s| s.item == SPEEDLOADER && gun_rounds(s) > 0)) {
-            // Nothing live in the cylinder, and something to load it with: reloaded; aiming,
-            // it only clicks (reloading would drop the sights; R reloads), like the others.
-            if self.guns.aim > 0.0 {
-                let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
-                self.gun_message(&tf("gun.empty_reload", &[&key]));
-                self.audio.play(Sound::DryFire, None, 0.8);
-                self.hand.dry_fire();
-            } else {
-                self.start_reload();
-            }
+            // Nothing live in the cylinder, and something to load it with: it only clicks (R
+            // reloads), like the others.
+            let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
+            self.gun_message(&tf("gun.empty_reload", &[&key]));
+            self.audio.play(Sound::DryFire, None, 0.8);
+            self.hand.dry_fire();
             return;
         }
         if !revolver && !gun_chambered(&gun) {
-            // Nothing in the chamber: it gets readied if it can be (a round from the magazine,
-            // or a loaded magazine in), otherwise the trigger only clicks.
+            // Nothing in the chamber: the trigger only clicks (R readies it, from the hip or
+            // aimed alike).
             let can_reload = (gun_has_mag(&gun) && gun_rounds(&gun) > 0) || self.has_loaded_magazine(kind);
-            if can_reload && self.guns.aim > 0.0 {
-                // Aiming, it only clicks: reloading would drop the sights (R reloads).
+            if can_reload {
                 let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
                 self.gun_message(&tf("gun.empty_reload", &[&key]));
                 self.audio.play(Sound::DryFire, None, 0.8);
                 self.hand.dry_fire();
-            } else if can_reload {
-                self.start_reload();
             } else {
                 self.gun_message(t("gun.no_ammo"));
                 self.audio.play(Sound::DryFire, None, 0.8);

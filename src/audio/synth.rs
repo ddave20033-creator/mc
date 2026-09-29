@@ -416,7 +416,7 @@ fn make(sound: Sound) -> Vec<f32> {
         Sound::ShotRevolver => make(Sound::ShotPistol),
         Sound::MagOutRifle => make(Sound::MagOut),
         Sound::MagInRifle | Sound::SpeedloaderIn => make(Sound::MagIn),
-        Sound::BoltRifle | Sound::CylinderShut => make(Sound::SlideRelease),
+        Sound::BoltRifle | Sound::CylinderShut | Sound::CylinderOpen => make(Sound::SlideRelease),
         Sound::RoundIn => make(Sound::DryFire),
         Sound::ShotPistol => gunshot(&Report {
             seed: 11,
