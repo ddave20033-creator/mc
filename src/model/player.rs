@@ -64,6 +64,8 @@ pub struct PlayerPose {
     pub grenade: Option<f32>,
     /// Holding a fishing rod: what it is doing (cast, line out, fighting a fish...).
     pub rod: Option<super::angler::RodAnim>,
+    /// Chopping a tree: seconds into the axe's swing (`chop_rig`).
+    pub chop: Option<f32>,
 }
 
 // Face order for layers: +X, -X, +Y, -Y, +Z (back), -Z (front)
@@ -445,6 +447,18 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
         let (sr, sl) = (Vec3::new(5.0, shoulder_y, 0.0), Vec3::new(-5.0, shoulder_y, 0.0));
         (l.right_arm, l.right_elbow, l.right_shift) = reach_bent(sr, pts.grip, Vec3::new(1.0, -1.0, 0.35), 0.0);
         (l.left_arm, l.left_elbow, l.left_shift) = reach_bent(sl, left, Vec3::new(-1.0, -1.0, 0.35), 0.0);
+    } else if let Some(tc) = p.chop {
+        // Chopping: both hands on the axe's handle where the Blockbench rig has it
+        // (`chop_rig`), turned with where the head looks.
+        use super::chop_rig::{GRIP, LEFT_GRIP};
+        let rig = super::chop_rig::pose(tc);
+        let look = chop_look(p);
+        let shoulder_y = 22.0 - SNEAK_DROP * c;
+        let right_hand = (look * rig.axe).transform_point3(GRIP);
+        let left_hand = (look * rig.axe).transform_point3(LEFT_GRIP);
+        let (sr, sl) = (Vec3::new(5.0, shoulder_y, 0.0), Vec3::new(-5.0, shoulder_y, 0.0));
+        (l.right_arm, l.right_elbow, l.right_shift) = reach_bent(sr, right_hand, Vec3::new(1.0, -1.0, 0.6), 0.0);
+        (l.left_arm, l.left_elbow, l.left_shift) = reach_bent(sl, left_hand, Vec3::new(-1.0, -1.0, 0.6), 0.0);
     } else if let (Some(kind), false, false) =
         (crate::item::GunKind::of(p.held), swinging, p.blocking)
     {
@@ -796,10 +810,21 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         use super::grenade::{emit, sized, Look};
         let smoke = p.held == crate::item::SMOKE_GRENADE;
         emit(out, smoke, sized(smoke, held_item(p, right_hand), 0.62), Look::readied(t), light, fl);
+    } else if let (Some(tc), true) = (p.chop, show_right) {
+        // The axe where the chop's rig has it.
+        let m = root * chop_look(p) * super::chop_rig::pose(tc).axe * super::chop_rig::axe_item();
+        super::emit_held_data(out, m, &crate::item::Stack::one(p.held), light, fl);
     } else if p.held != NONE && show_right {
         let st = crate::item::Stack { data: p.held_data, ..crate::item::Stack::one(p.held) };
         super::emit_held_data(out, held_item(p, right_hand), &st, light, fl);
     }
+}
+
+/// The chop's rig turned about the shoulders with where the head looks round (not up or
+/// down: the swing stays level).
+fn chop_look(p: &PlayerPose) -> Mat4 {
+    let pivot = Vec3::new(0.0, 22.0 - SNEAK_DROP * p.crouch, 0.0);
+    Mat4::from_translation(pivot) * Mat4::from_rotation_y(-(p.head_yaw - p.body_yaw)) * Mat4::from_translation(-pivot)
 }
 
 /// Where the open guide book is on the player model (model pixels from the feet, facing -Z):
@@ -1038,6 +1063,7 @@ mod gun_hold_tests {
             book: None,
             grenade: None,
             rod: None,
+            chop: None,
         }
     }
 

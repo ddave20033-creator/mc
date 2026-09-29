@@ -593,6 +593,7 @@ fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
         book: None,
         grenade: (p.grenade > 0).then(|| (p.grenade - 1) as f32 / 100.0),
         rod: p.rod,
+        chop: None,
     }
 }
 

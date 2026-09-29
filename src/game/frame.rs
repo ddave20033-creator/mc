@@ -916,6 +916,7 @@ impl Game {
                 book: self.book_view(),
                 grenade: self.grenades.hold.map(|h| h.t),
                 rod: self.rod_anim(),
+                chop: self.hand.chop_time(),
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {

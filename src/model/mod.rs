@@ -7,6 +7,7 @@ pub mod angler;
 pub mod ballistics;
 pub mod book;
 pub mod bucket;
+pub mod chop_rig;
 pub mod dummy;
 pub mod fishing_rod;
 pub mod grenade;

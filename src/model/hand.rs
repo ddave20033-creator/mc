@@ -41,10 +41,10 @@ const SWING_TIME: f32 = 0.24;
 const MIN_SWING_TIME: f32 = 0.09;
 /// Seconds the arm follows through after throwing a grenade.
 const THROW_TIME: f32 = 0.3;
-/// An axe's chop (`HandAnim::chop`): drawn back, brought down into the trunk, stuck there a
-/// moment, pulled out and back. When it bites in, and how long it all takes (seconds).
-pub const CHOP_HIT: f32 = 0.38;
-pub const CHOP_TIME: f32 = 0.78;
+/// An axe's chop (`HandAnim::chop`, made in Blockbench: `chop_rig`). When it bites in, and
+/// how long it all takes (seconds).
+pub const CHOP_HIT: f32 = super::chop_rig::HIT;
+pub const CHOP_TIME: f32 = super::chop_rig::LENGTH;
 
 pub struct HandAnim {
     swing: f32,
@@ -267,43 +267,39 @@ impl HandAnim {
         std::mem::take(&mut self.chop_bit)
     }
 
-    /// The chop's movement at `tc` seconds in (camera space, applied to the held item): a
-    /// level swing from the side, like a woodcutter's. The axe is laid over on its side (the
-    /// handle level, the head to the left, its edge leading), drawn back out to the right,
-    /// then swung across fast to where it bites in (toward `aim`, camera space: the head at
-    /// the trunk's side, edge first); stuck there with a shiver; pulled out and eased back.
-    fn chop_pose(tc: f32, aim: Vec3) -> Mat4 {
+    /// Seconds into the chop going on, if one is.
+    pub fn chop_time(&self) -> Option<f32> {
+        self.chop
+    }
+
+    /// The chop in first person (`chop_rig`, the Blockbench animation), seen from the rig's
+    /// eye: the axe and both forearms, the whole swing turned toward where it was aimed
+    /// (`aim`, camera space) as it comes in. `rest` is the held item's usual place, which the
+    /// axe comes from and goes back to. The axe's place and the forearms' (camera space).
+    fn chop_view(tc: f32, aim: Vec3, rest: Mat4) -> (Mat4, [Mat4; 2], f32) {
+        use super::chop_rig::{self, EDGE, EYE, HIT, LENGTH, PX};
         let ease = |x: f32| {
             let x = x.clamp(0.0, 1.0);
             x * x * (3.0 - 2.0 * x)
         };
-        // Poses as (offset from rest, degrees about y, then x, then z).
-        let screen = Vec2::new(aim.x, aim.y) / (-aim.z).max(0.3);
-        let level = 62.0;
-        let back = (Vec3::new(0.32, 0.12, 0.2), Vec3::new(-55.0, 0.0, level));
-        let bite = (
-            Vec3::new(-0.26 + screen.x * 0.45, 0.2 + screen.y * 0.45, -0.18),
-            Vec3::new(20.0, 0.0, level),
-        );
-        let rest = (Vec3::ZERO, Vec3::ZERO);
-        let lerp = |a: (Vec3, Vec3), b: (Vec3, Vec3), k: f32| (a.0.lerp(b.0, k), a.1.lerp(b.1, k));
-        let wind = CHOP_HIT - 0.12;
-        let (off, rot) = if tc < wind {
-            lerp(rest, back, ease(tc / wind))
-        } else if tc < CHOP_HIT {
-            let k = (tc - wind) / (CHOP_HIT - wind);
-            lerp(back, bite, k * k)
-        } else if tc < CHOP_HIT + 0.14 {
-            // Stuck in the wood: a short shiver dying away.
-            let s = tc - CHOP_HIT;
-            let shiver = (s * 70.0).sin() * 2.5 * (-s / 0.05).exp();
-            (bite.0, bite.1 + Vec3::new(shiver, 0.0, 0.0))
-        } else {
-            lerp(bite, rest, ease((tc - CHOP_HIT - 0.14) / (CHOP_TIME - CHOP_HIT - 0.14)))
-        };
-        // About the hands holding it (at rest).
-        let grip = Vec3::new(0.56, -0.52, -0.72);
-        Mat4::from_translation(grip + off) * ry(rot.x) * rx(rot.y) * rz(rot.z) * Mat4::from_translation(-grip)
+        let to_cam = Mat4::from_scale(Vec3::splat(PX)) * Mat4::from_translation(-EYE);
+        // Turned toward the aim: fully from the start of the stroke until it is pulled out.
+        let edge = (to_cam * chop_rig::pose(HIT).axe).transform_point3(EDGE).normalize_or(Vec3::NEG_Z);
+        let toward = ease((tc - 0.29) / 0.09) * (1.0 - ease((tc - 0.55) / 0.2));
+        // (round the vertical and then up or down, so a level swing stays level)
+        let yaw = |d: Vec3| (-d.x).atan2(-d.z);
+        let pitch = |d: Vec3| d.y.clamp(-1.0, 1.0).asin();
+        let turn = Mat4::from_rotation_y(yaw(aim) * toward)
+            * Mat4::from_rotation_x((pitch(aim) - pitch(edge)) * toward)
+            * Mat4::from_rotation_y(-yaw(edge) * toward);
+        let view = turn * to_cam;
+        let pose = chop_rig::pose(tc);
+        // In from the usual hold and back to it at the ends.
+        let k = ease(tc / 0.12) * ease((LENGTH - tc) / 0.12);
+        let axe = blend(rest, view * pose.axe * chop_rig::axe_item(), k);
+        // (the forearms come up from below at the ends)
+        let low = Mat4::from_translation(Vec3::Y * -(1.0 - k) * 0.6);
+        (axe, [low * view * pose.right_hand, low * view * pose.left_hand], k)
     }
 
     /// A grenade thrown: the empty arm follows through, then the next one comes up.
@@ -695,7 +691,15 @@ impl HandAnim {
         let item = match self.chop {
             Some(tc) => {
                 let aim = cam_to_world.inverse().transform_vector3(self.chop_aim).normalize_or(Vec3::NEG_Z);
-                base * Self::chop_pose(tc, aim) * base.inverse() * item
+                let (axe, arms, k) = Self::chop_view(tc, aim, base.inverse() * item);
+                if k > 0.02 {
+                    use super::chop_rig::{LEFT_FOREARM, RIGHT_FOREARM};
+                    let layers = ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin));
+                    for (m, (lo, hi)) in arms.into_iter().zip([RIGHT_FOREARM, LEFT_FOREARM]) {
+                        super::emit_box_rows(out, base * m, lo, hi, layers, [[255; 3]; 6], light, fl, [0.5, 1.0]);
+                    }
+                }
+                base * axe
             }
             None => item,
         };
