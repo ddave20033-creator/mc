@@ -373,8 +373,8 @@ impl Game {
         };
 
         self.update_bullets(dt);
-        for (at, hard) in self.guns.cases.update(dt, &self.terrain.world) {
-            self.audio.play(Sound::CaseBrass, Some(at), 0.25 + 0.75 * hard);
+        for (at, kind, hard) in self.guns.cases.update(dt, &self.terrain.world) {
+            self.audio.play(kind.sound(), Some(at), 0.06 + 0.18 * hard);
         }
 
         // The flash fades in a moment; a hot barrel smokes.

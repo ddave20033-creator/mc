@@ -167,7 +167,7 @@ impl Game {
                 if c.t >= RELOAD_EJECT && !c.ejected {
                     c.ejected = true;
                     if c.ejects {
-                        self.audio.play(Sound::CaseBrass, Some(at), 0.8);
+                        self.audio.play(Sound::CaseMagnum, Some(at), 0.2);
                         self.revolver_empty();
                     }
                 }

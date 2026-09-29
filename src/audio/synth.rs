@@ -339,6 +339,12 @@ fn scrape(seed: u32, len: f32, fc: f32) -> Vec<f32> {
 
 /// A ringing piece of metal: sine partials (Hz, loudness) dying away over `decay` seconds
 /// (the high ones sooner).
+/// A spent case landing: a tick and its ring (`pitch` scales the ring's partials).
+fn case_clink(pitch: f32, decay: f32, tick: f32, ring: f32) -> Vec<f32> {
+    let r = ring_of(&[(2650.0 * pitch, 0.5), (4100.0 * pitch, 0.3), (6200.0 * pitch, 0.12)], decay);
+    sequence(&[(clack(39, tick, 0.008), 0.0, 1.0), (r, 0.0, ring)], 0.45)
+}
+
 fn ring_of(partials: &[(f32, f32)], decay: f32) -> Vec<f32> {
     let n = samples(decay * 5.0);
     (0..n)
@@ -492,10 +498,12 @@ fn make(sound: Sound) -> Vec<f32> {
             ],
             0.75,
         ),
-        Sound::CaseBrass => {
-            let r = ring_of(&[(3150.0, 0.5), (4790.0, 0.35), (6950.0, 0.25), (9240.0, 0.15)], 0.06);
-            sequence(&[(clack(39, 5000.0, 0.01), 0.0, 0.5), (r, 0.0, 1.0)], 0.45)
-        }
+        // A small tick with a short, faint ring (it lands mostly on soil, not on a plate). The
+        // longer the case, the lower and a little longer it rings: the 9 mm's, the .357
+        // Magnum's; the 7.62x39's is lacquered steel, duller.
+        Sound::CaseBrass => case_clink(1.0, 0.022, 3200.0, 0.35),
+        Sound::CaseMagnum => case_clink(0.86, 0.026, 2900.0, 0.35),
+        Sound::CaseRifle => case_clink(0.74, 0.024, 2500.0, 0.25),
         Sound::Impact => {
             let mut chip = noise(samples(0.03), 41);
             for (i, x) in chip.iter_mut().enumerate() {
@@ -641,22 +649,28 @@ fn make(sound: Sound) -> Vec<f32> {
     }
 }
 
-/// Every sound, in `SOUNDS` order: recorded where there is a recording (as loud at its peak as
-/// the made one, so the mix stays as it was), made otherwise.
+/// Every sound, in `SOUNDS` order: recorded where there is a recording (brought to its
+/// `Sound::level`), made otherwise.
 pub fn bank() -> Vec<Arc<[f32]>> {
-    let peak = |x: &[f32]| x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
     SOUNDS
         .iter()
-        .map(|&s| {
-            let made = make(s);
-            match super::samples::recorded(s) {
-                Some(mut rec) => {
-                    let k = peak(&made) / peak(&rec).max(1e-6);
-                    rec.iter_mut().for_each(|v| *v *= k);
-                    Arc::from(rec)
-                }
-                None => Arc::from(made),
-            }
+        .map(|&s| match super::samples::recorded(s) {
+            Some(rec) => Arc::from(leveled(rec, s.level().unwrap_or(-20.0))),
+            None => Arc::from(make(s)),
         })
         .collect()
+}
+
+/// A recording brought to `target` loudness: turned up or down, its loudest moments
+/// limited when that would go over the top (which takes a little off: a few more tries).
+fn leveled(rec: Vec<f32>, target: f32) -> Vec<f32> {
+    use super::level::{limit, loudness};
+    let mut gain = 10f32.powf((target - loudness(&rec)) / 20.0);
+    let mut out = Vec::new();
+    for _ in 0..3 {
+        out = rec.iter().map(|v| v * gain).collect();
+        limit(&mut out, 0.98);
+        gain *= 10f32.powf((target - loudness(&out)) / 20.0);
+    }
+    out
 }

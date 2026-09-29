@@ -567,7 +567,7 @@ pub struct OptionsState {
 }
 
 /// Settings tabs.
-const OPTION_TABS: [&str; 3] = ["opt.tab.graphics", "opt.tab.controls", "opt.tab.interface"];
+const OPTION_TABS: [&str; 4] = ["opt.tab.graphics", "opt.tab.controls", "opt.tab.sound", "opt.tab.interface"];
 
 /// Options, sorted into tabs. Each row: the setting's name on the left, its control on the
 /// right; the hovered row's description shows at the bottom.
@@ -593,7 +593,8 @@ pub fn options(
     ui.text_centered(t("opt.title"), w * 0.5, py + 9.0 * s, s, WHITE, true);
 
     // Tabs
-    let tab_w = ((pw - 24.0 * s - 8.0 * s) / 3.0).floor();
+    let n = OPTION_TABS.len() as f32;
+    let tab_w = ((pw - 24.0 * s - (n - 1.0) * 4.0 * s) / n).floor();
     let tab_y = py + 24.0 * s;
     let tab_h = 18.0 * s;
     for (i, key) in OPTION_TABS.iter().enumerate() {
@@ -761,6 +762,24 @@ pub fn options(
                 os.scroll = 0.0;
                 os.listening = None;
                 act = Action::KeyBinds;
+            }
+        }
+        2 => {
+            // Volumes, in steps of 5 percent.
+            let sliders: [(&str, &'static str, &'static str, &mut f32); 3] = [
+                ("vol", "opt.l.volume", "opt.d.volume", &mut st.volume),
+                ("vol_weapons", "opt.l.volume_weapons", "opt.d.volume_weapons", &mut st.volume_weapons),
+                ("vol_other", "opt.l.volume_other", "opt.d.volume_other", &mut st.volume_other),
+            ];
+            for (i, (id, key, desc, v)) in sliders.into_iter().enumerate() {
+                let y = name(ui, i, key, desc);
+                let label = if v.round() <= 0.0 {
+                    t("opt.off").to_string()
+                } else {
+                    format!("{}%", v.round() as i32)
+                };
+                ui.slider(id, &label, v, 0.0, 100.0, cx, y, cw, ch);
+                *v = (*v / 5.0).round() * 5.0;
             }
         }
         _ => {

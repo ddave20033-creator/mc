@@ -27,6 +27,16 @@ pub enum CaseKind {
 }
 
 impl CaseKind {
+    /// What it sounds like landing.
+    pub fn sound(self) -> crate::audio::Sound {
+        use crate::audio::Sound;
+        match self {
+            CaseKind::Pistol => Sound::CaseBrass,
+            CaseKind::Magnum => Sound::CaseMagnum,
+            CaseKind::Rifle => Sound::CaseRifle,
+        }
+    }
+
     /// The round it is the case of.
     fn ammo(self) -> ItemId {
         match self {
@@ -81,9 +91,9 @@ impl Cases {
     }
 
     /// Falls, bounces off blocks (a little less each time) and comes to rest lying down.
-    /// Returns where cases hit the ground hard enough to be heard: (where, a shotgun hull,
-    /// how hard 0..1).
-    pub fn update(&mut self, dt: f32, world: &World) -> Vec<(Vec3, f32)> {
+    /// Returns where cases hit the ground hard enough to be heard: (where, which case, how
+    /// hard 0..1).
+    pub fn update(&mut self, dt: f32, world: &World) -> Vec<(Vec3, CaseKind, f32)> {
         let mut clinks = Vec::new();
         let solid = |p: Vec3| {
             is_solid(world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32))
@@ -109,7 +119,7 @@ impl Cases {
                 if axis == 1 && c.vel.y < 0.0 {
                     let hard = (-c.vel.y / 6.0).min(1.0);
                     if hard > 0.15 {
-                        clinks.push((p, hard));
+                        clinks.push((p, c.kind, hard));
                     }
                     // Landed: bounce a little, lose speed, spin slower.
                     p.y = q.y.floor() + 1.0 + c.kind.look().y;

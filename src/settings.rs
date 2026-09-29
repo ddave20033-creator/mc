@@ -32,6 +32,10 @@ pub struct Settings {
     pub name: String,
     pub skin: u8,
     pub keys: KeyMap,
+    /// Volumes in percent: overall, weapons (guns, grenades), everything else.
+    pub volume: f32,
+    pub volume_weapons: f32,
+    pub volume_other: f32,
 }
 
 impl Default for Settings {
@@ -55,6 +59,9 @@ impl Default for Settings {
             name: default_name(),
             skin: 0,
             keys: KeyMap::default(),
+            volume: 80.0,
+            volume_weapons: 100.0,
+            volume_other: 100.0,
         }
     }
 }
@@ -86,6 +93,9 @@ impl Settings {
                     "dark_ui" => s.dark_ui = b,
                     "name" if !v.is_empty() => s.name = v.chars().take(16).collect(),
                     "skin" => s.skin = v.parse().unwrap_or(0),
+                    "volume" => s.volume = v.parse().unwrap_or(s.volume),
+                    "volume_weapons" => s.volume_weapons = v.parse().unwrap_or(s.volume_weapons),
+                    "volume_other" => s.volume_other = v.parse().unwrap_or(s.volume_other),
                     // `|` cannot be in a Windows file name.
                     "resource_packs" => {
                         s.resource_packs = v
@@ -112,6 +122,9 @@ impl Settings {
         s.sensitivity = s.sensitivity.clamp(10.0, 200.0);
         s.render_distance = s.render_distance.clamp(4.0, 64.0);
         s.gui_scale = s.gui_scale.min(6);
+        for v in [&mut s.volume, &mut s.volume_weapons, &mut s.volume_other] {
+            *v = v.clamp(0.0, 100.0);
+        }
         if s.fps_limit != 0 {
             s.fps_limit = s.fps_limit.clamp(30, 250);
         }
@@ -125,7 +138,8 @@ impl Settings {
     pub fn save(&self) {
         let mut text = format!(
             "fov:{}\nsensitivity:{}\nrender_distance:{}\ngui_scale:{}\nfullscreen:{}\nfps_limit:{}\nantialiasing:{}\nshow_fps:{}\n\
-             shadows:{}\nclouds:{}\nview_bobbing:{}\nfirst_person_body:{}\nlanguage:{}\ndark_ui:{}\nresource_packs:{}\nname:{}\nskin:{}\n",
+             shadows:{}\nclouds:{}\nview_bobbing:{}\nfirst_person_body:{}\nlanguage:{}\ndark_ui:{}\nresource_packs:{}\nname:{}\nskin:{}\n\
+             volume:{}\nvolume_weapons:{}\nvolume_other:{}\n",
             self.fov,
             self.sensitivity,
             self.render_distance,
@@ -142,7 +156,10 @@ impl Settings {
             self.dark_ui,
             self.resource_packs.join("|"),
             self.name,
-            self.skin
+            self.skin,
+            self.volume,
+            self.volume_weapons,
+            self.volume_other
         );
         for (i, (_, name, _)) in BINDS.iter().enumerate() {
             text += &format!("key_{name}:{}\n", crate::keys::code_name(self.keys.0[i]));

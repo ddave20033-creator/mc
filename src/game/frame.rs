@@ -172,7 +172,9 @@ impl Game {
         let t_update = Instant::now();
 
         let view = self.camera_view(dt, w, h);
-        self.audio.set_listener(view.cam, view.right);
+        self.audio.set_listener(view.cam, view.right, view.up);
+        let st = &self.settings;
+        self.audio.set_volumes(st.volume / 100.0, [st.volume_weapons / 100.0, st.volume_other / 100.0]);
         let medium = self.medium(&view);
         let lighting = self.lighting(&view, medium);
         let scene = self.build_scene(&view, dt);

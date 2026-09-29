@@ -41,7 +41,11 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("opt.title", "Options", "Beállítások"),
     ("opt.tab.graphics", "Graphics", "Grafika"),
     ("opt.tab.controls", "Controls", "Irányítás"),
+    ("opt.tab.sound", "Sound", "Hang"),
     ("opt.tab.interface", "Interface", "Felület"),
+    ("opt.l.volume", "Master Volume", "Fő hangerő"),
+    ("opt.l.volume_weapons", "Weapons", "Fegyverek"),
+    ("opt.l.volume_other", "Other Sounds", "Egyéb hangok"),
     ("opt.l.render", "Render Distance", "Látótávolság"),
     ("opt.l.fov", "Field of View", "Látószög"),
     ("opt.l.shadows", "Shadows", "Árnyékok"),
@@ -100,6 +104,21 @@ const TABLE: &[(&str, &str, &str)] = &[
         "opt.d.bobbing",
         "The view bobs while walking.",
         "Járás közben billeg a kép.",
+    ),
+    (
+        "opt.d.volume",
+        "How loud the game is overall.",
+        "A játék összes hangjának hangereje.",
+    ),
+    (
+        "opt.d.volume_weapons",
+        "Guns, grenades and explosions.",
+        "Fegyverek, gránátok és robbanások.",
+    ),
+    (
+        "opt.d.volume_other",
+        "Fire, furnaces, armor and the rest.",
+        "Tűz, kemencék, páncél és a többi.",
     ),
     (
         "opt.d.fp_body",
