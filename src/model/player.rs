@@ -1128,6 +1128,7 @@ mod bend_tests {
             book: None,
             grenade: None,
             rod: None,
+            chop: None,
         }
     }
 
