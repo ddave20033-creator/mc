@@ -374,7 +374,7 @@ impl Game {
         self.remotes
             .iter()
             .filter(|r| r.shown())
-            .filter(|r| crate::model::player::held_up(r.pose.held))
+            .filter(|r| crate::model::player::gives_light(r.pose.held))
             .map(|r| {
                 // Like this player's own: just below the eyes, where the hand holds it up.
                 let eye = 1.62 - 0.35 * r.pose.crouch;

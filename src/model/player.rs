@@ -937,6 +937,12 @@ pub fn held_up(item: ItemId) -> bool {
     item == crate::world::TORCH as ItemId || item == crate::world::LANTERN as ItemId
 }
 
+/// Whether a held item lights up the world around its holder (a torch, a lantern, a bucket
+/// of lava).
+pub fn gives_light(item: ItemId) -> bool {
+    held_up(item) || item == crate::item::LAVA_BUCKET
+}
+
 /// A player lying on their back in a bed. `bed_top` is the middle of the top of the bed's
 /// head half and `head` the way the bed points (foot to head). Returns where the standing
 /// model's feet go, its body yaw (facing the foot end) and the turn that lays it down: the

@@ -634,7 +634,7 @@ impl Game {
 
     fn held_lights(&self, in_world: bool, cam: Vec3) -> [[f32; 4]; MAX_HELD_LIGHTS] {
         let intensity = |held: ItemId, phase: f32| {
-            if held == LANTERN as ItemId {
+            if held == LANTERN as ItemId || held == crate::item::LAVA_BUCKET {
                 1.0
             } else {
                 torch_flicker(self.time + phase)
@@ -649,7 +649,7 @@ impl Game {
             && self.player.spawned
             && self.screen != Screen::Dead
             && !self.spectator()
-            && held_up(self.held())
+            && crate::model::player::gives_light(self.held())
         {
             let p = self.player.eye() - Vec3::Y * 0.35;
             lights.push((p, intensity(self.held(), 0.0)));
@@ -714,7 +714,8 @@ impl Game {
         // A lantern is always held by the first-person hand (hanging with the body shown), and
         // so is a pistol (the body's arm would point it at the ground when looking down), and
         // a grenade being readied (both hands on it).
-        let lantern = self.held() == LANTERN as ItemId;
+        // (and so is a bucket, hanging from the fist by its handle)
+        let lantern = self.held() == LANTERN as ItemId || crate::model::bucket::is_bucket(self.held());
         // (and so is a fishing rod: both hands on it)
         let rod = self.held() == crate::item::FISHING_ROD;
         let pistol = self.holding_gun() || self.grenades.hold.is_some() || rod;

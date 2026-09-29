@@ -36,7 +36,7 @@ use crate::model::crack_overlay;
 use crate::model::hand::HandAnim;
 use crate::model::particles::Particles;
 use crate::model::player::{
-    build_player, hand_pivot, held_up, limb_targets, LimbSmoother, PlayerPose,
+    build_player, hand_pivot, limb_targets, LimbSmoother, PlayerPose,
 };
 use crate::render::{FrameInfo, FrameUbo, Renderer, SHADOW_SIZE};
 use crate::save::{ChunkSaver, PlayerSave, WorldMeta};

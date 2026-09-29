@@ -175,6 +175,12 @@ impl Surface {
     }
 }
 
+/// Where the middle of the handle's grip is, up (bucket space): the bucket hangs from there.
+pub fn handle_top() -> f32 {
+    let ear_y = RIM - 0.07;
+    ear_y + (radius(ear_y) + 0.03) * 1.05
+}
+
 /// A bucket item: `fill` in it, `surface` how the liquid lies, `handle` how far the handle
 /// is let down toward its back (-Z; 0 up, 1 lying on the rim).
 #[allow(clippy::too_many_arguments)]
@@ -183,7 +189,9 @@ pub fn emit(out: &mut Vec<Vertex>, m: Mat4, fill: Fill, surface: &Surface, handl
     let metal = tex::BUCKET_METAL;
     let mut q = Quads { out, m, flip, light, fl };
     let steel = [255u8, 255, 255];
-    let inside = [168u8, 170, 174];
+    // Lava lights up the inside of the bucket.
+    let lava = fill == Fill::Lava;
+    let inside = if lava { [255u8, 168, 112] } else { [168u8, 170, 174] };
     let floor_in = [140u8, 142, 146];
     let ang = |i: usize| i as f32 / SIDES as f32 * TAU;
     let at = |a: f32, r: f32, y: f32| Vec3::new(a.cos() * r, y, a.sin() * r);
@@ -227,6 +235,10 @@ pub fn emit(out: &mut Vec<Vertex>, m: Mat4, fill: Fill, surface: &Surface, handl
         );
         // Inside wall, down to the floor.
         let yf = BOTTOM + FLOOR;
+        let lit = q.light;
+        if lava {
+            q.light = [255, 255, 255, lit[3]];
+        }
         q.quad(
             [at(a0, inner_radius(yf), yf), at(a1, inner_radius(yf), yf), at(a1, inner_radius(RIM), b1), at(a0, inner_radius(RIM), b1)],
             [[u0, 1.0], [u1, 1.0], [u1, 0.0], [u0, 0.0]],
@@ -234,6 +246,7 @@ pub fn emit(out: &mut Vec<Vertex>, m: Mat4, fill: Fill, surface: &Surface, handl
             metal,
             inside,
         );
+        q.light = lit;
         // The floor inside and the bottom outside (fans from the middle).
         let c = Vec3::new(0.0, yf, 0.0);
         let uv = |p: Vec3| [0.5 + p.x, 0.5 + p.z];

@@ -557,7 +557,7 @@ impl HandAnim {
             return;
         }
         if let Some(fill) = super::bucket::Fill::of(self.held) {
-            self.build_bucket(out, base, fill, s, sq, eq, light, fl, dt);
+            self.build_bucket(out, base, fill, s, sq, eq, light, fl, dt, skin);
             return;
         }
         let lantern = self.held == crate::world::LANTERN as ItemId;
@@ -619,9 +619,9 @@ impl HandAnim {
 }
 
 impl HandAnim {
-    /// A bucket carried by its handle at the lower right of the view: upright in the world
-    /// (it hangs), turned with the view, swinging a little on its handle as it is moved about,
-    /// the liquid in it rocking. Used, it tips forward.
+    /// A bucket hanging from the fist by its handle, like a lantern: the arm holds it at the
+    /// lower right of the view, it stays upright in the world, swinging a little on its
+    /// handle as it is moved about, the liquid in it rocking. Used, it tips forward.
     #[allow(clippy::too_many_arguments)]
     fn build_bucket(
         &mut self,
@@ -634,27 +634,42 @@ impl HandAnim {
         light: [u8; 4],
         fl: u8,
         dt: f32,
+        skin: u8,
     ) {
         use super::bucket;
-        let f1 = (sq * PI).sin();
-        let at = base.transform_point3(Vec3::new(
-            0.46 - 0.2 * f1,
-            -0.44 - (1.0 - eq) * 0.6 + 0.1 * (sq * TAU).sin(),
-            -0.8 - 0.15 * (s * PI).sin(),
-        ));
-        self.bucket.update(fill, at, dt);
+        // The arm and the fist as for a lantern.
+        let grip = base * t(-0.025, 0.125, 0.0) * rz(10.0);
+        let pose = Self::arm_pose(grip, s, sq, eq);
+        emit_box(
+            out,
+            Self::arm_part(pose),
+            Vec3::new(-3.0, -10.0, -2.0),
+            Vec3::new(1.0, 2.0, 2.0),
+            ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
+            [[255; 3]; 6],
+            light,
+            fl,
+        );
+        let turn = glam::Quat::from_xyzw(0.2077, -0.6488, 0.4433, 0.5825).normalize();
+        let center = Vec3::splat(0.5);
+        let block = pose
+            * t(-0.684, 0.117, -0.439)
+            * Mat4::from_translation(center)
+            * Mat4::from_quat(turn)
+            * Mat4::from_translation(-center);
+        let pivot = block.transform_point3(Vec3::new(0.5, 11.0 / 16.0, 0.5));
         // Its ears toward the view's sides, so the handle is seen across.
         let right = base.transform_vector3(Vec3::X);
         let yaw = (-right.z).atan2(right.x);
-        let size = 0.42;
-        // Swinging about where the hand holds the handle.
-        let grip = Vec3::Y * 0.62 * size;
-        let m = Mat4::from_translation(at + grip)
+        let f1 = (sq * PI).sin();
+        let size = 0.4;
+        let m = Mat4::from_translation(pivot)
             * self.bucket.swing_matrix()
-            * Mat4::from_translation(-grip)
             * Mat4::from_rotation_y(yaw)
-            * rx(-30.0 * f1)
-            * Mat4::from_scale(Vec3::splat(size));
+            * rx(-20.0 * f1)
+            * Mat4::from_scale(Vec3::splat(size))
+            * Mat4::from_translation(Vec3::new(0.0, -bucket::handle_top(), 0.0));
+        self.bucket.update(fill, m.transform_point3(Vec3::ZERO), dt);
         let surface = bucket::Surface { tilt: self.bucket.tilt, bounce: self.bucket.bounce, own_up: false };
         bucket::emit(out, m, fill, &surface, 0.0, light, fl);
     }
