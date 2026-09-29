@@ -177,9 +177,11 @@ impl Surface {
 
 /// Where the middle of the handle's grip is, up (bucket space): the bucket hangs from there.
 pub fn handle_top() -> f32 {
-    let ear_y = RIM - 0.07;
-    ear_y + (radius(ear_y) + 0.03) * 1.05
+    RIM - 0.07 + SPAN * 1.05
 }
+
+/// Half the handle's width: its ends well out past the rim's bead.
+const SPAN: f32 = R_TOP + 0.05;
 
 /// A bucket item: `fill` in it, `surface` how the liquid lies, `handle` how far the handle
 /// is let down toward its back (-Z; 0 up, 1 lying on the rim).
@@ -260,12 +262,14 @@ pub fn emit(out: &mut Vec<Vertex>, m: Mat4, fill: Fill, surface: &Surface, handl
     // The ears, and the wire handle between them over the top.
     let ear_y = RIM - 0.07;
     let ear_r = radius(ear_y);
+    let span = SPAN;
+    // (the ears reach out past the rim's bead, so the wire clears it)
     for side in [-1.0f32, 1.0] {
-        let c = Vec3::new(side * (ear_r + 0.012), ear_y, 0.0);
-        q.cuboid(c - Vec3::new(0.014, 0.045, 0.04), c + Vec3::new(0.014, 0.03, 0.04), metal, [214, 216, 220]);
+        let (a, b) = (ear_r - 0.004, span + 0.012);
+        let (lo, hi) = if side > 0.0 { (a, b) } else { (-b, -a) };
+        q.cuboid(Vec3::new(lo, ear_y - 0.045, -0.035), Vec3::new(hi, ear_y + 0.03, 0.035), metal, [214, 216, 220]);
     }
     let pivot = Vec3::new(0.0, ear_y, 0.0);
-    let span = ear_r + 0.03;
     let down = handle.clamp(0.0, 1.0) * 1.35;
     let turn = Mat4::from_translation(pivot) * Mat4::from_rotation_x(-down) * Mat4::from_translation(-pivot);
     let arc = |t: f32| {

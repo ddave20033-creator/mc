@@ -637,32 +637,36 @@ impl HandAnim {
         skin: u8,
     ) {
         use super::bucket;
-        // The arm and the fist as for a lantern.
-        let grip = base * t(-0.025, 0.125, 0.0) * rz(10.0);
-        let pose = Self::arm_pose(grip, s, sq, eq);
+        // The fist at the right of the view, the handle's grip in it; the arm comes in to it
+        // from the shoulder off the lower right of the view (like the book's arms), clear of the
+        // bucket below. Used, it swings forward.
+        let f1 = (sq * PI).sin();
+        let hand = Vec3::new(
+            0.34 - 0.12 * f1,
+            0.0 - (1.0 - eq) * 0.7 + 0.08 * (sq * TAU).sin(),
+            -0.8 - 0.18 * (s * PI).sin(),
+        );
+        let shoulder = Vec3::new(0.95, -0.7, 0.1);
+        let along = (shoulder - hand).normalize_or(Vec3::Y);
+        let arm = base
+            * Mat4::from_translation(hand)
+            * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, along))
+            * Mat4::from_scale(Vec3::splat(1.0 / 30.0));
         emit_box(
             out,
-            Self::arm_part(pose),
-            Vec3::new(-3.0, -10.0, -2.0),
-            Vec3::new(1.0, 2.0, 2.0),
+            arm,
+            Vec3::new(-2.0, -1.5, -2.0),
+            Vec3::new(2.0, 26.0, 2.0),
             ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
             [[255; 3]; 6],
             light,
             fl,
         );
-        let turn = glam::Quat::from_xyzw(0.2077, -0.6488, 0.4433, 0.5825).normalize();
-        let center = Vec3::splat(0.5);
-        let block = pose
-            * t(-0.684, 0.117, -0.439)
-            * Mat4::from_translation(center)
-            * Mat4::from_quat(turn)
-            * Mat4::from_translation(-center);
-        let pivot = block.transform_point3(Vec3::new(0.5, 11.0 / 16.0, 0.5));
+        let pivot = base.transform_point3(hand);
         // Its ears toward the view's sides, so the handle is seen across.
         let right = base.transform_vector3(Vec3::X);
         let yaw = (-right.z).atan2(right.x);
-        let f1 = (sq * PI).sin();
-        let size = 0.4;
+        let size = 0.38;
         let m = Mat4::from_translation(pivot)
             * self.bucket.swing_matrix()
             * Mat4::from_rotation_y(yaw)

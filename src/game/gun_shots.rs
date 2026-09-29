@@ -228,6 +228,61 @@ impl Game {
         }
     }
 
+    /// `GUN_SHOTS_BUCKET=1`: a bucket of water, then one of lava, held (with the first-person
+    /// body on, then off): looking ahead, down more and more, walking, stopping, turning.
+    fn bucket_shots_step(&mut self, dt: f32, start: Vec3) {
+        let Some(g) = self.gun_shots.as_mut() else { return };
+        let runs = [
+            (crate::item::WATER_BUCKET, "water", true),
+            (crate::item::LAVA_BUCKET, "lava", true),
+            (crate::item::WATER_BUCKET, "water_nobody", false),
+        ];
+        let Some(&(item, name, body)) = runs.get(g.gun) else {
+            println!("bucket shots done: {}", g.dir.display());
+            self.quit = true;
+            return;
+        };
+        let t0 = g.t;
+        g.t += dt;
+        let t = g.t;
+        if t0 == 0.0 {
+            self.inventory.slots[7] = Some(Stack::one(item));
+            self.hotbar_slot = 7;
+            self.camera.mode = 0;
+            self.settings.first_person_body = body;
+            self.player.pos = start;
+            self.player.vel = Vec3::ZERO;
+            self.yaw = 0.0;
+            self.body_yaw = 0.0;
+        }
+        // Pitch over time: ahead, then down to 20, 45, 70, 88 degrees, then ahead walking.
+        let pitch = match t {
+            t if t < 1.5 => 0.0,
+            t if t < 2.5 => -20f32,
+            t if t < 3.5 => -45.0,
+            t if t < 4.5 => -70.0,
+            t if t < 5.5 => -88.0,
+            t if t < 7.5 => -30.0,
+            _ => 0.0,
+        };
+        self.pitch = pitch.to_radians();
+        self.keys.clear();
+        if (5.5..6.7).contains(&t) {
+            self.keys.insert(self.settings.keys.get(Bind::Forward));
+        }
+        if (7.5..8.5).contains(&t) {
+            self.yaw = (t - 7.5) * 2.5;
+        }
+        let shots = [1.2, 2.3, 3.3, 4.3, 5.3, 6.0, 6.5, 6.8, 7.0, 7.2, 7.8, 8.1, 8.5, 8.8];
+        if let Some(i) = shots.iter().position(|&at| t0 < at && t >= at) {
+            self.gpu.capture = Some(g.dir.join(format!("bucket_{name}_{i:02}.png")));
+        }
+        if t > 9.0 {
+            g.gun += 1;
+            g.t = 0.0;
+        }
+    }
+
     /// `GUN_SHOTS_FISHING=1`: a pond is dug ahead of the lane and fished: the rod drawn back
     /// and cast, the bobber landing, nibbles and the bite (made to come soon), the hook set and
     /// a carp fought (a player keeping the tension bar in the middle, shifting gears with
@@ -720,6 +775,10 @@ impl Game {
         }
         if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_FISHING").is_ok()) {
             self.fishing_shots_step(dt, start);
+            return;
+        }
+        if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_BUCKET").is_ok()) {
+            self.bucket_shots_step(dt, start);
             return;
         }
         if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_GRENADE").is_ok()) {

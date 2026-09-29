@@ -147,7 +147,7 @@ impl ItemEntity {
                 let scale = size * 1.5;
                 let m = m * Mat4::from_translation(Vec3::Y * scale * 0.5) * Mat4::from_scale(Vec3::splat(scale));
                 let surface = bucket::Surface { tilt: self.slosh.tilt, bounce: self.slosh.bounce, own_up: false };
-                bucket::emit(out, m, fill, &surface, 0.55, light, flags::ENTITY);
+                bucket::emit(out, m, fill, &surface, 1.0, light, flags::ENTITY);
                 continue;
             }
             emit_item_flat_or_block(out, m, &self.stack, size, light, flags::ENTITY);
