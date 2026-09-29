@@ -7,6 +7,7 @@ pub mod mesh;
 pub mod noise;
 pub mod terrain;
 pub mod textures;
+pub mod trees;
 
 pub use block::*;
 pub use chunk::*;

@@ -741,6 +741,109 @@ impl Builder {
         }
     }
 
+    /// A log or a branch, round: a many-sided cylinder along its axis (logs thick, branches
+    /// thin), its bark around it. An end joining the same kind of log goes on into it; one
+    /// meeting a log across (a branch out of a trunk, a branch turning up) reaches on into
+    /// its middle, so the joint is closed; a free end is capped with the rings.
+    fn round_log(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+        let axis = log_axis(b);
+        let radius = log_radius(b);
+        let sides = if is_branch(b) { 8 } else { 12 };
+        // Block-local position from (along the axis, u, v across it).
+        let (u_axis, v_axis) = match axis {
+            0 => (2, 1),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        let at = |t: f32, u: f32, v: f32| {
+            let mut p = [0.5f32; 3];
+            p[axis] = t;
+            p[u_axis] = 0.5 + u;
+            p[v_axis] = 0.5 + v;
+            p
+        };
+        let mut step = [0i32; 3];
+        step[axis] = 1;
+        let mut ends = [(0.0f32, true), (1.0f32, true)];
+        for (k, dir) in [-1i32, 1].into_iter().enumerate() {
+            let nb = r.get(x + step[0] * dir, y + step[1] * dir, z + step[2] * dir);
+            let t = if dir < 0 { 0.0 } else { 1.0 };
+            ends[k] = if is_log(nb) && log_axis(nb) == axis {
+                // Goes on into the next one (a thicker one here shows its end ring).
+                (t, radius > log_radius(nb) + 0.01)
+            } else if is_log(nb) && radius <= log_radius(nb) + 0.01 {
+                (t + 0.5 * dir as f32, false)
+            } else {
+                (t, true)
+            };
+        }
+        let (s, bl) = r.light(x, y, z);
+        let side_layer = face_texture(b, if axis == 1 { 0 } else { 2 });
+        let end_layer = face_texture(b, if axis == 1 { 2 } else { 0 });
+        let (t0, t1) = (ends[0].0, ends[1].0);
+        let angle = |i: usize| (i as f32 + 0.5) / sides as f32 * std::f32::consts::TAU;
+        let around = if is_branch(b) { 1.0 } else { 3.0 };
+        let (wx, wz) = ((x + self.ox) as f32, (z + self.oz) as f32);
+        let world = move |p: [f32; 3]| [wx + p[0], y as f32 + p[1], wz + p[2]];
+        let face_of = |n: [f32; 3]| {
+            let a = n.map(f32::abs);
+            let k = if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 };
+            (k * 2 + (n[k] < 0.0) as usize) as u8
+        };
+        let emit = |b: &mut Self, ps: [[f32; 3]; 4], uvs: [[f32; 2]; 4], n: [f32; 3], layer: u32| {
+            // Wound to face `n`.
+            let d = |a: [f32; 3], c: [f32; 3]| [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let (e1, e2) = (d(ps[0], ps[1]), d(ps[0], ps[2]));
+            let cross = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+            let flip = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2] < 0.0;
+            let base = b.verts.len() as u32;
+            let face = face_of(n);
+            for i in 0..4 {
+                b.push(Vertex {
+                    pos: world(ps[i]),
+                    uv: uvs[i],
+                    layer: layer as f32,
+                    light: [255, (s * 17) as u8, (bl * 17) as u8, face],
+                    tint: [255, 255, 255, 0],
+                });
+            }
+            let idx = if flip { [base, base + 2, base + 1, base, base + 3, base + 2] } else { [base, base + 1, base + 2, base, base + 2, base + 3] };
+            b.opaque.extend_from_slice(&idx);
+        };
+        for i in 0..sides {
+            let (a0, a1) = (angle(i), angle(i + 1));
+            let (c0, s0, c1, s1) = (a0.cos() * radius, a0.sin() * radius, a1.cos() * radius, a1.sin() * radius);
+            let mid = (a0 + a1) * 0.5;
+            let mut n = [0.0f32; 3];
+            n[u_axis] = mid.cos();
+            n[v_axis] = mid.sin();
+            let (u0, u1) = (i as f32 / sides as f32 * around, (i + 1) as f32 / sides as f32 * around);
+            emit(
+                self,
+                [at(t0, c0, s0), at(t0, c1, s1), at(t1, c1, s1), at(t1, c0, s0)],
+                [[u0, 1.0 - t0], [u1, 1.0 - t0], [u1, 1.0 - t1], [u0, 1.0 - t1]],
+                n,
+                side_layer,
+            );
+            // The end caps: a slice of the rings each.
+            for (k, &(t, capped)) in ends.iter().enumerate() {
+                if !capped {
+                    continue;
+                }
+                let mut n = [0.0f32; 3];
+                n[axis] = if k == 0 { -1.0 } else { 1.0 };
+                let uv = |u: f32, v: f32| [0.5 + u, 0.5 + v];
+                emit(
+                    self,
+                    [at(t, 0.0, 0.0), at(t, c0, s0), at(t, c1, s1), at(t, 0.0, 0.0)],
+                    [uv(0.0, 0.0), uv(c0, s0), uv(c1, s1), uv(0.0, 0.0)],
+                    n,
+                    end_layer,
+                );
+            }
+        }
+    }
+
     /// Stairs: the filled eighths of the block, without the faces between them or against
     /// solid neighbours.
     fn stairs(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
@@ -1195,6 +1298,10 @@ pub fn mesh_chunk(
                 }
                 if is_stairs(b) {
                     m.stairs(&r, x, y, z, b);
+                    continue;
+                }
+                if is_log(b) {
+                    m.round_log(&r, x, y, z, b);
                     continue;
                 }
                 if is_bed(b) {

@@ -181,7 +181,10 @@ impl Game {
         let action = self.draw_ui(w, h, dt, view.in_world, medium);
         // Out of a world (the title screen's and the other menus' panorama), the world
         // behind the menu is blurred: drawn small by the scope pass, spread over the screen.
-        let blur = !view.in_world && !matches!(self.screen, Screen::Playing | Screen::Chat);
+        // (`GUN_SHOTS_NOBLUR`: sharp, to look at the world in pictures)
+        let blur = !view.in_world
+            && !matches!(self.screen, Screen::Playing | Screen::Chat)
+            && std::env::var("GUN_SHOTS_NOBLUR").is_err();
         if blur {
             let corner = |x: f32, y: f32| crate::world::mesh::Vertex {
                 pos: [x, y, 0.0],

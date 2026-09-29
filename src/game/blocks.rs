@@ -321,60 +321,27 @@ impl Game {
         self.block_updated(p);
     }
 
-    /// Grows a sapling into a tree. Returns false if there is not enough room.
+    /// Grows a sapling into a tree (the generator's shapes). Returns false if there is not
+    /// enough room for its wood.
     pub(super) fn grow_tree(&mut self, p: IVec3, sapling: u8) -> bool {
-        let r = self.random();
-        let (log, leaves, trunk) = match sapling {
-            BIRCH_SAPLING => (BIRCH_LOG, BIRCH_LEAVES, 5 + (r * 3.0) as i32),
-            SPRUCE_SAPLING => (SPRUCE_LOG, SPRUCE_LEAVES, 6 + (r * 4.0) as i32),
-            _ => (OAK_LOG, OAK_LEAVES, 4 + (r * 3.0) as i32),
+        let log = match sapling {
+            BIRCH_SAPLING => BIRCH_LOG,
+            SPRUCE_SAPLING => SPRUCE_LOG,
+            _ => OAK_LOG,
         };
+        let seed = (self.random() * u32::MAX as f32) as u32;
+        let shape = crate::world::trees::tree_shape(log, seed);
         let w = &self.terrain.world;
-        if (1..=trunk + 1).any(|dy| {
-            !matches!(w.geti(p + IVec3::Y * dy), AIR) && !is_leaves(w.geti(p + IVec3::Y * dy))
-        }) {
+        let free = |b: u8| b == AIR || is_leaves(b) || is_plant(b) || is_sapling(b);
+        if shape.iter().any(|&(d, _, soft)| !soft && !free(w.geti(p + d))) {
             return false;
         }
-        let mut leaf = Vec::new();
-        if sapling == SPRUCE_SAPLING {
-            let top = p.y + trunk;
-            leaf.push(IVec3::new(p.x, top, p.z));
-            for i in 1..trunk - 1 {
-                let rad = if i % 2 == 1 { 1 } else { (1 + i / 3).min(3) };
-                for dx in -rad..=rad {
-                    for dz in -rad..=rad {
-                        if dx.abs() + dz.abs() > rad + 1
-                            || (dx.abs() == rad && dz.abs() == rad && rad > 1)
-                        {
-                            continue;
-                        }
-                        leaf.push(IVec3::new(p.x + dx, top - i, p.z + dz));
-                    }
-                }
+        for (d, b, soft) in shape {
+            let q = p + d;
+            let cur = self.terrain.world.geti(q);
+            if !soft || cur == AIR || is_plant(cur) {
+                self.set_block(q, b);
             }
-        } else {
-            let top = p.y + trunk - 1;
-            for dy in -2..=1 {
-                let rad: i32 = if dy <= -1 { 2 } else { 1 };
-                for dx in -rad..=rad {
-                    for dz in -rad..=rad {
-                        let corner = dx.abs() == rad && dz.abs() == rad;
-                        if corner && (dy == 1 || self.random() < 0.5) {
-                            continue;
-                        }
-                        leaf.push(IVec3::new(p.x + dx, top + dy, p.z + dz));
-                    }
-                }
-            }
-        }
-        for q in leaf {
-            let b = self.terrain.world.geti(q);
-            if b == AIR || is_plant(b) {
-                self.set_block(q, leaves);
-            }
-        }
-        for dy in 0..trunk {
-            self.set_block(p + IVec3::Y * dy, log);
         }
         if self.terrain.world.geti(p - IVec3::Y) == GRASS {
             self.set_block(p - IVec3::Y, DIRT);

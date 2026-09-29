@@ -113,6 +113,8 @@ pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
         return one(b as ItemId);
     }
     match b {
+        // A branch breaks into sticks.
+        _ if is_branch(b) => vec![Stack::new(STICK, 1 + (r * 2.0) as u8)],
         GRASS | SNOWY_GRASS => one(DIRT as ItemId),
         STONE => one(COBBLE as ItemId),
         COAL_ORE => one(COAL),

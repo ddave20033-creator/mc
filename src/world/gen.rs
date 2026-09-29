@@ -740,8 +740,10 @@ impl Generator {
     }
 
     fn place_trees(&self, c: &mut ChunkData, x0: i32, z0: i32, cols: &[[Option<Column>; 16]; 16]) {
-        for wz in z0 - 3..z0 + 19 {
-            for wx in x0 - 3..x0 + 19 {
+        // (trees standing next to the chunk reach into it)
+        let reach = super::trees::REACH;
+        for wz in z0 - reach..z0 + 16 + reach {
+            for wx in x0 - reach..x0 + 16 + reach {
                 // Cheap rejection first: no biome has a tree chance above MAX_TREE_CHANCE, so
                 // most columns (especially the ones outside this chunk) skip `column()`.
                 let tree_roll = hash(self.seed ^ 0x7EE5, wx, 0, wz);
@@ -818,56 +820,18 @@ impl Generator {
         kind: Tree,
         r: f64,
     ) {
-        let leaf_skip = |dx: i32, dy: i32, dz: i32| {
-            hash(self.seed ^ 0xF00D, x + dx * 7, y + dy, z + dz * 13) < 0.5
+        let log = match kind {
+            Tree::Oak => OAK_LOG,
+            Tree::Birch => BIRCH_LOG,
+            Tree::Spruce => SPRUCE_LOG,
+            Tree::Cactus => CACTUS,
         };
         match kind {
-            Tree::Oak | Tree::Birch => {
-                let (log, leaves) = if matches!(kind, Tree::Oak) {
-                    (OAK_LOG, OAK_LEAVES)
-                } else {
-                    (BIRCH_LOG, BIRCH_LEAVES)
-                };
-                let trunk = 4 + (r * 3.0) as i32 + if matches!(kind, Tree::Birch) { 1 } else { 0 };
+            Tree::Oak | Tree::Birch | Tree::Spruce => {
                 put(c, x0, z0, x, y - 1, z, DIRT, false);
-                let top = y + trunk - 1;
-                for dy in -2..=1 {
-                    let rad: i32 = if dy <= -1 { 2 } else { 1 };
-                    for dx in -rad..=rad {
-                        for dz in -rad..=rad {
-                            let corner = dx.abs() == rad && dz.abs() == rad;
-                            if corner && (dy == 1 || leaf_skip(dx, dy, dz)) {
-                                continue;
-                            }
-                            put(c, x0, z0, x + dx, top + dy, z + dz, leaves, true);
-                        }
-                    }
-                }
-                for dy in 0..trunk {
-                    put(c, x0, z0, x, y + dy, z, log, false);
-                }
-            }
-            Tree::Spruce => {
-                let trunk = 6 + (r * 4.0) as i32;
-                put(c, x0, z0, x, y - 1, z, DIRT, false);
-                let top = y + trunk;
-                put(c, x0, z0, x, top, z, SPRUCE_LEAVES, true);
-                for i in 1..trunk - 1 {
-                    let ly = top - i;
-                    let rad = if i % 2 == 1 { 1 } else { (1 + i / 3).min(3) };
-                    for dx in -rad..=rad {
-                        for dz in -rad..=rad {
-                            if dx.abs() + dz.abs() > rad + 1
-                                || (dx.abs() == rad && dz.abs() == rad && rad > 1)
-                            {
-                                continue;
-                            }
-                            put(c, x0, z0, x + dx, ly, z + dz, SPRUCE_LEAVES, true);
-                        }
-                    }
-                }
-                for dy in 0..trunk {
-                    put(c, x0, z0, x, y + dy, z, SPRUCE_LOG, false);
+                let seed = (r * u32::MAX as f64) as u32 ^ (x as u32).wrapping_mul(0x85EB_CA77) ^ (z as u32).wrapping_mul(0xC2B2_AE3D);
+                for (d, b, soft) in super::trees::tree_shape(log, seed) {
+                    put(c, x0, z0, x + d.x, y + d.y, z + d.z, b, soft);
                 }
             }
             Tree::Cactus => {

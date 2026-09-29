@@ -83,6 +83,16 @@ pub const SPRUCE_LOG_X: u8 = 178;
 pub const SPRUCE_LOG_Z: u8 = 179;
 pub const BIRCH_LOG_X: u8 = 180;
 pub const BIRCH_LOG_Z: u8 = 181;
+/// Branches: thin round logs growing out of the trees' trunks, upright or lying along X or
+/// Z (spruce branches only lie).
+pub const OAK_BRANCH: u8 = 182;
+pub const OAK_BRANCH_X: u8 = 183;
+pub const OAK_BRANCH_Z: u8 = 193;
+pub const BIRCH_BRANCH: u8 = 251;
+pub const BIRCH_BRANCH_X: u8 = 252;
+pub const BIRCH_BRANCH_Z: u8 = 253;
+pub const SPRUCE_BRANCH_X: u8 = 254;
+pub const SPRUCE_BRANCH_Z: u8 = 255;
 /// Red bed halves: base id + facing (bits 0-1, from the foot toward the head: the way the
 /// player looked when placing it) + head half (bit 2).
 pub const BED: u8 = 184;
@@ -366,17 +376,43 @@ pub fn bed_other_half(b: u8) -> IVec3 {
     }
 }
 
+/// A log or a branch (both round, wood).
 #[inline]
 pub fn is_log(b: u8) -> bool {
-    matches!(b, OAK_LOG | SPRUCE_LOG | BIRCH_LOG) || (OAK_LOG_X..=BIRCH_LOG_Z).contains(&b)
+    matches!(b, OAK_LOG | SPRUCE_LOG | BIRCH_LOG) || (OAK_LOG_X..=BIRCH_LOG_Z).contains(&b) || is_branch(b)
 }
-/// The upright log of a log block.
+#[inline]
+pub fn is_branch(b: u8) -> bool {
+    matches!(b, OAK_BRANCH | OAK_BRANCH_X | OAK_BRANCH_Z) || (BIRCH_BRANCH..=SPRUCE_BRANCH_Z).contains(&b)
+}
+/// The upright log of a log block (of a branch: of its tree).
 pub fn log_base(b: u8) -> u8 {
     match b {
-        OAK_LOG_X | OAK_LOG_Z => OAK_LOG,
-        SPRUCE_LOG_X | SPRUCE_LOG_Z => SPRUCE_LOG,
-        BIRCH_LOG_X | BIRCH_LOG_Z => BIRCH_LOG,
+        OAK_LOG_X | OAK_LOG_Z | OAK_BRANCH | OAK_BRANCH_X | OAK_BRANCH_Z => OAK_LOG,
+        SPRUCE_LOG_X | SPRUCE_LOG_Z | SPRUCE_BRANCH_X | SPRUCE_BRANCH_Z => SPRUCE_LOG,
+        BIRCH_LOG_X | BIRCH_LOG_Z | BIRCH_BRANCH | BIRCH_BRANCH_X | BIRCH_BRANCH_Z => BIRCH_LOG,
         _ => b,
+    }
+}
+/// A branch of the tree of `log` along `axis` (0 x, 1 y, 2 z; spruce ones only lie).
+pub fn branch_with_axis(log: u8, axis: usize) -> u8 {
+    match (log, axis) {
+        (SPRUCE_LOG, 2) => SPRUCE_BRANCH_Z,
+        (SPRUCE_LOG, _) => SPRUCE_BRANCH_X,
+        (BIRCH_LOG, 0) => BIRCH_BRANCH_X,
+        (BIRCH_LOG, 2) => BIRCH_BRANCH_Z,
+        (BIRCH_LOG, _) => BIRCH_BRANCH,
+        (_, 0) => OAK_BRANCH_X,
+        (_, 2) => OAK_BRANCH_Z,
+        _ => OAK_BRANCH,
+    }
+}
+/// How thick a round log is: its radius (blocks).
+pub fn log_radius(b: u8) -> f32 {
+    if is_branch(b) {
+        0.19
+    } else {
+        0.44
     }
 }
 /// Log lying along `axis` (0 x, 1 y, 2 z).
@@ -395,8 +431,8 @@ pub fn log_with_axis(base: u8, axis: usize) -> u8 {
 /// Axis a log runs along (0 x, 1 y, 2 z).
 pub fn log_axis(b: u8) -> usize {
     match b {
-        OAK_LOG_X | SPRUCE_LOG_X | BIRCH_LOG_X => 0,
-        OAK_LOG_Z | SPRUCE_LOG_Z | BIRCH_LOG_Z => 2,
+        OAK_LOG_X | SPRUCE_LOG_X | BIRCH_LOG_X | OAK_BRANCH_X | BIRCH_BRANCH_X | SPRUCE_BRANCH_X => 0,
+        OAK_LOG_Z | SPRUCE_LOG_Z | BIRCH_LOG_Z | OAK_BRANCH_Z | BIRCH_BRANCH_Z | SPRUCE_BRANCH_Z => 2,
         _ => 1,
     }
 }
@@ -495,6 +531,14 @@ pub fn block_boxes(b: u8, get: impl Fn(IVec3) -> u8) -> Boxes {
     }
     if is_bed(b) {
         return Boxes::one([0.0; 3], [1.0, BED_HEIGHT, 1.0]);
+    }
+    if is_log(b) {
+        // Round: the square inside its circle, along its axis.
+        let r = log_radius(b) * 0.92;
+        let (mut lo, mut hi) = ([0.5 - r; 3], [0.5 + r; 3]);
+        let a = log_axis(b);
+        (lo[a], hi[a]) = (0.0, 1.0);
+        return Boxes::one(lo, hi);
     }
     if is_chimney(b) {
         let mut out = Boxes::one(CHIMNEY_BOXES[0].0, CHIMNEY_BOXES[0].1);
@@ -752,7 +796,8 @@ pub fn is_opaque(b: u8) -> bool {
         || is_stairs(b)
         || is_bed(b)
         || is_chimney(b)
-        || is_gun_bench(b))
+        || is_gun_bench(b)
+        || is_log(b))
 }
 /// Blocks player movement.
 #[inline]
@@ -794,7 +839,7 @@ pub fn face_texture(b: u8, face: usize) -> u32 {
     let top = face == 2;
     let bottom = face == 3;
     let ends = top || bottom;
-    if log_axis(b) != 1 {
+    if log_axis(b) != 1 || is_branch(b) {
         let end = FACE_AXIS[face] == log_axis(b);
         return face_texture(log_base(b), if end { 2 } else { 0 });
     }

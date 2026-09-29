@@ -228,6 +228,53 @@ impl Game {
         }
     }
 
+    /// `GUN_SHOTS_TREES=1`: a row of each kind of tree (several of each, as they come out
+    /// differently) grown on the lane, looked at from the lane, from nearer and from above.
+    fn tree_shots_step(&mut self, dt: f32, start: Vec3) {
+        let Some(g) = self.gun_shots.as_mut() else { return };
+        let t0 = g.t;
+        g.t += dt;
+        let (t, dir) = (g.t, g.dir.clone());
+        let base = start.floor().as_ivec3();
+        if t0 == 0.0 {
+            for (row, log) in [crate::world::OAK_LOG, crate::world::BIRCH_LOG, crate::world::SPRUCE_LOG].into_iter().enumerate() {
+                for i in 0..3 {
+                    let at = base + IVec3::new(12 + i * 11, 0, (row as i32 - 1) * 12);
+                    for (d, b, soft) in crate::world::trees::tree_shape(log, 7 + i as u32 * 31 + row as u32 * 101) {
+                        let q = at + d;
+                        if !soft || self.terrain.world.geti(q) == AIR {
+                            self.set_block(q, b);
+                        }
+                    }
+                }
+            }
+            self.time_of_day = 0.3;
+        }
+        self.time_of_day = 0.3;
+        self.keys.clear();
+        let views: [(Vec3, f32, f32, &str); 4] = [
+            (Vec3::new(0.0, 0.0, 0.0), -1.5708 * 0.0, -0.05, "lane"),
+            (Vec3::new(6.0, 0.0, -12.0), 0.0, 0.05, "oak_near"),
+            (Vec3::new(6.0, 0.0, 12.0), 0.0, 0.05, "spruce_near"),
+            (Vec3::new(4.0, 14.0, -20.0), 0.6, -0.55, "above"),
+        ];
+        let k = (t / 2.0) as usize;
+        let Some(&(off, yaw, pitch, name)) = views.get(k) else {
+            println!("tree shots done: {}", dir.display());
+            self.quit = true;
+            return;
+        };
+        self.player.flying = true;
+        self.player.pos = start + off;
+        self.player.vel = Vec3::ZERO;
+        self.yaw = yaw;
+        self.pitch = pitch;
+        self.body_yaw = yaw;
+        if t0 < k as f32 * 2.0 + 1.6 && t >= k as f32 * 2.0 + 1.6 {
+            self.gpu.capture = Some(dir.join(format!("trees_{name}.png")));
+        }
+    }
+
     /// `GUN_SHOTS_MENU=1`: the menus one after another, each pictured as it comes in and
     /// once it has settled, with the mouse over one of its buttons.
     fn menu_shots_step(&mut self, dt: f32) {
@@ -861,6 +908,10 @@ impl Game {
         }
         if std::env::var("GUN_SHOTS_MENU").is_ok() {
             self.menu_shots_step(dt);
+            return;
+        }
+        if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_TREES").is_ok()) {
+            self.tree_shots_step(dt, start);
             return;
         }
         if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_BUCKET").is_ok()) {
