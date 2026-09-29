@@ -35,8 +35,27 @@ pub fn with_alpha(c: Color, a: f32) -> Color {
 pub const VERSION: &str = "RustCraft 0.4.0 (Vulkan)";
 
 pub const WHITE: Color = rgba(255, 255, 255, 255);
-pub const ACCENT: Color = rgba(98, 214, 120, 255);
-pub const HOVER_TEXT: Color = rgba(255, 255, 170, 255);
+/// The menus' colours: rust orange (the logo's) on dark glass.
+pub const ACCENT: Color = rgba(236, 128, 66, 255);
+pub const ACCENT_LIGHT: Color = rgba(255, 178, 116, 255);
+pub const DANGER: Color = rgba(222, 72, 64, 255);
+pub const HOVER_TEXT: Color = rgba(255, 238, 224, 255);
+pub const GLASS_TOP: Color = rgba(30, 32, 42, 205);
+pub const GLASS_BOTTOM: Color = rgba(18, 19, 26, 215);
+
+/// Eased 0..1: fast at first, gently settling.
+pub fn ease_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
+}
+
+/// How a button looks: a plain one, the main one of a screen, or one that destroys something.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ButtonKind {
+    Normal,
+    Primary,
+    Danger,
+}
 
 const MODE_RECT: f32 = 0.0;
 const MODE_TEXT: f32 = 1.0;
@@ -216,8 +235,19 @@ pub struct Ui {
     clip: Option<[f32; 4]>,
     focus: Option<u64>,
     anims: HashMap<u64, f32>,
+    /// A button's flash when it is clicked (1 .. 0).
+    flashes: HashMap<u64, f32>,
     active: Option<u64>,
     tooltip: Option<String>,
+    /// Everything drawn is this see-through (0..1) and moved by `offset` (the screens'
+    /// entrance animations, see `style`).
+    pub fade: f32,
+    pub offset: Vec2,
+    /// Seconds since the open screen opened, and which it is (`screen`); how many elements
+    /// have come in so far this frame (`appear`).
+    pub age: f32,
+    screen_key: u64,
+    stagger: u32,
 }
 
 impl Ui {
@@ -244,9 +274,44 @@ impl Ui {
             clip: None,
             focus: None,
             anims: HashMap::new(),
+            flashes: HashMap::new(),
             active: None,
             tooltip: None,
+            fade: 1.0,
+            offset: Vec2::ZERO,
+            age: 0.0,
+            screen_key: 0,
+            stagger: 0,
         }
+    }
+
+    /// Starts the screen's entrance animations over when `key` (which screen is open)
+    /// changes.
+    pub fn screen(&mut self, key: u64) {
+        if key != self.screen_key {
+            self.screen_key = key;
+            self.age = 0.0;
+        }
+    }
+
+    /// The next element's entrance (0..1, eased): each comes in a little after the one before.
+    pub fn appear(&mut self) -> f32 {
+        let i = self.stagger.min(14);
+        self.stagger += 1;
+        ease_out((self.age - 0.04 - i as f32 * 0.035) / 0.3)
+    }
+
+    /// Draws what follows `fade` times as see-through and moved by `offset`, until
+    /// `restore` with what this returns.
+    pub fn style(&mut self, fade: f32, offset: Vec2) -> (f32, Vec2) {
+        let old = (self.fade, self.offset);
+        self.fade *= fade;
+        self.offset += offset;
+        old
+    }
+
+    pub fn restore(&mut self, old: (f32, Vec2)) {
+        (self.fade, self.offset) = old;
     }
 
     pub fn begin(&mut self, w: f32, h: f32, s: f32, dt: f32, time: f32) {
@@ -259,6 +324,13 @@ impl Ui {
         self.s = s;
         self.dt = dt;
         self.time = time;
+        self.age += dt;
+        self.stagger = 0;
+        self.fade = 1.0;
+        self.offset = Vec2::ZERO;
+        for f in self.flashes.values_mut() {
+            *f = (*f - dt * 3.5).max(0.0);
+        }
         self.tooltip = None;
         self.clicked = false;
         if !self.mouse_down {
@@ -276,22 +348,24 @@ impl Ui {
             let y = (self.mouse.y - bh - 4.0 * s).max(2.0 * s).round();
             self.rect_full(
                 x,
-                y + s,
+                y + 2.0 * s,
                 bw,
                 bh,
-                rgba(0, 0, 0, 90),
-                rgba(0, 0, 0, 90),
-                3.0 * s,
+                rgba(0, 0, 0, 110),
+                rgba(0, 0, 0, 110),
                 4.0 * s,
+                6.0 * s,
             );
-            self.rect(x, y, bw, bh, with_alpha(ACCENT, 0.8), 3.0 * s);
-            self.rect(
-                x + s,
-                y + s,
-                bw - 2.0 * s,
-                bh - 2.0 * s,
-                rgba(18, 16, 28, 245),
-                2.0 * s,
+            self.rect(x, y, bw, bh, with_alpha(ACCENT, 0.7), 4.0 * s);
+            self.rect_full(
+                x + 1.0,
+                y + 1.0,
+                bw - 2.0,
+                bh - 2.0,
+                rgba(34, 32, 40, 248),
+                rgba(20, 19, 26, 248),
+                4.0 * s - 1.0,
+                0.0,
             );
             self.text(&text, x + 4.0 * s, y + 3.5 * s, s, WHITE, true);
         }
@@ -321,11 +395,14 @@ impl Ui {
     }
 
     fn push(&mut self, p: [Vec2; 4], uv: [[f32; 2]; 4], c: [Color; 4], rect: [f32; 4], mode: f32) {
+        if self.fade <= 0.001 {
+            return;
+        }
         for i in [0, 1, 2, 0, 2, 3] {
             self.verts.push(UiVertex {
-                pos: p[i].to_array(),
+                pos: (p[i] + self.offset).to_array(),
                 uv: uv[i],
-                color: c[i],
+                color: with_alpha(c[i], self.fade),
                 rect,
                 mode,
             });
@@ -390,6 +467,20 @@ impl Ui {
             [1e6, 1e6, 0.0, 0.0],
             MODE_RECT,
         );
+    }
+
+    /// Hard-edged gradient quad from left to right.
+    pub fn hgradient(&mut self, x: f32, y: f32, w: f32, h: f32, left: Color, right: Color) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let p = [
+            Vec2::new(x, y),
+            Vec2::new(x + w, y),
+            Vec2::new(x + w, y + h),
+            Vec2::new(x, y + h),
+        ];
+        self.push(p, [[0.0; 2]; 4], [left, right, right, left], [1e6, 1e6, 0.0, 0.0], MODE_RECT);
     }
 
     /// Hard-edged solid quad of any shape (a triangle when two corners are the same).
@@ -538,8 +629,9 @@ impl Ui {
         }
     }
 
+    /// A soft shadow under text (not the hard, full-strength block shadow).
     fn shadow_color(c: Color) -> Color {
-        [c[0] * 0.25, c[1] * 0.25, c[2] * 0.25, c[3]]
+        [c[0] * 0.08, c[1] * 0.08, c[2] * 0.1, c[3] * 0.5]
     }
 
     /// Draws text with its top-left at (x, y). Returns the width.
@@ -604,98 +696,113 @@ impl Ui {
         *v
     }
 
+    /// A control's box: dark glass with a hairline border, lit up (`t`) with the accent and a
+    /// glow when hovered; `press` sinks it a little.
     #[allow(clippy::too_many_arguments)]
-    fn frame_box(&mut self, x: f32, y: f32, w: f32, h: f32, t: f32, enabled: bool, oy: f32) {
+    fn frame_box(&mut self, x: f32, y: f32, w: f32, h: f32, t: f32, enabled: bool, press: f32, kind: ButtonKind) {
         let s = self.s;
-        let r = 3.0 * s;
-        self.rect_full(
-            x,
-            y + 1.5 * s,
-            w,
-            h,
-            rgba(0, 0, 0, 90),
-            rgba(0, 0, 0, 90),
-            r,
-            3.0 * s,
-        );
-        let border = if enabled {
-            lerp_color(rgba(255, 255, 255, 38), rgba(120, 230, 140, 235), t)
-        } else {
-            rgba(255, 255, 255, 18)
+        let r = 4.0 * s;
+        let inset = press * s;
+        let (x, y, w, h) = (x + inset, y + inset, w - 2.0 * inset, h - 2.0 * inset);
+        // Shadow, and the glow of the hovered one.
+        self.rect_full(x, y + 2.0 * s, w, h, rgba(0, 0, 0, 70), rgba(0, 0, 0, 90), r, 6.0 * s);
+        let tone = match kind {
+            ButtonKind::Danger => DANGER,
+            _ => ACCENT,
         };
-        self.rect(x, y + oy, w, h, border, r);
-        let bw = (s * 0.67).max(1.0).round();
-        let (top, bot) = if enabled {
-            (
-                lerp_color(rgba(44, 48, 58, 215), rgba(58, 76, 66, 235), t),
-                lerp_color(rgba(24, 26, 33, 215), rgba(30, 46, 38, 235), t),
-            )
+        if enabled && t > 0.01 {
+            self.rect_full(x, y, w, h, with_alpha(tone, 0.28 * t), with_alpha(tone, 0.18 * t), r, 9.0 * s);
+        }
+        let (border, top, bot) = if !enabled {
+            (rgba(255, 255, 255, 14), rgba(28, 29, 36, 150), rgba(20, 21, 26, 150))
         } else {
-            (rgba(30, 31, 36, 160), rgba(22, 23, 27, 160))
+            match kind {
+                ButtonKind::Normal => (
+                    lerp_color(rgba(255, 255, 255, 30), with_alpha(ACCENT_LIGHT, 0.85), t),
+                    lerp_color(GLASS_TOP, rgba(50, 44, 46, 230), t),
+                    lerp_color(GLASS_BOTTOM, rgba(34, 28, 30, 235), t),
+                ),
+                ButtonKind::Primary => (
+                    lerp_color(rgba(255, 196, 150, 200), rgba(255, 224, 196, 255), t),
+                    lerp_color(rgba(226, 118, 58, 240), rgba(246, 146, 82, 250), t),
+                    lerp_color(rgba(176, 78, 34, 240), rgba(204, 98, 50, 250), t),
+                ),
+                ButtonKind::Danger => (
+                    lerp_color(rgba(255, 150, 140, 120), rgba(255, 190, 180, 230), t),
+                    lerp_color(rgba(120, 36, 36, 225), rgba(176, 52, 48, 240), t),
+                    lerp_color(rgba(76, 22, 24, 225), rgba(120, 32, 32, 240), t),
+                ),
+            }
         };
-        let ir = (r - bw).max(0.0);
+        self.rect(x, y, w, h, border, r);
+        self.rect_full(x + 1.0, y + 1.0, w - 2.0, h - 2.0, top, bot, r - 1.0, 0.0);
+        // A thin highlight along the top.
+        let sheen = if kind == ButtonKind::Normal { 16.0 + 16.0 * t } else { 50.0 + 30.0 * t };
         self.rect_full(
-            x + bw,
-            y + bw + oy,
-            w - 2.0 * bw,
-            h - 2.0 * bw,
-            top,
-            bot,
-            ir,
-            0.0,
-        );
-        let sheen = (14.0 + 18.0 * t) as u8;
-        self.rect_full(
-            x + bw,
-            y + bw + oy,
-            w - 2.0 * bw,
-            (h * 0.45).round(),
-            rgba(255, 255, 255, sheen),
+            x + 1.0,
+            y + 1.0,
+            w - 2.0,
+            (h * 0.5).round(),
+            rgba(255, 255, 255, sheen as u8),
             rgba(255, 255, 255, 0),
-            ir,
+            r - 1.0,
             0.0,
         );
     }
 
     pub fn button(&mut self, label: &str, x: f32, y: f32, w: f32, h: f32, enabled: bool) -> bool {
-        let s = self.s;
-        let hovered = self.hit(x, y, w, h) && self.active.is_none();
-        let t = self.anim(hash_id(label, x, y), hovered && enabled);
-        let down = hovered && enabled && self.mouse_down;
-        let oy = if down { (s * 0.5).round() } else { 0.0 };
-        self.frame_box(x, y, w, h, t, enabled, oy);
+        self.button_ex(label, x, y, w, h, enabled, ButtonKind::Normal)
+    }
 
-        if enabled && t > 0.01 {
-            let lw = (w - 8.0 * s) * t;
-            let th = (s * 0.67).max(1.0).round();
-            self.rect(
-                x + (w - lw) * 0.5,
-                y + h - th - 1.5 * s + oy,
-                lw,
-                th,
-                with_alpha(ACCENT, t),
-                th * 0.5,
-            );
+    /// The screen's main button, filled with the accent.
+    pub fn button_primary(&mut self, label: &str, x: f32, y: f32, w: f32, h: f32, enabled: bool) -> bool {
+        self.button_ex(label, x, y, w, h, enabled, ButtonKind::Primary)
+    }
+
+    /// A button that comes in with the screen (after the ones before it), lights up when
+    /// hovered (a bar of the accent grows at its left, the label moves over to it), sinks
+    /// when pressed and flashes when clicked.
+    #[allow(clippy::too_many_arguments)]
+    pub fn button_ex(&mut self, label: &str, x: f32, y: f32, w: f32, h: f32, enabled: bool, kind: ButtonKind) -> bool {
+        let s = self.s;
+        let a = self.appear();
+        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 8.0 * s).round()));
+        let id = hash_id(label, x, y);
+        let hovered = self.hit(x, y, w, h) && self.active.is_none();
+        let t = self.anim(id, hovered && enabled);
+        let down = hovered && enabled && self.mouse_down;
+        let press = self.anim(id ^ 0x5eed, down);
+        self.frame_box(x, y, w, h, t, enabled, press, kind);
+
+        if enabled && kind == ButtonKind::Normal && t > 0.01 {
+            let bh = ((h - 10.0 * s) * t).max(0.0);
+            self.rect(x + 3.0 * s, y + (h - bh) * 0.5, 2.0 * s, bh, ACCENT, s);
         }
-        let tc = if enabled {
-            lerp_color(WHITE, HOVER_TEXT, t)
+        let flash = self.flashes.get(&id).copied().unwrap_or(0.0);
+        if flash > 0.0 {
+            self.rect(x, y, w, h, rgba(255, 255, 255, (flash * 90.0) as u8), 4.0 * s);
+        }
+        let tc = if !enabled {
+            rgba(120, 122, 132, 255)
+        } else if kind == ButtonKind::Normal {
+            lerp_color(rgba(222, 224, 232, 255), HOVER_TEXT, t)
         } else {
-            rgba(130, 130, 136, 255)
+            WHITE
         };
         let tw = self.text_width(label, s);
-        self.text(
-            label,
-            x + (w - tw) * 0.5,
-            y + (h - 7.0 * s) * 0.5 + oy,
-            s,
-            tc,
-            true,
-        );
+        let shift = if kind == ButtonKind::Normal { (t * 2.0 * s).round() } else { 0.0 };
+        self.text(label, x + (w - tw) * 0.5 + shift, y + (h - 7.0 * s) * 0.5, s, tc, true);
         let clicked = hovered && enabled && self.pressed;
+        if clicked {
+            self.flashes.insert(id, 1.0);
+        }
         self.clicked |= clicked;
+        self.restore(old);
         clicked
     }
 
+    /// A slider: a glass box with its label, filled with the accent up to its value, a round
+    /// knob that glows while it is held or hovered.
     #[allow(clippy::too_many_arguments)]
     pub fn slider(
         &mut self,
@@ -710,6 +817,8 @@ impl Ui {
         h: f32,
     ) -> bool {
         let s = self.s;
+        let a = self.appear();
+        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 8.0 * s).round()));
         let hid = hash_id(id, 0.0, 0.0);
         let hovered = self.hit(x, y, w, h);
         if hovered && self.pressed && self.active.is_none() {
@@ -717,10 +826,10 @@ impl Ui {
         }
         let active = self.active == Some(hid);
         let t = self.anim(hid, (hovered && self.active.is_none()) || active);
-        let handle_w = 8.0 * s;
+        let knob = 10.0 * s;
         let mut changed = false;
         if active {
-            let f = ((self.mouse.x - x - handle_w * 0.5) / (w - handle_w)).clamp(0.0, 1.0);
+            let f = ((self.mouse.x - x - knob * 0.5) / (w - knob)).clamp(0.0, 1.0);
             let nv = min + f * (max - min);
             if (nv - *value).abs() > f32::EPSILON {
                 *value = nv;
@@ -728,51 +837,39 @@ impl Ui {
             }
         }
         let f = ((*value - min) / (max - min)).clamp(0.0, 1.0);
-        self.frame_box(x, y, w, h, t, true, 0.0);
-
-        let bw = (s * 0.67).max(1.0).round();
-        let hx = (x + f * (w - handle_w)).round();
-        let fill_w = hx + handle_w * 0.5 - x - bw;
+        self.frame_box(x, y, w, h, t * 0.6, true, 0.0, ButtonKind::Normal);
+        let r = 4.0 * s;
+        let kx = (x + f * (w - knob)).round();
+        // The filled part, brighter toward the knob.
+        let fill_w = (kx + knob * 0.5 - x).max(0.0);
         self.rect_full(
-            x + bw,
-            y + bw,
+            x + 1.0,
+            y + 1.0,
             fill_w,
-            h - 2.0 * bw,
-            with_alpha(ACCENT, 0.28 + 0.12 * t),
-            with_alpha(ACCENT, 0.12 + 0.08 * t),
-            2.0 * s,
+            h - 2.0,
+            with_alpha(ACCENT, 0.42 + 0.14 * t),
+            with_alpha(rgba(176, 78, 34, 255), 0.36 + 0.14 * t),
+            r - 1.0,
             0.0,
         );
+        // The knob: a pill, glowing when held.
+        let (ky, kh) = (y + 3.0 * s, h - 6.0 * s);
+        let held = if active { 1.0 } else { t };
+        self.rect_full(kx + s, ky, knob - 2.0 * s, kh, with_alpha(ACCENT, 0.5 * held), with_alpha(ACCENT, 0.3 * held), 3.0 * s, 6.0 * s);
         self.rect_full(
-            hx,
-            y + s,
-            handle_w,
-            h - 2.0 * s,
-            rgba(0, 0, 0, 80),
-            rgba(0, 0, 0, 80),
-            2.5 * s,
-            2.0 * s,
-        );
-        self.rect_full(
-            hx,
-            y,
-            handle_w,
-            h,
-            lerp_color(rgba(210, 214, 222, 255), WHITE, t),
-            rgba(150, 156, 168, 255),
-            2.5 * s,
+            kx + s,
+            ky,
+            knob - 2.0 * s,
+            kh,
+            lerp_color(rgba(236, 238, 244, 255), WHITE, t),
+            rgba(190, 192, 202, 255),
+            3.0 * s,
             0.0,
         );
-        let tc = lerp_color(WHITE, HOVER_TEXT, t);
+        let tc = lerp_color(rgba(232, 234, 240, 255), HOVER_TEXT, t);
         let tw = self.text_width(label, s);
-        self.text(
-            label,
-            x + (w - tw) * 0.5,
-            y + (h - 7.0 * s) * 0.5,
-            s,
-            tc,
-            true,
-        );
+        self.text(label, x + (w - tw) * 0.5, y + (h - 7.0 * s) * 0.5, s, tc, true);
+        self.restore(old);
         changed
     }
 
@@ -790,6 +887,8 @@ impl Ui {
         max: usize,
     ) -> bool {
         let s = self.s;
+        let a = self.appear();
+        let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 8.0 * s).round()));
         let hid = hash_id(id, 0.0, 0.0);
         let hovered = self.hit(x, y, w, h);
         if self.pressed {
@@ -812,38 +911,36 @@ impl Ui {
                 }
             }
         }
-        let border = if focused {
-            ACCENT
-        } else if hovered {
-            rgba(255, 255, 255, 120)
-        } else {
-            rgba(255, 255, 255, 60)
-        };
-        self.rect(x, y, w, h, border, 2.0 * s);
-        self.rect(
-            x + s,
-            y + s,
-            w - 2.0 * s,
-            h - 2.0 * s,
-            rgba(10, 10, 14, 235),
-            1.5 * s,
+        let t = self.anim(hid, focused);
+        let hover = self.anim(hid ^ 0x40, hovered);
+        let r = 4.0 * s;
+        if t > 0.01 {
+            self.rect_full(x, y, w, h, with_alpha(ACCENT, 0.3 * t), with_alpha(ACCENT, 0.2 * t), r, 8.0 * s);
+        }
+        let border = lerp_color(
+            lerp_color(rgba(255, 255, 255, 34), rgba(255, 255, 255, 80), hover),
+            ACCENT_LIGHT,
+            t,
         );
+        self.rect(x, y, w, h, border, r);
+        self.rect_full(x + 1.0, y + 1.0, w - 2.0, h - 2.0, rgba(10, 11, 16, 235), rgba(16, 17, 24, 235), r - 1.0, 0.0);
+        // An accent line along the bottom, growing out from the middle when focused.
+        let lw = (w - 8.0 * s) * t;
+        if lw > 0.5 {
+            self.rect(x + (w - lw) * 0.5, y + h - 2.0 * s, lw, s, ACCENT, s * 0.5);
+        }
         let ty = (y + (h - 7.0 * s) * 0.5).round();
         if value.is_empty() && !focused {
-            self.text(
-                placeholder,
-                x + 4.0 * s,
-                ty,
-                s,
-                rgba(120, 120, 120, 255),
-                false,
-            );
+            self.text(placeholder, x + 5.0 * s, ty, s, rgba(112, 114, 126, 255), false);
         } else {
-            let tw = self.text(value, x + 4.0 * s, ty, s, WHITE, true);
-            if focused && (self.time * 2.5) as i32 % 2 == 0 {
-                self.text("_", x + 4.0 * s + tw + s, ty, s, WHITE, true);
+            let tw = self.text(value, x + 5.0 * s, ty, s, WHITE, true);
+            if focused {
+                // A caret that fades in and out.
+                let blink = 0.5 + 0.5 * (self.time * 5.0).cos();
+                self.rect(x + 5.0 * s + tw + s, ty - s, s, 9.0 * s, with_alpha(ACCENT_LIGHT, blink), 0.0);
             }
         }
+        self.restore(old);
         changed
     }
 
@@ -852,30 +949,45 @@ impl Ui {
         self.focus = Some(hash_id(id, 0.0, 0.0));
     }
 
-    /// Frosted glass card.
+    /// A card of dark frosted glass: a soft shadow, a hairline border, a faint light along
+    /// its top.
     pub fn panel(&mut self, x: f32, y: f32, w: f32, h: f32) {
         let s = self.s;
-        let r = 6.0 * s;
-        self.rect_full(
-            x,
-            y + 4.0 * s,
-            w,
-            h,
-            rgba(0, 0, 0, 120),
-            rgba(0, 0, 0, 120),
-            r,
-            12.0 * s,
-        );
-        self.rect(x, y, w, h, rgba(255, 255, 255, 34), r);
+        let r = 7.0 * s;
+        self.rect_full(x, y + 6.0 * s, w, h, rgba(0, 0, 0, 120), rgba(0, 0, 0, 150), r, 16.0 * s);
+        self.rect_full(x, y, w, h, rgba(255, 255, 255, 46), rgba(255, 255, 255, 18), r, 0.0);
         self.rect_full(
             x + 1.0,
             y + 1.0,
             w - 2.0,
             h - 2.0,
-            rgba(28, 30, 40, 220),
-            rgba(14, 15, 20, 230),
+            rgba(26, 28, 38, 228),
+            rgba(13, 14, 20, 238),
             r - 1.0,
             0.0,
         );
+        self.rect_full(
+            x + r,
+            y + 1.0,
+            w - 2.0 * r,
+            s,
+            rgba(255, 255, 255, 40),
+            rgba(255, 255, 255, 40),
+            0.0,
+            0.0,
+        );
+    }
+
+    /// A small rounded label: `text` on a tinted pill (a world's mode, a setting's state).
+    pub fn chip(&mut self, text: &str, x: f32, y: f32, color: Color) -> f32 {
+        let s = self.s;
+        let size = s;
+        let tw = self.text_width(text, size);
+        let (w, h) = ((tw + 8.0 * s).round(), (11.0 * s).round());
+        self.rect(x, y, w, h, with_alpha(color, 0.45), h * 0.5);
+        self.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, lerp_color(rgba(14, 15, 20, 235), color, 0.18), h * 0.5 - 1.0);
+        let light = lerp_color(color, WHITE, 0.55);
+        self.text(text, x + 4.0 * s, y + (h - 7.0 * size) * 0.5, size, light, false);
+        w
     }
 }

@@ -438,6 +438,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("worlds.play", "Play Selected World", "Világ indítása"),
     ("worlds.create", "Create New World", "Új világ létrehozása"),
     ("worlds.delete", "Delete", "Törlés"),
+    ("worlds.play_short", "Play", "Játék"),
+    ("worlds.create_short", "Create", "Létrehozás"),
     (
         "worlds.empty",
         "No worlds yet - create one!",

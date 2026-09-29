@@ -114,7 +114,7 @@ const WARMUP: f32 = 10.0;
 
 pub struct GunShots {
     dir: std::path::PathBuf,
-    wait: f32,
+    pub(super) wait: f32,
     /// Where the lane starts (feet), set up once.
     start: Option<Vec3>,
     gun: usize,
@@ -225,6 +225,53 @@ impl Game {
             g.n = 0;
             g.next = 0.0;
             self.right_down = false;
+        }
+    }
+
+    /// `GUN_SHOTS_MENU=1`: the menus one after another, each pictured as it comes in and
+    /// once it has settled, with the mouse over one of its buttons.
+    fn menu_shots_step(&mut self, dt: f32) {
+        let Some(g) = self.gun_shots.as_mut() else { return };
+        let screens = [
+            (Screen::MainMenu, "main"),
+            (Screen::SelectWorld, "worlds"),
+            (Screen::CreateWorld, "create"),
+            (Screen::DeleteWorld, "delete"),
+            (Screen::Paused, "pause"),
+            (Screen::Options { in_game: false }, "options"),
+            (Screen::Dead, "dead"),
+            (Screen::Credits, "credits"),
+            (Screen::Multiplayer, "multi"),
+        ];
+        let Some(&(screen, name)) = screens.get(g.gun) else {
+            println!("menu shots done: {}", g.dir.display());
+            self.quit = true;
+            return;
+        };
+        let t0 = g.t;
+        g.t += dt;
+        let t = g.t;
+        let dir = g.dir.clone();
+        if t0 == 0.0 {
+            if screen == Screen::SelectWorld || screen == Screen::DeleteWorld {
+                self.worlds = crate::save::list_worlds();
+                self.selected_world = (!self.worlds.is_empty()).then_some(0);
+            }
+            self.death_message = "Steve fell from a high place".into();
+            self.screen = screen;
+            self.set_grab(false);
+        }
+        self.ui.mouse = glam::Vec2::new(self.ui.w * 0.2, self.ui.h * 0.5);
+        for (at, k) in [(0.12, "in"), (1.2, "done")] {
+            if t0 < at && t >= at {
+                self.gpu.capture = Some(dir.join(format!("menu_{name}_{k}.png")));
+            }
+        }
+        if t > 1.5 {
+            if let Some(g) = self.gun_shots.as_mut() {
+                g.gun += 1;
+                g.t = 0.0;
+            }
         }
     }
 
@@ -810,6 +857,10 @@ impl Game {
         }
         if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_FISHING").is_ok()) {
             self.fishing_shots_step(dt, start);
+            return;
+        }
+        if std::env::var("GUN_SHOTS_MENU").is_ok() {
+            self.menu_shots_step(dt);
             return;
         }
         if let (Some(start), true) = (g.start, std::env::var("GUN_SHOTS_BUCKET").is_ok()) {

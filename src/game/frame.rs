@@ -1180,6 +1180,17 @@ impl Game {
         if in_world {
             self.draw_hud(medium.underwater, medium.in_lava);
         }
+        // A screen (a menu, not the game itself) fades in as it opens, its buttons coming in
+        // one after another.
+        {
+            use std::hash::{Hash, Hasher};
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            std::mem::discriminant(&self.screen).hash(&mut hash);
+            self.ui.screen(hash.finish());
+        }
+        let menu = !matches!(self.screen, Screen::Playing | Screen::Chat);
+        let entrance = if menu { crate::ui::ease_out(self.ui.age / 0.25) } else { 1.0 };
+        let before = self.ui.style(entrance, glam::Vec2::ZERO);
         let action = match self.screen {
             Screen::MainMenu => screens::main_menu(
                 &mut self.ui,
@@ -1241,6 +1252,7 @@ impl Game {
             }
             Screen::Playing | Screen::Chat => Action::None,
         };
+        self.ui.restore(before);
         // Fade in from black when the game starts.
         if self.time < 1.2 {
             let a = ((1.0 - self.time / 1.2) * 255.0) as u8;

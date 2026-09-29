@@ -3,6 +3,8 @@
 use super::*;
 use crate::lang::tf;
 use crate::save::{self, list_worlds, seed_from_text};
+use crate::ui::screens::{action_bar, card_title, screen_header};
+use crate::ui::{ButtonKind, ACCENT, ACCENT_LIGHT, DANGER, GLASS_BOTTOM, GLASS_TOP};
 
 /// "2026-09-23 18:04" from unix seconds (UTC).
 fn format_date(secs: u64) -> String {
@@ -37,101 +39,73 @@ impl Game {
         self.screen = Screen::SelectWorld;
     }
 
+    /// The worlds as cards (an icon of its mode, its name, chips for its mode and cheats, when
+    /// it was last played), coming in one after another; the selected one lit with the
+    /// accent. The actions in a bar along the bottom.
     pub(super) fn world_list_screen(&mut self) -> Action {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
-        screens::backdrop(&mut self.ui, 1.5);
-        self.ui
-            .text_centered(t("worlds.title"), w * 0.5, 12.0 * s, s, WHITE, true);
+        screens::backdrop(&mut self.ui, 1.3);
+        let (lw, row_h, card_h) = ((300.0 * s).min(w - 24.0 * s).round(), (42.0 * s).round(), (37.0 * s).round());
+        let lx = (w * 0.5 - lw * 0.5).round();
+        screen_header(&mut self.ui, t("worlds.title"), &format!("{}", self.worlds.len()), lx, lw);
 
         // Scrollable list
-        let (lw, row_h) = (270.0 * s, 32.0 * s);
-        let lx = (w * 0.5 - lw * 0.5).round();
-        let (top, bottom) = (28.0 * s, h - 60.0 * s);
+        let (top, bottom) = ((44.0 * s).round(), h - 50.0 * s);
         let visible = ((bottom - top) / row_h).floor().max(1.0) as usize;
         let max_scroll = self.worlds.len().saturating_sub(visible) as f32;
         self.world_scroll = (self.world_scroll - self.ui.scroll).clamp(0.0, max_scroll);
         let first = self.world_scroll as usize;
-        self.ui.solid(
-            0.0,
-            top - 2.0 * s,
-            w,
-            bottom - top + 4.0 * s,
-            rgba(0, 0, 0, 110),
-        );
         if self.worlds.is_empty() {
             self.ui.text_centered(
                 t("worlds.empty"),
                 w * 0.5,
                 (top + bottom) * 0.5 - 4.0 * s,
                 s,
-                rgba(170, 170, 170, 255),
+                rgba(170, 170, 180, 255),
                 true,
             );
         }
         let mut play = None;
         for (i, meta) in self.worlds.iter().enumerate().skip(first).take(visible) {
             let y = (top + (i - first) as f32 * row_h).round();
-            let hovered = self.ui.hit(lx, y, lw, row_h - 2.0 * s);
+            let a = self.ui.appear();
+            let old = self.ui.style(a, Vec2::new(0.0, ((1.0 - a) * 10.0 * s).round()));
+            let hovered = self.ui.hit(lx, y, lw, card_h);
             let selected = self.selected_world == Some(i);
-            if selected {
-                self.ui.rect_full(
-                    lx,
-                    y,
-                    lw,
-                    row_h - 2.0 * s,
-                    rgba(43, 66, 54, 245),
-                    rgba(26, 42, 36, 245),
-                    3.0 * s,
-                    0.0,
-                );
-                self.ui
-                    .rect(lx, y, 2.0 * s, row_h - 2.0 * s, ACCENT_GREEN, s);
-            } else if hovered {
-                self.ui
-                    .rect(lx, y, lw, row_h - 2.0 * s, rgba(48, 54, 64, 225), 3.0 * s);
-            }
-            let tx = lx + 8.0 * s;
-            self.ui.text(&meta.name, tx, y + 5.0 * s, s, WHITE, true);
-            let mode = if meta.spectator {
-                t("mode.spectator_long")
-            } else if meta.creative {
-                t("mode.creative_long")
-            } else {
-                t("mode.survival_long")
-            };
-            let info = if meta.cheats {
-                format!("{mode}, {}", t("worlds.cheats"))
-            } else {
-                mode.to_string()
-            };
-            let details = format!("{info}  |  {}", format_date(meta.last_played));
-            let detail_color = if selected {
-                rgba(205, 225, 211, 255)
-            } else {
-                rgba(180, 190, 195, 255)
-            };
-            self.ui
-                .text(&details, tx, y + 18.0 * s, s, detail_color, false);
+            world_card(&mut self.ui, meta, lx, y, lw, card_h, hovered, selected);
+            self.ui.restore(old);
             if hovered && self.ui.pressed {
                 if self.last_click.0 == i && self.time - self.last_click.1 < 0.35 {
                     play = Some(i);
                 }
                 self.selected_world = Some(i);
                 self.last_click = (i, self.time);
+                self.ui.clicked = true;
             }
         }
+        // A scroll bar when not all fit.
+        if max_scroll > 0.0 {
+            let track = bottom - top;
+            let bar = (track * visible as f32 / self.worlds.len() as f32).max(12.0 * s);
+            let by = top + (track - bar) * (self.world_scroll / max_scroll);
+            self.ui.rect(lx + lw + 5.0 * s, top, 2.0 * s, track, rgba(255, 255, 255, 20), s);
+            self.ui.rect(lx + lw + 5.0 * s, by, 2.0 * s, bar, with_alpha(ACCENT, 0.8), s);
+        }
 
-        // Buttons
-        let (bw, bh) = (150.0 * s, 20.0 * s);
-        let x1 = (w * 0.5 - 154.0 * s).round();
-        let x2 = (w * 0.5 + 4.0 * s).round();
-        let y1 = (h - 52.0 * s).round();
-        let y2 = (h - 28.0 * s).round();
+        // The actions.
+        let bar_y = (h - 40.0 * s).round();
+        action_bar(&mut self.ui, bar_y);
+        let bh = (22.0 * s).round();
+        let bw = ((lw - 3.0 * 6.0 * s) / 4.0).floor().max(60.0 * s);
+        let total = bw * 4.0 + 18.0 * s;
+        let x0 = (w * 0.5 - total * 0.5).round();
+        let bx = |k: f32| (x0 + k * (bw + 6.0 * s)).round();
+        let by = bar_y + 9.0 * s;
         let has = self.selected_world.is_some();
-        if self.ui.button(t("worlds.play"), x1, y1, bw, bh, has) {
+        if self.ui.button_primary(t("worlds.play_short"), bx(0.0), by, bw, bh, has) {
             play = self.selected_world;
         }
-        if self.ui.button(t("worlds.create"), x2, y1, bw, bh, true) {
+        if self.ui.button(t("worlds.create_short"), bx(1.0), by, bw, bh, true) {
             self.create_name = t("create.default_name").to_string();
             self.create_seed.clear();
             self.create_creative = false;
@@ -139,10 +113,10 @@ impl Game {
             self.ui.focus("world_name");
             self.screen = Screen::CreateWorld;
         }
-        if self.ui.button(t("worlds.delete"), x1, y2, bw, bh, has) {
+        if self.ui.button_ex(t("worlds.delete"), bx(2.0), by, bw, bh, has, ButtonKind::Danger) {
             self.screen = Screen::DeleteWorld;
         }
-        if self.ui.button(t("gui.cancel"), x2, y2, bw, bh, true) {
+        if self.ui.button(t("gui.cancel"), bx(3.0), by, bw, bh, true) {
             self.screen = Screen::MainMenu;
         }
         if let Some(i) = play {
@@ -152,38 +126,30 @@ impl Game {
         Action::None
     }
 
+    /// A new world: its name and seed, its mode and cheats as toggles, on a card.
     pub(super) fn create_world_screen(&mut self) -> Action {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
-        screens::backdrop(&mut self.ui, 1.5);
+        screens::backdrop(&mut self.ui, 1.3);
         let cx = w * 0.5;
-        let fw = 200.0 * s;
-        let fx = (cx - fw * 0.5).round();
-        let mut y = (h * 0.5 - 100.0 * s).max(8.0 * s).round();
-        self.ui
-            .text_centered(t("worlds.create"), cx, y, s, WHITE, true);
-        y += 18.0 * s;
-        self.ui
-            .text(t("create.name"), fx, y, s, rgba(170, 170, 170, 255), false);
+        let (pw, ph) = ((250.0 * s).round(), (230.0 * s).round());
+        let (px, py) = ((cx - pw * 0.5).round(), ((h - ph) * 0.45).round().max(6.0 * s));
+        self.ui.panel(px, py, pw, ph);
+        card_title(&mut self.ui, t("worlds.create"), cx, py + 12.0 * s, pw - 24.0 * s);
+        self.ui.rect(cx - 14.0 * s, py + 27.0 * s, 28.0 * s, s, ACCENT, s * 0.5);
+        let fw = pw - 28.0 * s;
+        let fx = (px + 14.0 * s).round();
+        let mut y = py + 38.0 * s;
+        let label = rgba(160, 164, 180, 255);
+        self.ui.text(t("create.name"), fx, y, s, label, false);
         y += 10.0 * s;
         let mut name = std::mem::take(&mut self.create_name);
-        self.ui
-            .text_field("world_name", &mut name, fx, y, fw, 20.0 * s, "", 32);
+        self.ui.text_field("world_name", &mut name, fx, y, fw, 20.0 * s, "", 32);
         self.create_name = name;
-        y += 28.0 * s;
-        self.ui
-            .text(t("create.seed"), fx, y, s, rgba(170, 170, 170, 255), false);
+        y += 27.0 * s;
+        self.ui.text(t("create.seed"), fx, y, s, label, false);
         y += 10.0 * s;
         let mut seed = std::mem::take(&mut self.create_seed);
-        self.ui.text_field(
-            "world_seed",
-            &mut seed,
-            fx,
-            y,
-            fw,
-            20.0 * s,
-            t("create.seed_hint"),
-            32,
-        );
+        self.ui.text_field("world_seed", &mut seed, fx, y, fw, 20.0 * s, t("create.seed_hint"), 32);
         self.create_seed = seed;
         y += 28.0 * s;
         let mode = if self.create_creative {
@@ -191,23 +157,24 @@ impl Game {
         } else {
             t("mode.survival")
         };
-        if self
-            .ui
-            .button(&tf("create.mode", &[&mode]), fx, y, fw, 20.0 * s, true)
-        {
+        if self.ui.button(&tf("create.mode", &[&mode]), fx, y, fw, 20.0 * s, true) {
             self.create_creative = !self.create_creative;
             // Minecraft enables cheats by default in creative.
             self.create_cheats = self.create_creative;
         }
-        y += 22.0 * s;
+        y += 23.0 * s;
         let desc = if self.create_creative {
             t("create.creative_desc")
         } else {
             t("create.survival_desc")
         };
-        self.ui
-            .text_centered(desc, cx, y, s * 0.8, rgba(170, 170, 170, 255), false);
-        y += 12.0 * s;
+        let small = (s * 0.8).max(1.0);
+        let lines = self.ui.wrap(desc, fw, small);
+        for line in lines.iter().take(2) {
+            self.ui.text_centered(line, cx, y, small, rgba(150, 154, 170, 255), false);
+            y += 8.0 * small;
+        }
+        y += 4.0 * s;
         if self.ui.button(
             &tf("create.cheats", &[&crate::lang::on_off(self.create_cheats)]),
             fx,
@@ -218,22 +185,12 @@ impl Game {
         ) {
             self.create_cheats = !self.create_cheats;
         }
-        let (bw, bh) = (150.0 * s, 20.0 * s);
-        let by = (h - 28.0 * s).round();
-        if self.ui.button(
-            t("worlds.create"),
-            (cx - 154.0 * s).round(),
-            by,
-            bw,
-            bh,
-            true,
-        ) {
+        let bw = ((fw - 6.0 * s) * 0.5).floor();
+        let by = (py + ph - 32.0 * s).round();
+        if self.ui.button_primary(t("worlds.create_short"), fx, by, bw, 22.0 * s, true) {
             self.create_world();
         }
-        if self
-            .ui
-            .button(t("gui.cancel"), (cx + 4.0 * s).round(), by, bw, bh, true)
-        {
+        if self.ui.button(t("gui.cancel"), fx + fw - bw, by, bw, 22.0 * s, true) {
             self.screen = Screen::SelectWorld;
         }
         Action::None
@@ -250,46 +207,34 @@ impl Game {
         self.load_world(meta);
     }
 
+    /// Asks before deleting a world: a card with the warning and a red button.
     pub(super) fn delete_world_screen(&mut self) -> Action {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
-        screens::backdrop(&mut self.ui, 1.8);
+        screens::backdrop(&mut self.ui, 1.6);
         let Some(i) = self.selected_world else {
             self.screen = Screen::SelectWorld;
             return Action::None;
         };
         let name = self.worlds[i].name.clone();
-        self.ui
-            .text_centered(t("worlds.delete_q"), w * 0.5, h * 0.35, s, WHITE, true);
-        self.ui.text_centered(
-            &tf("worlds.delete_warn", &[&name]),
-            w * 0.5,
-            h * 0.35 + 14.0 * s,
-            s,
-            rgba(170, 170, 170, 255),
-            true,
-        );
-        let (bw, bh) = (150.0 * s, 20.0 * s);
-        let by = (h * 0.35 + 40.0 * s).round();
-        if self.ui.button(
-            t("worlds.delete"),
-            (w * 0.5 - 154.0 * s).round(),
-            by,
-            bw,
-            bh,
-            true,
-        ) {
+        let (pw, ph) = ((270.0 * s).round(), (104.0 * s).round());
+        let (px, py) = ((w * 0.5 - pw * 0.5).round(), ((h - ph) * 0.42).round());
+        self.ui.panel(px, py, pw, ph);
+        card_title(&mut self.ui, t("worlds.delete_q"), w * 0.5, py + 12.0 * s, pw - 24.0 * s);
+        self.ui.rect(w * 0.5 - 14.0 * s, py + 27.0 * s, 28.0 * s, s, DANGER, s * 0.5);
+        let warn = tf("worlds.delete_warn", &[&name]);
+        let lines = self.ui.wrap(&warn, pw - 28.0 * s, s);
+        for (k, line) in lines.iter().enumerate().take(3) {
+            self.ui.text_centered(line, w * 0.5, py + 36.0 * s + k as f32 * 10.0 * s, s, rgba(190, 192, 204, 255), false);
+        }
+        let fw = pw - 28.0 * s;
+        let bw = ((fw - 6.0 * s) * 0.5).floor();
+        let (fx, by) = ((px + 14.0 * s).round(), (py + ph - 32.0 * s).round());
+        if self.ui.button_ex(t("worlds.delete"), fx, by, bw, 22.0 * s, true, ButtonKind::Danger) {
             self.saver.wait();
             save::delete_world(&self.worlds[i].folder);
             self.open_world_list();
         }
-        if self.ui.button(
-            t("gui.cancel"),
-            (w * 0.5 + 4.0 * s).round(),
-            by,
-            bw,
-            bh,
-            true,
-        ) {
+        if self.ui.button(t("gui.cancel"), fx + fw - bw, by, bw, 22.0 * s, true) {
             self.screen = Screen::SelectWorld;
         }
         Action::None
@@ -577,4 +522,75 @@ impl Game {
     }
 }
 
-const ACCENT_GREEN: Color = rgba(98, 214, 120, 255);
+
+/// A block drawn as a little isometric icon (a world's picture).
+fn block_icon(ui: &mut crate::ui::Ui, c: Vec2, r: f32, b: u8) {
+    use crate::world::{face_texture, icon_tint, tint_kind, TintKind};
+    let tint = icon_tint(b);
+    let top = if tint_kind(b, 2) != TintKind::None { tint } else { [255; 3] };
+    let side = if tint_kind(b, 0) != TintKind::None { tint } else { [255; 3] };
+    ui.block_icon_faces(c, r, face_texture(b, 2), face_texture(b, 5), face_texture(b, 0), top, side);
+}
+
+/// One world in the list: its mode's block, its name, chips for its mode and cheats, and
+/// when it was last played. Lifted a little and lit when hovered; the selected one bordered
+/// with the accent, a bar of it at its left.
+#[allow(clippy::too_many_arguments)]
+fn world_card(ui: &mut crate::ui::Ui, meta: &WorldMeta, x: f32, y: f32, w: f32, h: f32, hovered: bool, selected: bool) {
+    let s = ui.s;
+    let r = 5.0 * s;
+    let lift = if hovered && !selected { -s } else { 0.0 };
+    let y = y + lift;
+    ui.rect_full(x, y + 3.0 * s, w, h, rgba(0, 0, 0, 80), rgba(0, 0, 0, 100), r, 7.0 * s);
+    if selected {
+        ui.rect_full(x, y, w, h, with_alpha(ACCENT, 0.3), with_alpha(ACCENT, 0.18), r, 10.0 * s);
+    }
+    let border = if selected {
+        ACCENT_LIGHT
+    } else if hovered {
+        rgba(255, 255, 255, 70)
+    } else {
+        rgba(255, 255, 255, 24)
+    };
+    ui.rect(x, y, w, h, border, r);
+    let (top, bot) = if selected {
+        (rgba(54, 40, 36, 235), rgba(30, 22, 22, 240))
+    } else if hovered {
+        (rgba(40, 42, 54, 225), rgba(24, 25, 33, 230))
+    } else {
+        (GLASS_TOP, GLASS_BOTTOM)
+    };
+    ui.rect_full(x + 1.0, y + 1.0, w - 2.0, h - 2.0, top, bot, r - 1.0, 0.0);
+    if selected {
+        ui.rect(x + 3.0 * s, y + 6.0 * s, 2.0 * s, h - 12.0 * s, ACCENT, s);
+    }
+    // The picture: the block of its mode on a dark tile.
+    let tile = h - 10.0 * s;
+    ui.rect(x + 8.0 * s, y + 5.0 * s, tile, tile, rgba(0, 0, 0, 70), 4.0 * s);
+    let block = if meta.spectator {
+        crate::world::GLASS
+    } else if meta.creative {
+        crate::world::DIAMOND_BLOCK
+    } else {
+        crate::world::GRASS
+    };
+    block_icon(ui, Vec2::new(x + 8.0 * s + tile * 0.5, y + 5.0 * s + tile * 0.5), tile * 0.36, block);
+
+    let tx = x + 14.0 * s + tile;
+    ui.text(&meta.name, tx, y + 7.0 * s, s, WHITE, true);
+    let date = format_date(meta.last_played);
+    let dw = ui.text_width(&date, s);
+    ui.text(&date, x + w - dw - 9.0 * s, y + 7.0 * s, s, rgba(140, 144, 160, 255), false);
+    let (mode, color) = if meta.spectator {
+        (t("mode.spectator"), rgba(150, 156, 176, 255))
+    } else if meta.creative {
+        (t("mode.creative"), rgba(170, 128, 255, 255))
+    } else {
+        (t("mode.survival"), rgba(96, 204, 120, 255))
+    };
+    let cy = y + h - 16.0 * s;
+    let cw = ui.chip(mode, tx, cy, color);
+    if meta.cheats {
+        ui.chip(t("worlds.cheats"), tx + cw + 4.0 * s, cy, ACCENT);
+    }
+}
