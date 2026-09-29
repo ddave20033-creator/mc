@@ -1,0 +1,13 @@
+# The checks alone: surfaces fighting over the same place in the world around and in every
+# item's model, textures in use that are empty, and a flicker comparison of the view.
+world bench
+window 1600 900
+empty
+time 0.3
+look 30 -15
+wait 1
+shot view
+flicker view
+check zfight 2
+check models
+check textures

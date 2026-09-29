@@ -45,8 +45,8 @@ struct App {
     bench: bool,
     /// `--aa-shots <folder>`: anti-aliasing comparison pictures.
     shots: Option<std::path::PathBuf>,
-    /// `--gun-shots <folder>`: pictures of every gun's animations, frame by frame.
-    gun_shots: Option<std::path::PathBuf>,
+    /// `--test <script> [folder]`: a test script (see `game::testbed`).
+    test: Option<(String, Option<std::path::PathBuf>)>,
 }
 
 impl App {
@@ -84,7 +84,7 @@ impl ApplicationHandler for App {
                 .create_window(attrs)
                 .expect("failed to create window"),
         );
-        let mut game = game::Game::new(window, self.bench, self.shots.clone(), self.gun_shots.clone());
+        let mut game = game::Game::new(window, self.bench, self.shots.clone(), self.test.clone());
         splash.set_progress(0.1);
         game.frame();
         self.game = Some(game);
@@ -206,8 +206,8 @@ fn main() {
         bench: args.get(1).map(String::as_str) == Some("--bench"),
         shots: (args.get(1).map(String::as_str) == Some("--aa-shots"))
             .then(|| args.get(2).map(Into::into).unwrap_or_else(|| "aa-shots".into())),
-        gun_shots: (args.get(1).map(String::as_str) == Some("--gun-shots"))
-            .then(|| args.get(2).map(Into::into).unwrap_or_else(|| "gun-shots".into())),
+        test: (args.get(1).map(String::as_str) == Some("--test"))
+            .then(|| (args.get(2).cloned().unwrap_or_else(|| "checks".into()), args.get(3).map(Into::into))),
         game: None,
         splash: None,
     };

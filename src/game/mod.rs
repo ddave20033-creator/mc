@@ -8,7 +8,6 @@ mod fishing;
 mod frame;
 mod furnace;
 mod grenades;
-mod gun_shots;
 mod gui;
 mod guns;
 mod health;
@@ -19,6 +18,7 @@ mod mobs;
 mod multi;
 mod revolver;
 mod sleep;
+mod testbed;
 mod spectate;
 mod station;
 mod update;
@@ -368,7 +368,10 @@ pub struct Game {
     /// `--aa-shots`: anti-aliasing comparison pictures (runs in bench mode).
     shots: Option<bench::Shots>,
     /// `--gun-shots`: pictures of the guns' animations (runs in bench mode).
-    gun_shots: Option<gun_shots::GunShots>,
+    /// `--test`: a test script running (see `testbed`).
+    testbed: Option<testbed::Testbed>,
+    /// A test asked for the menus' backdrop sharp.
+    test_no_blur: bool,
     /// Max FPS: when the next frame may start.
     next_frame: Option<Instant>,
     /// Last frame's CPU time in ms: update, build, submit (without waiting), waiting for the GPU.
@@ -424,9 +427,9 @@ impl Game {
         window: Arc<Window>,
         bench: bool,
         shots: Option<std::path::PathBuf>,
-        gun_shots: Option<std::path::PathBuf>,
+        test: Option<(String, Option<std::path::PathBuf>)>,
     ) -> Self {
-        let bench = bench || shots.is_some() || gun_shots.is_some();
+        let bench = bench || shots.is_some();
         let mut settings = Settings::load();
         let mut custom_skins = std::collections::HashMap::new();
         let mut skin_pngs = std::collections::HashMap::new();
@@ -616,7 +619,8 @@ impl Game {
             show_debug: false,
             bench: bench.then(Default::default),
             shots: shots.map(bench::Shots::new),
-            gun_shots: gun_shots.map(gun_shots::GunShots::new),
+            testbed: test.map(|(what, dir)| testbed::Testbed::new(&what, dir)),
+            test_no_blur: false,
             next_frame: None,
             cpu_ms: [0.0; 4],
             frame_end: Instant::now(),
@@ -681,7 +685,7 @@ impl Game {
             self.close_lan();
         }
         self.saver.wait();
-        if self.bench.is_none() {
+        if self.bench.is_none() && self.testbed.is_none() {
             self.settings.save();
         }
         if lan {
@@ -910,7 +914,7 @@ impl Game {
                 self.left_down = false;
                 self.right_down = false;
                 // Bench and shot runs keep going in the background.
-                if self.screen == Screen::Playing && self.bench.is_none() {
+                if self.screen == Screen::Playing && self.bench.is_none() && self.testbed.is_none() {
                     self.pause();
                 }
             }
@@ -1090,7 +1094,7 @@ impl Game {
     }
 
     fn set_grab(&mut self, grab: bool) {
-        let grab = grab && self.bench.is_none();
+        let grab = grab && self.bench.is_none() && self.testbed.is_none();
         if !grab {
             self.w_sprint = false;
             self.last_w = -1.0;

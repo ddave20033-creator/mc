@@ -1,0 +1,33 @@
+# Rows of each kind of tree grown on the lane (several seeds each), from the lane, nearer and
+# from above; then the surfaces checked for fighting.
+world bench
+window 1600 900
+empty
+lane
+time 0.3
+tree oak 12 -12 1
+tree oak 23 -12 2
+tree oak 34 -12 3
+tree birch 12 0 1
+tree birch 23 0 2
+tree birch 34 0 3
+tree spruce 12 12 1
+tree spruce 23 12 2
+tree spruce 34 12 3
+fly on
+look 0 -5
+wait 2
+shot lane
+pos 6 0 -12
+look 0 5
+wait 1
+shot oak_near
+pos 6 0 12
+wait 1
+shot spruce_near
+pos 4 14 -20
+look 35 -30
+wait 1
+shot above
+flicker trees
+check zfight 2

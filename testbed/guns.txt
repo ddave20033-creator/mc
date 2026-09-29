@@ -1,0 +1,59 @@
+# Each gun on the lane: standing, walking, aimed, firing, reloading, looked over, and seen
+# from the front and the side.
+world bench
+window 1600 900
+empty
+lane
+time 0.25
+hold pistol 1 loaded
+slot 7
+hold pistol_magazine 1 loaded
+slot 8
+hold magnum_round 64
+slot 0
+look 0 0
+wait 1
+shot pistol_idle
+key forward 1.2
+shots pistol_walk 4 0.25
+wait 0.5
+click right 1.5
+wait 0.6
+shot pistol_aim
+click left
+frames 2
+shots pistol_fire 4 0.05
+wait 1
+press reload
+shots pistol_reload 6 0.4
+press inspect
+shots pistol_inspect 5 0.8
+camera front
+wait 1
+shot pistol_front
+camera side
+wait 1
+shot pistol_side
+camera fp
+hold revolver 1 loaded
+wait 1
+shot revolver_idle
+click right 1.5
+wait 0.6
+shot revolver_aim
+wait 1
+click left
+frames 2
+shots revolver_fire 3 0.05
+hold ak47 1 loaded
+wait 1
+shot ak_idle
+key forward 1.5
+key sprint 1.5
+shots ak_sprint 3 0.4
+click right 1.5
+wait 0.8
+shot ak_aim
+camera front
+wait 1
+shot ak_front

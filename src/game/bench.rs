@@ -28,12 +28,8 @@ impl Game {
             self.shots_step(dt);
             return;
         }
-        // (the station pictures go on with a gun station open too)
-        let station = std::env::var("GUN_SHOTS_STATION").is_ok() && matches!(self.screen, Screen::Container(Container::GunStation(_)));
-        // (and the menu pictures go through the menus)
-        let menus = std::env::var("GUN_SHOTS_MENU").is_ok() && self.gun_shots.as_ref().is_some_and(|g| g.wait <= 0.0);
-        if self.gun_shots.is_some() && (self.screen == Screen::Playing || station || menus) {
-            self.gun_shots_step(dt);
+        if self.testbed.is_some() {
+            self.testbed_step(dt);
             return;
         }
         let Some(b) = self.bench.as_mut() else {

@@ -181,10 +181,8 @@ impl Game {
         let action = self.draw_ui(w, h, dt, view.in_world, medium);
         // Out of a world (the title screen's and the other menus' panorama), the world
         // behind the menu is blurred: drawn small by the scope pass, spread over the screen.
-        // (`GUN_SHOTS_NOBLUR`: sharp, to look at the world in pictures)
-        let blur = !view.in_world
-            && !matches!(self.screen, Screen::Playing | Screen::Chat)
-            && std::env::var("GUN_SHOTS_NOBLUR").is_err();
+        // (a test can have it sharp, to look at the world in pictures)
+        let blur = !view.in_world && !matches!(self.screen, Screen::Playing | Screen::Chat) && !self.test_no_blur;
         if blur {
             let corner = |x: f32, y: f32| crate::world::mesh::Vertex {
                 pos: [x, y, 0.0],
@@ -400,7 +398,7 @@ impl Game {
         if third_person {
             if self.camera.mode == 2 {
                 fwd = -fwd;
-            } else if self.camera.mode == super::camera::SIDE_VIEW || self.camera.mode == super::camera::FIXED_FRONT {
+            } else if matches!(self.camera.mode, super::camera::SIDE_VIEW | super::camera::SIDE_LEFT | super::camera::FIXED_FRONT) {
                 fwd = (eye - Vec3::Y * 0.5 - cam).normalize_or_zero();
             } else {
                 // Keep view rotation independent of changing nearby blocks and plants.

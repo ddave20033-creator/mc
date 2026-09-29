@@ -257,7 +257,7 @@ impl Terrain {
         self.extra_centers = extra;
     }
 
-    fn neighborhood(&self, p: ChunkPos) -> Option<Box<[Arc<ChunkData>; 9]>> {
+    pub fn neighborhood(&self, p: ChunkPos) -> Option<Box<[Arc<ChunkData>; 9]>> {
         let mut v = Vec::with_capacity(9);
         for dz in -1..=1 {
             for dx in -1..=1 {

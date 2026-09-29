@@ -1,0 +1,44 @@
+# Every menu, as it comes in (0.12 s) and settled (1.2 s), then moved through with the keyboard.
+world menu
+window 1600 900
+wait 2
+screen main
+wait 0.12
+shot main_in
+wait 1.1
+shot main
+uikey S
+uikey S
+frames 3
+shot main_keys
+screen worlds
+wait 1.2
+shot worlds
+screen create
+wait 1.2
+shot create
+screen delete
+wait 1.2
+shot delete
+screen options
+wait 1.2
+shot options
+uikey E
+frames 3
+shot options_tab2
+screen keys
+wait 1.2
+shot keys
+screen credits
+wait 1.2
+shot credits
+screen multi
+wait 1.2
+shot multi
+screen skin
+wait 1.2
+shot skin
+set blur off
+screen main
+wait 1.2
+shot main_sharp

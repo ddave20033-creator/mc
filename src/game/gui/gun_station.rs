@@ -2045,7 +2045,7 @@ impl Game {
     found
     }
 
-    /// `GUN_SHOTS_STATION`: a map of what a click would do at every point of the view (the
+    /// The test's `pickmap`: a map of what a click would do at every point of the view (the
     /// station at `p`, with what is on the mouse now), written as a picture beside the view's
     /// own: the loader's bay green, the boxes of rounds orange, the brush blue, the handle
     /// white, what lies on the table red, nothing black.

@@ -781,7 +781,9 @@ impl Builder {
         let side_layer = face_texture(b, if axis == 1 { 0 } else { 2 });
         let end_layer = face_texture(b, if axis == 1 { 2 } else { 0 });
         let (t0, t1) = (ends[0].0, ends[1].0);
-        let angle = |i: usize| (i as f32 + 0.5) / sides as f32 * std::f32::consts::TAU;
+        // (no side faces straight along an axis: two logs crossing never have sides in the
+        // same plane, which would flicker)
+        let angle = |i: usize| i as f32 / sides as f32 * std::f32::consts::TAU;
         let around = if is_branch(b) { 1.0 } else { 3.0 };
         let (wx, wz) = ((x + self.ox) as f32, (z + self.oz) as f32);
         let world = move |p: [f32; 3]| [wx + p[0], y as f32 + p[1], wz + p[2]];

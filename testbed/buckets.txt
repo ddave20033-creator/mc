@@ -1,0 +1,41 @@
+# The buckets held (looking ahead and down, walking, turning), dropped on the ground at night,
+# and seen from the front.
+world bench
+window 1600 900
+empty
+lane
+time 0.25
+set body on
+hold water_bucket
+look 0 0
+wait 1
+shot water_ahead
+look 0 -45
+wait 0.5
+shot water_down45
+look 0 -85
+wait 0.5
+shot water_down85
+look 0 -30
+key forward 1.2
+shots water_walk 3 0.3
+turn 150 1
+shots water_turn 3 0.3
+hold lava_bucket
+look 0 -30
+wait 1
+shot lava_down
+camera front
+look 0 0
+wait 1
+shot water_front
+camera fp
+time 0.75
+look 0 -35
+drop lava_bucket 2.5 0.1 -1
+drop lantern 2.5 0.1 0
+drop torch 2.5 0.1 1
+drop water_bucket 2.5 0.1 2
+hold bucket
+wait 1.5
+shot dropped_night

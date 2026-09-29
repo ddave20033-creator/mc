@@ -1,0 +1,29 @@
+# Blocks side by side on the lane (the odd shapes: logs, branches, stairs, chests, doors,
+# glass, lanterns...), looked at from a few angles, checked for fighting surfaces.
+world bench
+window 1600 900
+empty
+lane
+time 0.3
+place 4 0 -3 oak_log
+place 4 1 -3 oak_log
+place 6 0 -3 birch_log
+place 8 0 -3 spruce_log
+place 4 0 0 oak_stairs
+place 6 0 0 chest
+place 8 0 0 glass
+place 9 0 0 glass
+place 10 0 0 lantern
+place 4 0 3 furnace
+place 6 0 3 crafting_table
+place 8 0 3 torch
+place 10 0 3 red_bed
+look 0 -15
+wait 1.5
+shot blocks
+pos 12 3 0
+look 180 -30
+wait 1
+shot blocks_back
+flicker blocks
+check zfight 1
