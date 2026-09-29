@@ -14,6 +14,8 @@ pub struct ItemEntity {
     pub age: f32,
     pub pickup_delay: f32,
     pickup: Option<PickupFlight>,
+    /// The liquid in a dropped bucket, rocking as it flies and lands.
+    slosh: crate::model::bucket::Slosh,
     /// Unique id for LAN play.
     pub id: u32,
 }
@@ -44,6 +46,7 @@ impl ItemEntity {
             age: 0.0,
             pickup_delay,
             pickup: None,
+            slosh: Default::default(),
             id: 0,
         }
     }
@@ -74,6 +77,9 @@ impl ItemEntity {
 
     pub fn update(&mut self, dt: f32, w: &World) {
         self.age += dt;
+        if let Some(fill) = crate::model::bucket::Fill::of(self.stack.item) {
+            self.slosh.update(fill, self.pos, dt);
+        }
         self.pickup_delay -= dt;
         let in_water = is_water(w.get(
             self.pos.x.floor() as i32,
@@ -136,6 +142,14 @@ impl ItemEntity {
                 Vec3::new(i as f32 * 0.06, i as f32 * 0.05, -(i as f32) * 0.04) * (size / 0.3);
             let m = Mat4::from_translation(pos + off)
                 * Mat4::from_rotation_y(self.age * 1.6 + time * 0.2);
+            if let Some(fill) = crate::model::bucket::Fill::of(self.stack.item) {
+                use crate::model::bucket;
+                let scale = size * 1.5;
+                let m = m * Mat4::from_translation(Vec3::Y * scale * 0.5) * Mat4::from_scale(Vec3::splat(scale));
+                let surface = bucket::Surface { tilt: self.slosh.tilt, bounce: self.slosh.bounce, own_up: false };
+                bucket::emit(out, m, fill, &surface, 0.55, light, flags::ENTITY);
+                continue;
+            }
             emit_item_flat_or_block(out, m, &self.stack, size, light, flags::ENTITY);
         }
     }

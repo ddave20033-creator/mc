@@ -319,7 +319,9 @@ pub mod tex {
     pub const FISHING_ROD: u32 = FISHING_ROD_MODEL + crate::model::fishing_rod::PAGES;
     pub const RAW_FISH: u32 = FISHING_ROD + 1;
     pub const COOKED_FISH: u32 = FISHING_ROD + 2;
-    pub const LAYERS: usize = (COOKED_FISH + 1) as usize;
+    /// The bucket's galvanized steel (`model::bucket`).
+    pub const BUCKET_METAL: u32 = COOKED_FISH + 1;
+    pub const LAYERS: usize = (BUCKET_METAL + 1) as usize;
 }
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
@@ -468,6 +470,9 @@ fn render_item_icons(base: &mut [u8]) {
         (tex::AK_PARTS + 4, ak_mag),
         (tex::RIFLE_ROUND, Stack::one(RIFLE_ROUND)),
         (tex::MAG_LOADER, Stack::one(MAG_LOADER)),
+        (tex::BUCKET, Stack::one(BUCKET)),
+        (tex::WATER_BUCKET, Stack::one(WATER_BUCKET)),
+        (tex::LAVA_BUCKET, Stack::one(LAVA_BUCKET)),
     ];
     for (layer, st) in icons {
         let img = render_icon(base, &st);
@@ -513,7 +518,9 @@ pub fn render_icon(base: &[u8], st: &crate::item::Stack) -> Vec<u8> {
     let mut verts = Vec::new();
     // A three-quarter view: turned toward the viewer's left, looked at a little from above.
     let turn = -0.4;
-    let view = glam::Mat4::from_rotation_x(0.35) * glam::Mat4::from_rotation_y(turn);
+    // A bucket from higher up, to show what is in it.
+    let down = if crate::model::bucket::is_bucket(st.item) { 0.62 } else { 0.35 };
+    let view = glam::Mat4::from_rotation_x(down) * glam::Mat4::from_rotation_y(turn);
     crate::model::emit_held_data(&mut verts, view, st, [255, 255, 255, 0], 0);
     // A long gun and its long parts lie across the icon corner to corner, the muzzle end up, to
     // fill it (as Minecraft draws its long items).

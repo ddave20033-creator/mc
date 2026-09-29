@@ -1236,6 +1236,27 @@ fn metal_block(l: u32, x: i32, y: i32, c: [f32; 3]) -> [u8; 4] {
     )
 }
 
+/// A bucket's galvanized steel: pale mottled spangles, faint streaks down it, and two pressed
+/// ridges around it (the rows are the wall from the rim down).
+fn bucket_metal(l: u32, x: i32, y: i32) -> [u8; 4] {
+    let fy = y as f32 + 0.5;
+    let spangle = voronoi(l, x, y, 40, 470);
+    let flake = 0.94 + 0.08 * hash(l, spangle.id as i32, 0, 471);
+    let v = flake + 0.04 * (vn2(l, x, y, 2, 24, 472) - 0.5) + 0.02 * (grain(l, x, y, 473) - 0.5);
+    // A ridge: a light edge above, a dark one below.
+    let ridge = |at: f32| {
+        let d = fy - at;
+        if (-4.0..0.0).contains(&d) {
+            1.1
+        } else if (0.0..4.0).contains(&d) {
+            0.8
+        } else {
+            1.0
+        }
+    };
+    col([178.0, 184.0, 190.0], v * ridge(40.0) * ridge(88.0), UNTINTED)
+}
+
 fn furnace(l: u32, x: i32, y: i32) -> [u8; 4] {
     let pattern = if l == tex::FURNACE_FRONT_LIT {
         tex::FURNACE_FRONT
@@ -2253,6 +2274,7 @@ pub(super) fn pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] {
             )
         }
         tex::PLANKS => planks(l, x, y),
+        tex::BUCKET_METAL => bucket_metal(l, x, y),
         tex::COBBLE => {
             let c = voronoi(l, x, y, 16, 130);
             if c.d2 - c.d1 < 3.0 {

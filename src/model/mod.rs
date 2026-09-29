@@ -6,6 +6,7 @@ pub mod ak_vm;
 pub mod angler;
 pub mod ballistics;
 pub mod book;
+pub mod bucket;
 pub mod dummy;
 pub mod fishing_rod;
 pub mod grenade;
@@ -56,6 +57,12 @@ pub fn emit_held(out: &mut Vec<Vertex>, m: Mat4, item: ItemId, light: [u8; 4], f
 /// none), its slide held back, and how dirty it is.
 pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, light: [u8; 4], fl: u8) {
     let item = st.item;
+    if let Some(fill) = bucket::Fill::of(item) {
+        // In the world its liquid lies level with the world; on an icon, with the bucket.
+        let own_up = fl & (flags::ENTITY | flags::VIEWMODEL) == 0;
+        bucket::emit(out, m, fill, &bucket::Surface::still(own_up), 0.55, light, fl);
+        return;
+    }
     if item == TORCH as ItemId {
         emit_torch(out, m, light, fl, 94);
         return;
@@ -146,6 +153,14 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
 /// stays cheap.
 pub fn emit_lying(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, light: [u8; 4], fl: u8) {
     let item = st.item;
+    if bucket::is_bucket(item) {
+        // Standing up on what it lies on (the flat item's +Z is up).
+        let stand = Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
+            * Mat4::from_scale(Vec3::splat(0.8))
+            * Mat4::from_translation(Vec3::Y * 0.3);
+        emit_held_data(out, m * stand, st, light, fl);
+        return;
+    }
     let Icon::Flat(layer) = icon(item) else {
         emit_held_data(out, m, st, light, fl);
         return;

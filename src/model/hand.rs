@@ -85,6 +85,8 @@ pub struct HandAnim {
     /// otherwise it is held still by its handle.
     pub fancy_lantern: bool,
     lantern_swing: crate::model::lantern::SmoothSwing,
+    /// The liquid in a held bucket, and the bucket swinging on its handle.
+    bucket: super::bucket::Slosh,
     /// Blend 0..1 from the normal hold to the blocking pose.
     block: f32,
     /// Where the held torch's fire was drawn last frame (world, but in the hand's own
@@ -179,6 +181,7 @@ impl HandAnim {
             rod_tip: None,
             fancy_lantern: false,
             lantern_swing: crate::model::lantern::SmoothSwing::default(),
+            bucket: Default::default(),
             torch_tip: None,
             shot: None,
             dry: None,
@@ -289,6 +292,7 @@ impl HandAnim {
             self.dry = None;
             self.block = 0.0;
             self.lantern_swing = crate::model::lantern::SmoothSwing::default();
+            self.bucket = Default::default();
         }
     }
 
@@ -552,6 +556,10 @@ impl HandAnim {
             crate::model::lantern::emit_held_lantern(out, style, pivot, dir, yaw, light, fl);
             return;
         }
+        if let Some(fill) = super::bucket::Fill::of(self.held) {
+            self.build_bucket(out, base, fill, s, sq, eq, light, fl, dt);
+            return;
+        }
         let lantern = self.held == crate::world::LANTERN as ItemId;
         let item = if super::is_model_item(self.held) {
             // A gun's part, a magazine, an attachment, a round or a grenade: held low in the
@@ -611,6 +619,46 @@ impl HandAnim {
 }
 
 impl HandAnim {
+    /// A bucket carried by its handle at the lower right of the view: upright in the world
+    /// (it hangs), turned with the view, swinging a little on its handle as it is moved about,
+    /// the liquid in it rocking. Used, it tips forward.
+    #[allow(clippy::too_many_arguments)]
+    fn build_bucket(
+        &mut self,
+        out: &mut Vec<Vertex>,
+        base: Mat4,
+        fill: super::bucket::Fill,
+        s: f32,
+        sq: f32,
+        eq: f32,
+        light: [u8; 4],
+        fl: u8,
+        dt: f32,
+    ) {
+        use super::bucket;
+        let f1 = (sq * PI).sin();
+        let at = base.transform_point3(Vec3::new(
+            0.46 - 0.2 * f1,
+            -0.44 - (1.0 - eq) * 0.6 + 0.1 * (sq * TAU).sin(),
+            -0.8 - 0.15 * (s * PI).sin(),
+        ));
+        self.bucket.update(fill, at, dt);
+        // Its ears toward the view's sides, so the handle is seen across.
+        let right = base.transform_vector3(Vec3::X);
+        let yaw = (-right.z).atan2(right.x);
+        let size = 0.42;
+        // Swinging about where the hand holds the handle.
+        let grip = Vec3::Y * 0.62 * size;
+        let m = Mat4::from_translation(at + grip)
+            * self.bucket.swing_matrix()
+            * Mat4::from_translation(-grip)
+            * Mat4::from_rotation_y(yaw)
+            * rx(-30.0 * f1)
+            * Mat4::from_scale(Vec3::splat(size));
+        let surface = bucket::Surface { tilt: self.bucket.tilt, bounce: self.bucket.bounce, own_up: false };
+        bucket::emit(out, m, fill, &surface, 0.0, light, fl);
+    }
+
     /// The guide book held open in both hands, like a map: low in the view while looking
     /// ahead, lifted up in front of the eyes (`read` 1) when looking down, both arms holding
     /// it by its sides. Also finds where the middle of the view falls on its pages.
