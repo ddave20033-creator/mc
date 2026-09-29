@@ -342,12 +342,12 @@ impl HandAnim {
         let turn = (look_delta * 0.03).clamp(Vec2::splat(-3.0), Vec2::splat(3.0));
         self.sway
             .step(Vec3::new(turn.x, turn.y, -turn.x * 0.9), 4.2, 0.42, dt);
-        // Into and out of the sprint and crouch poses with a little overshoot; out of the
-        // sprint faster (to shoot again).
+        // Into and out of the sprint and crouch poses smoothly (about a third of a second into
+        // the sprint, a quarter out of it, to shoot again), hardly overshooting.
         let sprint = if self.sprinting && self.reload.is_none() { 1.0 } else { 0.0 };
         let crouch = if self.crouching { 1.0 } else { 0.0 };
-        let freq = if sprint < self.poses.x.x { 4.2 } else { 2.8 };
-        self.poses.step(Vec3::new(sprint, crouch, 0.0), freq, 0.62, dt);
+        let freq = if sprint < self.poses.x.x { 2.2 } else { 1.5 };
+        self.poses.step(Vec3::new(sprint, crouch, 0.0), freq, 0.85, dt);
         self.sprint = self.poses.x.x.max(0.0);
         self.crouch = self.poses.x.y.max(0.0);
         let target = if on_ground { (walk_speed / 4.3).min(1.4) } else { 0.0 };
