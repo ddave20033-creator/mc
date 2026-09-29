@@ -659,11 +659,11 @@ impl HandAnim {
             * Mat4::from_quat(turn)
             * Mat4::from_translation(-center);
         // (held toward the fist's left edge, so like the lantern it hangs out beside the arm)
-        let pivot = block.transform_point3(Vec3::new(0.5, 11.0 / 16.0, 0.5)) - base.transform_vector3(Vec3::X) * 0.07;
+        let size = 0.55;
+        let pivot = block.transform_point3(Vec3::new(0.5, 11.0 / 16.0, 0.5)) - base.transform_vector3(Vec3::X) * (0.18 * size);
         // Its ears toward the view's sides, so the handle is seen across.
         let right = base.transform_vector3(Vec3::X);
         let yaw = (-right.z).atan2(right.x);
-        let size = 0.38;
         let m = Mat4::from_translation(pivot)
             * self.bucket.swing_matrix()
             * Mat4::from_rotation_y(yaw)
