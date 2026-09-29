@@ -764,6 +764,21 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         let dir = p.lantern.unwrap_or(Vec3::NEG_Y);
         let style = crate::model::lantern::ON_MODEL;
         crate::model::lantern::emit_held_lantern(out, style, pivot, dir, p.body_yaw, light, fl);
+    } else if let (Some(fill), true) = (super::bucket::Fill::of(p.held), show_right) {
+        // Hanging from the hand by its handle like the lantern, swinging with the same
+        // pendulum, its ears to the sides.
+        use super::bucket;
+        // (the grip in the fist)
+        let pivot = right_hand.transform_point3(Vec3::new(1.0, -10.2, 0.0));
+        let dir = p.lantern.unwrap_or(Vec3::NEG_Y);
+        let tilt = glam::Quat::from_rotation_arc(Vec3::NEG_Y, dir.try_normalize().unwrap_or(Vec3::NEG_Y));
+        let size = 0.5;
+        let m = Mat4::from_translation(pivot)
+            * Mat4::from_quat(tilt)
+            * Mat4::from_rotation_y(-p.body_yaw + std::f32::consts::FRAC_PI_2)
+            * Mat4::from_scale(Vec3::splat(size))
+            * Mat4::from_translation(Vec3::new(0.0, -bucket::handle_top(), 0.0));
+        bucket::emit(out, m, fill, &bucket::Surface::still(false), 0.0, light, fl);
     } else if let (Some(view), true) = (&p.book, show_right) {
         super::book::emit_open_book(out, root * book_on_model(p), view, light, fl);
     } else if let (Some(kind), true) = (crate::item::GunKind::of(p.held), show_right) {
@@ -934,13 +949,19 @@ pub const TORCH_TIP: Vec3 = Vec3::new(0.0, 0.17, 0.0);
 
 /// Lights held up in front of the eyes (Not Enough Animations' pose for torches; lanterns too).
 pub fn held_up(item: ItemId) -> bool {
-    item == crate::world::TORCH as ItemId || item == crate::world::LANTERN as ItemId
+    item == crate::world::TORCH as ItemId || hangs(item)
+}
+
+/// Whether a held item hangs from the hand and swings (a lantern by its chain, a bucket by
+/// its handle).
+pub fn hangs(item: ItemId) -> bool {
+    item == crate::world::LANTERN as ItemId || super::bucket::is_bucket(item)
 }
 
 /// Whether a held item lights up the world around its holder (a torch, a lantern, a bucket
 /// of lava).
 pub fn gives_light(item: ItemId) -> bool {
-    held_up(item) || item == crate::item::LAVA_BUCKET
+    item == crate::world::TORCH as ItemId || item == crate::world::LANTERN as ItemId || item == crate::item::LAVA_BUCKET
 }
 
 /// A player lying on their back in a bed. `bed_top` is the middle of the top of the bed's

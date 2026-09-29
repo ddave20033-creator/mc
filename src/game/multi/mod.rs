@@ -678,7 +678,7 @@ pub(super) fn build_remote_players(
                 ..pose
             };
             let limbs = r.limbs.update(limb_targets(&pose), dt);
-            let lantern = if pose.held == LANTERN as ItemId {
+            let lantern = if crate::model::player::hangs(pose.held) {
                 Some(r.lantern.update(
                     crate::model::lantern::ON_MODEL,
                     hand_pivot(&pose, &limbs),

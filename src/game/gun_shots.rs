@@ -238,6 +238,8 @@ impl Game {
             (crate::item::WATER_BUCKET, "water_nobody", false),
             (crate::world::LANTERN as crate::item::ItemId, "lantern", true),
             (crate::item::BUCKET, "dropped", true),
+            (crate::item::WATER_BUCKET, "water_tp", true),
+            (crate::world::LANTERN as crate::item::ItemId, "lantern_tp", true),
         ];
         let Some(&(item, name, body)) = runs.get(g.gun) else {
             println!("bucket shots done: {}", g.dir.display());
@@ -280,7 +282,7 @@ impl Game {
         if t0 == 0.0 {
             self.inventory.slots[7] = Some(Stack::one(item));
             self.hotbar_slot = 7;
-            self.camera.mode = 0;
+            self.camera.mode = if name.ends_with("_tp") { 2 } else { 0 };
             self.settings.first_person_body = body;
             self.player.pos = start;
             self.player.vel = Vec3::ZERO;
@@ -312,6 +314,7 @@ impl Game {
         if t > 9.0 {
             g.gun += 1;
             g.t = 0.0;
+            self.camera.mode = 0;
         }
     }
 

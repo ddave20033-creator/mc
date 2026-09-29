@@ -919,7 +919,7 @@ impl Game {
             // Where the fishing rod's tip is on the model (the line leaves from there).
             self.fishing.tip_tp = crate::model::player::rod_tip(&pose);
             // A held lantern swings from the hand.
-            let lantern_dir = if pose.held == LANTERN as ItemId {
+            let lantern_dir = if crate::model::player::hangs(pose.held) {
                 let pivot = hand_pivot(&pose, &limbs);
                 Some(
                     self.lantern_swing
