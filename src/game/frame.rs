@@ -662,6 +662,16 @@ impl Game {
                 .collect();
             others.sort_by(|a, b| a.0.distance(cam).total_cmp(&b.0.distance(cam)));
             lights.extend(others);
+            // Torches, lanterns and buckets of lava lying on the ground light it up too.
+            let mut dropped: Vec<(Vec3, f32)> = self
+                .items
+                .iter()
+                .filter(|it| !it.is_picking_up() && crate::model::player::gives_light(it.stack.item))
+                .filter(|it| it.pos.distance(cam) < 48.0)
+                .map(|it| (it.pos + Vec3::Y * 0.35, intensity(it.stack.item, it.id as f32 * 1.9 + it.age)))
+                .collect();
+            dropped.sort_by(|a, b| a.0.distance(cam).total_cmp(&b.0.distance(cam)));
+            lights.extend(dropped);
         }
         let mut held_lights = [[0.0; 4]; MAX_HELD_LIGHTS];
         for (slot, (p, w)) in held_lights.iter_mut().zip(lights) {

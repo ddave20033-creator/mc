@@ -237,6 +237,7 @@ impl Game {
             (crate::item::LAVA_BUCKET, "lava", true),
             (crate::item::WATER_BUCKET, "water_nobody", false),
             (crate::world::LANTERN as crate::item::ItemId, "lantern", true),
+            (crate::item::BUCKET, "dropped", true),
         ];
         let Some(&(item, name, body)) = runs.get(g.gun) else {
             println!("bucket shots done: {}", g.dir.display());
@@ -246,6 +247,36 @@ impl Game {
         let t0 = g.t;
         g.t += dt;
         let t = g.t;
+        if name == "dropped" {
+            // At night: things that glow lying on the ground ahead, seen from above.
+            self.time_of_day = 0.75;
+            if t0 == 0.0 {
+                self.player.pos = start;
+                self.player.vel = Vec3::ZERO;
+                self.yaw = 0.0;
+                self.pitch = -0.6;
+                self.inventory.slots[7] = None;
+                self.hotbar_slot = 7;
+                let ahead = look_dir(0.0, 0.0);
+                let side = ahead.cross(Vec3::Y);
+                let things = [crate::item::LAVA_BUCKET, crate::world::LANTERN as crate::item::ItemId, crate::world::TORCH as crate::item::ItemId, crate::item::WATER_BUCKET, crate::item::BUCKET];
+                for (i, it) in things.into_iter().enumerate() {
+                    let at = start + ahead * 2.6 + side * (i as f32 - 2.0) * 1.1 + Vec3::Y * 0.1;
+                    self.items.push(ItemEntity::new(at, Vec3::ZERO, Stack::one(it), 1000.0));
+                }
+            }
+            self.keys.clear();
+            for (i, at) in [3.0f32, 4.0].iter().enumerate() {
+                if t0 < *at && t >= *at {
+                    self.gpu.capture = Some(g.dir.join(format!("bucket_dropped_{i:02}.png")));
+                }
+            }
+            if t > 4.5 {
+                g.gun += 1;
+                g.t = 0.0;
+            }
+            return;
+        }
         if t0 == 0.0 {
             self.inventory.slots[7] = Some(Stack::one(item));
             self.hotbar_slot = 7;

@@ -473,6 +473,7 @@ fn render_item_icons(base: &mut [u8]) {
         (tex::BUCKET, Stack::one(BUCKET)),
         (tex::WATER_BUCKET, Stack::one(WATER_BUCKET)),
         (tex::LAVA_BUCKET, Stack::one(LAVA_BUCKET)),
+        (tex::LANTERN_ITEM, Stack::one(crate::world::LANTERN as ItemId)),
     ];
     for (layer, st) in icons {
         let img = render_icon(base, &st);

@@ -67,6 +67,13 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
         emit_torch(out, m, light, fl, 94);
         return;
     }
+    if item == crate::world::LANTERN as ItemId {
+        // The lantern's model (pixels, standing on y = 0, 11 tall) filling the unit.
+        let k = 0.9 / 11.0;
+        let at = m * Mat4::from_scale(Vec3::splat(k)) * Mat4::from_translation(Vec3::new(0.0, -5.5, 0.0));
+        lantern::emit_lantern(out, at, light, fl, lantern::LanternKind::Standing);
+        return;
+    }
     if item == crate::world::GUN_STATION as ItemId || item == crate::world::RIFLE_BENCH as ItemId {
         gun_station::emit_item(out, item == crate::world::RIFLE_BENCH as ItemId, m, light, fl);
         return;
@@ -153,7 +160,7 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
 /// stays cheap.
 pub fn emit_lying(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, light: [u8; 4], fl: u8) {
     let item = st.item;
-    if bucket::is_bucket(item) {
+    if bucket::is_bucket(item) || item == crate::world::LANTERN as ItemId {
         // Standing up on what it lies on (the flat item's +Z is up).
         let stand = Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
             * Mat4::from_scale(Vec3::splat(0.8))

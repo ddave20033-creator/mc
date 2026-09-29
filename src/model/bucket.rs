@@ -177,8 +177,11 @@ impl Surface {
 
 /// Where the middle of the handle's grip is, up (bucket space): the bucket hangs from there.
 pub fn handle_top() -> f32 {
-    RIM - 0.07 + SPAN * 1.05
+    RIM - 0.07 + SPAN * 1.05 * (GRIP * std::f32::consts::PI).sin()
 }
+
+/// Where along the handle (0..1, ear to ear) the wooden grip starts.
+const GRIP: f32 = 0.34;
 
 /// Half the handle's width: its ends well out past the rim's bead.
 const SPAN: f32 = R_TOP + 0.05;
@@ -277,15 +280,19 @@ pub fn emit(out: &mut Vec<Vertex>, m: Mat4, fill: Fill, surface: &Surface, handl
         // A tall arch: round over the top, the ends coming down to the ears.
         turn.transform_point3(pivot + Vec3::new(-a.cos() * span, a.sin() * span * 1.05, 0.0))
     };
-    const SEGS: usize = 12;
+    // The wire from each ear up to the wooden grip, which lies straight across the top
+    // around it (the wire goes on inside it).
+    const SEGS: usize = 6;
     let wire = 0.011;
-    for i in 0..SEGS {
-        let (p0, p1) = (arc(i as f32 / SEGS as f32), arc((i + 1) as f32 / SEGS as f32));
-        q.rod(p0, p1, wire, metal, [150, 152, 158]);
+    for (from, to) in [(0.0, GRIP), (1.0 - GRIP, 1.0)] {
+        for i in 0..SEGS {
+            let t0 = from + (to - from) * i as f32 / SEGS as f32;
+            let t1 = from + (to - from) * (i + 1) as f32 / SEGS as f32;
+            q.rod(arc(t0), arc(t1), wire, metal, [150, 152, 158]);
+        }
     }
-    // A wooden grip in the middle of it.
-    let (g0, g1) = (arc(0.36), arc(0.64));
-    q.rod(g0, g1, 0.028, tex::PLANKS, [200, 170, 130]);
+    let (g0, g1) = (arc(GRIP), arc(1.0 - GRIP));
+    q.rod(g0, g1, 0.03, tex::PLANKS, [200, 170, 130]);
 
     if fill != Fill::Empty {
         emit_surface(&mut q, fill, surface);
