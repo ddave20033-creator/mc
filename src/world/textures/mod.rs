@@ -449,7 +449,7 @@ pub fn logo_levels() -> Vec<Vec<u8>> {
                     for c in 0..3 {
                         next[o + c] = if a > 0.0 { (rgb[c] / a) as u8 } else { 0 };
                     }
-                    next[o + 3] = if a / 4.0 > 0.3 { 255 } else { 0 };
+                    next[o + 3] = (a / 4.0 * 255.0).round() as u8;
                 }
             }
         }
@@ -1571,7 +1571,8 @@ pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> 
                         asum += a;
                     }
                     let mut a = asum / 4.0;
-                    if cutout && l as u32 != tex::GLASS && !is_crack(l as u32) {
+                    let logo = (tex::LOGO..tex::LOGO + tex::LOGO_TILES).contains(&(l as u32));
+                    if cutout && l as u32 != tex::GLASS && !is_crack(l as u32) && !logo {
                         a = if a > 0.3 { 1.0 } else { 0.0 };
                     } else if l as u32 == tex::GLASS {
                         a = if a > 0.45 { 1.0 } else { 0.0 };

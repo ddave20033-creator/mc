@@ -61,15 +61,7 @@ pub fn death(ui: &mut Ui, message: &str) -> Action {
     act
 }
 
-fn hash01(a: i32, b: i32) -> f32 {
-    let mut h = (a as u32).wrapping_mul(0x9E37_79B1) ^ (b as u32).wrapping_mul(0x85EB_CA77);
-    h ^= h >> 15;
-    h = h.wrapping_mul(0x2C1B_3C6D);
-    h ^= h >> 13;
-    (h & 0xFFFF) as f32 / 65535.0
-}
-
-/// Darkened panorama backdrop used behind menus, with embers drifting up through it.
+/// Darkened panorama backdrop used behind menus.
 pub fn backdrop(ui: &mut Ui, strength: f32) {
     let (w, h) = (ui.w, ui.h);
     let a = |v: f32| (v * strength).clamp(0.0, 255.0) as u8;
@@ -78,33 +70,18 @@ pub fn backdrop(ui: &mut Ui, strength: f32) {
         0.0,
         w,
         h * 0.5,
-        rgba(8, 10, 18, a(140.0)),
-        rgba(8, 10, 18, a(30.0)),
+        rgba(10, 10, 14, a(140.0)),
+        rgba(10, 10, 14, a(30.0)),
     );
     ui.gradient(
         0.0,
         h * 0.5,
         w,
         h * 0.5 + 1.0,
-        rgba(8, 10, 18, a(30.0)),
-        rgba(8, 10, 18, a(170.0)),
+        rgba(10, 10, 14, a(30.0)),
+        rgba(10, 10, 14, a(170.0)),
     );
-    ui.vignette(rgba(0, 0, 0, a(180.0)));
-    embers(ui);
-}
-
-/// A few sparks rising slowly from the bottom of the screen, swaying and fading out.
-fn embers(ui: &mut Ui) {
-    let (w, h, s) = (ui.w, ui.h, ui.s);
-    for i in 0..16 {
-        let period = 11.0 + 8.0 * hash01(i, 1);
-        let phase = (ui.time / period + hash01(i, 2)).fract();
-        let x = hash01(i, 3) * w + (ui.time * 0.4 + i as f32 * 1.7).sin() * 10.0 * s;
-        let y = h * (1.04 - phase * 1.1);
-        let size = (0.6 + 0.8 * hash01(i, 4)) * s;
-        let alpha = (phase * std::f32::consts::PI).sin().powf(1.5) * (0.2 + 0.3 * hash01(i, 5));
-        ui.rect(x - size * 0.5, y - size * 0.5, size, size, with_alpha(rgba(255, 200, 150, 255), alpha), size * 0.5);
-    }
+    ui.vignette(rgba(0, 0, 0, a(160.0)));
 }
 
 /// A screen's title bar: a dark band along the top, the title at the left of the content
@@ -112,7 +89,7 @@ fn embers(ui: &mut Ui) {
 pub fn screen_header(ui: &mut Ui, title: &str, note: &str, x: f32, w: f32) {
     let (s, sw) = (ui.s, ui.w);
     let bh = (34.0 * s).round();
-    ui.gradient(0.0, 0.0, sw, bh, rgba(8, 9, 14, 210), rgba(8, 9, 14, 150));
+    ui.gradient(0.0, 0.0, sw, bh, rgba(12, 12, 16, 210), rgba(12, 12, 16, 150));
     ui.hgradient(0.0, bh, sw * 0.5, 1.0, rgba(255, 255, 255, 0), rgba(255, 255, 255, 30));
     ui.hgradient(sw * 0.5, bh, sw * 0.5, 1.0, rgba(255, 255, 255, 30), rgba(255, 255, 255, 0));
     let big = (s * 1.5).round();
@@ -135,7 +112,7 @@ pub fn card_title(ui: &mut Ui, text: &str, cx: f32, y: f32, max_w: f32) {
 /// A dark band along the bottom of the screen from `y`, for a screen's buttons.
 pub fn action_bar(ui: &mut Ui, y: f32) {
     let (w, h) = (ui.w, ui.h);
-    ui.gradient(0.0, y, w, h - y, rgba(8, 9, 14, 150), rgba(8, 9, 14, 215));
+    ui.gradient(0.0, y, w, h - y, rgba(12, 12, 16, 150), rgba(12, 12, 16, 215));
     ui.hgradient(0.0, y, w * 0.5, 1.0, rgba(255, 255, 255, 0), rgba(255, 255, 255, 30));
     ui.hgradient(w * 0.5, y, w * 0.5, 1.0, rgba(255, 255, 255, 30), rgba(255, 255, 255, 0));
 }
@@ -158,8 +135,8 @@ pub fn main_menu(ui: &mut Ui, skin: u8, preview: &mut PreviewRotation) -> Action
     let sw = (w * 0.3).clamp(220.0 * s, 270.0 * s).min(w - 16.0 * s).round();
     let a = ui.appear();
     let slide = ui.style(1.0, Vec2::new(-((1.0 - a) * 24.0 * s).round(), 0.0));
-    ui.solid(0.0, 0.0, sw, h, rgba(9, 10, 15, 200));
-    ui.hgradient(sw, 0.0, 40.0 * s, h, rgba(9, 10, 15, 200), rgba(9, 10, 15, 0));
+    ui.solid(0.0, 0.0, sw, h, rgba(12, 12, 16, 214));
+    ui.hgradient(sw, 0.0, 40.0 * s, h, rgba(11, 11, 26, 205), rgba(12, 12, 16, 0));
 
     let (bx, bw, bh) = ((20.0 * s).round(), (sw - 40.0 * s).round(), (22.0 * s).round());
     let logo_y = (h * 0.16).round().max(16.0 * s);
@@ -427,7 +404,11 @@ pub fn options(
     ui.panel(px, py, pw, ph);
     ui.text_centered(t("opt.title"), w * 0.5, py + 9.0 * s, s, WHITE, true);
 
-    // Tabs
+    // Tabs (Q and E go to the one before and after).
+    let step = ui.nav_tab();
+    if step != 0 {
+        os.tab = (os.tab as i32 + step).rem_euclid(OPTION_TABS.len() as i32) as usize;
+    }
     let n = OPTION_TABS.len() as f32;
     let tab_w = ((pw - 24.0 * s - (n - 1.0) * 4.0 * s) / n).floor();
     let tab_y = py + 24.0 * s;
@@ -1159,7 +1140,7 @@ pub enum PauseLan<'a> {
 
 pub fn pause(ui: &mut Ui, lan: PauseLan) -> Action {
     let (w, h, s) = (ui.w, ui.h, ui.s);
-    ui.gradient(0.0, 0.0, w, h, rgba(6, 8, 14, 150), rgba(6, 8, 14, 120));
+    ui.gradient(0.0, 0.0, w, h, rgba(10, 10, 14, 150), rgba(10, 10, 14, 120));
     ui.vignette(rgba(0, 0, 0, 140));
     let rows = match lan {
         PauseLan::Joined => 3.0,
@@ -1229,7 +1210,7 @@ pub fn loading(ui: &mut Ui, progress: f32) {
     let p = progress.clamp(0.0, 1.0);
     if p > 0.0 {
         let fw = (bw * p).max(bh);
-        ui.rect_full(x, cy, fw, bh, ACCENT_LIGHT, rgba(196, 92, 42, 255), bh * 0.5, 0.0);
+        ui.rect(x, cy, fw, bh, ACCENT, bh * 0.5);
         // A light running along the filled part.
         let run = (ui.time * 0.7).fract();
         let lw = (30.0 * s).min(fw);
@@ -1255,7 +1236,7 @@ pub fn loading(ui: &mut Ui, progress: f32) {
     let (tpw, tph) = ((tw + 20.0 * s).round(), (18.0 * s).round());
     let (tx, ty) = ((w * 0.5 - tpw * 0.5).round(), (h - 34.0 * s).round());
     let old = ui.style(fade, Vec2::ZERO);
-    ui.rect(tx, ty, tpw, tph, rgba(12, 13, 19, 190), tph * 0.5);
+    ui.rect(tx, ty, tpw, tph, rgba(18, 18, 24, 200), tph * 0.5);
     ui.text(tip, tx + 10.0 * s, ty + (tph - 7.0 * s) * 0.5, s, rgba(200, 204, 218, 255), false);
     ui.restore(old);
 }

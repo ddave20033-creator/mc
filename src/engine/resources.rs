@@ -223,7 +223,7 @@ impl Image {
 pub enum SamplerKind {
     /// Pixel-art block textures: nearest magnification, mipmapped + anisotropic minification.
     Blocks,
-    /// Bitmap font: nearest everything, clamped.
+    /// The font atlas: smoothly filtered (an anti-aliased typeface drawn at any size), clamped.
     Font,
 }
 
@@ -364,8 +364,8 @@ impl Texture {
                 i
             }
             SamplerKind::Font => vk::SamplerCreateInfo::default()
-                .mag_filter(vk::Filter::NEAREST)
-                .min_filter(vk::Filter::NEAREST)
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
                 .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
                 .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
                 .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)

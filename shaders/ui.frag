@@ -38,6 +38,10 @@ void main() {
         float mask = abs(vRect.x - 1.0) < 0.5 ? clamp((t.a - 0.6) / 0.4, 0.0, 1.0) : 1.0;
         float shade = pow(vRect.y, 2.2);
         outColor = vec4(t.rgb * mix(vec3(shade), vColor.rgb, mask), vColor.a);
+    } else if (vMode > 4.5) {
+        // A picture from the block textures with soft edges (the logo); vRect.x = layer.
+        vec4 t = texture(blockTex, vec3(vUV, vRect.x));
+        outColor = vec4(t.rgb * vColor.rgb, t.a * vColor.a);
     } else {
         // Anti-aliased ring, leaving the world visible through its center.
         float d = abs(length(vUV) - vRect.x) - vRect.y * 0.5;

@@ -786,7 +786,7 @@ impl Game {
         match event {
             WindowEvent::Resized(size) => self.gpu.resize(size.width, size.height),
             WindowEvent::CursorMoved { position, .. } => {
-                self.ui.mouse = Vec2::new(position.x as f32, position.y as f32);
+                self.ui.set_mouse(Vec2::new(position.x as f32, position.y as f32));
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = *state == ElementState::Pressed;
@@ -835,6 +835,15 @@ impl Game {
                                 self.run_command(&line);
                             }
                         }
+                        return;
+                    }
+                    // A menu is moved through with the keyboard too (see `Ui::nav_key`).
+                    let menu = !matches!(
+                        self.screen,
+                        Screen::Playing | Screen::Chat | Screen::Container(_) | Screen::Spectate | Screen::Loading
+                    );
+                    let shift = self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
+                    if menu && self.ui.nav_key(code, shift) {
                         return;
                     }
                     if matches!(self.screen, Screen::Container(_)) && self.jei.focused {

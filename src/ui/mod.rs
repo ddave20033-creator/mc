@@ -9,8 +9,14 @@ use glam::Vec2;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-pub const FONT_TEX_W: u32 = 160;
-pub const FONT_TEX_H: u32 = 130;
+pub const FONT_TEX_W: u32 = 1024;
+pub const FONT_TEX_H: u32 = 512;
+
+/// The menus' and the HUD's typeface (from the system's fonts; the pixel font where it is
+/// missing).
+const SMOOTH_FONT: &str = "C:/Windows/Fonts/seguisb.ttf";
+/// Atlas pixels per font unit of the smooth font (text is 8 units tall at size 1).
+const FONT_RES: f32 = 4.0;
 
 pub type Color = [f32; 4];
 
@@ -35,13 +41,13 @@ pub fn with_alpha(c: Color, a: f32) -> Color {
 pub const VERSION: &str = "Your Worlds 0.4.0";
 
 pub const WHITE: Color = rgba(255, 255, 255, 255);
-/// The menus' colours: rust orange (the logo's) on dark glass.
-pub const ACCENT: Color = rgba(236, 128, 66, 255);
-pub const ACCENT_LIGHT: Color = rgba(255, 178, 116, 255);
-pub const DANGER: Color = rgba(222, 72, 64, 255);
-pub const HOVER_TEXT: Color = rgba(255, 238, 224, 255);
-pub const GLASS_TOP: Color = rgba(30, 32, 42, 205);
-pub const GLASS_BOTTOM: Color = rgba(18, 19, 26, 215);
+/// The menus' colours: dark neutral grey, indigo violet only to pick things out.
+pub const ACCENT: Color = rgba(118, 108, 236, 255);
+pub const ACCENT_LIGHT: Color = rgba(172, 164, 255, 255);
+pub const DANGER: Color = rgba(226, 78, 98, 255);
+pub const HOVER_TEXT: Color = rgba(255, 255, 255, 255);
+pub const GLASS_TOP: Color = rgba(24, 24, 30, 214);
+pub const GLASS_BOTTOM: Color = rgba(18, 18, 24, 222);
 
 /// Eased 0..1: fast at first, gently settling.
 pub fn ease_out(t: f32) -> f32 {
@@ -62,6 +68,7 @@ const MODE_TEXT: f32 = 1.0;
 const MODE_VIGNETTE: f32 = 2.0;
 const MODE_BLOCK: f32 = 3.0;
 const MODE_RING: f32 = 4.0;
+const MODE_IMAGE: f32 = 5.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -87,6 +94,8 @@ pub struct Glyph {
     pub minx: u32,
     /// Accent row drawn one pixel above the cell (capital letters with accents).
     pub top: u8,
+    /// Its quad in font units from the pen and the top of the line (x, y, width, height).
+    pub quad: [f32; 4],
 }
 
 /// ASCII + Latin-1 + Hungarian o/u with double acute.
@@ -176,6 +185,7 @@ impl Font {
                 });
             } else {
                 let w = (maxx - minx + 1) as f32;
+                let lift = (top != 0) as u32 as f32;
                 glyphs.push(Glyph {
                     u0: (ox + minx) as f32 / FONT_TEX_W as f32,
                     u1: (ox + maxx + 1) as f32 / FONT_TEX_W as f32,
@@ -186,6 +196,7 @@ impl Font {
                     bits,
                     minx,
                     top,
+                    quad: [0.0, -lift, w, 8.0 + lift],
                 });
             }
         }
@@ -194,6 +205,73 @@ impl Font {
             atlas,
             index,
         }
+    }
+
+    /// The smooth typeface (`SMOOTH_FONT`), anti-aliased: capitals about as tall as the pixel
+    /// font's, its baseline where the pixel font's is. The pixel font where it cannot be read.
+    pub fn smooth() -> Self {
+        use ab_glyph::{point, Font as _, FontVec, PxScale, ScaleFont as _};
+        let Some(font) = std::fs::read(SMOOTH_FONT).ok().and_then(|d| FontVec::try_from_vec(d).ok()) else {
+            return Self::new();
+        };
+        // Its size: a capital H 6.4 units tall.
+        let probe = PxScale::from(100.0);
+        let cap = font
+            .outline_glyph(font.glyph_id('H').with_scale_and_position(probe, point(0.0, 0.0)))
+            .map_or(70.0, |g| g.px_bounds().height());
+        let scale = PxScale::from(100.0 * 6.4 * FONT_RES / cap);
+        let scaled = font.as_scaled(scale);
+        let mut atlas = vec![0u8; (FONT_TEX_W * FONT_TEX_H) as usize];
+        let mut glyphs = Vec::new();
+        let mut index = HashMap::new();
+        let chars = (32u32..127)
+            .chain(160..256)
+            .filter_map(char::from_u32)
+            .chain(['\u{150}', '\u{151}', '\u{170}', '\u{171}', '\u{2013}', '\u{2014}', '\u{2022}', '\u{2026}', '\u{2190}', '\u{2192}']);
+        const PAD: u32 = 2;
+        let (mut cx, mut cy, mut row_h) = (1u32, 1u32, 0u32);
+        for ch in chars {
+            let id = font.glyph_id(ch);
+            let adv = scaled.h_advance(id) / FONT_RES;
+            let mut g = Glyph { adv, bits: [0; 8], ..Default::default() };
+            // The baseline 7 units down the line.
+            let placed = id.with_scale_and_position(scale, point(0.0, 7.0 * FONT_RES));
+            if let Some(outline) = font.outline_glyph(placed) {
+                let b = outline.px_bounds();
+                let (bw, bh) = (b.width() as u32 + 2 * PAD, b.height() as u32 + 2 * PAD);
+                if cx + bw >= FONT_TEX_W {
+                    cx = 1;
+                    cy += row_h + 1;
+                    row_h = 0;
+                }
+                if cy + bh >= FONT_TEX_H {
+                    break;
+                }
+                outline.draw(|x, y, c| {
+                    let (ax, ay) = (cx + PAD + x, cy + PAD + y);
+                    if ax < FONT_TEX_W && ay < FONT_TEX_H {
+                        let i = (ay * FONT_TEX_W + ax) as usize;
+                        atlas[i] = atlas[i].max((c.clamp(0.0, 1.0) * 255.0) as u8);
+                    }
+                });
+                g.u0 = cx as f32 / FONT_TEX_W as f32;
+                g.v0 = cy as f32 / FONT_TEX_H as f32;
+                g.u1 = (cx + bw) as f32 / FONT_TEX_W as f32;
+                g.v1 = (cy + bh) as f32 / FONT_TEX_H as f32;
+                g.quad = [
+                    (b.min.x - PAD as f32) / FONT_RES,
+                    (b.min.y - PAD as f32) / FONT_RES,
+                    bw as f32 / FONT_RES,
+                    bh as f32 / FONT_RES,
+                ];
+                g.w = b.width() / FONT_RES;
+                cx += bw + 1;
+                row_h = row_h.max(bh);
+            }
+            index.insert(ch, glyphs.len());
+            glyphs.push(g);
+        }
+        Self { glyphs, atlas, index }
     }
 
     pub fn glyph(&self, c: char) -> &Glyph {
@@ -212,6 +290,8 @@ fn hash_id(label: &str, x: f32, y: f32) -> u64 {
 pub struct Ui {
     pub verts: Vec<UiVertex>,
     pub font: Font,
+    /// The pixel font (the guide book is drawn in it).
+    pub pixel_font: Font,
     pub w: f32,
     pub h: f32,
     /// GUI scale (size of one "GUI pixel" in screen pixels).
@@ -246,13 +326,34 @@ pub struct Ui {
     pub age: f32,
     screen_key: u64,
     stagger: u32,
+    /// Moving through the controls with the keyboard (see `nav_key`).
+    nav: Nav,
+}
+
+/// Keyboard control of a screen: the focused control (by its order on the screen), and the
+/// keys pressed since the last frame.
+#[derive(Default)]
+struct Nav {
+    focus: Option<usize>,
+    /// Controls this frame so far, and in the whole last frame.
+    count: usize,
+    last_count: usize,
+    moves: i32,
+    adjust: i32,
+    activate: bool,
+    tab: i32,
+    /// This frame's (taken from the above in `begin`).
+    now_adjust: i32,
+    now_activate: bool,
+    now_tab: i32,
 }
 
 impl Ui {
     pub fn new() -> Self {
         Self {
             verts: Vec::with_capacity(32_768),
-            font: Font::new(),
+            font: Font::smooth(),
+            pixel_font: Font::new(),
             w: 1.0,
             h: 1.0,
             s: 2.0,
@@ -279,7 +380,72 @@ impl Ui {
             age: 0.0,
             screen_key: 0,
             stagger: 0,
+            nav: Nav::default(),
         }
+    }
+
+    /// A key pressed on a menu: W/S or the up and down arrows (and Tab) move through its
+    /// controls, A/D or left and right turn a slider, Space or Enter uses the focused one, Q/E
+    /// switch between its tabs. Returns whether it was taken (while typing in a text field,
+    /// only the arrows, Tab and Enter are).
+    pub fn nav_key(&mut self, code: winit::keyboard::KeyCode, shift: bool) -> bool {
+        use winit::keyboard::KeyCode as K;
+        let typing = self.focus.is_some();
+        let n = &mut self.nav;
+        match code {
+            K::ArrowUp => n.moves -= 1,
+            K::ArrowDown => n.moves += 1,
+            K::Tab => n.moves += if shift { -1 } else { 1 },
+            K::ArrowLeft => n.adjust -= 1,
+            K::ArrowRight => n.adjust += 1,
+            K::Enter | K::NumpadEnter => {
+                if typing && n.focus.is_none() {
+                    return false;
+                }
+                n.activate = true;
+            }
+            _ if typing => return false,
+            K::KeyW => n.moves -= 1,
+            K::KeyS => n.moves += 1,
+            K::KeyA => n.adjust -= 1,
+            K::KeyD => n.adjust += 1,
+            K::Space => n.activate = true,
+            K::KeyQ => n.tab -= 1,
+            K::KeyE => n.tab += 1,
+            _ => return false,
+        }
+        true
+    }
+
+    /// Q/E this frame: the tab to go to, as a step (-1 back, 1 on).
+    pub fn nav_tab(&self) -> i32 {
+        self.nav.now_tab
+    }
+
+    /// The mouse moved to `p`: it takes over from the keyboard.
+    pub fn set_mouse(&mut self, p: Vec2) {
+        if p.distance(self.mouse) > 2.0 {
+            self.nav.focus = None;
+        }
+        self.mouse = p;
+    }
+
+    /// The next control that can be focused with the keyboard: whether it is.
+    pub fn nav_item(&mut self) -> bool {
+        let i = self.nav.count;
+        self.nav.count += 1;
+        self.nav.focus == Some(i)
+    }
+
+    /// Whether the focused control is used (Space or Enter) this frame; call after `nav_item`
+    /// said it is the focused one.
+    pub fn nav_activated(&self) -> bool {
+        self.nav.now_activate
+    }
+
+    /// A/D this frame on the focused control (-1, 0 or 1 and more).
+    pub fn nav_adjust(&self) -> i32 {
+        self.nav.now_adjust
     }
 
     /// Starts the screen's entrance animations over when `key` (which screen is open)
@@ -288,6 +454,7 @@ impl Ui {
         if key != self.screen_key {
             self.screen_key = key;
             self.age = 0.0;
+            self.nav.focus = None;
         }
     }
 
@@ -323,6 +490,26 @@ impl Ui {
         self.time = time;
         self.age += dt;
         self.stagger = 0;
+        // The keys pressed since the last frame move the focus over the last frame's controls.
+        let nav = &mut self.nav;
+        nav.last_count = nav.count;
+        nav.count = 0;
+        if nav.moves != 0 && nav.last_count > 0 {
+            let n = nav.last_count as i32;
+            // (from nothing focused, the first press lands on the first or the last control)
+            nav.focus = Some(match nav.focus {
+                None if nav.moves > 0 => (nav.moves - 1).rem_euclid(n),
+                None => (n + nav.moves).rem_euclid(n),
+                Some(f) => (f as i32 + nav.moves).rem_euclid(n),
+            } as usize);
+            // (a text field being typed in is left)
+            self.focus = None;
+        }
+        let nav = &mut self.nav;
+        nav.moves = 0;
+        nav.now_adjust = std::mem::take(&mut nav.adjust);
+        nav.now_activate = std::mem::take(&mut nav.activate) && nav.focus.is_some();
+        nav.now_tab = std::mem::take(&mut nav.tab);
         self.fade = 1.0;
         self.offset = Vec2::ZERO;
         self.tooltip = None;
@@ -350,17 +537,8 @@ impl Ui {
                 4.0 * s,
                 6.0 * s,
             );
-            self.rect(x, y, bw, bh, with_alpha(ACCENT, 0.7), 4.0 * s);
-            self.rect_full(
-                x + 1.0,
-                y + 1.0,
-                bw - 2.0,
-                bh - 2.0,
-                rgba(34, 32, 40, 248),
-                rgba(20, 19, 26, 248),
-                4.0 * s - 1.0,
-                0.0,
-            );
+            self.rect(x, y, bw, bh, rgba(255, 255, 255, 30), 4.0 * s);
+            self.rect(x + 1.0, y + 1.0, bw - 2.0, bh - 2.0, rgba(22, 22, 28, 248), 4.0 * s - 1.0);
             self.text(&text, x + 4.0 * s, y + 3.5 * s, s, WHITE, true);
         }
     }
@@ -603,8 +781,9 @@ impl Ui {
         for ch in s.chars() {
             let g = *self.font.glyph(ch);
             if g.w > 0.0 {
-                let lift = if g.top != 0 { size } else { 0.0 };
-                let (x0, y0, x1, y1) = (pen, y - lift, pen + g.w * size, y + 8.0 * size);
+                let [qx, qy, qw, qh] = g.quad;
+                let (x0, y0) = (pen + qx * size, y + qy * size);
+                let (x1, y1) = (x0 + qw * size, y0 + qh * size);
                 let mut p = [
                     Vec2::new(x0, y0),
                     Vec2::new(x1, y0),
@@ -632,7 +811,8 @@ impl Ui {
     pub fn text(&mut self, s: &str, x: f32, y: f32, size: f32, c: Color, shadow: bool) -> f32 {
         let (x, y) = (x.round(), y.round());
         if shadow {
-            self.draw_text(s, x + size, y + size, size, Self::shadow_color(c), None);
+            let d = (size * 0.5).max(1.0);
+            self.draw_text(s, x + d, y + d, size, Self::shadow_color(c), None);
         }
         self.draw_text(s, x, y, size, c, None);
         self.text_width(s, size)
@@ -674,58 +854,35 @@ impl Ui {
         *v
     }
 
-    /// A control's box: dark glass with a hairline border, lit up (`t`) with the accent and a
-    /// glow when hovered; `press` sinks it a little.
+    /// A control's box: flat dark grey with a hairline border, a shade lighter when hovered
+    /// (`t`); the main one filled with the accent, a destructive one tinted red only when
+    /// hovered. `press` sinks it a little.
     #[allow(clippy::too_many_arguments)]
     fn frame_box(&mut self, x: f32, y: f32, w: f32, h: f32, t: f32, enabled: bool, press: f32, kind: ButtonKind) {
         let s = self.s;
         let r = 4.0 * s;
         let inset = press * s;
         let (x, y, w, h) = (x + inset, y + inset, w - 2.0 * inset, h - 2.0 * inset);
-        // Shadow, and the glow of the hovered one.
-        self.rect_full(x, y + 2.0 * s, w, h, rgba(0, 0, 0, 70), rgba(0, 0, 0, 90), r, 6.0 * s);
-        let tone = match kind {
-            ButtonKind::Danger => DANGER,
-            _ => ACCENT,
-        };
-        if enabled && t > 0.01 {
-            self.rect_full(x, y, w, h, with_alpha(tone, 0.12 * t), with_alpha(tone, 0.08 * t), r, 6.0 * s);
-        }
-        let (border, top, bot) = if !enabled {
-            (rgba(255, 255, 255, 14), rgba(28, 29, 36, 150), rgba(20, 21, 26, 150))
+        let (border, fill) = if !enabled {
+            (rgba(255, 255, 255, 10), rgba(22, 22, 28, 150))
         } else {
             match kind {
                 ButtonKind::Normal => (
-                    lerp_color(rgba(255, 255, 255, 30), with_alpha(ACCENT_LIGHT, 0.85), t),
-                    lerp_color(GLASS_TOP, rgba(50, 44, 46, 230), t),
-                    lerp_color(GLASS_BOTTOM, rgba(34, 28, 30, 235), t),
+                    lerp_color(rgba(255, 255, 255, 18), rgba(255, 255, 255, 46), t),
+                    lerp_color(GLASS_TOP, rgba(38, 38, 48, 230), t),
                 ),
                 ButtonKind::Primary => (
-                    lerp_color(rgba(255, 196, 150, 200), rgba(255, 224, 196, 255), t),
-                    lerp_color(rgba(226, 118, 58, 240), rgba(246, 146, 82, 250), t),
-                    lerp_color(rgba(176, 78, 34, 240), rgba(204, 98, 50, 250), t),
+                    lerp_color(ACCENT, ACCENT_LIGHT, t * 0.5),
+                    lerp_color(ACCENT, rgba(140, 130, 250, 255), t),
                 ),
                 ButtonKind::Danger => (
-                    lerp_color(rgba(255, 150, 140, 120), rgba(255, 190, 180, 230), t),
-                    lerp_color(rgba(120, 36, 36, 225), rgba(176, 52, 48, 240), t),
-                    lerp_color(rgba(76, 22, 24, 225), rgba(120, 32, 32, 240), t),
+                    lerp_color(rgba(255, 255, 255, 18), with_alpha(DANGER, 0.7), t),
+                    lerp_color(GLASS_TOP, rgba(74, 28, 38, 235), t),
                 ),
             }
         };
         self.rect(x, y, w, h, border, r);
-        self.rect_full(x + 1.0, y + 1.0, w - 2.0, h - 2.0, top, bot, r - 1.0, 0.0);
-        // A thin highlight along the top.
-        let sheen = if kind == ButtonKind::Normal { 16.0 + 16.0 * t } else { 50.0 + 30.0 * t };
-        self.rect_full(
-            x + 1.0,
-            y + 1.0,
-            w - 2.0,
-            (h * 0.5).round(),
-            rgba(255, 255, 255, sheen as u8),
-            rgba(255, 255, 255, 0),
-            r - 1.0,
-            0.0,
-        );
+        self.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, fill, r - 1.0);
     }
 
     pub fn button(&mut self, label: &str, x: f32, y: f32, w: f32, h: f32, enabled: bool) -> bool {
@@ -746,8 +903,9 @@ impl Ui {
         let a = self.appear();
         let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 5.0 * s).round()));
         let id = hash_id(label, x, y);
+        let focused = enabled && self.nav_item();
         let hovered = self.hit(x, y, w, h) && self.active.is_none();
-        let t = self.anim(id, hovered && enabled);
+        let t = self.anim(id, (hovered || focused) && enabled);
         let down = hovered && enabled && self.mouse_down;
         let press = self.anim(id ^ 0x5eed, down);
         self.frame_box(x, y, w, h, t, enabled, press, kind);
@@ -756,17 +914,16 @@ impl Ui {
             let bh = ((h - 10.0 * s) * t).max(0.0);
             self.rect(x + 3.0 * s, y + (h - bh) * 0.5, 2.0 * s, bh, ACCENT, s);
         }
-        let tc = if !enabled {
-            rgba(120, 122, 132, 255)
-        } else if kind == ButtonKind::Normal {
-            lerp_color(rgba(222, 224, 232, 255), HOVER_TEXT, t)
-        } else {
-            WHITE
+        let tc = match (enabled, kind) {
+            (false, _) => rgba(112, 112, 122, 255),
+            (true, ButtonKind::Normal) => lerp_color(rgba(214, 214, 222, 255), HOVER_TEXT, t),
+            (true, ButtonKind::Danger) => lerp_color(rgba(236, 150, 160, 255), HOVER_TEXT, t),
+            (true, ButtonKind::Primary) => WHITE,
         };
         let tw = self.text_width(label, s);
         let shift = if kind == ButtonKind::Normal { (t * 2.0 * s).round() } else { 0.0 };
         self.text(label, x + (w - tw) * 0.5 + shift, y + (h - 7.0 * s) * 0.5, s, tc, true);
-        let clicked = hovered && enabled && self.pressed;
+        let clicked = (hovered && enabled && self.pressed) || (focused && self.nav_activated());
         self.clicked |= clicked;
         self.restore(old);
         clicked
@@ -791,14 +948,21 @@ impl Ui {
         let a = self.appear();
         let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 5.0 * s).round()));
         let hid = hash_id(id, 0.0, 0.0);
+        let focused = self.nav_item();
         let hovered = self.hit(x, y, w, h);
         if hovered && self.pressed && self.active.is_none() {
             self.active = Some(hid);
         }
         let active = self.active == Some(hid);
-        let t = self.anim(hid, (hovered && self.active.is_none()) || active);
+        let t = self.anim(hid, (hovered && self.active.is_none()) || active || focused);
         let knob = 10.0 * s;
         let mut changed = false;
+        if focused && self.nav_adjust() != 0 {
+            // A/D: a twentieth of the way (at least a whole step where it counts whole ones).
+            let step = ((max - min) / 20.0).max(if max - min >= 20.0 { 1.0 } else { 0.0 });
+            *value = (*value + step * self.nav_adjust() as f32).clamp(min, max);
+            changed = true;
+        }
         if active {
             let f = ((self.mouse.x - x - knob * 0.5) / (w - knob)).clamp(0.0, 1.0);
             let nv = min + f * (max - min);
@@ -813,30 +977,12 @@ impl Ui {
         let kx = (x + f * (w - knob)).round();
         // The filled part, brighter toward the knob.
         let fill_w = (kx + knob * 0.5 - x).max(0.0);
-        self.rect_full(
-            x + 1.0,
-            y + 1.0,
-            fill_w,
-            h - 2.0,
-            with_alpha(ACCENT, 0.42 + 0.14 * t),
-            with_alpha(rgba(176, 78, 34, 255), 0.36 + 0.14 * t),
-            r - 1.0,
-            0.0,
-        );
+        self.rect(x + 1.0, y + 1.0, fill_w, h - 2.0, with_alpha(ACCENT, 0.38 + 0.12 * t), r - 1.0);
         // The knob: a pill, glowing when held.
         let (ky, kh) = (y + 3.0 * s, h - 6.0 * s);
         let held = if active { 1.0 } else { t };
-        self.rect_full(kx + s, ky, knob - 2.0 * s, kh, with_alpha(ACCENT, 0.5 * held), with_alpha(ACCENT, 0.3 * held), 3.0 * s, 6.0 * s);
-        self.rect_full(
-            kx + s,
-            ky,
-            knob - 2.0 * s,
-            kh,
-            lerp_color(rgba(236, 238, 244, 255), WHITE, t),
-            rgba(190, 192, 202, 255),
-            3.0 * s,
-            0.0,
-        );
+        let _ = held;
+        self.rect(kx + s, ky, knob - 2.0 * s, kh, lerp_color(rgba(214, 214, 222, 255), WHITE, t), 3.0 * s);
         let tc = lerp_color(rgba(232, 234, 240, 255), HOVER_TEXT, t);
         let tw = self.text_width(label, s);
         self.text(label, x + (w - tw) * 0.5, y + (h - 7.0 * s) * 0.5, s, tc, true);
@@ -862,6 +1008,10 @@ impl Ui {
         let old = self.style(a, Vec2::new(0.0, ((1.0 - a) * 5.0 * s).round()));
         let hid = hash_id(id, 0.0, 0.0);
         let hovered = self.hit(x, y, w, h);
+        if self.nav_item() {
+            // Reached with the keyboard: typed into.
+            self.focus = Some(hid);
+        }
         if self.pressed {
             if hovered {
                 self.focus = Some(hid);
@@ -885,16 +1035,13 @@ impl Ui {
         let t = self.anim(hid, focused);
         let hover = self.anim(hid ^ 0x40, hovered);
         let r = 4.0 * s;
-        if t > 0.01 {
-            self.rect_full(x, y, w, h, with_alpha(ACCENT, 0.3 * t), with_alpha(ACCENT, 0.2 * t), r, 8.0 * s);
-        }
         let border = lerp_color(
-            lerp_color(rgba(255, 255, 255, 34), rgba(255, 255, 255, 80), hover),
+            lerp_color(rgba(255, 255, 255, 22), rgba(255, 255, 255, 60), hover),
             ACCENT_LIGHT,
             t,
         );
         self.rect(x, y, w, h, border, r);
-        self.rect_full(x + 1.0, y + 1.0, w - 2.0, h - 2.0, rgba(10, 11, 16, 235), rgba(16, 17, 24, 235), r - 1.0, 0.0);
+        self.rect_full(x + 1.0, y + 1.0, w - 2.0, h - 2.0, rgba(12, 12, 16, 235), rgba(14, 14, 18, 235), r - 1.0, 0.0);
         // An accent line along the bottom, growing out from the middle when focused.
         let lw = (w - 8.0 * s) * t;
         if lw > 0.5 {
@@ -925,41 +1072,22 @@ impl Ui {
     pub fn panel(&mut self, x: f32, y: f32, w: f32, h: f32) {
         let s = self.s;
         let r = 7.0 * s;
-        self.rect_full(x, y + 6.0 * s, w, h, rgba(0, 0, 0, 120), rgba(0, 0, 0, 150), r, 16.0 * s);
-        self.rect_full(x, y, w, h, rgba(255, 255, 255, 46), rgba(255, 255, 255, 18), r, 0.0);
-        self.rect_full(
-            x + 1.0,
-            y + 1.0,
-            w - 2.0,
-            h - 2.0,
-            rgba(26, 28, 38, 228),
-            rgba(13, 14, 20, 238),
-            r - 1.0,
-            0.0,
-        );
-        self.rect_full(
-            x + r,
-            y + 1.0,
-            w - 2.0 * r,
-            s,
-            rgba(255, 255, 255, 40),
-            rgba(255, 255, 255, 40),
-            0.0,
-            0.0,
-        );
+        self.rect_full(x, y + 4.0 * s, w, h, rgba(0, 0, 0, 90), rgba(0, 0, 0, 110), r, 14.0 * s);
+        self.rect(x, y, w, h, rgba(255, 255, 255, 22), r);
+        self.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, rgba(17, 17, 22, 236), r - 1.0);
     }
 
     /// The game's logo (`ui/logo.png`: `tex::LOGO_TILES` square texture layers from
-    /// `first_layer`), `width` wide, its top middle at (`cx`, `y`), with a soft shadow under it.
+    /// `first_layer`), `width` wide, its top middle at (`cx`, `y`), its edges smooth.
     pub fn logo(&mut self, first_layer: u32, cx: f32, y: f32, width: f32) {
         let tiles = crate::world::textures::tex::LOGO_TILES;
         let t = (width / tiles as f32).round();
         let x0 = (cx - t * tiles as f32 * 0.5).round();
-        self.rect_full(x0 + t * 0.3, y + t * 0.35, t * (tiles as f32 - 0.6), t * 0.5, rgba(0, 0, 0, 110), rgba(0, 0, 0, 110), t * 0.25, t * 0.3);
         for i in 0..tiles {
             let x = x0 + i as f32 * t;
             let p = [Vec2::new(x, y), Vec2::new(x + t, y), Vec2::new(x + t, y + t), Vec2::new(x, y + t)];
-            self.tex_quad(p, first_layer + i, 1.0);
+            let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+            self.push(p, uv, [WHITE; 4], [(first_layer + i) as f32, 0.0, 0.0, 0.0], MODE_IMAGE);
         }
     }
 
@@ -969,10 +1097,58 @@ impl Ui {
         let size = s;
         let tw = self.text_width(text, size);
         let (w, h) = ((tw + 8.0 * s).round(), (11.0 * s).round());
-        self.rect(x, y, w, h, with_alpha(color, 0.45), h * 0.5);
-        self.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, lerp_color(rgba(14, 15, 20, 235), color, 0.18), h * 0.5 - 1.0);
+        self.rect(x, y, w, h, with_alpha(color, 0.3), h * 0.5);
+        self.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, lerp_color(rgba(20, 20, 26, 235), color, 0.12), h * 0.5 - 1.0);
         let light = lerp_color(color, WHITE, 0.55);
         self.text(text, x + 4.0 * s, y + (h - 7.0 * size) * 0.5, size, light, false);
         w
+    }
+}
+
+#[cfg(test)]
+mod nav_tests {
+    use super::*;
+    use winit::keyboard::KeyCode as K;
+
+    /// One frame of a screen with two buttons and a slider: which buttons were used.
+    fn frame(ui: &mut Ui, value: &mut f32) -> [bool; 2] {
+        ui.begin(800.0, 600.0, 2.0, 0.016, 1.0);
+        ui.age = 10.0;
+        let a = ui.button("A", 0.0, 0.0, 40.0, 20.0, true);
+        let b = ui.button("B", 0.0, 30.0, 40.0, 20.0, true);
+        ui.slider("s", "S", value, 0.0, 100.0, 0.0, 60.0, 40.0, 20.0);
+        ui.finish();
+        [a, b]
+    }
+
+    #[test]
+    fn the_keyboard_moves_through_a_screen_and_uses_its_controls() {
+        let mut ui = Ui::new();
+        ui.mouse = Vec2::new(500.0, 500.0);
+        let mut v = 50.0;
+        assert_eq!(frame(&mut ui, &mut v), [false, false]);
+        // S twice: the second button; Space uses it.
+        for k in [K::KeyS, K::KeyS, K::Space] {
+            assert!(ui.nav_key(k, false));
+        }
+        assert_eq!(frame(&mut ui, &mut v), [false, true]);
+        // W and Enter: the first.
+        ui.nav_key(K::KeyW, false);
+        ui.nav_key(K::Enter, false);
+        assert_eq!(frame(&mut ui, &mut v), [true, false]);
+        // Down twice more, past the second, to the slider: D turns it up.
+        ui.nav_key(K::ArrowDown, false);
+        ui.nav_key(K::ArrowDown, false);
+        ui.nav_key(K::KeyD, false);
+        frame(&mut ui, &mut v);
+        assert!(v > 50.0, "{v}");
+        // And on past the last back to the first.
+        ui.nav_key(K::KeyS, false);
+        ui.nav_key(K::Space, false);
+        assert_eq!(frame(&mut ui, &mut v), [true, false]);
+        // Q and E are the tabs.
+        ui.nav_key(K::KeyE, false);
+        frame(&mut ui, &mut v);
+        assert_eq!(ui.nav_tab(), 1);
     }
 }

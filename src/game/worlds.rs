@@ -70,9 +70,16 @@ impl Game {
             let y = (top + (i - first) as f32 * row_h).round();
             let a = self.ui.appear();
             let old = self.ui.style(a, Vec2::new(0.0, ((1.0 - a) * 10.0 * s).round()));
+            let focused = self.ui.nav_item();
+            if focused {
+                self.selected_world = Some(i);
+                if self.ui.nav_activated() {
+                    play = Some(i);
+                }
+            }
             let hovered = self.ui.hit(lx, y, lw, card_h);
             let selected = self.selected_world == Some(i);
-            world_card(&mut self.ui, meta, lx, y, lw, card_h, hovered, selected);
+            world_card(&mut self.ui, meta, lx, y, lw, card_h, hovered || focused, selected);
             self.ui.restore(old);
             if hovered && self.ui.pressed {
                 if self.last_click.0 == i && self.time - self.last_click.1 < 0.35 {
@@ -542,21 +549,18 @@ fn world_card(ui: &mut crate::ui::Ui, meta: &WorldMeta, x: f32, y: f32, w: f32, 
     let lift = if hovered && !selected { -s } else { 0.0 };
     let y = y + lift;
     ui.rect_full(x, y + 3.0 * s, w, h, rgba(0, 0, 0, 80), rgba(0, 0, 0, 100), r, 7.0 * s);
-    if selected {
-        ui.rect_full(x, y, w, h, with_alpha(ACCENT, 0.3), with_alpha(ACCENT, 0.18), r, 10.0 * s);
-    }
     let border = if selected {
         ACCENT_LIGHT
     } else if hovered {
-        rgba(255, 255, 255, 70)
+        rgba(255, 255, 255, 50)
     } else {
-        rgba(255, 255, 255, 24)
+        rgba(255, 255, 255, 18)
     };
     ui.rect(x, y, w, h, border, r);
     let (top, bot) = if selected {
-        (rgba(54, 40, 36, 235), rgba(30, 22, 22, 240))
+        (rgba(32, 32, 42, 235), rgba(28, 28, 36, 240))
     } else if hovered {
-        (rgba(40, 42, 54, 225), rgba(24, 25, 33, 230))
+        (rgba(32, 32, 40, 228), rgba(26, 26, 32, 232))
     } else {
         (GLASS_TOP, GLASS_BOTTOM)
     };

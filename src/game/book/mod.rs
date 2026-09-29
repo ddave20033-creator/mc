@@ -263,7 +263,7 @@ impl Game {
                 display(self.settings.keys.get(Bind::Inventory)),
                 display(self.settings.keys.get(Bind::Reload)),
             );
-            self.book.layouts[hu as usize] = Some(layout(&self.ui.font, hu, &keys));
+            self.book.layouts[hu as usize] = Some(layout(&self.ui.pixel_font, hu, &keys));
         }
     }
 
@@ -585,7 +585,7 @@ impl Game {
         };
         let theme = if dark { &DARK } else { &LIGHT };
         let levels = {
-            let cv = draw_tabs(&self.ui.font, &self.texture_base, lay, open, hover, theme);
+            let cv = draw_tabs(&self.ui.pixel_font, &self.texture_base, lay, open, hover, theme);
             sheet_levels(&cv.px, cv.w, TAB_LAYERS as usize, TAB_LAYERS as usize)
         };
         self.renderer.queue_layers(tex::BOOK_TABS, TAB_LAYERS, levels);
@@ -605,7 +605,7 @@ impl Game {
             hover: id.hover,
         };
         let levels = {
-            let cv = draw_page(&self.ui.font, &self.texture_base, lay, id.page, &look);
+            let cv = draw_page(&self.ui.pixel_font, &self.texture_base, lay, id.page, &look);
             sheet_levels(&cv.px, cv.w, 2, SHEET_LAYERS as usize)
         };
         let base = tex::BOOK_SHEETS + i as u32 * SHEET_LAYERS;
