@@ -82,8 +82,34 @@ impl ChunkData {
             heightmap: [0; 256],
             max_y: 0,
         };
+        c.grass_under_trunks();
         c.recompute();
         Some(c)
+    }
+
+    /// Trees used to stand on dirt: under the trunks of worlds made then, the grass round
+    /// them (the same kind) goes on under them too.
+    fn grass_under_trunks(&mut self) {
+        use super::block::{is_branch, is_log, log_axis, DIRT, GRASS, SNOWY_GRASS};
+        for y in 0..HEIGHT - 1 {
+            for z in 0..CHUNK {
+                for x in 0..CHUNK {
+                    let above = self.get(x, y + 1, z);
+                    if self.get(x, y, z) != DIRT || !is_log(above) || is_branch(above) || log_axis(above) != 1 {
+                        continue;
+                    }
+                    let around = [(x.wrapping_sub(1), z), (x + 1, z), (x, z.wrapping_sub(1)), (x, z + 1)];
+                    let grass = around
+                        .iter()
+                        .filter(|&&(ax, az)| ax < CHUNK && az < CHUNK)
+                        .map(|&(ax, az)| self.get(ax, y, az))
+                        .find(|&b| b == GRASS || b == SNOWY_GRASS);
+                    if let Some(g) = grass {
+                        self.blocks[Self::idx(x, y, z)] = g;
+                    }
+                }
+            }
+        }
     }
 
     #[inline]

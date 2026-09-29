@@ -64,6 +64,11 @@ pub const COPPER_ORE: u8 = 63;
 pub const WATER: u8 = 64;
 pub const LAVA: u8 = 80;
 pub const FALLING: u8 = 8;
+/// Grass with the mark of a cut-down trunk in the middle of its top (bare soil in a circle,
+/// smaller at each stage as the grass grows back over it), in the fluids' unused levels:
+/// `STUMP_MARK + stage` on grass, `+ STUMP_STAGES + stage` on snowy grass.
+pub const STUMP_MARK: u8 = WATER + FALLING + 1;
+pub const STUMP_STAGES: u8 = 3;
 
 /// Double chest halves: base id + facing. The other half is on the chest's local +X side
 /// (the viewer's right, seen from the front) for `CHEST_LEFT`, local -X for `CHEST_RIGHT`.
@@ -376,6 +381,28 @@ pub fn bed_other_half(b: u8) -> IVec3 {
     }
 }
 
+#[inline]
+pub fn is_stump_mark(b: u8) -> bool {
+    (STUMP_MARK..STUMP_MARK + 2 * STUMP_STAGES).contains(&b)
+}
+/// The mark of a cut-down trunk at `stage` (0 the whole trunk's width) on `grass`.
+pub fn stump_mark(grass: u8, stage: u8) -> u8 {
+    STUMP_MARK + stage + if grass == SNOWY_GRASS { STUMP_STAGES } else { 0 }
+}
+pub fn stump_stage(b: u8) -> u8 {
+    (b - STUMP_MARK) % STUMP_STAGES
+}
+/// The block as the world's rules see it: a stump mark is the grass it is on.
+pub fn soil(b: u8) -> u8 {
+    if !is_stump_mark(b) {
+        b
+    } else if b - STUMP_MARK < STUMP_STAGES {
+        GRASS
+    } else {
+        SNOWY_GRASS
+    }
+}
+
 /// A log or a branch (both round, wood).
 #[inline]
 pub fn is_log(b: u8) -> bool {
@@ -553,11 +580,11 @@ pub fn block_boxes(b: u8, get: impl Fn(IVec3) -> u8) -> Boxes {
 
 #[inline]
 pub fn is_water(b: u8) -> bool {
-    (WATER..WATER + 16).contains(&b)
+    (WATER..=WATER + FALLING).contains(&b)
 }
 #[inline]
 pub fn is_lava(b: u8) -> bool {
-    (LAVA..LAVA + 16).contains(&b)
+    (LAVA..=LAVA + FALLING).contains(&b)
 }
 #[inline]
 pub fn is_fluid(b: u8) -> bool {
@@ -836,6 +863,9 @@ const FACE_AXIS: [usize; 6] = [0, 0, 1, 1, 2, 2];
 
 /// Texture array layer for a block face. Faces: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z.
 pub fn face_texture(b: u8, face: usize) -> u32 {
+    if is_stump_mark(b) {
+        return face_texture(soil(b), face);
+    }
     let top = face == 2;
     let bottom = face == 3;
     let ends = top || bottom;
@@ -1038,7 +1068,7 @@ pub enum TintKind {
 }
 
 pub fn tint_kind(b: u8, face: usize) -> TintKind {
-    match b {
+    match soil(b) {
         GRASS if face != 3 => TintKind::Grass,
         TALL_GRASS => TintKind::Grass,
         OAK_LEAVES => TintKind::Foliage,

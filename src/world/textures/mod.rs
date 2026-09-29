@@ -321,8 +321,11 @@ pub mod tex {
     pub const COOKED_FISH: u32 = FISHING_ROD + 2;
     /// The bucket's galvanized steel (`model::bucket`).
     pub const BUCKET_METAL: u32 = COOKED_FISH + 1;
+    /// The mark of a cut-down trunk on grass, a stage each (`world::STUMP_MARK`): bare soil
+    /// in a circle, the rest see-through.
+    pub const STUMP_MARK: u32 = BUCKET_METAL + 1;
     /// The game's logo (`ui/logo.png`), in tiles from its left.
-    pub const LOGO: u32 = BUCKET_METAL + 1;
+    pub const LOGO: u32 = STUMP_MARK + crate::world::STUMP_STAGES as u32;
     pub const LOGO_TILES: u32 = 8;
     pub const LAYERS: usize = (LOGO + LOGO_TILES) as usize;
 }
@@ -830,6 +833,7 @@ fn preserve_leaf_coverage(base: &[u8], next: &mut [u8], size: usize, layer: usiz
 
 fn is_cutout(l: u32) -> bool {
     CUTOUT.contains(&l)
+        || (tex::STUMP_MARK..tex::STUMP_MARK + crate::world::STUMP_STAGES as u32).contains(&l)
         || (tex::LOGO..tex::LOGO + tex::LOGO_TILES).contains(&l)
         || is_crack(l)
         || is_item_icon(l)
@@ -955,6 +959,7 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
     let at = tex::LOGO as usize * layer_bytes;
     base[at..at + logo.len()].copy_from_slice(&logo);
     synth_doors(&mut base);
+    synth_stump_marks(&mut base);
     synth_grilled(&mut base);
     mark_materials(&mut base);
     synth_glow(&mut base);
@@ -1480,6 +1485,37 @@ fn mark_materials(base: &mut [u8]) {
 /// the upper right half of the other: one side cooked (cooked over raw), one side burnt
 /// (burnt over cooked), and burnt on one side, raw on the other (burnt over raw). On the
 /// grill each side shows the raw, cooked or burnt meat's own texture (same shape).
+/// The stump marks: the dirt (the pack's, if it has one) in a circle as wide as the trunk
+/// was, then smaller, its edge a little ragged and darker; the rest see-through.
+fn synth_stump_marks(base: &mut [u8]) {
+    let layer_bytes = TILE * TILE * 4;
+    let dirt = base[tex::DIRT as usize * layer_bytes..][..layer_bytes].to_vec();
+    for stage in 0..crate::world::STUMP_STAGES as u32 {
+        let radius = [0.42, 0.3, 0.18][stage as usize];
+        let out = &mut base[(tex::STUMP_MARK + stage) as usize * layer_bytes..][..layer_bytes];
+        for y in 0..TILE {
+            for x in 0..TILE {
+                let dx = (x as f32 + 0.5) / TILE as f32 - 0.5;
+                let dy = (y as f32 + 0.5) / TILE as f32 - 0.5;
+                let d = (dx * dx + dy * dy).sqrt();
+                // Grass creeping in: the edge in and out by a texel or so (of 16).
+                let px = TILE as i32 / 16;
+                let ragged = (procedural::hash(77 + stage, x as i32 / px, y as i32 / px, 5) - 0.5) * 0.07;
+                let i = (y * TILE + x) * 4;
+                if d + ragged > radius {
+                    out[i..i + 4].copy_from_slice(&[0; 4]);
+                    continue;
+                }
+                let rim = if d + ragged > radius - 0.05 { 0.8 } else { 1.0 };
+                for k in 0..3 {
+                    out[i + k] = (dirt[i + k] as f32 * rim) as u8;
+                }
+                out[i + 3] = UNTINTED;
+            }
+        }
+    }
+}
+
 fn synth_grilled(base: &mut [u8]) {
     let layer_bytes = TILE * TILE * 4;
     let get = |base: &[u8], l: u32| base[l as usize * layer_bytes..][..layer_bytes].to_vec();

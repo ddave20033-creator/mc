@@ -1363,6 +1363,15 @@ pub fn mesh_chunk(
                     let rotated = face_rotated(b, face);
                     let from = m.opaque.len();
                     m.cube_face(&r, x, y, z, face, face_texture(b, face), tint, fl, rotated);
+                    if face == 2 && is_stump_mark(b) {
+                        // The mark of the cut-down trunk, a hair over the grass.
+                        let v0 = m.verts.len();
+                        let layer = tex::STUMP_MARK + stump_stage(b) as u32;
+                        m.cube_face(&r, x, y, z, face, layer, [255; 3], fl, false);
+                        for v in &mut m.verts[v0..] {
+                            v.pos[1] += 0.002;
+                        }
+                    }
                     let quad = m.opaque.split_off(from);
                     if is_leaves(b) && is_leaves(nbk) {
                         m.leaf_inner.extend(quad);

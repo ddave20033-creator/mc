@@ -13,6 +13,7 @@ struct Mining {
 }
 
 fn mining(b: u8) -> Option<Mining> {
+    let b = soil(b);
     use ToolKind::*;
     let m = |hardness, tool, needs| {
         Some(Mining {
@@ -107,6 +108,7 @@ pub fn drops(b: u8, held: ItemId, r: f32) -> Vec<Stack> {
     if !can_harvest(b, held) {
         return Vec::new();
     }
+    let b = soil(b);
     let one = |id: ItemId| vec![Stack::one(id)];
     // Sheared leaves and plants drop themselves, like in Minecraft.
     if held == SHEARS && (is_leaves(b) || matches!(b, TALL_GRASS | DEAD_BUSH)) {

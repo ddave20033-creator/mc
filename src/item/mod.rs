@@ -1265,6 +1265,7 @@ pub fn item_of_block(b: u8) -> Option<ItemId> {
         _ if is_rifle_bench(b) => RIFLE_BENCH,
         _ if is_gun_bench(b) => GUN_STATION,
         _ if is_log(b) => log_base(b),
+        _ if is_stump_mark(b) => soil(b),
         _ if is_water(b) => return Some(WATER_BUCKET),
         _ if is_lava(b) => return Some(LAVA_BUCKET),
         _ => b,

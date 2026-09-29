@@ -253,8 +253,8 @@ impl Game {
         Vec::new()
     }
 
-    /// A trunk cut down off grass leaves the soil under it bare for a while (the grass grows
-    /// back over it later).
+    /// A trunk cut down off grass leaves its mark on the grass under it: a circle of bare
+    /// soil the grass slowly grows back over (`update_stump_marks`).
     fn bare_under_trunk(&mut self, p: IVec3, b: u8) {
         if !is_log(b) || is_branch(b) || log_axis(b) != 1 {
             return;
@@ -262,10 +262,47 @@ impl Game {
         let below = p - IVec3::Y;
         let g = self.terrain.world.geti(below);
         if matches!(g, GRASS | SNOWY_GRASS) {
-            self.set_block(below, DIRT);
+            self.set_block(below, stump_mark(g, 0));
             self.block_updated(below);
-            let t = 120.0 + self.random() * 180.0;
-            self.regrow.push((below, t, g));
+        }
+    }
+
+    /// The grass growing back over the marks of cut-down trunks near the player, a stage at
+    /// a time (about a minute each), where nothing covers them. Found by looking round, so
+    /// marks in a world just loaded grow back too.
+    pub(super) fn update_stump_marks(&mut self, dt: f32) {
+        const EVERY: f32 = 2.0;
+        const STAGE_SECS: f32 = 60.0;
+        self.stump_scan -= dt;
+        if self.stump_scan > 0.0 {
+            return;
+        }
+        self.stump_scan = EVERY;
+        let c = self.player.pos.floor().as_ivec3();
+        let mut found = Vec::new();
+        let w = &self.terrain.world;
+        for y in (c.y - 12).max(0)..(c.y + 12).min(HEIGHT as i32) {
+            for z in c.z - 32..=c.z + 32 {
+                for x in c.x - 32..=c.x + 32 {
+                    let p = IVec3::new(x, y, z);
+                    let b = w.geti(p);
+                    if is_stump_mark(b) {
+                        found.push((p, b));
+                    }
+                }
+            }
+        }
+        for (p, b) in found {
+            if self.random() >= EVERY / STAGE_SECS {
+                continue;
+            }
+            let above = self.terrain.world.geti(p + IVec3::Y);
+            if is_opaque(above) || is_log(above) {
+                continue;
+            }
+            let next = if stump_stage(b) + 1 < STUMP_STAGES { b + 1 } else { soil(b) };
+            self.set_block(p, next);
+            self.block_updated(p);
         }
     }
 
@@ -296,8 +333,8 @@ impl Game {
                 }
             }
             CACTUS => matches!(below, SAND | CACTUS),
-            DEAD_BUSH => matches!(below, SAND | DIRT | GRASS),
-            _ if is_plant(b) => matches!(below, GRASS | DIRT | SNOWY_GRASS),
+            DEAD_BUSH => matches!(soil(below), SAND | DIRT | GRASS),
+            _ if is_plant(b) => matches!(soil(below), GRASS | DIRT | SNOWY_GRASS),
             _ => true,
         }
     }

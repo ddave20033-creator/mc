@@ -316,9 +316,8 @@ pub struct Game {
     /// The mob the crosshair is on (index into `mobs`), when it is closer than any block.
     mob_target: Option<usize>,
     saplings: Vec<(IVec3, f32)>,
-    /// Bare soil where a tree was cut down: (place, seconds until the grass grows back, the
-    /// grass it was).
-    regrow: Vec<(IVec3, f32, u8)>,
+    /// Seconds until the next look round for stump marks to grow over.
+    stump_scan: f32,
 
     slot_name_timer: f32,
     hint_timer: f32,
@@ -584,7 +583,7 @@ impl Game {
             mob_spawn_timer: 5.0,
             mob_target: None,
             saplings: Vec::new(),
-            regrow: Vec::new(),
+            stump_scan: 0.0,
             slot_name_timer: 0.0,
             hint_timer: 0.0,
             mining: None,
