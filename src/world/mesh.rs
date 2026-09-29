@@ -827,6 +827,12 @@ impl Builder {
             let idx = if flip { [base, base + 2, base + 1, base, base + 3, base + 2] } else { [base, base + 1, base + 2, base, base + 2, base + 3] };
             b.opaque.extend_from_slice(&idx);
         };
+        if axis == 1 && !is_branch(b) {
+            if let Some(notch) = notch_at(IVec3::new(x + self.ox, y, z + self.oz)) {
+                self.notched_log(notch, radius, sides, around, (t0, ends[0].1), (t1, ends[1].1), side_layer, end_layer, &emit, &round_n, &at);
+                return;
+            }
+        }
         for i in 0..sides {
             let (a0, a1) = (angle(i), angle(i + 1));
             let (c0, s0, c1, s1) = (a0.cos() * radius, a0.sin() * radius, a1.cos() * radius, a1.sin() * radius);
@@ -862,6 +868,136 @@ impl Builder {
                     None,
                 );
             }
+        }
+    }
+
+    /// An upright trunk with an axe's cut in it (`Notch`): a wedge taken out of its side,
+    /// deepest at the cut's middle, in steps like chips hewn out one after another. The
+    /// trunk is drawn in slices: whole below and above the cut, and each slice of the cut
+    /// the round cross-section with the part past the cut's face gone (its face and the
+    /// steps between the slices bare wood).
+    #[allow(clippy::too_many_arguments)]
+    fn notched_log(
+        &mut self,
+        notch: Notch,
+        radius: f32,
+        sides: usize,
+        around: f32,
+        (t0, cap0): (f32, bool),
+        (t1, cap1): (f32, bool),
+        side_layer: u32,
+        end_layer: u32,
+        emit: &dyn Fn(&mut Self, [[f32; 3]; 4], [[f32; 2]; 4], [f32; 3], u32, Option<[u8; 4]>),
+        round_n: &dyn Fn(f32) -> u8,
+        at: &dyn Fn(f32, f32, f32) -> [f32; 3],
+    ) {
+        use std::f32::consts::TAU;
+        const SLICES: usize = 6;
+        let dir = [notch.angle.cos(), notch.angle.sin()];
+        let across = [-dir[1], dir[0]];
+        let deep = notch.depth.clamp(0.0, 1.0) * 2.0 * radius;
+        let half = (deep * 0.8).max(0.08);
+        let h = notch.height.clamp(0.12, 0.88);
+        let (z0, z1) = ((h - half).max(t0 + 0.02), (h + half).min(t1 - 0.02));
+        let ring: Vec<[f32; 2]> = (0..sides)
+            .map(|i| {
+                let a = i as f32 / sides as f32 * TAU;
+                [a.cos() * radius, a.sin() * radius]
+            })
+            .collect();
+        // The cross-section with everything past `c` along the cut's direction gone.
+        let clip = |c: f32| -> Vec<[f32; 2]> {
+            let d = |p: [f32; 2]| p[0] * dir[0] + p[1] * dir[1] - c;
+            let mut out = Vec::new();
+            for i in 0..ring.len() {
+                let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+                let (da, db) = (d(a), d(b));
+                if da <= 0.0 {
+                    out.push(a);
+                }
+                if (da <= 0.0) != (db <= 0.0) {
+                    let k = da / (da - db);
+                    out.push([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]);
+                }
+            }
+            out
+        };
+        let rim = LOG_END_RIM / radius;
+        // One slice from `ya` up to `yb` of the cross-section `poly` (cut at `c`), with its
+        // bottom and top ends if asked.
+        let slice = |m: &mut Self, poly: &[[f32; 2]], c: f32, ya: f32, yb: f32, bottom: bool, top: bool| {
+            if poly.len() < 3 || yb - ya < 1e-4 {
+                return;
+            }
+            let on_cut = |p: [f32; 2]| (p[0] * dir[0] + p[1] * dir[1] - c).abs() < 1e-4;
+            for i in 0..poly.len() {
+                let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+                if on_cut(p) && on_cut(q) {
+                    // The cut's face: bare wood, its grain along the trunk.
+                    let u = |p: [f32; 2]| 0.5 + p[0] * across[0] + p[1] * across[1];
+                    let n = [dir[0], 0.0, dir[1]];
+                    emit(
+                        m,
+                        [at(ya, p[0], p[1]), at(ya, q[0], q[1]), at(yb, q[0], q[1]), at(yb, p[0], p[1])],
+                        [[u(p), 1.0 - ya], [u(q), 1.0 - ya], [u(q), 1.0 - yb], [u(p), 1.0 - yb]],
+                        n,
+                        end_layer,
+                        None,
+                    );
+                    continue;
+                }
+                let (ap, mut aq) = (p[1].atan2(p[0]).rem_euclid(TAU), q[1].atan2(q[0]).rem_euclid(TAU));
+                if aq < ap {
+                    aq += TAU;
+                }
+                let mid = (ap + aq) * 0.5;
+                let (up, uq) = (ap / TAU * around, aq / TAU * around);
+                emit(
+                    m,
+                    [at(ya, p[0], p[1]), at(ya, q[0], q[1]), at(yb, q[0], q[1]), at(yb, p[0], p[1])],
+                    [[up, 1.0 - ya], [uq, 1.0 - ya], [uq, 1.0 - yb], [up, 1.0 - yb]],
+                    [mid.cos(), 0.0, mid.sin()],
+                    side_layer,
+                    Some([round_n(ap), round_n(aq), round_n(aq), round_n(ap)]),
+                );
+            }
+            let n = poly.len() as f32;
+            let mid = poly.iter().fold([0.0, 0.0], |s, p| [s[0] + p[0] / n, s[1] + p[1] / n]);
+            let uv = |p: [f32; 2]| [0.5 + p[0] * rim, 0.5 + p[1] * rim];
+            for (y, up, on) in [(ya, -1.0, bottom), (yb, 1.0, top)] {
+                if !on {
+                    continue;
+                }
+                for i in 0..poly.len() {
+                    let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+                    emit(
+                        m,
+                        [at(y, mid[0], mid[1]), at(y, p[0], p[1]), at(y, q[0], q[1]), at(y, mid[0], mid[1])],
+                        [uv(mid), uv(p), uv(q), uv(mid)],
+                        [0.0, up, 0.0],
+                        end_layer,
+                        None,
+                    );
+                }
+            }
+        };
+        let whole = clip(f32::INFINITY);
+        slice(self, &whole, f32::INFINITY, t0, z0, cap0, true);
+        // A stump ends at the cut's middle (its top the rest of the break).
+        let z1 = if notch.felled { h } else { z1 };
+        let n = if notch.felled { SLICES / 2 } else { SLICES };
+        for k in 0..n {
+            let ya = z0 + (z1 - z0) * k as f32 / n as f32;
+            let yb = z0 + (z1 - z0) * (k + 1) as f32 / n as f32;
+            let dy = ((ya + yb) * 0.5 - h).abs();
+            let c = radius - deep * (1.0 - dy / half).max(0.0);
+            slice(self, &clip(c), c, ya, yb, true, true);
+        }
+        if notch.felled {
+            // The break across the rest of the trunk.
+            slice(self, &whole, f32::INFINITY, z1 - 0.001, z1, false, true);
+        } else {
+            slice(self, &whole, f32::INFINITY, z1, t1, true, cap1);
         }
     }
 
@@ -1552,3 +1688,32 @@ mod tests {
 /// How far out a round log's end reaches in its end texture (0.5 is the edge): just into
 /// the bark ring round the wood.
 pub const LOG_END_RIM: f32 = 0.47;
+
+/// An axe's cut in an upright trunk: the way its face looks (radians round the trunk, 0 =
+/// +X, toward +Z), the height of its middle in the block (0..1) and how deep it goes (0..1
+/// of the trunk's width); after the tree fell, the stump left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Notch {
+    pub angle: f32,
+    pub height: f32,
+    pub depth: f32,
+    /// The tree above has been felled: only the stump is left, up to the cut's middle.
+    pub felled: bool,
+}
+
+/// The cuts in the trunks (few at a time), read by the mesher.
+static NOTCHES: std::sync::RwLock<Vec<(IVec3, Notch)>> = std::sync::RwLock::new(Vec::new());
+
+pub fn notch_at(p: IVec3) -> Option<Notch> {
+    let list = NOTCHES.read().ok()?;
+    list.iter().find(|(q, _)| *q == p).map(|(_, n)| *n)
+}
+
+/// Puts (or with None, takes away) the cut at `p`; the chunk has to be meshed again.
+pub fn set_notch(p: IVec3, notch: Option<Notch>) {
+    let Ok(mut list) = NOTCHES.write() else { return };
+    list.retain(|(q, _)| *q != p);
+    if let Some(n) = notch {
+        list.push((p, n));
+    }
+}

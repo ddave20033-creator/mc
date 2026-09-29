@@ -166,7 +166,10 @@ impl Game {
         }
         // A left click on what is in a furnace takes it out instead of mining (a pistol shoots).
         let furnace_hold = control && !gun && !reading && self.furnace_left_click();
+        // An axe on a tree's trunk chops it instead.
+        let chopping = self.update_chopping(control && !reading && !sword && !gun && !furnace_hold);
         if control
+            && !chopping
             && !reading
             && self.left_down
             && self.action_cooldown <= 0.0
@@ -411,6 +414,9 @@ impl Game {
         // Mobs
         self.update_mobs(dt);
         self.spawn_animals(dt);
+
+        // Felled trees falling over.
+        self.update_falling_trees(dt);
 
         // Falling sand / gravel.
         let mut landed = Vec::new();

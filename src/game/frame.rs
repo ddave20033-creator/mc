@@ -1053,6 +1053,7 @@ impl Game {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
             f.build(target, sky, blk);
         }
+        self.build_falling_trees(target);
         // Mobs always go into the entity range so they cast shadows; in first person that
         // range only draws shadows, so they are copied into the particle range to be seen too.
         let mut mob_verts = Vec::new();

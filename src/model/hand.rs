@@ -41,6 +41,10 @@ const SWING_TIME: f32 = 0.24;
 const MIN_SWING_TIME: f32 = 0.09;
 /// Seconds the arm follows through after throwing a grenade.
 const THROW_TIME: f32 = 0.3;
+/// An axe's chop (`HandAnim::chop`): drawn back, brought down into the trunk, stuck there a
+/// moment, pulled out and back. When it bites in, and how long it all takes (seconds).
+pub const CHOP_HIT: f32 = 0.38;
+pub const CHOP_TIME: f32 = 0.78;
 
 pub struct HandAnim {
     swing: f32,
@@ -74,6 +78,11 @@ pub struct HandAnim {
     /// Seconds since a grenade left the hand (the arm follows through, then the next one
     /// comes up).
     thrown: Option<f32>,
+    /// A chop going on (seconds in), the way to where the axe bites in (world space), and
+    /// whether it has just bitten in (taken by `chop_bit`).
+    chop: Option<f32>,
+    chop_aim: Vec3,
+    chop_bit: bool,
     /// Where the middle of the readied grenade was drawn last frame (like `torch_tip`): it
     /// is thrown from there.
     pub grenade_tip: Option<Vec3>,
@@ -176,6 +185,9 @@ impl HandAnim {
             eating: None,
             grenade: None,
             thrown: None,
+            chop: None,
+            chop_aim: Vec3::NEG_Z,
+            chop_bit: false,
             grenade_tip: None,
             rod: None,
             rod_tip: None,
@@ -232,6 +244,66 @@ impl HandAnim {
     /// The trigger pulled with nothing in the chamber: it moves, nothing else does.
     pub fn dry_fire(&mut self) {
         self.dry = Some(0.0);
+    }
+
+    /// An axe chop at the point the way `aim` (world space) from the eye: the axe drawn
+    /// back, swung round at it, biting in (`chop_bit` then), and pulled out. Not while one
+    /// is going on.
+    pub fn chop(&mut self, aim: Vec3) {
+        if self.chop.is_none() {
+            self.chop = Some(0.0);
+            self.chop_aim = aim.normalize_or(Vec3::NEG_Z);
+            self.swinging = false;
+            self.swing = 0.0;
+        }
+    }
+
+    pub fn chopping(&self) -> bool {
+        self.chop.is_some()
+    }
+
+    /// The axe has just bitten in (once per chop).
+    pub fn chop_bit(&mut self) -> bool {
+        std::mem::take(&mut self.chop_bit)
+    }
+
+    /// The chop's movement at `tc` seconds in (camera space, applied to the held item): a
+    /// level swing from the side, like a woodcutter's. The axe is laid over on its side (the
+    /// handle level, the head to the left, its edge leading), drawn back out to the right,
+    /// then swung across fast to where it bites in (toward `aim`, camera space: the head at
+    /// the trunk's side, edge first); stuck there with a shiver; pulled out and eased back.
+    fn chop_pose(tc: f32, aim: Vec3) -> Mat4 {
+        let ease = |x: f32| {
+            let x = x.clamp(0.0, 1.0);
+            x * x * (3.0 - 2.0 * x)
+        };
+        // Poses as (offset from rest, degrees about y, then x, then z).
+        let screen = Vec2::new(aim.x, aim.y) / (-aim.z).max(0.3);
+        let level = 62.0;
+        let back = (Vec3::new(0.32, 0.12, 0.2), Vec3::new(-55.0, 0.0, level));
+        let bite = (
+            Vec3::new(-0.26 + screen.x * 0.45, 0.2 + screen.y * 0.45, -0.18),
+            Vec3::new(20.0, 0.0, level),
+        );
+        let rest = (Vec3::ZERO, Vec3::ZERO);
+        let lerp = |a: (Vec3, Vec3), b: (Vec3, Vec3), k: f32| (a.0.lerp(b.0, k), a.1.lerp(b.1, k));
+        let wind = CHOP_HIT - 0.12;
+        let (off, rot) = if tc < wind {
+            lerp(rest, back, ease(tc / wind))
+        } else if tc < CHOP_HIT {
+            let k = (tc - wind) / (CHOP_HIT - wind);
+            lerp(back, bite, k * k)
+        } else if tc < CHOP_HIT + 0.14 {
+            // Stuck in the wood: a short shiver dying away.
+            let s = tc - CHOP_HIT;
+            let shiver = (s * 70.0).sin() * 2.5 * (-s / 0.05).exp();
+            (bite.0, bite.1 + Vec3::new(shiver, 0.0, 0.0))
+        } else {
+            lerp(bite, rest, ease((tc - CHOP_HIT - 0.14) / (CHOP_TIME - CHOP_HIT - 0.14)))
+        };
+        // About the hands holding it (at rest).
+        let grip = Vec3::new(0.56, -0.52, -0.72);
+        Mat4::from_translation(grip + off) * ry(rot.x) * rx(rot.y) * rz(rot.z) * Mat4::from_translation(-grip)
     }
 
     /// A grenade thrown: the empty arm follows through, then the next one comes up.
@@ -324,6 +396,13 @@ impl HandAnim {
             self.keep_swinging();
         }
         self.equip = (self.equip + dt * 4.0).min(1.0);
+        if let Some(t) = self.chop {
+            let next = t + dt;
+            if t < CHOP_HIT && next >= CHOP_HIT {
+                self.chop_bit = true;
+            }
+            self.chop = (next < CHOP_TIME).then_some(next);
+        }
         if let Some(t) = self.thrown {
             let t = t + dt;
             self.thrown = (t < THROW_TIME).then_some(t);
@@ -613,6 +692,13 @@ impl HandAnim {
         if self.held == TORCH as ItemId {
             self.torch_tip = Some(item.transform_point3(super::player::TORCH_TIP));
         }
+        let item = match self.chop {
+            Some(tc) => {
+                let aim = cam_to_world.inverse().transform_vector3(self.chop_aim).normalize_or(Vec3::NEG_Z);
+                base * Self::chop_pose(tc, aim) * base.inverse() * item
+            }
+            None => item,
+        };
         let st = crate::item::Stack { data: self.held_data, damage: self.held_damage, ..crate::item::Stack::one(self.held) };
         super::emit_held_data(out, item, &st, light, fl);
     }

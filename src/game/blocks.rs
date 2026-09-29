@@ -19,6 +19,10 @@ impl Game {
     pub(super) fn set_block(&mut self, p: IVec3, b: u8) {
         let old = self.terrain.world.geti(p);
         if self.terrain.world.seti(p, b) {
+            if crate::world::mesh::notch_at(p).is_some() {
+                // (a cut trunk gone or changed takes its cut with it)
+                crate::world::mesh::set_notch(p, None);
+            }
             self.terrain.world.record_fluid_change(p, old, b, self.time);
             // Fluids flow on the host only.
             if !self.is_client() {
@@ -255,7 +259,7 @@ impl Game {
 
     /// A trunk cut down off grass leaves its mark on the grass under it: a circle of bare
     /// soil the grass slowly grows back over (`update_stump_marks`).
-    fn bare_under_trunk(&mut self, p: IVec3, b: u8) {
+    pub(super) fn bare_under_trunk(&mut self, p: IVec3, b: u8) {
         if !is_log(b) || is_branch(b) || log_axis(b) != 1 {
             return;
         }
