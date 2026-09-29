@@ -342,6 +342,29 @@ impl Game {
             }
         }
 
+        // Grass growing back where a tree was cut down (when nothing covers the soil).
+        let mut grown = Vec::new();
+        for (i, (_, t, _)) in self.regrow.iter_mut().enumerate() {
+            *t -= dt;
+            if *t <= 0.0 {
+                grown.push(i);
+            }
+        }
+        for i in grown.into_iter().rev() {
+            let (p, _, g) = self.regrow.swap_remove(i);
+            let above = self.terrain.world.geti(p + IVec3::Y);
+            if self.terrain.world.geti(p) != DIRT {
+                continue;
+            }
+            if above == AIR || is_plant(above) || above == SNOW {
+                self.set_block(p, g);
+                self.block_updated(p);
+            } else if !is_opaque(above) {
+                // Something on it for now: later.
+                self.regrow.push((p, 60.0, g));
+            }
+        }
+
         // Dropped items: physics and pickup.
         let center = self.player.pos + Vec3::Y * 0.9;
         let pickup_target = self.player.eye() - Vec3::Y * 0.25;

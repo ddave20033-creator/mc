@@ -48,6 +48,7 @@ impl Game {
         contents.extend(self.remove_other_half(p, b));
         let replacement = self.left_after_mining(p, b, creative);
         self.set_block(p, replacement);
+        self.bare_under_trunk(p, b);
         let center = p.as_vec3() + Vec3::splat(0.5);
         if !creative {
             let r = self.random();
@@ -252,6 +253,22 @@ impl Game {
         Vec::new()
     }
 
+    /// A trunk cut down off grass leaves the soil under it bare for a while (the grass grows
+    /// back over it later).
+    fn bare_under_trunk(&mut self, p: IVec3, b: u8) {
+        if !is_log(b) || is_branch(b) || log_axis(b) != 1 {
+            return;
+        }
+        let below = p - IVec3::Y;
+        let g = self.terrain.world.geti(below);
+        if matches!(g, GRASS | SNOWY_GRASS) {
+            self.set_block(below, DIRT);
+            self.block_updated(below);
+            let t = 120.0 + self.random() * 180.0;
+            self.regrow.push((below, t, g));
+        }
+    }
+
     /// Broken by the world (lost support): always drops like a hand-mined block.
     pub(super) fn break_naturally(&mut self, p: IVec3) {
         let b = self.terrain.world.geti(p);
@@ -342,9 +359,6 @@ impl Game {
             if !soft || cur == AIR || is_plant(cur) {
                 self.set_block(q, b);
             }
-        }
-        if self.terrain.world.geti(p - IVec3::Y) == GRASS {
-            self.set_block(p - IVec3::Y, DIRT);
         }
         true
     }

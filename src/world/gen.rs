@@ -828,7 +828,6 @@ impl Generator {
         };
         match kind {
             Tree::Oak | Tree::Birch | Tree::Spruce => {
-                put(c, x0, z0, x, y - 1, z, DIRT, false);
                 let seed = (r * u32::MAX as f64) as u32 ^ (x as u32).wrapping_mul(0x85EB_CA77) ^ (z as u32).wrapping_mul(0xC2B2_AE3D);
                 for (d, b, soft) in super::trees::tree_shape(log, seed) {
                     put(c, x0, z0, x + d.x, y + d.y, z + d.z, b, soft);
