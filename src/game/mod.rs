@@ -412,8 +412,6 @@ pub struct Game {
     texture_base: Vec<u8>,
     /// The start-up screen, while it is up.
     boot: Option<boot::Boot>,
-    /// Whether the window is shown yet (after the first frame).
-    window_shown: bool,
     custom_skins: std::collections::HashMap<u8, crate::pack::Image>,
     skin_pngs: std::collections::HashMap<u8, Vec<u8>>,
     local_skin_png: Option<Vec<u8>>,
@@ -646,7 +644,6 @@ impl Game {
             menu_preview: Default::default(),
             texture_base,
             boot: Some(boot),
-            window_shown: false,
             custom_skins,
             skin_pngs,
             local_skin_png,

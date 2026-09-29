@@ -24,6 +24,7 @@ mod pack;
 mod render;
 mod save;
 mod settings;
+mod splash;
 mod stats;
 mod ui;
 mod util;
@@ -39,6 +40,8 @@ use winit::window::{Window, WindowId};
 #[derive(Default)]
 struct App {
     game: Option<game::Game>,
+    /// The start-up splash (the logo filling up), while the game gets ready.
+    splash: Option<splash::Splash>,
     bench: bool,
     /// `--aa-shots <folder>`: anti-aliasing comparison pictures.
     shots: Option<std::path::PathBuf>,
@@ -62,6 +65,8 @@ impl ApplicationHandler for App {
             return;
         }
         // 16:9 window at most 1280x720 and at most ~75% of the monitor height (leaves room for the taskbar).
+        let mut splash = splash::Splash::new();
+        splash.set_progress(0.02);
         let mut size = LogicalSize::new(1280.0, 720.0);
         if let Some(m) = event_loop.primary_monitor() {
             let logical = m.size().to_logical::<f64>(m.scale_factor());
@@ -80,10 +85,10 @@ impl ApplicationHandler for App {
                 .expect("failed to create window"),
         );
         let mut game = game::Game::new(window, self.bench, self.shots.clone(), self.gun_shots.clone());
-        // The first frame now: a hidden window is not asked to redraw, and this one is shown
-        // once something is drawn in it.
+        splash.set_progress(0.1);
         game.frame();
         self.game = Some(game);
+        self.splash = Some(splash);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -115,10 +120,27 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _: &ActiveEventLoop) {
-        if let Some(g) = &self.game {
-            g.window.request_redraw();
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(g) = self.game.as_mut() else {
+            return;
+        };
+        if let Some(splash) = self.splash.as_mut() {
+            // Starting up: the window is hidden (and not asked to redraw), so its frames are
+            // run from here; the splash shows how far it has got, and when it is full the
+            // window takes its place.
+            g.frame();
+            if g.quit {
+                self.shutdown(event_loop);
+                return;
+            }
+            splash.set_progress(g.boot_progress().unwrap_or(1.0));
+            if splash.full() && g.boot_progress().is_none() {
+                self.splash = None;
+                g.show_window();
+            }
+            return;
         }
+        g.window.request_redraw();
     }
 }
 
@@ -187,6 +209,7 @@ fn main() {
         gun_shots: (args.get(1).map(String::as_str) == Some("--gun-shots"))
             .then(|| args.get(2).map(Into::into).unwrap_or_else(|| "gun-shots".into())),
         game: None,
+        splash: None,
     };
     event_loop.run_app(&mut app).expect("event loop error");
 }

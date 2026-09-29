@@ -881,6 +881,17 @@ pub fn generate(packs: &Packs) -> Vec<Vec<u8>> {
     with_skins(&generate_base(packs), &std::collections::HashMap::new())
 }
 
+/// How far the textures being made have got (0..1): the layers drawn, then the rest.
+pub static PROGRESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn set_progress(p: f32) {
+    PROGRESS.store(p.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn progress() -> f32 {
+    f32::from_bits(PROGRESS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Every layer at full size except the uploaded skins: the procedural textures, replaced by
 /// the resource packs' where they have them. This is the slow part; `with_skins` finishes it,
 /// so a new skin does not have to redo it.
@@ -889,6 +900,8 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
     let layers = tex::LAYERS;
     let layer_bytes = TILE * TILE * 4;
     let mut base = vec![0u8; layer_bytes * layers];
+    set_progress(0.0);
+    let done = std::sync::atomic::AtomicUsize::new(0);
     // Layers are independent: generate them in parallel.
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -896,6 +909,7 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
         .clamp(1, 16);
     std::thread::scope(|scope| {
         let crack = &crack;
+        let done = &done;
         let mut chunks: Vec<(usize, &mut [u8])> =
             base.chunks_mut(layer_bytes).enumerate().collect();
         let per = chunks.len().div_ceil(threads);
@@ -914,11 +928,14 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
                                 .copy_from_slice(&pixel(l as u32, x as i32, y as i32, crack));
                         }
                     }
+                    let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    set_progress(0.75 * n as f32 / layers as f32);
                 }
             });
         }
     });
     apply_pack(packs, &mut base);
+    set_progress(0.8);
     use crate::model::{ak_vm, gun_station, pistol_vm, revolver_vm};
     synth_model_pages(&mut base, pistol_vm::PNG, pistol_vm::PAGES, tex::PISTOL_VIEW);
     synth_model_pages(&mut base, revolver_vm::PNG, revolver_vm::PAGES, tex::REVOLVER_VIEW);

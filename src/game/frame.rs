@@ -257,11 +257,6 @@ impl Game {
         };
         let t_build = Instant::now();
         self.renderer.render(&mut self.gpu, &frame);
-        if !self.window_shown {
-            // The window was hidden until something was drawn in it.
-            self.window_shown = true;
-            self.window.set_visible(true);
-        }
         let t_end = Instant::now();
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
         let wait = self.gpu.wait_ms;
@@ -1279,8 +1274,6 @@ impl Game {
             Screen::Playing | Screen::Chat => Action::None,
         };
         self.ui.restore(before);
-        // The start-up screen over it all while it is up.
-        self.draw_boot();
         self.ui.finish();
         action
     }
