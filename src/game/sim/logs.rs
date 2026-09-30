@@ -43,6 +43,40 @@ impl LyingLog {
         (off.length() <= self.radius()).then_some(s)
     }
 
+    /// Where the ray from `o` along `d` (a unit vector) first meets its wood within `max`:
+    /// how far along the ray, and how far along the trunk (from its base). Worked out
+    /// exactly (a ray against a round trunk with flat ends), not stepped along.
+    pub fn ray_hit(&self, o: Vec3, d: Vec3, max: f32) -> Option<(f32, f32)> {
+        let (a, r, len) = (self.dir, self.radius(), self.len());
+        let w = o - self.base;
+        let (wa, da) = (w.dot(a), d.dot(a));
+        // Round side: the part of the ray within `r` of the axis.
+        let (wp, dp) = (w - a * wa, d - a * da);
+        let (qa, qb, qc) = (dp.dot(dp), 2.0 * wp.dot(dp), wp.dot(wp) - r * r);
+        let (mut t0, mut t1) = if qa > 1e-9 {
+            let disc = qb * qb - 4.0 * qa * qc;
+            if disc < 0.0 {
+                return None;
+            }
+            let root = disc.sqrt();
+            ((-qb - root) / (2.0 * qa), (-qb + root) / (2.0 * qa))
+        } else if qc <= 0.0 {
+            (f32::NEG_INFINITY, f32::INFINITY)
+        } else {
+            return None;
+        };
+        // Its ends: the part of the ray between them.
+        if da.abs() > 1e-9 {
+            let (e0, e1) = ((0.0 - wa) / da, (len - wa) / da);
+            t0 = t0.max(e0.min(e1));
+            t1 = t1.min(e0.max(e1));
+        } else if !(0.0..=len).contains(&wa) {
+            return None;
+        }
+        let t = t0.max(0.0);
+        (t <= t1 && t < max).then(|| (t, (wa + da * t).clamp(0.0, len)))
+    }
+
     /// The middle of the piece `i`.
     fn piece_middle(&self, i: usize) -> Vec3 {
         self.base + self.dir * (i as f32 + 0.5)
@@ -200,13 +234,8 @@ impl Game {
             if mid.distance(eye) > AIM_REACH + l.len() * 0.5 + 1.0 {
                 continue;
             }
-            let mut t = 0.0;
-            while t < block_dist.min(best.map_or(f32::MAX, |b| b.0)) {
-                if let Some(s) = l.contains(eye + dir * t) {
-                    best = Some((t, LogAim { id: l.id, from_base: l.from_base_at(s) }));
-                    break;
-                }
-                t += 0.02;
+            if let Some((t, s)) = l.ray_hit(eye, dir, block_dist.min(best.map_or(f32::MAX, |b| b.0))) {
+                best = Some((t, LogAim { id: l.id, from_base: l.from_base_at(s) }));
             }
         }
         if let Some((_, aim)) = best {
@@ -327,5 +356,49 @@ fn ring(out: &mut Vec<Vertex>, m: Mat4, radius: f32, wide: f32, layer: u32, ligh
         });
         out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
         out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The first point stepped along the ray that is in the wood (as the aim used to find it).
+    fn stepped(l: &LyingLog, o: Vec3, d: Vec3, max: f32) -> Option<(f32, f32)> {
+        let mut t = 0.0;
+        while t < max {
+            if let Some(s) = l.contains(o + d * t) {
+                return Some((t, s));
+            }
+            t += 0.002;
+        }
+        None
+    }
+
+    #[test]
+    fn a_ray_meets_a_lying_trunk_where_stepping_along_it_does() {
+        let mut rng = crate::util::Rng::new(7);
+        let mut hits = 0;
+        for k in 0..400 {
+            let dir = Vec3::new(rng.next() - 0.5, (rng.next() - 0.5) * 0.3, rng.next() - 0.5).normalize();
+            let l = LyingLog { id: k, base: Vec3::new(0.3, 64.4, -0.7), dir, pieces: vec![crate::world::OAK_LOG; 1 + (k % 5) as usize], next: 1 };
+            let o = l.base + Vec3::new(rng.next() - 0.5, rng.next() * 0.6 + 0.8, rng.next() - 0.5) * 6.0;
+            let target = l.base + dir * (rng.next() * l.len());
+            let d = (target - o).normalize();
+            let exact = l.ray_hit(o, d, 8.0);
+            let step = stepped(&l, o, d, 8.0);
+            match (exact, step) {
+                (Some((t, s)), Some((ts, ss))) => {
+                    hits += 1;
+                    assert!(t <= ts + 1e-4 && ts - t < 0.003, "{t} {ts}");
+                    assert!((s - ss).abs() < 0.01, "{s} {ss}");
+                }
+                (None, None) => {}
+                // (only a ray grazing the wood between two steps)
+                (Some((t, _)), None) => assert!(l.contains(o + d * (t + 1e-3)).is_none() || t > 7.99),
+                (None, Some(_)) => panic!("stepping found a hit the exact test missed"),
+            }
+        }
+        assert!(hits > 100, "{hits}");
     }
 }
