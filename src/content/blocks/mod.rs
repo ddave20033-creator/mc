@@ -1,13 +1,15 @@
-//! Every block, in one table (`blocks!` below). A line gives a block its constant, its key
-//! (commands, save files), its names, how it looks (its model, faces, tint and light), what it
-//! does in the world (solid, sunlight, support, gravity, fluids), how it is mined and what it
-//! drops, the item it is, where it is in the creative inventory, and how it is placed.
+//! Every block: a line each in the files of this folder, by kind (earth, stone, building
+//! blocks, plants, ores, fluids, machines, furniture). A line gives a block its constant, its
+//! key (commands, save files), its names, how it looks (its model, faces, tint and light), what
+//! it does in the world (solid, sunlight, support, gravity, fluids), how it is mined and what
+//! it drops, the item it is, where it is in the creative inventory, and how it is placed.
 //!
-//! Ids are not written anywhere: they follow from the order of the table. A block with a
-//! state (a facing, a door's halves...) takes `states` ids after its constant, the state
-//! being `b - BASE`. Save files keep the blocks' keys (`save`), so the order can change.
+//! Ids are not written anywhere: they follow from the order of the lines (and of the files,
+//! see `PARTS`). A block with a state (a facing, a door's halves...) takes `states` ids after
+//! its constant, the state being `b - BASE`. Save files keep the blocks' keys (`save`), so the
+//! order can change.
 //!
-//! Adding a plain block is adding a line here (and its texture: `tex`, the painter in
+//! Adding a plain block is adding a line to its file (and its texture: `tex`, the painter in
 //! `textures::procedural` and a resource pack name in `textures::pack`).
 
 use crate::item::{ItemId, Stack, ToolKind, CLAY_BALL, COAL, LAVA_BUCKET, SHEARS, STICK, WATER_BUCKET};
