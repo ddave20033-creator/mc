@@ -109,19 +109,13 @@ impl Server {
                 // (what they hold, near enough to reach)
                 let near = |m: &crate::entity::mob::Mob| m.pos.distance(from) < 8.0;
                 if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob && near(m)).filter(|_| item == held) {
-                    self.wolf_used(i, item, id);
+                    self.use_on_mob(i, item, id);
                 }
             }
-            Msg::BreakDummy { id: mob } => {
+            Msg::TakeDown { id: mob } => {
                 let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
                 if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob && m.pos.distance(from) < 8.0) {
-                    self.break_dummy(i, !creative);
-                }
-            }
-            Msg::Shear { id: mob } => {
-                let near = |m: &crate::entity::mob::Mob| m.pos.distance(from) < 8.0;
-                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob && near(m)).filter(|_| held == crate::item::SHEARS) {
-                    self.shear_mob(i);
+                    self.take_down(i, !creative);
                 }
             }
             Msg::FurnaceUse { p, part, take, offered } => {

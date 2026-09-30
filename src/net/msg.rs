@@ -85,12 +85,13 @@ pub struct MobNet {
     pub hurt: bool,
     /// Seconds since dying, or negative while alive.
     pub death: f32,
+    pub health: f32,
     /// A sheep without its wool.
     pub sheared: bool,
     /// A target dummy: the damage it has taken, and the last hit.
     pub taken: f32,
     pub last_hit: f32,
-    /// A wolf: `mob::wolf_flags`, and its collar's colour.
+    /// `mob::mob_flags` and the kind's own (a wolf's: `wolf::flags`); a wolf's collar's colour.
     pub flags: u8,
     pub collar: u8,
 }
@@ -184,15 +185,13 @@ pub enum Msg {
         pos: Vec3,
         seed: u32,
     },
-    /// Used shears on a mob (the host drops its wool).
-    Shear {
+    /// Took down a static mob, a target dummy (the server removes it and drops it as its
+    /// item).
+    TakeDown {
         id: u32,
     },
-    /// Took down a target dummy (the host removes it and drops it as an item).
-    BreakDummy {
-        id: u32,
-    },
-    /// Right clicked a mob holding `item` (a wolf: given a bone, or told to sit or stand).
+    /// Right clicked a mob holding `item` (what its kind does: `content::mobs::Hooks::used`;
+    /// shears on a sheep, a bone for a wolf...).
     UseOnMob {
         id: u32,
         item: u16,

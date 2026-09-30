@@ -429,7 +429,7 @@ impl Server {
             .mobs
             .iter()
             .filter(|m| m.pos.distance(at) < MOB_RANGE)
-            .map(|m| crate::net::MobNet { flags: m.wolf_flags(name.as_deref()), ..m.to_net() })
+            .map(|m| m.to_net(name.as_deref()))
             .collect();
         let items: Vec<ItemNet> = self
             .level

@@ -108,7 +108,8 @@ mod tests {
         let full: [Slot; ARMOR_SLOTS] = std::array::from_fn(|i| (i < 4).then(|| Stack::one(armor_id(3, i))));
         assert!((armor_factor(&full, false, false) - 0.2).abs() < 1e-6);
         assert!(armor_factor(&worn, true, false) < armor_factor(&worn, false, false));
-        for id in ARMOR_BASE..=BULLETPROOF_VEST {
+        // (the vest's id is not next to the pieces')
+        for id in (ARMOR_BASE..ARMOR_BASE + 16).chain([BULLETPROOF_VEST]) {
             assert!(armor_of(id).is_some() && armor_durability(id) > 0, "{id}");
         }
     }

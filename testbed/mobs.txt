@@ -1,0 +1,38 @@
+# Every mob (`content::mobs`) summoned on the lane: a pig, a sheep, a wolf and a target dummy,
+# seen from the front and the side; the dummy hit (its tally over it), a sheep sheared.
+world new 7
+window 1280 720
+empty
+lane
+time 0.3
+pos 0 0 0
+look 0 -12
+cmd summon pig ~5 ~ ~-3
+cmd summon sheep ~5 ~ ~-1
+cmd summon wolf ~5 ~ ~1
+cmd summon target_dummy ~5 ~ ~3
+wait 1.2
+shot mobs
+pos 6 0 -7
+look 90 -12
+wait 0.3
+shot mobs_side
+# The dummy, hit twice.
+pos 0 0 3
+look 0 -8
+hold wooden_sword
+click left 0.1
+wait 0.6
+click left 0.1
+wait 0.3
+shot dummy_hit
+wait 1
+shots dummy_rock 4 0.15
+# A sheep of its own, sheared.
+cmd summon sheep ~2.5 ~ ~
+hold shears
+look 0 -25
+wait 0.2
+click right 0.3
+wait 0.5
+shot sheared

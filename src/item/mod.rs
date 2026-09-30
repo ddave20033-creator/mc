@@ -124,7 +124,7 @@ pub const REVOLVER_HAMMER: ItemId = 1137;
 /// not fit the revolver (nor this the pistol).
 pub const MAGNUM_ROUND: ItemId = 1138;
 /// A wooden target dummy: set up with a right click, it shows the damage it takes above its
-/// head (see `entity::mob`, `MobKind::Dummy`).
+/// head (see `entity::mob`, `content::mobs::target_dummy`).
 pub const TARGET_DUMMY: ItemId = 1139;
 /// The AK-47, put together at the gun station from its five parts: the receiver (with the
 /// barrel, sights, handguard, grip and stock), the gas tube, the bolt carrier, the dust cover

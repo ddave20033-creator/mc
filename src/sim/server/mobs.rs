@@ -1,17 +1,21 @@
-//! Mobs on the server: their ticks (with their loot, bites and grazing), natural spawning,
-//! and what players do to them (hits, wolves given a bone or told to sit, shears, dummies
-//! taken down, spawn eggs).
+//! Mobs on the server: their ticks (with their loot, attacks and grazing), natural spawning
+//! (by their `Spawn` rules), and what players do to them (hits, items used on them, static
+//! ones taken down, spawn eggs). What a kind does is in its file (`content::mobs`).
 
 use super::Server;
-use crate::entity::mob::{standable, Foe, Mob, MobCtx, MobEvent, MobKind, BITE};
+use crate::content::mobs::{Behavior, MobDef, MOBS};
+use crate::entity::mob::{standable, Foe, Mob, MobCtx, MobEvent, MobKind};
 use crate::item::*;
-use crate::net::{fx, hurt, Msg};
+use crate::net::{fx, Msg};
 use crate::world::*;
 use glam::{Vec2, Vec3};
 use std::f32::consts::TAU;
 
+/// Animals near a player (within 96 blocks) above which no more appear.
+const MOB_CAP: usize = 10;
+
 impl Server {
-    /// The mobs' tick: they wander, graze, bite, die (dropping their loot), push each other
+    /// The mobs' tick: they wander, graze, attack, die (dropping their loot), push each other
     /// and are pushed by the players. (Not in chunks not loaded: they wait there.)
     pub(super) fn update_mobs(&mut self, dt: f32) {
         let people: Vec<(u8, String, Vec3)> = self
@@ -37,9 +41,12 @@ impl Server {
                 continue;
             }
             match event {
-                MobEvent::Bite(foe) => {
-                    let from = self.level.mobs[i].pos;
-                    self.bite(foe, from);
+                MobEvent::Attack(foe) => {
+                    let m = &self.level.mobs[i];
+                    if let Some(attack) = m.def().attack {
+                        let from = m.pos;
+                        self.mob_attacks(foe, from, attack);
+                    }
                 }
                 MobEvent::EatGrass(q) => {
                     let b = if self.world.geti(q) == GRASS { DIRT } else { AIR };
@@ -51,7 +58,7 @@ impl Server {
                     self.drop_loot(&m);
                     continue;
                 }
-                _ => {}
+                MobEvent::None => {}
             }
             i += 1;
         }
@@ -86,136 +93,93 @@ impl Server {
         }
     }
 
-    /// What a dead mob drops: pigs 1-3 porkchops, sheep 1-2 mutton and their wool (the meat
-    /// cooked if they died burning), and now and then a bone.
+    /// What a dead mob drops: its `loot` (burnt, if it died on fire) and what its kind adds.
     fn drop_loot(&mut self, m: &Mob) {
         let c = m.center();
-        let burnt = m.fire > 0.0;
-        let (meat, most) = match (m.kind, burnt) {
-            (MobKind::Pig, false) => (PORKCHOP, 3.0),
-            (MobKind::Pig, true) => (COOKED_PORKCHOP, 3.0),
-            (MobKind::Sheep, false) => (MUTTON, 2.0),
-            (MobKind::Sheep, true) => (COOKED_MUTTON, 2.0),
-            // (it never dies; a wolf leaves nothing)
-            (MobKind::Dummy | MobKind::Wolf, _) => return,
-        };
-        let n = 1 + (self.random() * most) as u8;
-        self.spawn_drop(c, Stack::new(meat, n.min(most as u8)));
-        if self.random() < 1.0 / 3.0 {
-            self.spawn_drop(c, Stack::one(BONE));
+        let def = m.def();
+        for l in def.loot {
+            if self.random() >= l.chance {
+                continue;
+            }
+            let item = if m.burnt { l.burnt.unwrap_or(l.item) } else { l.item };
+            let n = l.min + (self.random() * (l.max - l.min + 1) as f32) as u8;
+            self.spawn_drop(c, Stack::new(item, n.min(l.max)));
         }
-        if m.kind == MobKind::Sheep && !m.sheared {
-            self.spawn_drop(c, Stack::one(WOOL as ItemId));
+        if let Some(extra) = def.hooks.loot {
+            for s in extra(m) {
+                self.spawn_drop(c, s);
+            }
         }
     }
 
-    /// A wolf (at `from`) bit `foe`.
-    fn bite(&mut self, foe: Foe, from: Vec3) {
+    /// A mob (at `from`) attacked `foe`.
+    fn mob_attacks(&mut self, foe: Foe, from: Vec3, attack: crate::content::mobs::Attack) {
         match foe {
             Foe::Mob(id) => {
                 if let Some(m) = self.level.mobs.iter_mut().find(|m| m.id == id) {
-                    m.hurt(BITE, Some(from), 1.0);
+                    m.hurt(attack.damage, Some(from), 1.0);
                 }
             }
-            Foe::Player(id) => self.send_to(id, &Msg::Hurt { dmg: BITE, from, knock: 1.0, kind: hurt::WOLF }),
+            Foe::Player(id) => self.send_to(id, &Msg::Hurt { dmg: attack.damage, from, knock: 1.0, kind: attack.kind }),
         }
     }
 
-    /// Player `who` attacked `foe`. A wolf hit turns on them, and so does its wild pack;
-    /// `who`'s own tame wolves go for `foe`; a player attacked is defended by theirs.
+    /// Player `who` attacked `foe`: see `provoke_all`.
     pub fn attacked(&mut self, foe: Foe, who: u8) {
         let Some(name) = self.player_name(who) else { return };
-        let me = Foe::Player(who);
-        if let Foe::Mob(id) = foe {
-            if let Some((at, wild)) = self.level.mobs.iter().find(|m| m.id == id && m.kind == MobKind::Wolf).map(|m| (m.pos, m.owner.is_none())) {
-                for m in self.level.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf) {
-                    let pack = wild && m.owner.is_none() && m.pos.distance(at) < 12.0;
-                    if m.id == id || pack {
-                        m.provoke(me, Some(&name));
-                    }
-                }
-            }
-        }
         let foe_name = match foe {
             Foe::Player(id) => self.player_name(id),
             Foe::Mob(_) => None,
         };
-        for m in self.level.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf && m.owner.is_some()) {
-            let own = m.owner.as_deref() == Some(name.as_str());
-            if own && Foe::Mob(m.id) != foe {
-                m.provoke(foe, foe_name.as_deref());
-            }
-            if foe_name.is_some() && m.owner == foe_name {
-                m.provoke(me, Some(&name));
-            }
-        }
+        provoke_all(&mut self.level.mobs, foe, who, &name, foe_name.as_deref());
     }
 
-    /// Player `who` used `item` on wolf `i`: a wild one given a bone may take to them (or not),
-    /// a tame one of theirs sits down or stands up.
-    pub(super) fn wolf_used(&mut self, i: usize, item: ItemId, who: u8) {
+    /// Player `who` used `item` on mob `i` (what its kind does with it: `Hooks::used`).
+    pub(super) fn use_on_mob(&mut self, i: usize, item: ItemId, who: u8) {
         let Some(name) = self.player_name(who) else { return };
-        let m = &mut self.level.mobs[i];
-        if m.kind != MobKind::Wolf || !m.alive() {
-            return;
+        let Some(used) = self.level.mobs[i].def().hooks.used else { return };
+        let r = self.random();
+        let done = used(&mut self.level.mobs[i], item, &name, r);
+        if let Some((kind, pos)) = done.fx {
+            self.broadcast(&Msg::Fx { kind, pos }, None);
         }
-        if item == BONE && m.owner.is_none() && m.foe.is_none() {
-            let took = m.feed_bone(&name);
-            let head = m.pos + Vec3::Y * 0.6;
-            let kind = if took { fx::WOLF_TAKES } else { fx::WOLF_REFUSES };
-            self.broadcast(&Msg::Fx { kind, pos: head }, None);
-            return;
-        }
-        if m.owner.as_deref() == Some(name.as_str()) {
-            m.toggle_sit();
+        if let Some((at, stack)) = done.drop {
+            self.spawn_drop(at, stack);
         }
     }
 
-    /// Shears a sheep, dropping its wool.
-    pub(super) fn shear_mob(&mut self, i: usize) {
-        let m = &mut self.level.mobs[i];
-        if !m.can_shear() {
-            return;
-        }
-        m.sheared = true;
-        let at = m.pos + Vec3::Y * 1.0;
-        let n = 1 + (self.random() * 3.0) as u8;
-        self.spawn_drop(at, Stack::new(WOOL as ItemId, n.min(3)));
-    }
-
-    /// Takes a target dummy down, dropping it as an item (`drop`: not in creative).
-    pub(super) fn break_dummy(&mut self, i: usize, drop: bool) {
-        if self.level.mobs[i].kind != MobKind::Dummy {
+    /// Takes a static mob (a target dummy) down, dropping it as its item (`drop`: not in
+    /// creative).
+    pub(super) fn take_down(&mut self, i: usize, drop: bool) {
+        if self.level.mobs[i].def().behavior != Behavior::Static {
             return;
         }
         let m = self.level.mobs.swap_remove(i);
         let c = m.center();
         self.broadcast(&Msg::Fx { kind: fx::POOF, pos: c }, None);
         if drop {
-            self.spawn_drop(c, Stack::one(TARGET_DUMMY));
+            self.spawn_drop(c, Stack::one(m.def().egg));
         }
     }
 
     pub fn spawn_mob(&mut self, kind: MobKind, pos: Vec3) {
         let mut yaw = self.random() * TAU;
-        if kind == MobKind::Dummy {
-            // A dummy is set up facing whoever is nearest (the one setting it up).
+        if kind.def().behavior == Behavior::Static {
+            // A static one is set up facing whoever is nearest (the one setting it up).
             let near = self.player_positions().into_iter().min_by(|a, b| a.distance_squared(pos).total_cmp(&b.distance_squared(pos)));
             if let Some(p) = near {
                 let d = p - pos;
                 yaw = d.z.atan2(d.x);
             }
         }
-        let seed = (self.random() * 16_777_216.0) as u32;
-        let mut m = Mob::new(kind, pos, yaw, seed);
-        m.id = self.entity_id();
-        self.level.mobs.push(m);
+        let id = self.entity_id();
+        self.level.mobs.push(Mob::new(kind, pos, yaw, id));
     }
 
-    /// Minecraft-like animal spawning: now and then a group of sheep or pigs (Minecraft's
-    /// weights: 12 to 10) appears on grass under the open sky, 24-64 blocks from a player and
-    /// out of their sight, while fewer than 10 animals are around; in forests and taigas now
-    /// and then a pack of wolves instead.
+    /// Minecraft-like spawning: now and then a group of one kind appears 24-64 blocks from a
+    /// player and out of their sight, while fewer than `MOB_CAP` are around: a kind that may
+    /// appear in that biome (by the weights of their `Spawn`), on its ground under the open
+    /// sky, where it is light enough.
     pub(super) fn spawn_animals(&mut self, dt: f32) {
         self.level.mob_spawn_timer -= dt;
         if self.level.mob_spawn_timer > 0.0 {
@@ -233,9 +197,9 @@ impl Server {
             .level
             .mobs
             .iter()
-            .filter(|m| m.kind != MobKind::Dummy && Vec2::new(m.pos.x - me.x, m.pos.z - me.z).length() < 96.0)
+            .filter(|m| m.def().spawn.is_some() && Vec2::new(m.pos.x - me.x, m.pos.z - me.z).length() < 96.0)
             .count();
-        if near >= 10 {
+        if near >= MOB_CAP {
             return;
         }
         let ang = self.random() * TAU;
@@ -245,55 +209,137 @@ impl Server {
         if off.normalize().dot(crate::entity::player::look_dir(pose.yaw, 0.0)) > 0.3 {
             return;
         }
-        let group = 2 + (self.random() * 3.0) as i32;
+        let c = me + off;
+        let biome = self.gen.column(c.x.floor() as i32, c.z.floor() as i32).biome;
+        let r = self.random();
+        let Some(def) = pick_spawn(biome, r) else { return };
+        let Some(rule) = def.spawn else { return };
+        let (least, most) = rule.group;
+        let group = least as usize + (self.random() * (most - least + 1) as f32) as usize;
         let mut spots = Vec::new();
         for k in 0..group * 3 {
-            if spots.len() as i32 >= group {
+            if spots.len() >= group {
                 break;
             }
             let jitter = if k == 0 { Vec3::ZERO } else { Vec3::new(self.random() - 0.5, 0.0, self.random() - 0.5) * 6.0 };
-            let c = me + off + jitter;
-            let (x, z) = (c.x.floor() as i32, c.z.floor() as i32);
+            let at = c + jitter;
+            let (x, z) = (at.x.floor() as i32, at.z.floor() as i32);
             let w = &self.world;
             let Some(top) = w.height_at(x, z) else { continue };
-            if w.get(x, top, z) != GRASS {
+            if !rule.ground.contains(&w.get(x, top, z)) {
                 continue;
             }
-            if let Some((p, GRASS)) = standable(w, x, z, top + 1, 0) {
-                spots.push(p);
-            }
-        }
-        let c = me + off;
-        let biome = self.gen.column(c.x.floor() as i32, c.z.floor() as i32).biome;
-        use crate::world::gen::Biome;
-        let woods = matches!(biome, Biome::Forest | Biome::BirchForest | Biome::Taiga | Biome::SnowyTaiga);
-        let kind = if woods && self.random() < 0.35 {
-            MobKind::Wolf
-        } else if self.random() < 12.0 / 22.0 {
-            MobKind::Sheep
-        } else {
-            MobKind::Pig
-        };
-        if kind == MobKind::Wolf && spots.is_empty() {
-            // (the snowy taiga's ground is snowy grass)
-            for k in 0..group * 3 {
-                let jitter = Vec3::new(k as f32 * 0.37 % 1.0 - 0.5, 0.0, k as f32 * 0.61 % 1.0 - 0.5) * 6.0;
-                let c = me + off + jitter;
-                let (x, z) = (c.x.floor() as i32, c.z.floor() as i32);
-                let w = &self.world;
-                let Some(top) = w.height_at(x, z) else { continue };
-                if w.get(x, top, z) == SNOWY_GRASS {
-                    if let Some((p, _)) = standable(w, x, z, top + 1, 0) {
-                        spots.push(p);
-                    }
-                }
-                if spots.len() as i32 >= group {
-                    break;
+            if let Some((p, ground)) = standable(w, x, z, top + 1, 0) {
+                let (sky, block) = w.light_estimate(p + Vec3::Y * 0.5);
+                if rule.ground.contains(&ground) && sky.max(block) >= rule.min_light {
+                    spots.push(p);
                 }
             }
         }
         for p in spots {
-            self.spawn_mob(kind, p);
+            self.spawn_mob(def.kind, p);
         }
+    }
+}
+
+/// The kind that appears in `biome`, picked by the weights with `r` (0..1): of those whose
+/// `Spawn` lets them appear there.
+fn pick_spawn(biome: crate::world::gen::Biome, r: f32) -> Option<&'static MobDef> {
+    let here = || MOBS.iter().filter(move |d| d.spawn.is_some_and(|s| s.biomes.is_empty() || s.biomes.contains(&biome)));
+    let total: u32 = here().map(|d| d.spawn.map_or(0, |s| s.weight)).sum();
+    let mut left = r * total as f32;
+    for d in here() {
+        let w = d.spawn.map_or(0, |s| s.weight) as f32;
+        if left < w {
+            return Some(d);
+        }
+        left -= w;
+    }
+    here().last()
+}
+
+/// Player `who` (named `name`) attacked `foe` (named `foe_name`, a player): a mob hit that
+/// fights back turns on them, and so do the wild ones of its kind near it; `who`'s pets go
+/// for `foe` (not for a static mob, nor for another of their pets); and a player attacked is
+/// defended by theirs.
+fn provoke_all(mobs: &mut [Mob], foe: Foe, who: u8, name: &str, foe_name: Option<&str>) {
+    let me = Foe::Player(who);
+    let mut pets_may = true;
+    if let Foe::Mob(id) = foe {
+        if let Some(hit) = mobs.iter().find(|m| m.id == id) {
+            let (kind, at, wild) = (hit.kind, hit.pos, hit.owner().is_none());
+            let alert = kind.def().ai.alert;
+            pets_may = hit.def().behavior != Behavior::Static && hit.owner() != Some(name);
+            for m in mobs.iter_mut().filter(|m| m.kind == kind) {
+                let pack = wild && m.owner().is_none() && m.pos.distance(at) < alert;
+                if m.id == id || pack {
+                    m.provoke(me, Some(name));
+                }
+            }
+        }
+    }
+    for m in mobs.iter_mut().filter(|m| m.owner().is_some()) {
+        let own = m.owner() == Some(name);
+        if own && pets_may && Foe::Mob(m.id) != foe {
+            m.provoke(foe, foe_name);
+        }
+        if foe_name.is_some() && m.owner() == foe_name {
+            m.provoke(me, Some(name));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::mobs::{pig::PIG, sheep::SHEEP, wolf::WOLF, TARGET_DUMMY};
+    use crate::world::gen::Biome;
+
+    fn wolf(id: u32, x: f32, owner: Option<&str>) -> Mob {
+        let mut m = Mob::new(WOLF, Vec3::new(x, 64.0, 0.0), 0.0, id);
+        if let Some(o) = owner {
+            m.feed_bone(o, true);
+            m.toggle_sit();
+        }
+        m
+    }
+
+    #[test]
+    fn pets_leave_dummies_and_each_other_alone() {
+        let mut mobs = vec![wolf(1, 0.0, Some("Alby")), wolf(2, 1.0, Some("Alby")), Mob::new(TARGET_DUMMY, Vec3::new(3.0, 64.0, 0.0), 0.0, 3)];
+        provoke_all(&mut mobs, Foe::Mob(3), 0, "Alby", None);
+        assert!(mobs.iter().all(|m| m.foe.is_none()), "went for the dummy");
+        provoke_all(&mut mobs, Foe::Mob(2), 0, "Alby", None);
+        assert!(mobs.iter().all(|m| m.foe.is_none()), "went for one of their own");
+        // Someone else's pig: they go for it.
+        mobs.push(Mob::new(PIG, Vec3::new(5.0, 64.0, 0.0), 0.0, 4));
+        provoke_all(&mut mobs, Foe::Mob(4), 0, "Alby", None);
+        assert_eq!(mobs[0].foe, Some(Foe::Mob(4)));
+        assert_eq!(mobs[1].foe, Some(Foe::Mob(4)));
+    }
+
+    #[test]
+    fn a_wild_pack_turns_on_whoever_hurts_one_of_them() {
+        let mut mobs = vec![wolf(1, 0.0, None), wolf(2, 5.0, None), wolf(3, 40.0, None), wolf(4, 1.0, Some("Bob"))];
+        provoke_all(&mut mobs, Foe::Mob(1), 7, "Alby", None);
+        assert_eq!(mobs[0].foe, Some(Foe::Player(7)));
+        assert_eq!(mobs[1].foe, Some(Foe::Player(7)));
+        assert!(mobs[2].foe.is_none() && mobs[3].foe.is_none());
+        // Attacking Bob: his wolf defends him.
+        provoke_all(&mut mobs, Foe::Player(9), 7, "Alby", Some("Bob"));
+        assert_eq!(mobs[3].foe, Some(Foe::Player(7)));
+    }
+
+    #[test]
+    fn spawns_follow_the_biomes_and_weights() {
+        let pick = |b, r| pick_spawn(b, r).map(|d| d.kind);
+        // In a forest: wolves too (12 of 34).
+        let forest: Vec<_> = (0..34).map(|i| pick(Biome::Forest, (i as f32 + 0.5) / 34.0).unwrap()).collect();
+        assert_eq!(forest.iter().filter(|k| **k == WOLF).count(), 12);
+        assert_eq!(forest.iter().filter(|k| **k == SHEEP).count(), 12);
+        assert_eq!(forest.iter().filter(|k| **k == PIG).count(), 10);
+        // On the plains: never.
+        assert!((0..100).all(|i| pick(Biome::Plains, i as f32 / 100.0) != Some(WOLF)));
+        assert!((0..100).all(|i| pick(Biome::Plains, i as f32 / 100.0) != Some(TARGET_DUMMY)));
     }
 }

@@ -29,7 +29,8 @@ impl Server {
         );
         // Ids are not saved: every loaded mob and item gets a fresh one.
         for i in 0..self.level.mobs.len() {
-            self.level.mobs[i].id = self.entity_id();
+            let id = self.entity_id();
+            self.level.mobs[i].set_id(id);
         }
         for i in 0..self.level.items.len() {
             self.level.items[i].id = self.entity_id();

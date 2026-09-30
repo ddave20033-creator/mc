@@ -451,11 +451,7 @@ impl Msg {
                 w.u8(*kind);
                 w.vec3(*pos);
             }
-            Msg::Shear { id } => {
-                w.u8(11);
-                w.u32(*id);
-            }
-            Msg::BreakDummy { id } => {
+            Msg::TakeDown { id } => {
                 w.u8(48);
                 w.u32(*id);
             }
@@ -587,6 +583,7 @@ impl Msg {
                     }
                     w.bool(m.hurt);
                     w.f32(m.death);
+                    w.f32(m.health);
                     w.bool(m.sheared);
                     w.f32(m.taken);
                     w.f32(m.last_hit);
@@ -846,8 +843,7 @@ impl Msg {
             8 => Msg::Open { p: r.ivec3()? },
             9 => Msg::Command(r.str()?),
             10 => Msg::Save(r.state()?),
-            11 => Msg::Shear { id: r.u32()? },
-            48 => Msg::BreakDummy { id: r.u32()? },
+            48 => Msg::TakeDown { id: r.u32()? },
             49 => Msg::UseOnMob { id: r.u32()?, item: r.u16()? },
             12 => Msg::FurnaceUse {
                 p: r.ivec3()?,
@@ -893,6 +889,7 @@ impl Msg {
                         limb_amount: r.f32()?,
                         hurt: r.bool()?,
                         death: r.f32()?,
+                        health: r.f32()?,
                         sheared: r.bool()?,
                         taken: r.f32()?,
                         last_hit: r.f32()?,
@@ -1151,8 +1148,7 @@ mod tests {
             state: Some(state.clone()),
         });
         roundtrip(Msg::Save(state));
-        roundtrip(Msg::Shear { id: 77 });
-        roundtrip(Msg::BreakDummy { id: 78 });
+        roundtrip(Msg::TakeDown { id: 78 });
         roundtrip(Msg::UseOnMob { id: 78, item: 380 });
         roundtrip(Msg::Blocks(vec![
             (IVec3::new(1, 2, 3), 7),
@@ -1173,6 +1169,7 @@ mod tests {
                 limb_amount: 0.4,
                 hurt: true,
                 death: -1.0,
+                health: 6.5,
                 sheared: true,
                 taken: 12.5,
                 last_hit: 7.0,
