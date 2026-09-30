@@ -41,6 +41,10 @@ pub struct Player {
     pub crouch: f32,
     /// Bumped into a wall horizontally during the last update.
     pub hit_wall: bool,
+    /// Where it was before the last tick (drawn between that and `pos`) and its eye height
+    /// then.
+    pub prev_pos: Vec3,
+    pub prev_crouch: f32,
 }
 
 pub fn look_dir(yaw: f32, pitch: f32) -> Vec3 {
@@ -144,6 +148,27 @@ fn clip_move(world: &World, p: Vec3, axis: usize, delta: f32) -> f32 {
 impl Player {
     pub fn eye(&self) -> Vec3 {
         self.pos + Vec3::Y * (EYE_HEIGHT - self.crouch * SNEAK_DROP)
+    }
+
+    /// Before a tick: where it is now is where the next frames start from.
+    pub fn start_tick(&mut self) {
+        self.prev_pos = self.pos;
+        self.prev_crouch = self.crouch;
+    }
+
+    /// Where it is drawn, `between` (0..1) of the way from before the last tick to now (not
+    /// across a jump of more than a few blocks: a teleport).
+    pub fn drawn_pos(&self, between: f32) -> Vec3 {
+        if self.prev_pos.distance_squared(self.pos) > 16.0 {
+            return self.pos;
+        }
+        self.prev_pos.lerp(self.pos, between)
+    }
+
+    /// Its eye, drawn (see `drawn_pos`).
+    pub fn drawn_eye(&self, between: f32) -> Vec3 {
+        let crouch = self.prev_crouch + (self.crouch - self.prev_crouch) * between;
+        self.drawn_pos(between) + Vec3::Y * (EYE_HEIGHT - crouch * SNEAK_DROP)
     }
 
     pub fn intersects(&self, b: IVec3) -> bool {

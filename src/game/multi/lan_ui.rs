@@ -6,7 +6,7 @@ impl Game {
     /// Names above the other players' heads.
     pub(in crate::game) fn draw_name_tags(&mut self) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
-        let cam = self.player.eye();
+        let cam = self.eye();
         let time = self.time;
         for r in &self.remotes {
             let p = r.pose;

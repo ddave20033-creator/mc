@@ -23,7 +23,7 @@ impl Game {
     fn draw_dummy_tags(&mut self) {
         use crate::entity::mob::{MobKind, DUMMY_RESET};
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
-        let cam = self.player.eye();
+        let cam = self.eye();
         let focal = 1.0 / (self.fov_current.to_radians() * 0.5).tan();
         let tags: Vec<(Vec3, f32, f32, f32)> = self
             .level.mobs

@@ -37,6 +37,7 @@ use crate::model::player::{
 use crate::render::{FrameInfo, FrameUbo, Renderer, SHADOW_SIZE};
 use crate::save::{ChunkSaver, PlayerSave, WorldMeta};
 use crate::settings::Settings;
+use crate::sim::clock::TICK_SECS;
 use crate::ui::chat::{self, Chat, ChatInput};
 use crate::ui::screens::{self, Action};
 use crate::ui::{rgba, with_alpha, Color, Ui, WHITE};
@@ -271,6 +272,11 @@ pub struct Game {
 
     /// Frame timing: the frame rate, the F3 graph and statistics, the frame limiter.
     clock: FrameClock,
+    /// The simulation's ticks (20 a second), and where the frame is between the last one and
+    /// the next (0..1: things are drawn that far from where they were before the last tick
+    /// toward where they are).
+    ticks: crate::sim::clock::Clock,
+    between: f32,
     time: f32,
     /// (title, description) of the resource pack in use, for the credits.
     pack_credit: Option<(String, String)>,
@@ -361,6 +367,8 @@ impl Game {
             level: Level::new(),
             input: Input::new(),
             clock: FrameClock::new(),
+            ticks: crate::sim::clock::Clock::new(Instant::now()),
+            between: 1.0,
             bench_ui: BenchUi::new(),
             inv_ui: InventoryUi::new(),
             menus: Menus::new(),

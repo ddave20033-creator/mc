@@ -21,7 +21,7 @@ impl Game {
     /// Throws a stack in the look direction.
     pub(in crate::game) fn throw(&mut self, stack: Stack) {
         let dir = look_dir(self.yaw, self.pitch);
-        let pos = self.player.eye() - Vec3::Y * 0.3 + dir * 0.3;
+        let pos = self.eye() - Vec3::Y * 0.3 + dir * 0.3;
         self.add_item(ItemEntity::new(pos, dir * 6.0 + Vec3::Y * 1.5, stack, 1.5));
     }
 
@@ -197,7 +197,7 @@ impl Game {
     /// Glass bottle on water: fills it (lake water, not safe to drink until boiled).
     pub(in crate::game) fn fill_bottle(&mut self) {
         let dir = look_dir(self.yaw, self.pitch);
-        let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.player.eye(), dir, 5.0) else {
+        let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.eye(), dir, 5.0) else {
             return;
         };
         if !is_water(self.terrain.world.geti(hit)) {
@@ -235,7 +235,7 @@ impl Game {
             _ => 0.0,
         };
         let now = before + dt;
-        let mouth = self.player.eye() + look_dir(self.yaw, self.pitch) * 0.35 - Vec3::Y * 0.15;
+        let mouth = self.eye() + look_dir(self.yaw, self.pitch) * 0.35 - Vec3::Y * 0.15;
         if !c.drink && now > 0.35 && (now / 0.2).floor() != (before / 0.2).floor() {
             // Bits of food fly off every 4 ticks, like Minecraft's eating particles.
             if let Icon::Flat(layer) = icon(held) {
@@ -276,7 +276,7 @@ impl Game {
 
     pub(in crate::game) fn fill_bucket(&mut self) {
         let dir = look_dir(self.yaw, self.pitch);
-        let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.player.eye(), dir, 5.0) else {
+        let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.eye(), dir, 5.0) else {
             return;
         };
         let b = self.terrain.world.geti(hit);

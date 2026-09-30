@@ -118,6 +118,7 @@ impl Game {
             ["tp", coords @ ..] if coords.len() == 3 => match parse_pos(coords, self.player.pos) {
                 Some(p) => {
                     self.player.pos = p;
+                    self.player.start_tick();
                     self.player.vel = Vec3::ZERO;
                     self.fall_peak = p.y;
                     let f = |v: f32| format!("{v:.1}");

@@ -223,7 +223,7 @@ impl Game {
             return;
         }
         // (a swing going on keeps to the trunk it began on)
-        let eye = self.player.eye();
+        let eye = self.eye();
         let dir = look_dir(self.yaw, self.pitch);
         let block_dist = self
             .target

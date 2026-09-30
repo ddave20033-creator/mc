@@ -214,7 +214,7 @@ impl Game {
             return None;
         }
         let look = look_dir(self.yaw, self.pitch);
-        let from = self.guns.light_from.or(self.guns.light_tp).unwrap_or(self.player.eye() + look * 0.5);
+        let from = self.guns.light_from.or(self.guns.light_tp).unwrap_or(self.eye() + look * 0.5);
         Some((from, self.guns.gun_dir.unwrap_or(look)))
     }
 
@@ -313,7 +313,7 @@ impl Game {
                 reload_anim_time((t + dt) / length, kind, rack),
             );
             let finished = t + dt >= length;
-            let at = self.player.eye();
+            let at = self.eye();
             let due = |k: f32| (was < k && now >= k) || finished;
             // Each gun's magazine and slide (or bolt) sound its own.
             let feed = gun.magazine();
@@ -525,7 +525,7 @@ impl Game {
         }
         let look = look_dir(self.yaw, 0.0);
         let right = look.cross(Vec3::Y).normalize_or_zero();
-        let at = self.player.eye() - Vec3::Y * 0.7 + look * 0.35 + right * 0.15;
+        let at = self.eye() - Vec3::Y * 0.7 + look * 0.35 + right * 0.15;
         let vel = self.player.vel * 0.8 + look * 0.4 - Vec3::Y * 0.5;
         self.add_item(crate::entity::dropped::ItemEntity::new(at, vel, mag, 1.0));
     }
@@ -635,7 +635,7 @@ impl Game {
         let seed = self.random();
         self.hand.shoot(if silenced { 0.0 } else { stats.flash }, seed);
 
-        let eye = self.player.eye();
+        let eye = self.eye();
         // The shot goes where the gun points (the scope's middle, with one), not where the
         // view looks; but not where a gun being looked over or carried at a run points (the
         // barrel far off the view: it would go sideways or back).
@@ -745,7 +745,7 @@ impl Game {
 
     /// A spent case (or shotgun hull) flies out to the right of the gun, tumbling.
     fn eject_case(&mut self, kind: GunKind) {
-        let eye = self.player.eye();
+        let eye = self.eye();
         let look = look_dir(self.yaw, self.pitch);
         let right = look.cross(Vec3::Y).normalize_or_zero();
         let port = match (self.camera.mode, self.guns.eject, self.guns.eject_tp) {
@@ -979,7 +979,7 @@ impl Game {
         }
         let range = kind.stats().range.min(120.0);
         let dir = self.guns.gun_dir.unwrap_or_else(|| look_dir(self.yaw, self.pitch));
-        let Some(p) = self.laser_hit(self.player.eye(), dir, range, None) else { return };
+        let Some(p) = self.laser_hit(self.eye(), dir, range, None) else { return };
         // A small dot near by, still visible far away.
         let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
         ballistics::emit_laser_dot(out, p, right, up, size);

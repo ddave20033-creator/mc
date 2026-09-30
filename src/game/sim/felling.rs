@@ -43,8 +43,10 @@ pub(in crate::game) struct FallingTree {
     /// the axis it turns about (level, across the way it falls).
     pivot: Vec3,
     axis: Vec3,
-    /// How far over it is (radians from upright) and how fast it is going over.
+    /// How far over it is (radians from upright) and how fast it is going over, and how far
+    /// before the last tick (drawn between).
     angle: f32,
+    prev_angle: f32,
     speed: f32,
     /// How high it reaches over the hinge (its fall is slower, the taller it is).
     height: f32,
@@ -65,7 +67,11 @@ pub(in crate::game) struct FallingTree {
 
 impl FallingTree {
     fn turn(&self) -> Mat4 {
-        Mat4::from_translation(self.pivot) * Mat4::from_axis_angle(self.axis, self.angle)
+        self.turned(self.angle)
+    }
+
+    fn turned(&self, angle: f32) -> Mat4 {
+        Mat4::from_translation(self.pivot) * Mat4::from_axis_angle(self.axis, angle)
     }
 
     /// Where a block's middle is now.
@@ -496,6 +502,7 @@ impl Game {
             pivot,
             axis: Vec3::Y.cross(toward).normalize(),
             angle: 0.02,
+            prev_angle: 0.02,
             speed: 0.15,
             height,
             blocks,
@@ -515,6 +522,7 @@ impl Game {
         const GRAVITY: f32 = 28.0;
         let mut landed = Vec::new();
         for (i, t) in self.level.falling_trees.iter_mut().enumerate() {
+            t.prev_angle = t.angle;
             let pull = 1.5 * GRAVITY / t.height.max(1.5) * t.angle.sin().max(0.04);
             t.speed += pull * dt;
             t.angle += t.speed * dt;
@@ -596,7 +604,7 @@ impl Game {
         use crate::model::{emit_box, emit_item};
         let fl = crate::world::mesh::flags::ENTITY;
         for t in &self.level.falling_trees {
-            let turn = t.turn();
+            let turn = t.turned(t.prev_angle + (t.angle - t.prev_angle) * self.between);
             let mid = t.at(&turn, Vec3::new(0.0, t.height * 0.5, 0.0));
             if mid.distance(eye) > sight + t.height {
                 continue;

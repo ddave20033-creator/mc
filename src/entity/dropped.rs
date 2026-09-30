@@ -18,6 +18,9 @@ pub struct ItemEntity {
     slosh: crate::model::bucket::Slosh,
     /// Unique id for LAN play.
     pub id: u32,
+    /// Where it was, its age and how far it had flown to whoever picks it up before the last
+    /// tick (drawn between that and now); None where it moves in frames (a LAN player's copy).
+    prev: Option<(Vec3, f32, f32)>,
 }
 
 struct PickupFlight {
@@ -31,6 +34,8 @@ pub struct FallingBlock {
     pub pos: Vec3,
     pub vel_y: f32,
     pub block: Block,
+    /// Where it was before the last tick (see `ItemEntity::prev`).
+    pub prev: Option<Vec3>,
 }
 
 fn solid_at(w: &World, p: Vec3) -> bool {
@@ -48,7 +53,13 @@ impl ItemEntity {
             pickup: None,
             slosh: Default::default(),
             id: 0,
+            prev: None,
         }
+    }
+
+    /// Before a tick: how it is now is where the next frames start from.
+    pub fn start_tick(&mut self) {
+        self.prev = Some((self.pos, self.age, self.pickup.as_ref().map_or(0.0, |f| f.elapsed)));
     }
 
     pub fn is_picking_up(&self) -> bool {
@@ -131,14 +142,22 @@ impl ItemEntity {
         }
     }
 
-    pub fn build(&self, out: &mut Vec<Vertex>, time: f32, sky: u8, blk: u8) {
+    /// Its model, `between` (0..1) of the way from before the last tick to now.
+    pub fn build(&self, out: &mut Vec<Vertex>, time: f32, sky: u8, blk: u8, between: f32) {
         let light = vertex_light(sky, blk);
-        let (pos, size) = if let Some(flight) = &self.pickup {
-            let t = flight.elapsed / PICKUP_TIME;
-            (self.pos, 0.3 * (1.0 - t * t).max(0.01))
+        let elapsed = self.pickup.as_ref().map_or(0.0, |f| f.elapsed);
+        let (pos, age, elapsed) = match self.prev {
+            Some((p, a, e)) if p.distance_squared(self.pos) < 16.0 => {
+                (p.lerp(self.pos, between), a + (self.age - a) * between, e + (elapsed - e) * between)
+            }
+            _ => (self.pos, self.age, elapsed),
+        };
+        let (pos, size) = if self.pickup.is_some() {
+            let t = elapsed / PICKUP_TIME;
+            (pos, 0.3 * (1.0 - t * t).max(0.01))
         } else {
-            let bob = (time * 2.2 + self.age).sin() * 0.06 + 0.15;
-            (self.pos + Vec3::Y * bob, 0.3)
+            let bob = (time * 2.2 + age).sin() * 0.06 + 0.15;
+            (pos + Vec3::Y * bob, 0.3)
         };
         let copies = if self.stack.count > 16 {
             3
@@ -151,7 +170,7 @@ impl ItemEntity {
             let off =
                 Vec3::new(i as f32 * 0.06, i as f32 * 0.05, -(i as f32) * 0.04) * (size / 0.3);
             let m = Mat4::from_translation(pos + off)
-                * Mat4::from_rotation_y(self.age * 1.6 + time * 0.2);
+                * Mat4::from_rotation_y(age * 1.6 + time * 0.2);
             if let Some(fill) = crate::model::bucket::Fill::of(self.stack.item) {
                 use crate::model::bucket;
                 let scale = size * 1.5;
@@ -189,10 +208,12 @@ impl FallingBlock {
         false
     }
 
-    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8) {
+    /// Its box, `between` (0..1) of the way from before the last tick to now.
+    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8, between: f32) {
         let light = vertex_light(sky, blk);
         let layers = std::array::from_fn(|f| face_texture(self.block, f));
-        let min = Vec3::new(self.pos.x - 0.5, self.pos.y, self.pos.z - 0.5);
+        let pos = self.prev.map_or(self.pos, |p| p.lerp(self.pos, between));
+        let min = Vec3::new(pos.x - 0.5, pos.y, pos.z - 0.5);
         emit_box(
             out,
             Mat4::IDENTITY,

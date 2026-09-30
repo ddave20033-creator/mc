@@ -362,18 +362,19 @@ impl Game {
         }
     }
 
-    /// The player and the world move on (depending on the screen), and the animations.
-    fn update(&mut self, dt: f32) {
+    /// The player's eye where it is drawn this frame (between the last two ticks): what the
+    /// camera sees from, and what is aimed and shot from.
+    pub(super) fn eye(&self) -> Vec3 {
+        self.player.drawn_eye(self.between)
+    }
+
+    /// What runs on the current screen: the player (with the keys, or not while a screen is
+    /// open), and the world.
+    fn running(&self) -> (Option<bool>, bool) {
         match self.screen {
-            Screen::Playing => {
-                self.update_player(dt, true);
-                self.update_world(dt);
-            }
-            Screen::Chat | Screen::Container(_) | Screen::Spectate => {
-                self.update_player(dt, false);
-                self.update_world(dt);
-            }
-            Screen::Dead => self.update_world(dt),
+            Screen::Playing => (Some(true), true),
+            Screen::Chat | Screen::Container(_) | Screen::Spectate => (Some(false), true),
+            Screen::Dead => (None, true),
             // A LAN game keeps running behind the pause menu.
             Screen::Paused
             | Screen::Options { in_game: true }
@@ -381,11 +382,35 @@ impl Game {
             | Screen::KeyBinds { in_game: true }
                 if self.net.is_some() =>
             {
-                self.update_player(dt, false);
-                self.update_world(dt);
+                (Some(false), true)
             }
+            // Paused, or out of the world.
+            _ => (None, false),
+        }
+    }
+
+    /// The ticks due (the player's movement and the world, in fixed steps), then this frame's
+    /// part: looking, aiming, what is done with the hands, and the animations.
+    fn update(&mut self, dt: f32) {
+        let now = Instant::now();
+        let (player, world) = self.running();
+        for _ in 0..self.ticks.due(now) {
+            if let Some(control) = player {
+                self.tick_player(control);
+            }
+            if world {
+                self.tick_world();
+            }
+        }
+        self.between = self.ticks.between(now);
+        if let Some(control) = player {
+            self.update_player(dt, control);
+        }
+        if world {
+            self.update_world(dt);
+        } else {
             // Paused (or out of the world): burning furnaces and the like go quiet.
-            _ => self.audio.set_loops(&[]),
+            self.audio.set_loops(&[]);
         }
         self.particles.update(dt, &self.terrain.world);
         self.update_craft_fx(dt);
@@ -416,7 +441,7 @@ impl Game {
     /// slowly turning menu panorama.
     fn camera_view(&mut self, dt: f32, w: f32, h: f32) -> View {
         let in_world = self.in_world_view();
-        let eye = self.sleep_eye().unwrap_or(self.player.eye());
+        let eye = self.sleep_eye().unwrap_or(self.eye());
         let aim_dir = look_dir(self.yaw, self.pitch);
         let camera_offset = self
             .camera
@@ -564,7 +589,7 @@ impl Game {
         } else {
             Vec3::Y
         };
-        let focus_pos = if in_world { self.player.eye() } else { cam };
+        let focus_pos = if in_world { self.eye() } else { cam };
         let mut light_view =
             Mat4::look_at_rh(focus_pos + sky.light_dir * 220.0, focus_pos, light_up);
         let lc = light_view.transform_point3(focus_pos);
@@ -708,7 +733,7 @@ impl Game {
             && !self.spectator()
             && crate::model::player::gives_light(self.held())
         {
-            let p = self.player.eye() - Vec3::Y * 0.35;
+            let p = self.eye() - Vec3::Y * 0.35;
             lights.push((p, intensity(self.held(), 0.0)));
         }
         if in_world {
@@ -766,7 +791,7 @@ impl Game {
                 crack_overlay(&mut scene.overlay, p, prog);
             }
         }
-        let (player_sky, player_blk) = self.terrain.world.light_estimate(self.player.eye());
+        let (player_sky, player_blk) = self.terrain.world.light_estimate(self.eye());
         // First Person Model's dynamic hands: with the first-person body on, the regular hand
         // shows the held item while looking ahead. Looking down past 15 degrees it sinks
         // (fully gone past 30), and past 30 degrees the body's own arms take over.
@@ -929,11 +954,11 @@ impl Game {
         if in_world && self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
             // In bed: built standing, then laid down on it.
             let bed = self.sleep.map(|s| {
-                crate::model::player::lying(self.player.pos, facing_dir(s.facing).as_vec3())
+                crate::model::player::lying(self.player.drawn_pos(self.between), facing_dir(s.facing).as_vec3())
             });
             let (pos, head_yaw, pitch) = match bed {
                 Some((feet, yaw, _)) => (feet, yaw, 0.0),
-                None => (self.player.pos, self.visual_head_yaw(), self.pitch),
+                None => (self.player.drawn_pos(self.between), self.visual_head_yaw(), self.pitch),
             };
             let pose = PlayerPose {
                 pos,
@@ -1100,11 +1125,11 @@ impl Game {
         let eye = self.player.pos;
         for it in self.level.items.iter().filter(|it| it.pos.distance_squared(eye) < ITEM_SIGHT * ITEM_SIGHT) {
             let (sky, blk) = world.light_estimate(it.pos + Vec3::Y * 0.3);
-            it.build(target, self.time, sky, blk);
+            it.build(target, self.time, sky, blk, self.between);
         }
         for f in self.level.falling.iter().filter(|f| f.pos.distance_squared(eye) < sight * sight) {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
-            f.build(target, sky, blk);
+            f.build(target, sky, blk, self.between);
         }
         self.build_falling_trees(target, eye, sight);
         self.build_lying_logs(target, eye, sight);
@@ -1116,7 +1141,7 @@ impl Game {
                 continue;
             }
             let (sky, blk) = world.light_estimate(m.center());
-            m.build(mob_verts, sky, blk);
+            m.build(mob_verts, sky, blk, self.between);
         }
         // Watching someone through their eyes: their own model would be in the way.
         let inside = self.spectating.filter(|_| !third_person);

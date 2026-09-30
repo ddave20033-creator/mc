@@ -230,7 +230,23 @@ pub enum MobEvent {
     Bite(Foe),
 }
 
+/// What a mob's model is drawn from: where it is, how it is turned, its legs' swing and how
+/// long it has been dying.
+#[derive(Clone, Copy, Default)]
+pub struct MobPose {
+    pub pos: Vec3,
+    pub body_yaw: f32,
+    pub head_yaw: f32,
+    pub pitch: f32,
+    pub limb_swing: f32,
+    pub limb_amount: f32,
+    pub death: Option<f32>,
+}
+
 pub struct Mob {
+    /// Its pose before the last tick (drawn between that and now); None where it moves in
+    /// frames (a LAN player's copy follows the host's).
+    prev: Option<MobPose>,
     /// Unique id for LAN play.
     pub id: u32,
     /// LAN player: the latest state from the host, which the mob glides toward.
@@ -407,6 +423,7 @@ impl Mob {
             in_water: false,
             fall_peak: pos.y,
             limb_swing: 0.0,
+            prev: None,
             limb_amount: 0.0,
             target: None,
             target_time: 0.0,
@@ -1273,12 +1290,52 @@ impl Mob {
 
     // ------------------------------------------------------------------------ model
 
-    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8) {
+    fn pose(&self) -> MobPose {
+        MobPose {
+            pos: self.pos,
+            body_yaw: self.body_yaw,
+            head_yaw: self.head_yaw,
+            pitch: self.pitch,
+            limb_swing: self.limb_swing,
+            limb_amount: self.limb_amount,
+            death: self.death,
+        }
+    }
+
+    /// Before a tick: its pose now is where the next frames start from.
+    pub fn start_tick(&mut self) {
+        self.prev = Some(self.pose());
+    }
+
+    /// Its pose `between` (0..1) of the way from before the last tick to now.
+    pub fn drawn(&self, between: f32) -> MobPose {
+        let now = self.pose();
+        let Some(a) = self.prev.filter(|a| a.pos.distance_squared(now.pos) < 16.0) else {
+            return now;
+        };
+        let turn = |a: f32, b: f32| a + wrap_angle(b - a) * between;
+        let mix = |a: f32, b: f32| a + (b - a) * between;
+        MobPose {
+            pos: a.pos.lerp(now.pos, between),
+            body_yaw: turn(a.body_yaw, now.body_yaw),
+            head_yaw: turn(a.head_yaw, now.head_yaw),
+            pitch: mix(a.pitch, now.pitch),
+            limb_swing: mix(a.limb_swing, now.limb_swing),
+            limb_amount: mix(a.limb_amount, now.limb_amount),
+            death: match (a.death, now.death) {
+                (Some(x), Some(y)) => Some(mix(x, y)),
+                (_, d) => d,
+            },
+        }
+    }
+
+    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8, between: f32) {
+        let p = &self.drawn(between);
         let light = vertex_light(sky, blk);
         if self.kind == MobKind::Dummy {
             // Its model's front (+Z) toward where it faces.
-            let root = Mat4::from_translation(self.pos)
-                * Mat4::from_rotation_y(FRAC_PI_2 - self.body_yaw)
+            let root = Mat4::from_translation(p.pos)
+                * Mat4::from_rotation_y(FRAC_PI_2 - p.body_yaw)
                 * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
             crate::model::dummy::emit(out, root, self.tilt, light, 0);
             return;
@@ -1289,18 +1346,18 @@ impl Mob {
             [255, 255, 255]
         };
         // Dying: tips over onto its side (Minecraft's LivingEntityRenderer flip).
-        let flip = self
+        let flip = p
             .death
             .map(|t| (t * 1.6).sqrt().min(1.0) * FRAC_PI_2)
             .unwrap_or(0.0);
-        let root = Mat4::from_translation(self.pos)
-            * Mat4::from_rotation_y(-self.body_yaw - FRAC_PI_2)
+        let root = Mat4::from_translation(p.pos)
+            * Mat4::from_rotation_y(-p.body_yaw - FRAC_PI_2)
             * Mat4::from_rotation_z(flip)
             * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
         match self.kind {
-            MobKind::Pig => self.build_pig(out, root, tint, light),
-            MobKind::Sheep => self.build_sheep(out, root, tint, light),
-            MobKind::Wolf => self.build_wolf(out, root, tint, light),
+            MobKind::Pig => self.build_pig(p, out, root, tint, light),
+            MobKind::Sheep => self.build_sheep(p, out, root, tint, light),
+            MobKind::Wolf => self.build_wolf(p, out, root, tint, light),
             MobKind::Dummy => {}
         }
     }
@@ -1308,7 +1365,7 @@ impl Mob {
     /// Minecraft's `WolfModel`: head (with its ears and snout), body, mane, four legs and
     /// the tail; sitting, the body tips back onto its haunches. The wild, tame or angry
     /// wolf's texture, and a tame one's collar over it in its colour.
-    fn build_wolf(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
+    fn build_wolf(&self, p: &MobPose, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
         let part = |px: f32, py: f32, pz: f32, rot: Mat4| {
             root * Mat4::from_translation(Vec3::new(-px, 24.0 - py, pz))
                 * rot
@@ -1319,11 +1376,11 @@ impl Mob {
         let tame = self.owner.is_some() || flags.is_some_and(|f| f & wolf_flags::TAME != 0);
         let angry = self.foe.is_some() || flags.is_some_and(|f| f & wolf_flags::ANGRY != 0);
         let sit = self.sitting;
-        let ls = self.limb_swing * 0.6662;
-        let la = self.limb_amount;
+        let ls = p.limb_swing * 0.6662;
+        let la = p.limb_amount;
 
-        let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
-        let head = part(-1.0, 13.5, -7.0, Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(self.pitch));
+        let head_yaw = wrap_angle(p.head_yaw - p.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
+        let head = part(-1.0, 13.5, -7.0, Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(p.pitch));
         let (body, mane, tail_at, legs) = if sit {
             (
                 part(0.0, 18.0, 0.0, rx(PI / 4.0)),
@@ -1393,22 +1450,22 @@ impl Mob {
 
     /// Minecraft's `SheepModel` (a `QuadrupedModel` with leg height 12) and, unless sheared,
     /// `SheepFurModel` over it: the same parts grown a little, with the wool texture.
-    fn build_sheep(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
+    fn build_sheep(&self, p: &MobPose, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
         let part = |px: f32, py: f32, pz: f32, rot: Mat4| {
             root * Mat4::from_translation(Vec3::new(-px, 24.0 - py, pz))
                 * rot
                 * Mat4::from_scale(Vec3::new(-1.0, -1.0, 1.0))
         };
-        let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
+        let head_yaw = wrap_angle(p.head_yaw - p.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
         let head = part(
             0.0,
             6.0,
             -8.0,
-            Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(self.pitch),
+            Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(p.pitch),
         );
         let body = part(0.0, 5.0, 2.0, Mat4::from_rotation_x(-FRAC_PI_2));
-        let ls = self.limb_swing * 0.6662;
-        let la = self.limb_amount;
+        let ls = p.limb_swing * 0.6662;
+        let la = p.limb_amount;
         let legs = [
             (-3.0, 7.0, ls.cos()),
             (3.0, 7.0, (ls + PI).cos()),
@@ -1440,7 +1497,7 @@ impl Mob {
     }
 
     /// Minecraft's `PigModel` (a `QuadrupedModel` with leg height 6), in model pixels.
-    fn build_pig(&self, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
+    fn build_pig(&self, p: &MobPose, out: &mut Vec<Vertex>, root: Mat4, tint: [u8; 3], light: [u8; 4]) {
         use pig_skin::*;
         // A part's pivot, given in Minecraft's model coordinates (Y down from 24 = the ground,
         // X mirrored), then its rotation in ours.
@@ -1453,12 +1510,12 @@ impl Mob {
             emit_paged(out, m, o, &SKIN, b, 0.0, tex::PIG, tint, light);
         };
 
-        let head_yaw = wrap_angle(self.head_yaw - self.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
+        let head_yaw = wrap_angle(p.head_yaw - p.body_yaw).clamp(-HEAD_LIMIT, HEAD_LIMIT);
         let head = part(
             0.0,
             12.0,
             -6.0,
-            Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(self.pitch),
+            Mat4::from_rotation_y(-head_yaw) * Mat4::from_rotation_x(p.pitch),
         );
         cube(out, head, [-4.0, -4.0, -8.0], HEAD);
         cube(out, head, [-2.0, 0.0, -9.0], SNOUT);
@@ -1466,8 +1523,8 @@ impl Mob {
         let body = part(0.0, 11.0, 2.0, Mat4::from_rotation_x(-FRAC_PI_2));
         cube(out, body, [-5.0, -10.0, -7.0], BODY);
 
-        let ls = self.limb_swing * 0.6662;
-        let la = self.limb_amount;
+        let ls = p.limb_swing * 0.6662;
+        let la = p.limb_amount;
         let legs = [
             (-3.0, 7.0, ls.cos()),
             (3.0, 7.0, (ls + PI).cos()),
@@ -1546,7 +1603,7 @@ mod tests {
     fn pig_model_has_all_cubes() {
         let pig = Mob::new(MobKind::Pig, Vec3::ZERO, 0.0, 7);
         let mut out = Vec::new();
-        pig.build(&mut out, 15, 0);
+        pig.build(&mut out, 15, 0, 1.0);
         // Head, snout, body and four legs, 6 faces of 2 triangles each.
         assert_eq!(out.len(), 7 * 6 * 6);
         // It stands on the ground and is about a block tall and long.
@@ -1563,7 +1620,7 @@ mod tests {
     fn sheep_wears_its_wool_until_sheared() {
         let mut sheep = Mob::new(MobKind::Sheep, Vec3::ZERO, 0.0, 7);
         let mut out = Vec::new();
-        sheep.build(&mut out, 15, 0);
+        sheep.build(&mut out, 15, 0, 1.0);
         // Head, body and four legs, each with a wool cube over it.
         assert_eq!(out.len(), 12 * 6 * 6);
         let max_y = out.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
@@ -1571,7 +1628,7 @@ mod tests {
         assert!(sheep.can_shear());
         sheep.sheared = true;
         out.clear();
-        sheep.build(&mut out, 15, 0);
+        sheep.build(&mut out, 15, 0, 1.0);
         assert_eq!(out.len(), 6 * 6 * 6);
         assert!(!sheep.can_shear());
         let net = sheep.to_net();
@@ -1582,14 +1639,14 @@ mod tests {
     fn a_wolf_is_built_and_a_tame_one_wears_its_collar() {
         let mut wolf = Mob::new(MobKind::Wolf, Vec3::ZERO, 0.0, 7);
         let mut out = Vec::new();
-        wolf.build(&mut out, 15, 0);
+        wolf.build(&mut out, 15, 0, 1.0);
         // Head, two ears, snout, body, mane, four legs and the tail.
         assert_eq!(out.len(), 11 * 6 * 6);
         let max_y = out.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
         assert!(max_y > 0.8 && max_y < 1.1, "top at {max_y}");
         wolf.owner = Some("Alby".into());
         out.clear();
-        wolf.build(&mut out, 15, 0);
+        wolf.build(&mut out, 15, 0, 1.0);
         assert_eq!(out.len(), 12 * 6 * 6);
         assert!(out.iter().any(|v| v.layer == tex::WOLF_COLLAR as f32));
         let net = wolf.to_net();

@@ -281,7 +281,7 @@ fn torches_and_stump_marks_are_listed() {
 #[test]
 fn chunk_vertices_pack_without_loss() {
     use crate::render::chunks::pack_vertex;
-    let mut check = |m: &MeshData| {
+    let check = |m: &MeshData| {
         let (x0, z0) = ((m.pos.0 * 16) as f32, (m.pos.1 * 16) as f32);
         for v in &m.vertices {
             let p = pack_vertex(v, x0, z0, 0.0);

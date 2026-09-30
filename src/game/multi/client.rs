@@ -431,6 +431,7 @@ impl Game {
                 pos,
                 vel_y: 0.0,
                 block,
+                prev: None,
             })
             .collect();
     }

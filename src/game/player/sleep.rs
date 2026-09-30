@@ -71,6 +71,7 @@ impl Game {
             return;
         }
         self.player.pos = s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT, 0.5);
+        self.player.start_tick();
         self.player.vel = Vec3::ZERO;
         self.fall_peak = self.player.pos.y;
         let foot = -facing_dir(s.facing).as_vec3();
@@ -98,6 +99,7 @@ impl Game {
             .bed_stand_pos(s.bed)
             .unwrap_or(s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT, 0.5));
         self.player.pos = pos;
+        self.player.start_tick();
         self.player.vel = Vec3::ZERO;
         self.fall_peak = pos.y;
     }
@@ -219,6 +221,7 @@ impl Game {
         match self.bed_stand_pos(bed) {
             Some(pos) => {
                 self.player.pos = pos;
+                self.player.start_tick();
                 self.fall_peak = pos.y;
             }
             None => {

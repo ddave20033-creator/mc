@@ -249,7 +249,7 @@ impl Game {
         let speed = lo + (hi - lo) * k;
         // From the hand, toward what the crosshair is on.
         let pos = self.grenade_in_hand();
-        let aim = (self.player.eye() + look * 30.0 - pos).normalize_or(look);
+        let aim = (self.eye() + look * 30.0 - pos).normalize_or(look);
         let vel = aim * speed + Vec3::Y * (1.0 + 1.5 * k) + self.player.vel * 0.6;
         let fuse = match kind {
             GrenadeKind::Frag => (FUSE - held).max(0.05),
@@ -280,7 +280,7 @@ impl Game {
     /// Where the readied grenade is: in the hand as it is seen (the first-person hand, or the
     /// player model's), unless a wall is between it and the eyes (then just in front of them).
     fn grenade_in_hand(&self) -> Vec3 {
-        let eye = self.player.eye();
+        let eye = self.eye();
         let look = look_dir(self.yaw, self.pitch);
         let fallback = eye + look * 0.3 - Vec3::Y * 0.1;
         let hand = if self.camera.mode == 0 { self.grenades.hand_fp } else { self.grenades.hand_tp };
@@ -438,7 +438,7 @@ impl Game {
         let (sky, blk) = self.terrain.world.light_estimate(pos + Vec3::Y * 0.5);
         self.particles.explosion(pos, sky, blk);
         self.guns.flash_light = (3.0, pos + Vec3::Y * 0.5);
-        let near = pos.distance(self.player.eye());
+        let near = pos.distance(self.eye());
         self.grenades.shake = self.grenades.shake.max((1.0 - near / 18.0).max(0.0));
 
         let blocks = blast_blocks(&self.terrain.world, pos, seed);

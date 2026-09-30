@@ -167,6 +167,15 @@ impl Game {
             }
         }
 
+        self.body_yaw = self.yaw;
+        self.limb_amount += (0.0 - self.limb_amount) * (crate::util::damp(10.0, dt));
+    }
+
+    /// A spectator's tick: flying about (not while watching someone: then it is where they are).
+    pub(in crate::game) fn tick_spectator(&mut self, control: bool) {
+        if self.spectating.is_some() {
+            return;
+        }
         let k = |b: Bind| control && self.bind_down(b);
         let axis = |a: bool, b: bool| (a as i32 - b as i32) as f32;
         let input = MoveInput {
@@ -179,10 +188,9 @@ impl Game {
             using: false,
             aiming: false,
         };
-        self.player
-            .update(dt, &self.terrain.world, self.yaw, &input);
-        self.body_yaw = self.yaw;
-        self.limb_amount += (0.0 - self.limb_amount) * (crate::util::damp(10.0, dt));
+        self.player.flying = true;
+        self.player.noclip = true;
+        self.player.update(TICK_SECS, &self.terrain.world, self.yaw, &input);
     }
 
     /// Instead of the hotbar: what spectator mode is doing and which keys work.

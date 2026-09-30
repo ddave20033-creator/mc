@@ -25,6 +25,7 @@ mod pack;
 mod render;
 mod save;
 mod settings;
+mod sim;
 mod splash;
 mod stats;
 mod ui;

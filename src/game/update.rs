@@ -1,46 +1,29 @@
-//! The per-frame simulation: the player (movement, targeting, mining, using) and the world
-//! (chest lids, fluids, furnaces, saplings, dropped items, mobs, falling blocks, torch fire,
-//! time of day and autosave).
+//! The player and the world moving on: in ticks (`tick_player`, `tick_world`: movement,
+//! health, fluids, furnaces, saplings, dropped items, mobs, falling blocks, time of day and
+//! autosave), and in frames (`update_player`, `update_world`: looking, aiming, what the hands
+//! do, chest lids, shots, particles and sounds).
 
 use super::*;
 use crate::entity::player::{raycast, MoveInput};
 use crate::item::*;
 impl Game {
-    /// Player simulation. `control` is false while a screen is open (physics still runs).
-    pub(super) fn update_player(&mut self, dt: f32, control: bool) {
-        if control {
-            // Slower turning while zoomed in.
-            let zoom = (self.fov_current / self.settings.fov).min(1.0);
-            let sens = 0.0022 * self.settings.sensitivity / 100.0 * zoom;
-            self.yaw += self.input.mouse_delta.x * sens;
-            self.pitch = (self.pitch - self.input.mouse_delta.y * sens).clamp(-1.55, 1.55);
-            if self.input.scroll != 0.0 && !self.spectator() && !self.fishing_scroll() {
-                let d = if self.input.scroll > 0.0 { -1 } else { 1 };
-                self.hotbar_slot = (self.hotbar_slot as i32 + d).rem_euclid(9) as usize;
-                self.slot_name_timer = 2.0;
-            }
-        }
-        self.hand.equip(self.held());
-        let st = self.inventory.slots[self.hotbar_slot];
-        self.hand.held_data = st.map_or(0, |s| s.data);
-        self.hand.held_damage = st.map_or(0, |s| s.damage);
+    /// The player's tick: moving (with the keys held, `control`: no screen open), health,
+    /// hunger and thirst.
+    pub(super) fn tick_player(&mut self, control: bool) {
+        let dt = TICK_SECS;
+        self.player.start_tick();
         if self.sleep.is_some() {
             self.update_sleep(dt, control);
             return;
         }
         if self.spectator() {
-            self.update_spectator(dt, control);
+            self.tick_spectator(control);
             return;
         }
         self.player.noclip = false;
         if !self.creative() {
             self.player.flying = false;
         }
-        // Holding the right mouse button with a sword blocks (Minecraft 1.8).
-        self.blocking = control && self.input.right_down && is_sword(self.held());
-        self.hand.blocking = self.blocking;
-        self.update_using(dt, control);
-
         // Aiming a gun (right button held): no sprinting, and the double-tap sprint ends.
         let aiming = control && self.input.right_down && self.holding_gun();
         let firing = self.guns.no_sprint > 0.0;
@@ -64,17 +47,15 @@ impl Game {
             aiming,
         };
         let was_on_ground = self.player.on_ground;
-        self.player
-            .update(dt, &self.terrain.world, self.yaw, &input);
+        self.player.update(dt, &self.terrain.world, self.yaw, &input);
         self.update_health(dt, was_on_ground);
         if self.screen == Screen::Dead {
             return;
         }
-        let speed = self.player.horizontal_speed();
         if !self.creative() {
             // Sprinting, swimming and jumping make you hungry and thirsty.
             use crate::entity::survival::cost;
-            let moved = speed * dt;
+            let moved = self.player.horizontal_speed() * dt;
             if self.player.sprinting {
                 self.needs.exhaust(cost::SPRINT * moved);
             } else if self.player.fluid(&self.terrain.world) != AIR {
@@ -93,9 +74,47 @@ impl Game {
                 self.needs.exhaust(c);
             }
         }
+    }
 
-        // Targeting, mining and placing
-        let eye = self.player.eye();
+    /// The player's frame: looking about, aiming, and what is done with the hands (mining,
+    /// hitting, using, shooting), and the body's animation. `control` is false while a screen
+    /// is open.
+    pub(super) fn update_player(&mut self, dt: f32, control: bool) {
+        if control {
+            // Slower turning while zoomed in.
+            let zoom = (self.fov_current / self.settings.fov).min(1.0);
+            let sens = 0.0022 * self.settings.sensitivity / 100.0 * zoom;
+            self.yaw += self.input.mouse_delta.x * sens;
+            self.pitch = (self.pitch - self.input.mouse_delta.y * sens).clamp(-1.55, 1.55);
+            if self.input.scroll != 0.0 && !self.spectator() && !self.fishing_scroll() {
+                let d = if self.input.scroll > 0.0 { -1 } else { 1 };
+                self.hotbar_slot = (self.hotbar_slot as i32 + d).rem_euclid(9) as usize;
+                self.slot_name_timer = 2.0;
+            }
+        }
+        self.hand.equip(self.held());
+        let st = self.inventory.slots[self.hotbar_slot];
+        self.hand.held_data = st.map_or(0, |s| s.data);
+        self.hand.held_damage = st.map_or(0, |s| s.damage);
+        if self.sleep.is_some() {
+            return;
+        }
+        if self.spectator() {
+            self.update_spectator(dt, control);
+            return;
+        }
+        // Holding the right mouse button with a sword blocks (Minecraft 1.8).
+        self.blocking = control && self.input.right_down && is_sword(self.held());
+        self.hand.blocking = self.blocking;
+        self.update_using(dt, control);
+        if self.screen == Screen::Dead {
+            return;
+        }
+        let speed = self.player.horizontal_speed();
+
+        // Targeting, mining and placing (from the eye where it is drawn: what is aimed at is
+        // what is seen)
+        let eye = self.eye();
         self.target = if control {
             let dir = look_dir(self.yaw, self.pitch);
             match self.camera.shoulder_camera(&self.terrain.world, eye, dir) {
@@ -280,6 +299,8 @@ impl Game {
         self.limb_amount += (target - self.limb_amount) * (crate::util::damp(10.0, dt));
     }
 
+    /// The world's frame: chest lids, shots and grenades flying, furnace glow and sounds, torch
+    /// fire (and a LAN player's copy of the host's world following it).
     pub(super) fn update_world(&mut self, dt: f32) {
         // Chest lids: open chests (this player's and the other LAN players') swing up, the
         // others fall shut.
@@ -312,8 +333,20 @@ impl Game {
         if self.is_client() {
             // A LAN player's world is run by the host: only follow what it sends.
             self.client_world(dt);
+        }
+        if self.torch_particles {
+            self.torch_fire(dt);
+        }
+    }
+
+    /// The world's tick (the host's or one player's world; a LAN player's is the host's):
+    /// fluids, furnaces, saplings, grass over stumps, dropped items, mobs, felled trees,
+    /// falling blocks, the time of day, sleepers and the autosave.
+    pub(super) fn tick_world(&mut self) {
+        if self.is_client() {
             return;
         }
+        let dt = TICK_SECS;
 
         // Fluids
         let mut changed = Vec::new();
@@ -364,6 +397,7 @@ impl Game {
         let mut pickup_visuals = Vec::new();
         let mut i = 0;
         while i < self.level.items.len() {
+            self.level.items[i].start_tick();
             if self.level.items[i].is_picking_up() {
                 if !alive || self.level.items[i].update_pickup(dt, pickup_target) {
                     self.level.items.swap_remove(i);
@@ -437,6 +471,7 @@ impl Game {
                 i += 1;
                 continue;
             }
+            self.level.falling[i].prev = Some(p);
             if self.level.falling[i].update(dt, &self.terrain.world) {
                 landed.push(self.level.falling.swap_remove(i));
             } else {
@@ -451,10 +486,6 @@ impl Game {
             } else {
                 self.spawn_drop(f.pos + Vec3::Y * 0.5, Stack::one(f.block as ItemId));
             }
-        }
-
-        if self.torch_particles {
-            self.torch_fire(dt);
         }
 
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH).fract();

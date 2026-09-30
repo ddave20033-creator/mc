@@ -413,6 +413,7 @@ impl Game {
                 i += 1;
                 continue;
             }
+            self.level.mobs[i].start_tick();
             let event = self.level.mobs[i].update(dt, &self.terrain.world, &ctx);
             if self.level.mobs[i].pos.y < -64.0 {
                 self.level.mobs.swap_remove(i);

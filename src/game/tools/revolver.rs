@@ -156,7 +156,7 @@ impl Game {
             self.guns.reload = None;
             return;
         }
-        let at = self.player.eye();
+        let at = self.eye();
         let was = c.t;
         c.t += dt;
         match c.phase {
@@ -306,7 +306,7 @@ impl Game {
     /// they are gone).
     fn revolver_empty(&mut self) {
         let Some(g) = self.held_revolver() else { return };
-        let eye = self.player.eye();
+        let eye = self.eye();
         let look = look_dir(self.yaw, self.pitch);
         let right = look.cross(Vec3::Y).normalize_or_zero();
         // Where each chamber's head is (the first-person gun, or near the hands).

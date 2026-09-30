@@ -91,6 +91,7 @@ impl Game {
                     .column(x.floor() as i32, z.floor() as i32)
                     .height;
                 self.player.pos = Vec3::new(x, ground.max(SEA) as f32 + 1.5, z);
+                self.player.start_tick();
                 self.yaw = (t * 0.4).sin() * 1.2;
                 self.pitch = -0.1;
                 self.body_yaw = self.yaw;
@@ -339,6 +340,7 @@ impl Game {
             (p, yaw, pitch)
         });
         self.player.pos = pos;
+        self.player.start_tick();
         self.pitch = pitch;
         self.body_yaw = yaw;
         self.yaw = yaw;

@@ -424,7 +424,7 @@ impl Game {
     /// outside), or about there.
     fn rod_tip(&self) -> Vec3 {
         let tip = if self.camera.mode == 0 { self.fishing.tip_fp } else { self.fishing.tip_tp };
-        let eye = self.player.eye();
+        let eye = self.eye();
         tip.or(self.fishing.tip_tp)
             .filter(|t| t.distance(eye) < 4.0)
             .unwrap_or_else(|| eye + look_dir(self.yaw, self.pitch) * 1.8 + Vec3::Y * 0.6)

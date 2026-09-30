@@ -1376,7 +1376,7 @@ impl Game {
         let w = &self.terrain.world;
         let main = bench_main(hit, w.geti(hit), |q| w.geti(q))?;
         let table = Table::of(main, w.geti(main)).filter(|t| t.rifle())?;
-        let (eye, dir) = (self.player.eye(), look_dir(self.yaw, self.pitch));
+        let (eye, dir) = (self.eye(), look_dir(self.yaw, self.pitch));
         let mut found: Option<(usize, f32)> = None;
         for (half, lo, hi, m) in crate::model::gun_station::crate_halves(main, table.toward) {
             let inv = m.inverse();
@@ -1423,7 +1423,7 @@ impl Game {
         } else {
             return true;
         }
-        self.audio.play(crate::audio::Sound::GrenadeBounce, Some(self.player.eye()), 0.35);
+        self.audio.play(crate::audio::Sound::GrenadeBounce, Some(self.eye()), 0.35);
         self.hand.swing();
         self.bench_changed(main, None);
         true

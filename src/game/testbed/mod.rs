@@ -202,6 +202,7 @@ impl Game {
                 tb.origin = o;
                 tb.log(format!("lane from {:.1} {:.1} {:.1}", o.x, o.y, o.z));
                 self.player.pos = o;
+                self.player.start_tick();
                 self.player.vel = Vec3::ZERO;
             }
             Cmd::Clear(r, h) => {
@@ -217,6 +218,7 @@ impl Game {
             Cmd::Time(t) => tb.time_of_day = Some(t),
             Cmd::Pos(o, v) => {
                 self.player.pos = at(o, v);
+                self.player.start_tick();
                 self.player.vel = Vec3::ZERO;
             }
             Cmd::Look(yaw, pitch) => {
