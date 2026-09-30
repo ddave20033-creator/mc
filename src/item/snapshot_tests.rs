@@ -2,6 +2,8 @@
 //! both languages, icons, blocks, smelting, fuel, magazines) and of what the crafting grid
 //! makes of every recipe's own grid (shifted, mirrored, spoilt a cell) and of random grids:
 //! a change to any of them changes the hash. Rewriting how items are looked up must not.
+//! Items are written by their keys (their ids are not their identity: they follow the order
+//! of the items' table), and listed in the order of their keys.
 
 use super::*;
 use std::fmt::Write;
@@ -29,13 +31,31 @@ fn icon_str(id: ItemId) -> String {
     }
 }
 
+/// An item by its key (an id that is no item: by its number).
+fn ik(id: ItemId) -> String {
+    let k = key(id);
+    if k == "unknown" {
+        format!("#{id}")
+    } else {
+        k
+    }
+}
+
+/// Every item that is not a block, in the order of their keys.
+fn other_items() -> Vec<ItemId> {
+    let mut v: Vec<ItemId> = (FIRST_ITEM..4096).filter(|&id| key(id) != "unknown").collect();
+    v.sort_by_key(|&id| key(id));
+    v
+}
+
 fn items_snapshot() -> String {
     let mut s = String::new();
-    for id in 0..1024u16 {
+    let ids = (0..FIRST_ITEM).map(|id| (id.to_string(), id)).chain(other_items().into_iter().map(|id| (key(id), id)));
+    for (label, id) in ids {
         let k = key(id);
         let _ = writeln!(
             s,
-            "{id} {} {} {} {} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {:?} {:?} {:?}",
+            "{label} {} {} {} {} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {:?} {:?} {:?}",
             max_stack(id),
             consumable_str(id),
             attack_damage(id),
@@ -46,28 +66,33 @@ fn items_snapshot() -> String {
             magazine_capacity(id),
             magazine_gun(id),
             fuel_time(id),
-            smelt(id),
+            smelt(id).map(ik),
             smelt_tier(id),
             icon_str(id),
             k,
-            from_key(&k),
+            from_key(&k).map(ik),
             armor_of(id),
         );
     }
     for b in 0..BLOCK_IDS as Block {
         let _ = writeln!(s, "b{b} {:?}", item_of_block(b));
     }
-    let _ = writeln!(s, "{:?}", all_items());
+    let mut all: Vec<String> = all_items().into_iter().map(ik).collect();
+    all.sort();
+    let _ = writeln!(s, "{all:?}");
     for k in ["minecraft:stone", "unknown", "", "stick", "minecraft:ammo_box", "diamond_sword", "Stone"] {
-        let _ = writeln!(s, "{k} {:?}", from_key(k));
+        let _ = writeln!(s, "{k} {:?}", from_key(k).map(ik));
     }
     s
 }
 
 fn names_snapshot() -> String {
     let mut s = String::new();
-    for id in 0..1024u16 {
+    for id in 0..FIRST_ITEM {
         let _ = writeln!(s, "{id} {}", name(id));
+    }
+    for id in other_items() {
+        let _ = writeln!(s, "{} {}", key(id), name(id));
     }
     for b in 0..BLOCK_IDS as Block {
         let _ = writeln!(s, "b{b} {}", block_name(b));
@@ -78,7 +103,7 @@ fn names_snapshot() -> String {
 fn craft_str(grid: &[Slot], size: usize) -> String {
     match craft(grid, size) {
         None => "-".into(),
-        Some(st) => format!("{} {} {} {}", st.item, st.count, st.damage, st.data),
+        Some(st) => format!("{} {} {} {}", ik(st.item), st.count, st.damage, st.data),
     }
 }
 
@@ -88,7 +113,7 @@ fn crafting_snapshot() -> String {
     let mut grids: Vec<[Option<ItemId>; 9]> = Vec::new();
     for item in recipe_results() {
         for (cells, n) in recipes_for(item) {
-            let _ = writeln!(s, "r {item} {n}");
+            let _ = writeln!(s, "r {} {n}", ik(item));
             for c in &cells {
                 for &i in c {
                     if !pool.contains(&i) {
@@ -125,7 +150,7 @@ fn crafting_snapshot() -> String {
             }
         }
     }
-    pool.sort();
+    pool.sort_by_key(|&i| key(i));
     // Random grids, and each recipe grid with one cell spoilt.
     let mut seed: u64 = 12345;
     let mut rnd = |n: usize| {
@@ -146,7 +171,7 @@ fn crafting_snapshot() -> String {
         grids.push(std::array::from_fn(|_| (rnd(5) <= few).then(|| pool[rnd(pool.len())])));
     }
     for g in &grids {
-        let slots: Vec<Slot> = g.iter().map(|c| c.map(|i| Stack::new(i, 1 + (i % 7) as u8))).collect();
+        let slots: Vec<Slot> = g.iter().map(|c| c.map(|i| Stack::new(i, 1 + (fnv(&key(i)) % 7) as u8))).collect();
         let _ = write!(s, "{} ", craft_str(&slots, 3));
         // The top left 2x2, as the inventory's grid.
         let small: Vec<Slot> = [0, 1, 3, 4].iter().map(|&i| slots[i]).collect();
@@ -161,7 +186,14 @@ fn crafting_snapshot() -> String {
     slots[4] = None;
     let _ = writeln!(s, "{}", craft_str(&slots, 3));
     for item in recipe_results() {
-        let _ = writeln!(s, "v {item} {:?} {:?}", recipe_view(item).map(|(r, st)| (r, st.item, st.count)), smelted_from(item));
+        let view = recipe_view(item).map(|(r, st)| {
+            let r: Vec<Vec<Vec<String>>> =
+                r.into_iter().map(|row| row.into_iter().map(|c| c.into_iter().map(ik).collect()).collect()).collect();
+            (r, ik(st.item), st.count)
+        });
+        let mut from: Vec<(String, u8)> = smelted_from(item).into_iter().map(|(i, t)| (ik(i), t)).collect();
+        from.sort();
+        let _ = writeln!(s, "v {} {view:?} {from:?}", ik(item));
     }
     s
 }
@@ -184,5 +216,5 @@ fn item_data_and_crafting_are_unchanged() {
     assert_eq!(got, EXPECTED);
 }
 
-const EXPECTED: [u64; 4] = [0x60e3749d20e045a5, 0x1034e3267b837a11, 0xe20c1e6cb4959ed9, 0xe36efeceeba9c072];
+const EXPECTED: [u64; 4] = [0xd3a7e964578f02d0, 0x5293f6a520c67988, 0x3dbc3468aa2dc181, 0x8af34cec993be3e4];
 
