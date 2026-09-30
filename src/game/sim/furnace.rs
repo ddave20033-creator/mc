@@ -37,11 +37,11 @@ impl Game {
     /// starting to mine the furnace; keeping the button held then does not mine it either
     /// (until it is let go). Returns true while mining is held off.
     pub(in crate::game) fn furnace_left_click(&mut self) -> bool {
-        if !self.left_down {
+        if !self.input.left_down {
             self.furnace_hold = false;
             return false;
         }
-        if self.left_pressed {
+        if self.input.left_pressed {
             if let Some((p, k)) = self.furnace_part {
                 if self.use_furnace(p, k, true) {
                     self.furnace_hold = true;
@@ -65,7 +65,7 @@ impl Game {
         let (p, k) = self.furnace_part?;
         let held = self.inventory.slots[self.hotbar_slot];
         let empty = Furnace::default();
-        let f = self.block_entities.furnaces.get(&p).unwrap_or(&empty);
+        let f = self.level.block_entities.furnaces.get(&p).unwrap_or(&empty);
         (f.has(k) || held.is_some_and(|h| f.accepts(k, h.item))).then_some((p, k))
     }
 
@@ -96,7 +96,7 @@ impl Game {
         let slot = self.hotbar_slot;
         let held = self.inventory.slots[slot];
         let tier = furnace_tier(self.terrain.world.geti(p));
-        let f = self.block_entities.furnaces.entry(p).or_default();
+        let f = self.level.block_entities.furnaces.entry(p).or_default();
         f.tier = tier;
         let puts = held.is_some_and(|h| f.accepts(k, h.item));
         let able = if take {
@@ -149,7 +149,7 @@ impl Game {
             return;
         }
         let tier = furnace_tier(self.terrain.world.geti(p));
-        let f = self.block_entities.furnaces.entry(p).or_default();
+        let f = self.level.block_entities.furnaces.entry(p).or_default();
         f.tier = tier;
         let r = f.use_part(k, offered, take);
         let mut back = r.give;
@@ -165,7 +165,7 @@ impl Game {
             self.send_to(id, &crate::net::Msg::Give(st));
         }
         // Their copy may have guessed wrong (someone else was quicker): the real one.
-        if let Some(f) = self.block_entities.furnaces.get(&p) {
+        if let Some(f) = self.level.block_entities.furnaces.get(&p) {
             self.send_to(id, &Self::furnace_msg(p, f));
         }
     }
@@ -173,7 +173,7 @@ impl Game {
     /// Host: furnaces burn, cook and smelt.
     pub(in crate::game) fn update_furnaces(&mut self, dt: f32) {
         let mut relight = Vec::new();
-        for (p, f) in self.block_entities.furnaces.iter_mut() {
+        for (p, f) in self.level.block_entities.furnaces.iter_mut() {
             let b = self.terrain.world.geti(*p);
             // (in a chunk not loaded the block reads as air: it keeps the tier it had)
             if self.terrain.world.is_loaded(p.x, p.z) {
@@ -203,13 +203,13 @@ impl Game {
         let near = self.player.pos;
         let mut loops = Vec::new();
         let mut dings = Vec::new();
-        for (p, f) in &self.block_entities.furnaces {
+        for (p, f) in &self.level.block_entities.furnaces {
             let at = p.as_vec3() + Vec3::splat(0.5);
             if at.distance_squared(near) > 24.0 * 24.0 {
                 continue;
             }
             let made = f.output.map_or(0, |s| s.count as u32);
-            let before = self.furnace_heard.insert(*p, made);
+            let before = self.level.furnace_heard.insert(*p, made);
             if before.is_some_and(|b| made > b) {
                 dings.push(at);
             }
@@ -223,8 +223,8 @@ impl Game {
             };
             loops.push((id, sound, at, 0.8));
         }
-        self.furnace_heard
-            .retain(|p, _| self.block_entities.furnaces.contains_key(p));
+        self.level.furnace_heard
+            .retain(|p, _| self.level.block_entities.furnaces.contains_key(p));
         for at in dings {
             self.audio.play(Sound::SmeltDone, Some(at), 0.8);
         }
@@ -234,7 +234,7 @@ impl Game {
     /// Steam and smoke off the meat on lit furnaces near the player: light while it cooks,
     /// more once the side on the fire is done, dark and thick when it burns.
     pub(in crate::game) fn furnace_fx(&mut self, dt: f32) {
-        for (p, f) in self.block_entities.furnaces.iter_mut() {
+        for (p, f) in self.level.block_entities.furnaces.iter_mut() {
             if self.terrain.world.is_loaded(p.x, p.z) {
                 f.tier = furnace_tier(self.terrain.world.geti(*p));
             }
@@ -243,7 +243,7 @@ impl Game {
             // Between the host's updates (every second, or when something changes) the
             // furnaces go on here as they do there: flips turn, fuel burns, meat cooks on
             // the side on the fire, smelting goes on.
-            for f in self.block_entities.furnaces.values_mut() {
+            for f in self.level.block_entities.furnaces.values_mut() {
                 for g in f.grill.iter_mut().flatten() {
                     g.flip = (g.flip - dt).max(0.0);
                 }
@@ -265,7 +265,7 @@ impl Game {
         let mut sparks = Vec::new();
         let mut fires = Vec::new();
         let mut chimneys = Vec::new();
-        for (p, f) in &self.block_entities.furnaces {
+        for (p, f) in &self.level.block_entities.furnaces {
             if f.burn <= 0.0 || p.as_vec3().distance_squared(near) > 40.0 * 40.0 {
                 continue;
             }

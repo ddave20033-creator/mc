@@ -207,14 +207,14 @@ impl Game {
             None => {
                 // (on a rifle station's grenade crate, the grenade goes into it instead)
                 let crate_ = self.crate_under_crosshair().is_some();
-                if control && kind.is_some() && self.right_pressed && self.action_cooldown <= 0.0 && !crate_ {
+                if control && kind.is_some() && self.input.right_pressed && self.action_cooldown <= 0.0 && !crate_ {
                     self.grenades.hold = Some(Hold { slot, item, t: 0.0, released: false });
                 }
             }
             Some(h) => {
                 let was = h.t;
                 h.t += dt;
-                h.released |= !self.right_down;
+                h.released |= !self.input.right_down;
                 let (t, released) = (h.t, h.released);
                 // The ring is caught and the pin starts coming out.
                 let pull = RAISE_TIME + 0.08;
@@ -484,7 +484,7 @@ impl Game {
         };
         let me = hurt(self.player.pos + Vec3::Y * 0.9);
         let mobs: Vec<(usize, f32, f32)> = self
-            .mobs
+            .level.mobs
             .iter()
             .enumerate()
             .filter(|(_, m)| m.alive())
@@ -499,7 +499,7 @@ impl Game {
             self.blast_hit(dmg, pos, knock);
         }
         for (i, dmg, knock) in mobs {
-            self.mobs[i].hurt(dmg, Some(pos), knock);
+            self.level.mobs[i].hurt(dmg, Some(pos), knock);
         }
         for (id, dmg, knock) in others {
             self.send_to(

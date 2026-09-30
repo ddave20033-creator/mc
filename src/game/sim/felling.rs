@@ -218,7 +218,7 @@ impl Game {
                     return Some((t, Contact::Trunk(p), q));
                 }
                 if kind == Kind::Stump {
-                    if let Some(l) = self.lying_logs.iter().find(|l| l.contains(q).is_some()) {
+                    if let Some(l) = self.level.lying_logs.iter().find(|l| l.contains(q).is_some()) {
                         return Some((t, Contact::Log(l.id), q));
                     }
                     let b = w.geti(q.floor().as_ivec3());
@@ -264,7 +264,7 @@ impl Game {
             self.log_cut = None;
         }
         let target = if active { self.chop_target() } else { None };
-        if self.chop.is_none() && (target.is_none() || !self.left_down) {
+        if self.chop.is_none() && (target.is_none() || !self.input.left_down) {
             self.hand.hidden = false;
             return target.is_some();
         }
@@ -340,7 +340,7 @@ impl Game {
     /// Lets a tree still going over land at once (the world is being left: its drops are
     /// not lost with it).
     pub(in crate::game) fn land_falling_trees(&mut self) {
-        for t in std::mem::take(&mut self.falling_trees) {
+        for t in std::mem::take(&mut self.level.falling_trees) {
             self.tree_lands(t);
         }
         self.come_apart();
@@ -494,7 +494,7 @@ impl Game {
             self.block_updated(q);
         }
         set_notch(p, Some(Notch { felled: true, ..notch }));
-        self.falling_trees.push(FallingTree {
+        self.level.falling_trees.push(FallingTree {
             pivot,
             axis: Vec3::Y.cross(toward).normalize(),
             angle: 0.02,
@@ -516,7 +516,7 @@ impl Game {
     pub(in crate::game) fn update_falling_trees(&mut self, dt: f32) {
         const GRAVITY: f32 = 28.0;
         let mut landed = Vec::new();
-        for (i, t) in self.falling_trees.iter_mut().enumerate() {
+        for (i, t) in self.level.falling_trees.iter_mut().enumerate() {
             let pull = 1.5 * GRAVITY / t.height.max(1.5) * t.angle.sin().max(0.04);
             t.speed += pull * dt;
             t.angle += t.speed * dt;
@@ -537,7 +537,7 @@ impl Game {
             }
         }
         for i in landed.into_iter().rev() {
-            let t = self.falling_trees.swap_remove(i);
+            let t = self.level.falling_trees.swap_remove(i);
             self.tree_lands(t);
         }
     }
@@ -601,7 +601,7 @@ impl Game {
     pub(in crate::game) fn build_falling_trees(&self, out: &mut Vec<Vertex>, eye: Vec3, sight: f32) {
         use crate::model::{emit_box, emit_item};
         let fl = crate::world::mesh::flags::ENTITY;
-        for t in &self.falling_trees {
+        for t in &self.level.falling_trees {
             let turn = t.turn();
             let mid = t.at(&turn, Vec3::new(0.0, t.height * 0.5, 0.0));
             if mid.distance(eye) > sight + t.height {

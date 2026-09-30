@@ -74,7 +74,7 @@ impl Game {
     /// Keyboard input while the JEI search box has it.
     pub(in crate::game) fn jei_key(&mut self, code: KeyCode, text: Option<&str>) {
         const MAX: usize = 24;
-        let jei = &mut self.jei;
+        let jei = &mut self.inv_ui.jei;
         match code {
             KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab => {
                 jei.focused = false
@@ -127,7 +127,7 @@ impl Game {
         let fs = (s * 0.75).round().max(1.0);
         let gx = x0 + 4.0 * s;
         let mut top = y0 + 4.0 * s;
-        if let Some(item) = self.jei.item {
+        if let Some(item) = self.inv_ui.jei.item {
             top = self.jei_recipe(item, gx, top, pw - 8.0 * s);
         } else {
             let hint = t(if creative { "jei.hint_creative" } else { "jei.hint_survival" });
@@ -145,16 +145,16 @@ impl Game {
         self.jei_search_box(gx, by, pw - 8.0 * s, bh);
 
         // The items.
-        let items = jei_items(&self.jei.search);
+        let items = jei_items(&self.inv_ui.jei.search);
         let gy = top;
         let visible = (((by - 3.0 * s - gy) / cell).floor().max(0.0)) as usize;
         let rows = items.len().div_ceil(cols);
         let max_scroll = rows.saturating_sub(visible) as f32;
-        if over && !self.jei.focused {
-            self.jei.scroll -= self.ui.scroll;
+        if over && !self.inv_ui.jei.focused {
+            self.inv_ui.jei.scroll -= self.ui.scroll;
         }
-        self.jei.scroll = self.jei.scroll.clamp(0.0, max_scroll);
-        let first = self.jei.scroll.round() as usize;
+        self.inv_ui.jei.scroll = self.inv_ui.jei.scroll.clamp(0.0, max_scroll);
+        let first = self.inv_ui.jei.scroll.round() as usize;
         for r in 0..visible {
             for c in 0..cols {
                 let Some(&id) = items.get((first + r) * cols + c) else {
@@ -174,8 +174,8 @@ impl Game {
                         self.tooltip_for(&st);
                     }
                     if self.ui.pressed || self.ui.right_pressed {
-                        self.jei.item = Some(id);
-                        self.jei.page = 0;
+                        self.inv_ui.jei.item = Some(id);
+                        self.inv_ui.jei.page = 0;
                     }
                 }
             }
@@ -184,12 +184,12 @@ impl Game {
         if max_scroll > 0.0 && visible > 0 {
             let track = visible as f32 * cell;
             let bar = (track * visible as f32 / rows as f32).max(6.0 * s);
-            let at = gy + (track - bar) * (self.jei.scroll / max_scroll);
+            let at = gy + (track - bar) * (self.inv_ui.jei.scroll / max_scroll);
             self.ui
                 .solid(x0 + pw - 3.0 * s, at, 2.0 * s, bar, rgba(200, 200, 210, 160));
         }
         if over && self.ui.pressed && !self.ui.hit(gx, by, pw - 8.0 * s, bh) {
-            self.jei.focused = false;
+            self.inv_ui.jei.focused = false;
         }
         over
     }
@@ -199,15 +199,15 @@ impl Game {
         let s = self.ui.s;
         let hovered = self.ui.hit(x, y, w, h);
         if hovered && self.ui.pressed {
-            self.jei.focused = true;
-            self.search_focused = false;
+            self.inv_ui.jei.focused = true;
+            self.inv_ui.search_focused = false;
         }
         if hovered && self.ui.right_pressed {
-            self.jei.search.clear();
-            self.jei.scroll = 0.0;
-            self.jei.focused = true;
+            self.inv_ui.jei.search.clear();
+            self.inv_ui.jei.scroll = 0.0;
+            self.inv_ui.jei.focused = true;
         }
-        let border = if self.jei.focused {
+        let border = if self.inv_ui.jei.focused {
             rgba(98, 214, 120, 255)
         } else if hovered {
             rgba(150, 150, 160, 255)
@@ -219,18 +219,18 @@ impl Game {
             .solid(x + s, y + s, w - 2.0 * s, h - 2.0 * s, rgba(22, 23, 30, 255));
         let fs = (s * 0.75).round().max(1.0);
         let (tx, ty) = (x + 3.0 * s, (y + (h - 7.0 * fs) * 0.5).round());
-        if self.jei.search.is_empty() && !self.jei.focused {
+        if self.inv_ui.jei.search.is_empty() && !self.inv_ui.jei.focused {
             self.ui
                 .text(t("gui.search"), tx, ty, fs, rgba(125, 125, 132, 255), false);
         } else {
-            let mut shown = self.jei.search.as_str();
+            let mut shown = self.inv_ui.jei.search.as_str();
             while self.ui.text_width(shown, fs) > w - 8.0 * s {
                 let mut it = shown.chars();
                 it.next();
                 shown = it.as_str();
             }
             let tw = self.ui.text(shown, tx, ty, fs, WHITE, true);
-            if self.jei.focused && (self.time * 2.5) as i32 % 2 == 0 {
+            if self.inv_ui.jei.focused && (self.time * 2.5) as i32 % 2 == 0 {
                 self.ui.text("_", tx + tw + fs * 0.5, ty, fs, WHITE, true);
             }
         }
@@ -250,7 +250,7 @@ impl Game {
         }
         self.ui.text(&title, x, y + s, fs, rgba(255, 220, 150, 255), true);
         if self.ui.button("x", x + w - 9.0 * s, y, 9.0 * s, 9.0 * s, true) {
-            self.jei.item = None;
+            self.inv_ui.jei.item = None;
             return y + 12.0 * s;
         }
         let ways = ways(item);
@@ -264,17 +264,17 @@ impl Game {
             }
             return top + 4.0 * s;
         }
-        let page = self.jei.page % ways.len();
+        let page = self.inv_ui.jei.page % ways.len();
         // Several ways: arrows to go through them.
         if ways.len() > 1 {
             let label = format!("{}/{}", page + 1, ways.len());
             let lw = self.ui.text_width(&label, fs);
             let cx = x + w * 0.5;
             if self.ui.button("<", cx - lw * 0.5 - 12.0 * s, top, 9.0 * s, 9.0 * s, true) {
-                self.jei.page = (page + ways.len() - 1) % ways.len();
+                self.inv_ui.jei.page = (page + ways.len() - 1) % ways.len();
             }
             if self.ui.button(">", cx + lw * 0.5 + 3.0 * s, top, 9.0 * s, 9.0 * s, true) {
-                self.jei.page = (page + 1) % ways.len();
+                self.inv_ui.jei.page = (page + 1) % ways.len();
             }
             self.ui
                 .text_centered(&label, cx, top + 1.0 * s, fs, WHITE, true);
@@ -336,8 +336,8 @@ impl Game {
             }
         }
         if let Some(id) = clicked {
-            self.jei.item = Some(id);
-            self.jei.page = 0;
+            self.inv_ui.jei.item = Some(id);
+            self.inv_ui.jei.page = 0;
         }
         // A line under the recipe.
         self.ui

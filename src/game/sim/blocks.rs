@@ -47,7 +47,7 @@ impl Game {
     /// around it. On a LAN, the host runs this for everyone.
     pub(in crate::game) fn break_world(&mut self, p: IVec3, held: ItemId, creative: bool) {
         let b = self.terrain.world.geti(p);
-        let mut contents = self.block_entities.remove(p);
+        let mut contents = self.level.block_entities.remove(p);
         self.split_chest(p, b);
         contents.extend(self.remove_other_half(p, b));
         let replacement = self.left_after_mining(p, b, creative);
@@ -63,7 +63,7 @@ impl Game {
         for s in contents {
             self.spawn_drop(center, s);
         }
-        self.saplings.retain(|(q, _)| *q != p);
+        self.level.saplings.retain(|(q, _)| *q != p);
         self.block_updated(p);
     }
 
@@ -77,12 +77,12 @@ impl Game {
         let b = self.join_chest(at, b);
         self.set_block(at, b);
         if is_furnace(b) {
-            self.block_entities.furnaces.insert(at, Default::default());
+            self.level.block_entities.furnaces.insert(at, Default::default());
         } else if is_chest(b) {
-            self.block_entities.chests.insert(at, Box::new([None; 27]));
+            self.level.block_entities.chests.insert(at, Box::new([None; 27]));
         } else if is_sapling(b) {
             let t = 60.0 + self.random() * 120.0;
-            self.saplings.push((at, t));
+            self.level.saplings.push((at, t));
         }
         self.block_updated(at);
     }
@@ -217,7 +217,7 @@ impl Game {
         if let (Some(base), Some(f)) = (furnace_base(b).filter(|&k| k != FURNACE), facing(b)) {
             let origin = furnace_origin(p, b);
             let contents = if origin != p {
-                self.block_entities.remove(origin)
+                self.level.block_entities.remove(origin)
             } else {
                 Vec::new()
             };
@@ -235,7 +235,7 @@ impl Game {
             let Some(main) = bench_main(p, b, |q| w.geti(q)) else { return Vec::new() };
             // (the left block's id says how wide it is; it is gone already when it was broken)
             let main_b = if main == p { b } else { w.geti(main) };
-            let contents = if main != p { self.block_entities.remove(main) } else { Vec::new() };
+            let contents = if main != p { self.level.block_entities.remove(main) } else { Vec::new() };
             for q in bench_cells(main, main_b) {
                 if q != p && is_gun_bench(self.terrain.world.geti(q)) {
                     self.set_block(q, AIR);
@@ -277,11 +277,11 @@ impl Game {
     pub(in crate::game) fn update_stump_marks(&mut self, dt: f32) {
         const EVERY: f32 = 2.0;
         const STAGE_SECS: f32 = 60.0;
-        self.stump_scan -= dt;
-        if self.stump_scan > 0.0 {
+        self.level.stump_scan -= dt;
+        if self.level.stump_scan > 0.0 {
             return;
         }
-        self.stump_scan = EVERY;
+        self.level.stump_scan = EVERY;
         let c = self.player.pos.floor().as_ivec3();
         let w = &self.terrain.world;
         let found: Vec<(IVec3, u8)> = crate::world::terrain::listed_near(&self.terrain.stump_marks, c, 32, 12)
@@ -311,7 +311,7 @@ impl Game {
         for s in drops(b, NONE, r).into_iter().chain(contents) {
             self.spawn_drop(p.as_vec3() + Vec3::splat(0.5), s);
         }
-        self.saplings.retain(|(q, _)| *q != p);
+        self.level.saplings.retain(|(q, _)| *q != p);
         self.block_updated(p);
     }
 
@@ -363,7 +363,7 @@ impl Game {
     pub(in crate::game) fn start_fall(&mut self, p: IVec3) {
         let b = self.terrain.world.geti(p);
         self.set_block(p, AIR);
-        self.falling.push(FallingBlock {
+        self.level.falling.push(FallingBlock {
             pos: Vec3::new(p.x as f32 + 0.5, p.y as f32, p.z as f32 + 0.5),
             vel_y: 0.0,
             block: b,

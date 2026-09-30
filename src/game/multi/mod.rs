@@ -183,7 +183,7 @@ impl Game {
             return;
         }
         it.id = self.entity_id();
-        self.items.push(it);
+        self.level.items.push(it);
     }
 
     /// Feet of all living players: this one and the others on the LAN.
@@ -291,12 +291,12 @@ impl Game {
             sprint: self.tp_sprint,
             gun_dirt: self.held_gun_dirt(),
             brush: self.bench_brush_pose(),
-            drawer: matches!(self.screen, Screen::Container(Container::GunStation(_))) && self.bench_in_drawer,
+            drawer: matches!(self.screen, Screen::Container(Container::GunStation(_))) && self.bench_ui.in_drawer,
             held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
             gun_extra: if self.holding_gun() { self.hand.gun_anim().pack_extra() } else { 0 },
             grenade: self.grenades.hold.map_or(0, |h| (h.t * 100.0).round().min(65000.0) as u16 + 1),
             rod: self.rod_anim(),
-            bench_hold: match (self.screen, self.cursor, self.bench_hold_at) {
+            bench_hold: match (self.screen, self.cursor, self.bench_ui.hold_at) {
                 (Screen::Container(Container::GunStation(_)), Some(st), Some(at)) => Some((st, at)),
                 _ => None,
             },
@@ -306,7 +306,7 @@ impl Game {
     /// What this player is busy with, for the bubble above their head.
     fn my_status(&self) -> u8 {
         use crate::net::status;
-        if !self.focused {
+        if !self.input.focused {
             return status::AFK;
         }
         if self.screen == Screen::Playing && self.book_status() {
@@ -792,13 +792,13 @@ impl Game {
         let table_open = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
         let (kind, slots) = if is_chest(b) {
             // A double chest sends both halves (54 slots).
-            self.block_entities.chests.get(&p)?;
+            self.level.block_entities.chests.get(&p)?;
             (container::CHEST, self.chest_slots(p))
         } else if b == CRAFTING_TABLE {
             let grid = if table_open {
                 self.craft
             } else {
-                self.block_entities
+                self.level.block_entities
                     .tables
                     .get(&p)
                     .copied()
@@ -831,9 +831,9 @@ impl Game {
                 if open_here {
                     self.craft = grid;
                 } else if grid.iter().any(|s| s.is_some()) {
-                    self.block_entities.tables.insert(p, grid);
+                    self.level.block_entities.tables.insert(p, grid);
                 } else {
-                    self.block_entities.tables.remove(&p);
+                    self.level.block_entities.tables.remove(&p);
                 }
             }
             _ => {}
@@ -893,7 +893,7 @@ impl Game {
         [input, fuel, output]: [Slot; 3],
         grill: Vec<(u8, crate::entity::Grilled)>,
     ) {
-        let f = self.block_entities.furnaces.entry(p).or_default();
+        let f = self.level.block_entities.furnaces.entry(p).or_default();
         f.burn = burn;
         f.cook = cook;
         f.input = input;

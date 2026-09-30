@@ -150,10 +150,10 @@ impl Game {
     fn limit_fps(&mut self) {
         let limit = self.settings.fps_limit;
         if limit == 0 || self.bench.is_some() {
-            self.next_frame = None;
+            self.clock.next_frame = None;
             return;
         }
-        if let Some(t) = self.next_frame {
+        if let Some(t) = self.clock.next_frame {
             loop {
                 let now = Instant::now();
                 if now >= t {
@@ -170,7 +170,7 @@ impl Game {
         let now = Instant::now();
         let period = std::time::Duration::from_secs_f64(1.0 / limit as f64);
         // Keep an even pace; after a slow frame start over from now instead of catching up.
-        self.next_frame = Some(match self.next_frame {
+        self.clock.next_frame = Some(match self.clock.next_frame {
             Some(t) if t + period > now => t + period,
             _ => now + period,
         });
@@ -288,43 +288,43 @@ impl Game {
         let t_end = Instant::now();
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
         let wait = self.gpu.wait_ms;
-        self.cpu_ms = [
+        self.clock.cpu_ms = [
             ms(now, t_update),
             ms(t_update, t_build),
             (ms(t_build, t_end) - wait).max(0.0),
             wait,
         ];
         // This frame's own duration (the frame time measured at the start is the previous one's).
-        self.bench_record(self.between_ms + ms(now, t_end));
+        self.bench_record(self.clock.between_ms + ms(now, t_end));
         self.scene = scene;
         self.end_input();
-        self.frame_end = Instant::now();
+        self.clock.frame_end = Instant::now();
     }
 
     /// Frame timing (fps, the F3 graph and stats, bench mode); returns this frame's time step.
     fn frame_clock(&mut self, now: Instant) -> f32 {
-        self.between_ms = (now - self.frame_end).as_secs_f32() * 1000.0;
-        let frame_ms = (now - self.last).as_secs_f32() * 1000.0;
+        self.clock.between_ms = (now - self.clock.frame_end).as_secs_f32() * 1000.0;
+        let frame_ms = (now - self.clock.last).as_secs_f32() * 1000.0;
         let dt = (frame_ms / 1000.0).min(0.1);
-        self.last = now;
-        if self.frame_times.len() == hud::FRAME_GRAPH {
-            self.frame_times.pop_front();
+        self.clock.last = now;
+        if self.clock.frame_times.len() == hud::FRAME_GRAPH {
+            self.clock.frame_times.pop_front();
         }
-        self.frame_times.push_back(frame_ms);
-        self.sys_stats.set_active(self.show_debug);
-        self.vram_timer -= dt;
-        if self.show_debug && self.vram_timer <= 0.0 {
-            self.vram_timer = 1.0;
-            self.vram = self.gpu.vram_usage();
+        self.clock.frame_times.push_back(frame_ms);
+        self.clock.sys_stats.set_active(self.show_debug);
+        self.clock.vram_timer -= dt;
+        if self.show_debug && self.clock.vram_timer <= 0.0 {
+            self.clock.vram_timer = 1.0;
+            self.clock.vram = self.gpu.vram_usage();
         }
         self.bench_step(dt);
         self.time += dt;
-        self.fps_accum += dt;
-        self.fps_frames += 1;
-        if self.fps_accum >= 0.5 {
-            self.fps = self.fps_frames as f32 / self.fps_accum;
-            self.fps_accum = 0.0;
-            self.fps_frames = 0;
+        self.clock.fps_accum += dt;
+        self.clock.fps_frames += 1;
+        if self.clock.fps_accum >= 0.5 {
+            self.clock.fps = self.clock.fps_frames as f32 / self.clock.fps_accum;
+            self.clock.fps_accum = 0.0;
+            self.clock.fps_frames = 0;
         }
         dt
     }
@@ -397,7 +397,7 @@ impl Game {
             mining,
             self.player.horizontal_speed(),
             self.player.on_ground && !self.player.flying,
-            self.look_delta,
+            self.input.look_delta,
         );
         // Every view, including LAN poses, uses the hand/camera step clock.
         self.limb_swing = self.hand.walk_phase() / crate::model::player::LIMB_SWING_SCALE;
@@ -714,7 +714,7 @@ impl Game {
             lights.extend(others);
             // Torches, lanterns and buckets of lava lying on the ground light it up too.
             let mut dropped: Vec<(Vec3, f32)> = self
-                .items
+                .level.items
                 .iter()
                 .filter(|it| !it.is_picking_up() && crate::model::player::gives_light(it.stack.item))
                 .filter(|it| it.pos.distance(cam) < 48.0)
@@ -1089,11 +1089,11 @@ impl Game {
         const ITEM_SIGHT: f32 = 64.0;
         let sight = self.settings.render_distance * CHUNK as f32;
         let eye = self.player.pos;
-        for it in self.items.iter().filter(|it| it.pos.distance_squared(eye) < ITEM_SIGHT * ITEM_SIGHT) {
+        for it in self.level.items.iter().filter(|it| it.pos.distance_squared(eye) < ITEM_SIGHT * ITEM_SIGHT) {
             let (sky, blk) = world.light_estimate(it.pos + Vec3::Y * 0.3);
             it.build(target, self.time, sky, blk);
         }
-        for f in self.falling.iter().filter(|f| f.pos.distance_squared(eye) < sight * sight) {
+        for f in self.level.falling.iter().filter(|f| f.pos.distance_squared(eye) < sight * sight) {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
             f.build(target, sky, blk);
         }
@@ -1102,7 +1102,7 @@ impl Game {
         // Mobs always go into the entity range so they cast shadows; in first person that
         // range only draws shadows, so they are copied into the particle range to be seen too.
         let mob_verts = &mut scene.mobs;
-        for m in &self.mobs {
+        for m in &self.level.mobs {
             if (m.pos - self.player.pos).length_squared() > 128.0 * 128.0 {
                 continue;
             }
@@ -1131,14 +1131,14 @@ impl Game {
             if let Some(facing) = facing(b).filter(|_| is_chest(b)) {
                 // Both halves of a double chest open together.
                 let partner = chest_partner_offset(b);
-                let lid = |q: IVec3| self.chest_open.get(&q).copied().unwrap_or(0.0);
+                let lid = |q: IVec3| self.level.chest_open.get(&q).copied().unwrap_or(0.0);
                 let open = lid(*p).max(partner.map_or(0.0, |d| lid(*p + d)));
                 let side = chest_side(b, facing);
                 let (sky, blk) = light(*p);
                 build_chest_lid(target, *p, facing, side, open, sky, blk);
                 if open > 0.0 {
                     // What is inside shows while it is open (lifted: under the mouse).
-                    let lift = match (self.station_hover, &self.station) {
+                    let lift = match (self.inv_ui.station_hover, &self.station) {
                         (Some(gui::SlotRef::Chest(i)), Some(st)) => {
                             let (a, b) = self.chest_halves(st.pos);
                             if *p == a && i < 27 {
@@ -1151,7 +1151,7 @@ impl Game {
                         }
                         _ => None,
                     };
-                    if let Some(slots) = self.block_entities.chests.get(p) {
+                    if let Some(slots) = self.level.block_entities.chests.get(p) {
                         build_chest_items(target, *p, facing, side, &slots[..], lift, sky, blk);
                     }
                 }
@@ -1168,11 +1168,11 @@ impl Game {
             if !in_sight(p) {
                 // (out of sight it is not drawn, but it still swings shut or open)
                 let target_open = if door_open(b) { 1.0 } else { 0.0 };
-                self.door_swing.insert(*p, target_open);
+                self.level.door_swing.insert(*p, target_open);
                 continue;
             }
             let target_open = if door_open(b) { 1.0 } else { 0.0 };
-            let s = self.door_swing.entry(*p).or_insert(target_open);
+            let s = self.level.door_swing.entry(*p).or_insert(target_open);
             *s = if *s < target_open {
                 (*s + step).min(target_open)
             } else {
@@ -1181,9 +1181,9 @@ impl Game {
             let (sky, blk) = world.light_estimate(p.as_vec3() + Vec3::splat(0.5));
             build_door(target, *p, b, *s, sky, blk);
         }
-        self.door_swing.retain(|p, _| is_door(world.geti(*p)));
+        self.level.door_swing.retain(|p, _| is_door(world.geti(*p)));
         // Meat on the furnaces, and what was put into their fronts.
-        for (p, f) in self.block_entities.furnaces.iter().filter(|(p, _)| near(p)) {
+        for (p, f) in self.level.block_entities.furnaces.iter().filter(|(p, _)| near(p)) {
             let b = world.geti(*p);
             if let Some(facing) = facing(b).filter(|_| is_furnace(b)) {
                 let (sky, blk) = light(*p);
@@ -1199,7 +1199,7 @@ impl Game {
             Screen::Container(Container::Crafting(p)) => Some(p),
             _ => None,
         };
-        for (p, grid) in self.block_entities.tables.iter().filter(|(p, _)| near(p)) {
+        for (p, grid) in self.level.block_entities.tables.iter().filter(|(p, _)| near(p)) {
             if open_table != Some(*p) {
                 let (sky, blk) = light(*p);
                 build_table_items(target, *p, self.table_side(*p), grid, None, sky, blk);
@@ -1207,7 +1207,7 @@ impl Game {
         }
         if let Some(p) = open_table {
             // The open table: its grid (lifted under the mouse), and what was crafted.
-            let lift = match self.station_hover {
+            let lift = match self.inv_ui.station_hover {
                 Some(gui::SlotRef::Craft(i)) => Some(i),
                 _ => None,
             };
@@ -1216,13 +1216,13 @@ impl Game {
             build_table_items(target, p, side, &self.craft, lift, sky, blk);
             if let Some(made) = &self.craft_out {
                 let (t, used) = self.craft_fx.unwrap_or((10.0, [None; 9]));
-                let hovered = self.station_hover == Some(gui::SlotRef::CraftOut);
+                let hovered = self.inv_ui.station_hover == Some(gui::SlotRef::CraftOut);
                 build_table_made(target, p, side, made, &used, t, hovered, sky, blk);
             }
         }
         // The highlighted slot in an open chest or on a table, or spot of a furnace.
         let glow = match self.screen {
-            Screen::Container(_) if self.in_station() => self.station_frame,
+            Screen::Container(_) if self.in_station() => self.inv_ui.station_frame,
             Screen::Playing if !self.in_station() => self.furnace_frame(),
             _ => None,
         };
@@ -1241,19 +1241,19 @@ impl Game {
         self.update_state_icons();
         let s = self.settings.effective_gui_scale(w, h);
         let booting = self.boot_step();
-        self.ui.input_enabled = !self.cursor_grabbed && !booting;
-        self.ui.mouse_down = self.left_down;
-        self.ui.pressed = self.left_pressed && !self.cursor_grabbed;
-        self.ui.right_pressed = self.right_pressed && !self.cursor_grabbed;
+        self.ui.input_enabled = !self.input.cursor_grabbed && !booting;
+        self.ui.mouse_down = self.input.left_down;
+        self.ui.pressed = self.input.left_pressed && !self.input.cursor_grabbed;
+        self.ui.right_pressed = self.input.right_pressed && !self.input.cursor_grabbed;
         self.ui.shift =
-            self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
-        self.ui.scroll = if self.cursor_grabbed {
+            self.input.keys.contains(&KeyCode::ShiftLeft) || self.input.keys.contains(&KeyCode::ShiftRight);
+        self.ui.scroll = if self.input.cursor_grabbed {
             0.0
         } else {
-            self.scroll
+            self.input.scroll
         };
-        self.ui.typed = std::mem::take(&mut self.typed);
-        self.ui.backspace = self.backspace;
+        self.ui.typed = std::mem::take(&mut self.input.typed);
+        self.ui.backspace = self.input.backspace;
         self.ui.begin(w, h, s, dt, self.time);
         if in_world {
             self.draw_hud(medium.underwater, medium.in_lava);
@@ -1273,26 +1273,26 @@ impl Game {
             Screen::MainMenu => screens::main_menu(
                 &mut self.ui,
                 self.settings.skin,
-                &mut self.menu_preview,
+                &mut self.menus.menu_preview,
             ),
             Screen::Skin => screens::skin_menu(
                 &mut self.ui,
                 self.settings.skin,
                 self.custom_skins.contains_key(&0),
-                &self.skin_error,
+                &self.menus.skin_error,
             ),
             Screen::Options { in_game } => screens::options(
                 &mut self.ui,
                 &mut self.settings,
                 in_game,
-                &mut self.options,
+                &mut self.menus.options,
                 self.gpu.max_samples,
             ),
             Screen::ResourcePacks { in_game } => {
-                screens::resource_packs(&mut self.ui, &mut self.pack_screen, in_game)
+                screens::resource_packs(&mut self.ui, &mut self.menus.pack_screen, in_game)
             }
             Screen::KeyBinds { in_game } => {
-                screens::key_binds(&mut self.ui, &mut self.settings, in_game, &mut self.options)
+                screens::key_binds(&mut self.ui, &mut self.settings, in_game, &mut self.menus.options)
             }
             Screen::Credits => screens::credits(
                 &mut self.ui,

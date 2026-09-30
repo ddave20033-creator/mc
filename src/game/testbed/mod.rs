@@ -109,9 +109,9 @@ impl Game {
         // Held keys and buttons.
         tb.held.retain(|&(_, until)| until > now);
         let held: Vec<KeyCode> = tb.held.iter().map(|h| h.0).collect();
-        self.keys.retain(|k| held.contains(k));
+        self.input.keys.retain(|k| held.contains(k));
         for k in held {
-            self.keys.insert(k);
+            self.input.keys.insert(k);
         }
         let tb = self.testbed.as_mut().unwrap();
         for (i, b) in tb.buttons.iter_mut().enumerate() {
@@ -120,9 +120,9 @@ impl Game {
                 *b = None;
             }
             if i == 0 {
-                self.left_down = down;
+                self.input.left_down = down;
             } else {
-                self.right_down = down;
+                self.input.right_down = down;
             }
         }
         if let Some((rate, until)) = tb.turning {
@@ -132,7 +132,7 @@ impl Game {
                 tb.turning = None;
             }
         }
-        self.mouse_delta = Vec2::ZERO;
+        self.input.mouse_delta = Vec2::ZERO;
         // A world being made ready: loaded, entered, and the chunks around drawn.
         if let Some(since) = tb.loading {
             let ready = self.screen == Screen::Playing && self.renderer.pending() == 0 && self.renderer.chunk_count() > 60;
@@ -291,7 +291,7 @@ impl Game {
                 }
             }
             Cmd::Drop(name, v) => match crate::item::from_key(&name) {
-                Some(id) => self.items.push(crate::entity::dropped::ItemEntity::new(origin + Vec3::from(v), Vec3::ZERO, Stack::one(id), 1000.0)),
+                Some(id) => self.level.items.push(crate::entity::dropped::ItemEntity::new(origin + Vec3::from(v), Vec3::ZERO, Stack::one(id), 1000.0)),
                 None => tb.problems.push(format!("drop: no item `{name}`")),
             },
             Cmd::Key(name, secs) => match key_named(&self.settings, &name) {
@@ -310,11 +310,11 @@ impl Game {
                 let i = if left { 0 } else { 1 };
                 tb.buttons[i] = Some(tb.clock + secs.max(0.02));
                 if left {
-                    self.left_pressed = true;
-                    self.left_down = true;
+                    self.input.left_pressed = true;
+                    self.input.left_down = true;
                 } else {
-                    self.right_pressed = true;
-                    self.right_down = true;
+                    self.input.right_pressed = true;
+                    self.input.right_down = true;
                 }
             }
             Cmd::Mouse(fx, fy) => {
@@ -419,16 +419,16 @@ impl Game {
         self.screen = match name {
             "main" => Screen::MainMenu,
             "worlds" | "delete" => {
-                self.worlds = crate::save::list_worlds();
-                self.selected_world = (!self.worlds.is_empty()).then_some(0);
-                if name == "delete" && self.selected_world.is_some() {
+                self.menus.worlds = crate::save::list_worlds();
+                self.menus.selected_world = (!self.menus.worlds.is_empty()).then_some(0);
+                if name == "delete" && self.menus.selected_world.is_some() {
                     Screen::DeleteWorld
                 } else {
                     Screen::SelectWorld
                 }
             }
             "create" => {
-                self.create_name = t("create.default_name").to_string();
+                self.menus.create_name = t("create.default_name").to_string();
                 Screen::CreateWorld
             }
             "pause" => Screen::Paused,

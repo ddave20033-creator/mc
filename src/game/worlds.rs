@@ -29,13 +29,13 @@ fn format_date(secs: u64) -> String {
 
 impl Game {
     pub(super) fn open_world_list(&mut self) {
-        self.worlds = list_worlds();
-        self.selected_world = if self.worlds.is_empty() {
+        self.menus.worlds = list_worlds();
+        self.menus.selected_world = if self.menus.worlds.is_empty() {
             None
         } else {
             Some(0)
         };
-        self.world_scroll = 0.0;
+        self.menus.world_scroll = 0.0;
         self.screen = Screen::SelectWorld;
     }
 
@@ -52,10 +52,10 @@ impl Game {
         // Scrollable list
         let (top, bottom) = ((44.0 * s).round(), h - 50.0 * s);
         let visible = ((bottom - top) / row_h).floor().max(1.0) as usize;
-        let max_scroll = self.worlds.len().saturating_sub(visible) as f32;
-        self.world_scroll = (self.world_scroll - self.ui.scroll).clamp(0.0, max_scroll);
-        let first = self.world_scroll as usize;
-        if self.worlds.is_empty() {
+        let max_scroll = self.menus.worlds.len().saturating_sub(visible) as f32;
+        self.menus.world_scroll = (self.menus.world_scroll - self.ui.scroll).clamp(0.0, max_scroll);
+        let first = self.menus.world_scroll as usize;
+        if self.menus.worlds.is_empty() {
             self.ui.text_centered(
                 t("worlds.empty"),
                 w * 0.5,
@@ -66,35 +66,35 @@ impl Game {
             );
         }
         let mut play = None;
-        for (i, meta) in self.worlds.iter().enumerate().skip(first).take(visible) {
+        for (i, meta) in self.menus.worlds.iter().enumerate().skip(first).take(visible) {
             let y = (top + (i - first) as f32 * row_h).round();
             let a = self.ui.appear();
             let old = self.ui.style(a, Vec2::new(0.0, ((1.0 - a) * 10.0 * s).round()));
             let focused = self.ui.nav_item();
             if focused {
-                self.selected_world = Some(i);
+                self.menus.selected_world = Some(i);
                 if self.ui.nav_activated() {
                     play = Some(i);
                 }
             }
             let hovered = self.ui.hit(lx, y, lw, card_h);
-            let selected = self.selected_world == Some(i);
+            let selected = self.menus.selected_world == Some(i);
             world_card(&mut self.ui, meta, lx, y, lw, card_h, hovered || focused, selected);
             self.ui.restore(old);
             if hovered && self.ui.pressed {
-                if self.last_click.0 == i && self.time - self.last_click.1 < 0.35 {
+                if self.menus.last_click.0 == i && self.time - self.menus.last_click.1 < 0.35 {
                     play = Some(i);
                 }
-                self.selected_world = Some(i);
-                self.last_click = (i, self.time);
+                self.menus.selected_world = Some(i);
+                self.menus.last_click = (i, self.time);
                 self.ui.clicked = true;
             }
         }
         // A scroll bar when not all fit.
         if max_scroll > 0.0 {
             let track = bottom - top;
-            let bar = (track * visible as f32 / self.worlds.len() as f32).max(12.0 * s);
-            let by = top + (track - bar) * (self.world_scroll / max_scroll);
+            let bar = (track * visible as f32 / self.menus.worlds.len() as f32).max(12.0 * s);
+            let by = top + (track - bar) * (self.menus.world_scroll / max_scroll);
             self.ui.rect(lx + lw + 5.0 * s, top, 2.0 * s, track, rgba(255, 255, 255, 20), s);
             self.ui.rect(lx + lw + 5.0 * s, by, 2.0 * s, bar, with_alpha(ACCENT, 0.8), s);
         }
@@ -108,15 +108,15 @@ impl Game {
         let x0 = (w * 0.5 - total * 0.5).round();
         let bx = |k: f32| (x0 + k * (bw + 6.0 * s)).round();
         let by = bar_y + 9.0 * s;
-        let has = self.selected_world.is_some();
+        let has = self.menus.selected_world.is_some();
         if self.ui.button_primary(t("worlds.play_short"), bx(0.0), by, bw, bh, has) {
-            play = self.selected_world;
+            play = self.menus.selected_world;
         }
         if self.ui.button(t("worlds.create_short"), bx(1.0), by, bw, bh, true) {
-            self.create_name = t("create.default_name").to_string();
-            self.create_seed.clear();
-            self.create_creative = false;
-            self.create_cheats = false;
+            self.menus.create_name = t("create.default_name").to_string();
+            self.menus.create_seed.clear();
+            self.menus.create_creative = false;
+            self.menus.create_cheats = false;
             self.ui.focus("world_name");
             self.screen = Screen::CreateWorld;
         }
@@ -127,7 +127,7 @@ impl Game {
             self.screen = Screen::MainMenu;
         }
         if let Some(i) = play {
-            let meta = self.worlds[i].clone();
+            let meta = self.menus.worlds[i].clone();
             self.load_world(meta);
         }
         Action::None
@@ -149,28 +149,28 @@ impl Game {
         let label = rgba(160, 164, 180, 255);
         self.ui.text(t("create.name"), fx, y, s, label, false);
         y += 10.0 * s;
-        let mut name = std::mem::take(&mut self.create_name);
+        let mut name = std::mem::take(&mut self.menus.create_name);
         self.ui.text_field("world_name", &mut name, fx, y, fw, 20.0 * s, "", 32);
-        self.create_name = name;
+        self.menus.create_name = name;
         y += 27.0 * s;
         self.ui.text(t("create.seed"), fx, y, s, label, false);
         y += 10.0 * s;
-        let mut seed = std::mem::take(&mut self.create_seed);
+        let mut seed = std::mem::take(&mut self.menus.create_seed);
         self.ui.text_field("world_seed", &mut seed, fx, y, fw, 20.0 * s, t("create.seed_hint"), 32);
-        self.create_seed = seed;
+        self.menus.create_seed = seed;
         y += 28.0 * s;
-        let mode = if self.create_creative {
+        let mode = if self.menus.create_creative {
             t("mode.creative")
         } else {
             t("mode.survival")
         };
         if self.ui.button(&tf("create.mode", &[&mode]), fx, y, fw, 20.0 * s, true) {
-            self.create_creative = !self.create_creative;
+            self.menus.create_creative = !self.menus.create_creative;
             // Minecraft enables cheats by default in creative.
-            self.create_cheats = self.create_creative;
+            self.menus.create_cheats = self.menus.create_creative;
         }
         y += 23.0 * s;
-        let desc = if self.create_creative {
+        let desc = if self.menus.create_creative {
             t("create.creative_desc")
         } else {
             t("create.survival_desc")
@@ -183,14 +183,14 @@ impl Game {
         }
         y += 4.0 * s;
         if self.ui.button(
-            &tf("create.cheats", &[&crate::lang::on_off(self.create_cheats)]),
+            &tf("create.cheats", &[&crate::lang::on_off(self.menus.create_cheats)]),
             fx,
             y,
             fw,
             20.0 * s,
             true,
         ) {
-            self.create_cheats = !self.create_cheats;
+            self.menus.create_cheats = !self.menus.create_cheats;
         }
         let bw = ((fw - 6.0 * s) * 0.5).floor();
         let by = (py + ph - 32.0 * s).round();
@@ -204,12 +204,12 @@ impl Game {
     }
 
     pub(super) fn create_world(&mut self) {
-        let seed = seed_from_text(&self.create_seed);
+        let seed = seed_from_text(&self.menus.create_seed);
         let meta = WorldMeta::create(
-            &self.create_name,
+            &self.menus.create_name,
             seed,
-            self.create_creative,
-            self.create_cheats,
+            self.menus.create_creative,
+            self.menus.create_cheats,
         );
         self.load_world(meta);
     }
@@ -218,11 +218,11 @@ impl Game {
     pub(super) fn delete_world_screen(&mut self) -> Action {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         screens::backdrop(&mut self.ui, 1.6);
-        let Some(i) = self.selected_world else {
+        let Some(i) = self.menus.selected_world else {
             self.screen = Screen::SelectWorld;
             return Action::None;
         };
-        let name = self.worlds[i].name.clone();
+        let name = self.menus.worlds[i].name.clone();
         let (pw, ph) = ((270.0 * s).round(), (104.0 * s).round());
         let (px, py) = ((w * 0.5 - pw * 0.5).round(), ((h - ph) * 0.42).round());
         self.ui.panel(px, py, pw, ph);
@@ -238,7 +238,7 @@ impl Game {
         let (fx, by) = ((px + 14.0 * s).round(), (py + ph - 32.0 * s).round());
         if self.ui.button_ex(t("worlds.delete"), fx, by, bw, 22.0 * s, true, ButtonKind::Danger) {
             self.saver.wait();
-            save::delete_world(&self.worlds[i].folder);
+            save::delete_world(&self.menus.worlds[i].folder);
             self.open_world_list();
         }
         if self.ui.button(t("gui.cancel"), fx + fw - bw, by, bw, 22.0 * s, true) {
@@ -271,39 +271,34 @@ impl Game {
         let (carried, worn) = all.split_at(crate::item::inventory::SIZE);
         self.inventory.slots.copy_from_slice(carried);
         self.inventory.armor.copy_from_slice(worn);
-        self.block_entities = BlockEntities::default();
-        self.saplings.clear();
-        self.items.clear();
-        self.mobs.clear();
+        // Everything in the last world goes (its things, mobs, animations), all at once.
+        self.level = Level::new();
         self.mob_target = None;
         save::load_entities(
             &meta.folder,
-            &mut self.block_entities,
-            &mut self.saplings,
-            &mut self.items,
-            &mut self.mobs,
+            &mut self.level.block_entities,
+            &mut self.level.saplings,
+            &mut self.level.items,
+            &mut self.level.mobs,
         );
         // Ids are not saved: every loaded mob and item gets a fresh one (hits, bites and LAN
         // updates find them by it).
-        for i in 0..self.mobs.len() {
-            self.mobs[i].id = self.entity_id();
+        for i in 0..self.level.mobs.len() {
+            self.level.mobs[i].id = self.entity_id();
         }
-        for i in 0..self.items.len() {
-            self.items[i].id = self.entity_id();
+        for i in 0..self.level.items.len() {
+            self.level.items[i].id = self.entity_id();
         }
-        self.falling.clear();
         // The cuts in its trunks; nothing of the last world's felling.
         felling::load_notches(&save::load_notches(&meta.folder));
-        self.falling_trees.clear();
         self.chop = None;
         self.struck = None;
-        self.lying_logs = logs::parse_logs(&save::load_logs(&meta.folder));
-        self.next_log_id = self.lying_logs.len() as u32;
+        self.level.lying_logs = logs::parse_logs(&save::load_logs(&meta.folder));
+        self.level.next_log_id = self.level.lying_logs.len() as u32;
         self.log_aim = None;
         self.log_cut = None;
         self.cursor = None;
         self.craft = [None; 9];
-        self.bench_anims.clear();
         // Nothing of the last world's shots, grenades, fishing or effects comes along (a grenade
         // thrown just before leaving would blow up here).
         self.guns = Default::default();
@@ -313,12 +308,6 @@ impl Game {
         self.station = None;
         self.craft_out = None;
         self.craft_fx = None;
-        self.door_swing.clear();
-        self.bench_drawer.clear();
-        self.loader_feed.clear();
-        self.table_sides.clear();
-        self.furnace_heard.clear();
-        self.torches.clear();
         self.furnace_part = None;
         self.furnace_hold = false;
         self.player_target = None;
@@ -326,10 +315,9 @@ impl Game {
         self.fall_peak = 0.0;
         self.fire_tick = 0.0;
         self.drown_tick = 0.0;
-        self.drag = None;
+        self.inv_ui.drag = None;
         self.mining = None;
         self.target = None;
-        self.chest_open.clear();
         self.air = MAX_AIR;
         self.invuln = 0.0;
         self.spectating = None;
@@ -530,13 +518,13 @@ impl Game {
         let folder = meta.folder.clone();
         save::save_inventory(&folder, &slots);
         save::save_notches(&folder, &felling::notches_text());
-        save::save_logs(&folder, &logs::logs_text(&self.lying_logs));
+        save::save_logs(&folder, &logs::logs_text(&self.level.lying_logs));
         save::save_entities(
             &folder,
-            &self.block_entities,
-            &self.saplings,
-            &self.items,
-            &self.mobs,
+            &self.level.block_entities,
+            &self.level.saplings,
+            &self.level.items,
+            &self.level.mobs,
         );
         let world = &self.terrain.world;
         let chunks = world

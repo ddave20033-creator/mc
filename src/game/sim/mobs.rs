@@ -14,9 +14,9 @@ impl Game {
     /// wear like Minecraft (swords 1, tools 2).
     pub(in crate::game) fn attack(&mut self, mob: Option<usize>, player: Option<u8>) {
         // Sneaking, a hit takes a target dummy down (it drops as an item).
-        if let Some(i) = mob.filter(|&i| self.mobs[i].kind == MobKind::Dummy && self.player.sneaking) {
+        if let Some(i) = mob.filter(|&i| self.level.mobs[i].kind == MobKind::Dummy && self.player.sneaking) {
             if self.is_client() {
-                let id = self.mobs[i].id;
+                let id = self.level.mobs[i].id;
                 self.send(crate::net::Msg::BreakDummy { id });
             } else {
                 self.break_dummy(i, !self.creative());
@@ -38,15 +38,15 @@ impl Game {
         let hit = match (mob, player) {
             (Some(i), _) if self.is_client() => {
                 // The host has the real mob; it can be hit when it is not still flashing red.
-                let m = &self.mobs[i];
+                let m = &self.level.mobs[i];
                 let can = m.alive() && m.hurt_time <= 0.0;
                 let id = m.id;
                 self.send(Msg::AttackMob { id, dmg, knock });
                 can
             }
             (Some(i), _) => {
-                let hit = self.mobs[i].hurt(dmg, Some(from), knock);
-                let foe = Foe::Mob(self.mobs[i].id);
+                let hit = self.level.mobs[i].hurt(dmg, Some(from), knock);
+                let foe = Foe::Mob(self.level.mobs[i].id);
                 self.attacked(foe, crate::game::multi::HOST_ID);
                 hit
             }
@@ -64,7 +64,7 @@ impl Game {
             _ => false,
         };
         let hit_at = match (mob, player) {
-            (Some(i), _) => self.mobs[i].center(),
+            (Some(i), _) => self.level.mobs[i].center(),
             (None, Some(id)) => self.remote_pos(id).unwrap_or(from) + Vec3::Y,
             _ => from,
         };
@@ -107,8 +107,8 @@ impl Game {
         let Some(name) = self.player_name(who) else { return };
         let me = Foe::Player(who);
         if let Foe::Mob(id) = foe {
-            if let Some((at, wild)) = self.mobs.iter().find(|m| m.id == id && m.kind == MobKind::Wolf).map(|m| (m.pos, m.owner.is_none())) {
-                for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf) {
+            if let Some((at, wild)) = self.level.mobs.iter().find(|m| m.id == id && m.kind == MobKind::Wolf).map(|m| (m.pos, m.owner.is_none())) {
+                for m in self.level.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf) {
                     let pack = wild && m.owner.is_none() && m.pos.distance(at) < 12.0;
                     if m.id == id || pack {
                         m.provoke(me, Some(&name));
@@ -120,7 +120,7 @@ impl Game {
             Foe::Player(id) => self.player_name(id),
             Foe::Mob(_) => None,
         };
-        for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf && m.owner.is_some()) {
+        for m in self.level.mobs.iter_mut().filter(|m| m.kind == MobKind::Wolf && m.owner.is_some()) {
             let own = m.owner.as_deref() == Some(name.as_str());
             if own && Foe::Mob(m.id) != foe {
                 m.provoke(foe, foe_name.as_deref());
@@ -135,7 +135,7 @@ impl Game {
     /// tame one of theirs sits down or stands up. True if something happened.
     pub(in crate::game) fn use_on_wolf(&mut self, i: usize) -> bool {
         let held = self.held();
-        let m = &self.mobs[i];
+        let m = &self.level.mobs[i];
         if m.kind != MobKind::Wolf || !m.alive() {
             return false;
         }
@@ -148,7 +148,7 @@ impl Game {
             let id = m.id;
             self.send(crate::net::Msg::UseOnMob { id, item: held });
             if !bone {
-                self.mobs[i].toggle_sit();
+                self.level.mobs[i].toggle_sit();
             }
         } else if self.wolf_used(i, held, crate::game::multi::HOST_ID).is_none() {
             return false;
@@ -165,7 +165,7 @@ impl Game {
     /// was given, Some(false) if it sat down or stood up.
     pub(in crate::game) fn wolf_used(&mut self, i: usize, item: ItemId, who: u8) -> Option<bool> {
         let name = self.player_name(who)?;
-        let m = &mut self.mobs[i];
+        let m = &mut self.level.mobs[i];
         if m.kind != MobKind::Wolf || !m.alive() {
             return None;
         }
@@ -194,8 +194,8 @@ impl Game {
     fn bite(&mut self, foe: Foe, from: Vec3) {
         match foe {
             Foe::Mob(id) => {
-                if let Some(j) = self.mobs.iter().position(|m| m.id == id) {
-                    self.mobs[j].hurt(BITE, Some(from), 1.0);
+                if let Some(j) = self.level.mobs.iter().position(|m| m.id == id) {
+                    self.level.mobs[j].hurt(BITE, Some(from), 1.0);
                 }
             }
             Foe::Player(id) if id == crate::game::multi::HOST_ID => self.hit_by_player(BITE, from, 1.0, hurt::WOLF),
@@ -227,12 +227,12 @@ impl Game {
 
     /// Right click on a sheep with shears: 1-3 wool pops off (the host drops it).
     pub(in crate::game) fn shear(&mut self, i: usize) {
-        if !self.mobs[i].can_shear() {
+        if !self.level.mobs[i].can_shear() {
             return;
         }
         if self.is_client() {
-            let id = self.mobs[i].id;
-            self.mobs[i].sheared = true;
+            let id = self.level.mobs[i].id;
+            self.level.mobs[i].sheared = true;
             self.send(crate::net::Msg::Shear { id });
         } else {
             self.shear_mob(i);
@@ -247,7 +247,7 @@ impl Game {
 
     /// Host: shears a sheep and drops its wool.
     pub(in crate::game) fn shear_mob(&mut self, i: usize) {
-        let m = &mut self.mobs[i];
+        let m = &mut self.level.mobs[i];
         if !m.can_shear() {
             return;
         }
@@ -259,10 +259,10 @@ impl Game {
 
     /// Host: takes a target dummy down, dropping it as an item (`drop`).
     pub(in crate::game) fn break_dummy(&mut self, i: usize, drop: bool) {
-        if self.mobs[i].kind != MobKind::Dummy {
+        if self.level.mobs[i].kind != MobKind::Dummy {
             return;
         }
-        let m = self.mobs.swap_remove(i);
+        let m = self.level.mobs.swap_remove(i);
         let c = m.center();
         let (sky, blk) = (self.terrain.world.sky_estimate(c), self.terrain.world.block_light_estimate(c));
         self.particles.poof(c, sky, blk);
@@ -291,18 +291,18 @@ impl Game {
         let seed = (self.random() * 16_777_216.0) as u32;
         let mut m = Mob::new(kind, pos, yaw, seed);
         m.id = self.entity_id();
-        self.mobs.push(m);
+        self.level.mobs.push(m);
     }
 
     /// Minecraft-like animal spawning: now and then a group of sheep or pigs (Minecraft's
     /// weights: 12 to 10) appears on grass under the open sky, 24-64 blocks from the player
     /// and out of sight, while fewer than 10 animals are around.
     pub(in crate::game) fn spawn_animals(&mut self, dt: f32) {
-        self.mob_spawn_timer -= dt;
-        if self.mob_spawn_timer > 0.0 {
+        self.level.mob_spawn_timer -= dt;
+        if self.level.mob_spawn_timer > 0.0 {
             return;
         }
-        self.mob_spawn_timer = 3.0 + self.random() * 4.0;
+        self.level.mob_spawn_timer = 3.0 + self.random() * 4.0;
         // Around a random player (the host or a LAN player).
         let players = self.player_positions();
         if players.is_empty() {
@@ -312,7 +312,7 @@ impl Game {
         let me = players[pick.min(players.len() - 1)];
         let own = me == self.player.pos;
         let near = self
-            .mobs
+            .level.mobs
             .iter()
             .filter(|m| m.kind != MobKind::Dummy && Vec2::new(m.pos.x - me.x, m.pos.z - me.z).length() < 96.0)
             .count();
@@ -399,11 +399,11 @@ impl Game {
         let ctx = MobCtx {
             players: self.player_positions(),
             people,
-            mobs: self.mobs.iter().filter(|m| m.alive()).map(|m| (m.id, m.pos)).collect(),
+            mobs: self.level.mobs.iter().filter(|m| m.alive()).map(|m| (m.id, m.pos)).collect(),
         };
         let mut i = 0;
-        while i < self.mobs.len() {
-            let p = self.mobs[i].pos;
+        while i < self.level.mobs.len() {
+            let p = self.level.mobs[i].pos;
             // Mobs in unloaded chunks wait there.
             if !self
                 .terrain
@@ -413,17 +413,17 @@ impl Game {
                 i += 1;
                 continue;
             }
-            let event = self.mobs[i].update(dt, &self.terrain.world, &ctx);
-            if self.mobs[i].pos.y < -64.0 {
-                self.mobs.swap_remove(i);
+            let event = self.level.mobs[i].update(dt, &self.terrain.world, &ctx);
+            if self.level.mobs[i].pos.y < -64.0 {
+                self.level.mobs.swap_remove(i);
                 continue;
             }
-            if let Some(s) = self.mobs[i].sound(dt) {
-                let at = self.mobs[i].center();
+            if let Some(s) = self.level.mobs[i].sound(dt) {
+                let at = self.level.mobs[i].center();
                 self.audio.play(s, Some(at), 1.0);
             }
             if let MobEvent::Bite(foe) = event {
-                let from = self.mobs[i].pos;
+                let from = self.level.mobs[i].pos;
                 self.bite(foe, from);
             }
             if let MobEvent::EatGrass(q) = event {
@@ -436,7 +436,7 @@ impl Game {
                 self.block_updated(q);
             }
             if let MobEvent::Remove = event {
-                let m = self.mobs.swap_remove(i);
+                let m = self.level.mobs.swap_remove(i);
                 let c = m.center();
                 let (sky, blk) = (
                     self.terrain.world.sky_estimate(c),
@@ -469,28 +469,28 @@ impl Game {
         }
         // Mobs push each other apart, and the player pushes them.
         // (swept along x: only mobs less than 2 blocks apart that way are compared)
-        let mut order: Vec<usize> = (0..self.mobs.len()).collect();
-        order.sort_unstable_by(|&a, &b| self.mobs[a].pos.x.total_cmp(&self.mobs[b].pos.x));
+        let mut order: Vec<usize> = (0..self.level.mobs.len()).collect();
+        order.sort_unstable_by(|&a, &b| self.level.mobs[a].pos.x.total_cmp(&self.level.mobs[b].pos.x));
         for (i, &a) in order.iter().enumerate() {
             for &b in &order[i + 1..] {
-                let (pa, pb) = (self.mobs[a].pos, self.mobs[b].pos);
+                let (pa, pb) = (self.level.mobs[a].pos, self.level.mobs[b].pos);
                 if pb.x - pa.x > 2.0 {
                     break;
                 }
                 if (pa - pb).length_squared() > 4.0 {
                     continue;
                 }
-                let (w, tall) = self.mobs[b].size();
-                if let Some(away) = self.mobs[a].overlaps(pb, w, tall) {
+                let (w, tall) = self.level.mobs[b].size();
+                if let Some(away) = self.level.mobs[a].overlaps(pb, w, tall) {
                     let push = away.normalize_or_zero() * (dt * 12.0).min(1.0);
-                    self.mobs[a].push(push);
-                    self.mobs[b].push(-push);
+                    self.level.mobs[a].push(push);
+                    self.level.mobs[b].push(-push);
                 }
             }
         }
         // Players push them too.
         for me in &ctx.players {
-            for m in &mut self.mobs {
+            for m in &mut self.level.mobs {
                 if let Some(away) = m.overlaps(*me, 0.3, 1.8) {
                     m.push(away.normalize_or_zero() * (dt * 20.0).min(1.0));
                 }

@@ -7,6 +7,7 @@ mod gui;
 mod multi;
 mod player;
 mod sim;
+mod state;
 mod testbed;
 mod tools;
 mod update;
@@ -17,6 +18,7 @@ pub(crate) use gui::icons;
 use player::{camera, sleep};
 use sim::{felling, logs};
 use tools::{fishing, grenades, guns, revolver};
+use state::{BenchUi, FrameClock, Input, InventoryUi, Level, Menus};
 
 use crate::engine::Gpu;
 use crate::entity::mob::{Mob, MobCtx, MobEvent, MobKind};
@@ -153,14 +155,9 @@ pub struct Game {
     // World management
     world_meta: Option<WorldMeta>,
     pending_player: Option<PlayerSave>,
-    worlds: Vec<WorldMeta>,
-    selected_world: Option<usize>,
-    world_scroll: f32,
-    last_click: (usize, f32),
-    create_name: String,
-    create_seed: String,
-    create_creative: bool,
-    create_cheats: bool,
+    /// The menus' state: the world list and the new world's settings, the multiplayer screen,
+    /// the options, the resource packs and the title screen's player.
+    menus: Menus,
     autosave: f32,
     saver: ChunkSaver,
 
@@ -213,120 +210,46 @@ pub struct Game {
     hotbar_anim: f32,
     cursor: Slot,
     craft: [Slot; 9],
-    /// Creative list scroll in rows: the target set by the wheel, and the eased position.
-    creative_scroll: f32,
-    creative_scroll_anim: f32,
-    /// Dragging the creative scroll bar.
-    scroll_drag: bool,
-    /// Creative inventory search text; typing goes to it while it is focused.
-    creative_search: String,
-    search_focused: bool,
-    /// The JEI panel beside the inventory screens.
-    jei: gui::Jei,
-    /// The open tab of the creative inventory (index into `gui::TABS`); kept between openings.
-    creative_tab: usize,
-    /// Chest lid animation 0..1 per chest position.
-    chest_open: crate::world::FastMap<IVec3, f32>,
-    /// How far each door half is swung open (0..1), easing toward its state.
-    door_swing: crate::world::FastMap<IVec3, f32>,
-    /// How far each gun station's drawer is out (0..1): it slides out while one is used.
-    bench_drawer: crate::world::FastMap<IVec3, f32>,
+    /// The inventory screens: the creative tabs, list and search, the JEI panel, dragging and
+    /// clicking slots, and what the mouse is on at an open chest or table.
+    inv_ui: InventoryUi,
     /// How far into running the player is (0..1, eased: the gun carried across the chest on
     /// the player model).
     tp_sprint: f32,
-    /// Host: seconds each rifle station's magazine loader has been feeding the next round.
-    loader_feed: crate::world::FastMap<IVec3, f32>,
-    /// At the open gun station: holding its brush, and where it is; the camera's sway with
-    /// the mouse (-1 .. 1); something picked up off the table (where the mouse was, to drag
-    /// it); what the mouse points at there; scrubbing now, the dirt scrubbed off not yet
-    /// taken off, and whether that is not sent yet; when the table was last sent.
-    bench_brush: bool,
-    bench_brush_at: Option<Vec3>,
-    /// Where on the open gun station's table the mouse points (x, z), if it does.
-    bench_spot: Option<(f32, f32)>,
-    /// Where what is held on the mouse would lie on the open gun station's table.
-    bench_held_spot: Option<(f32, f32)>,
-    /// Where in the open drawer the mouse points (on its floor), if it does.
-    bench_drawer_spot: Option<Vec3>,
-    /// Where what is held on the mouse shows over the open gun station (world), for the
-    /// others to see it there too.
-    bench_hold_at: Option<Vec3>,
-    bench_pan: f32,
-    /// At the open gun station: looking into its drawer (the mouse went down to it), and how
-    /// far the camera has gone down to it (0 over the table .. 1 over the drawer).
-    bench_in_drawer: bool,
-    bench_focus: f32,
-    /// How long the mouse has stayed where it opens (or closes) the drawer.
-    bench_dwell: f32,
-    bench_drag: Option<Vec2>,
-    bench_hover: Option<gui::BenchPick>,
-    bench_scrubbing: bool,
-    /// What the mouse is on at the gun station is where what is held goes (it lights green).
-    bench_hover_ok: bool,
-    bench_scrub: f32,
-    bench_scrub_dirty: bool,
-    bench_sent: f32,
-    /// The last change seen on each gun station's table and when it started (it plays out).
-    bench_anims: crate::world::FastMap<IVec3, (u16, f32)>,
-    /// Slot drag in progress (Minecraft-style stack spreading).
-    drag: Option<gui::Drag>,
-    /// The slot a stack was just picked up from with the button still held: letting go
-    /// over another slot puts it there.
-    press_pick: Option<gui::SlotRef>,
+    /// At the open gun station: the brush, the mouse on its table and in its drawer, the camera,
+    /// scrubbing, and what was last sent.
+    bench_ui: BenchUi,
     /// The camera over an open chest or crafting table (and gliding back after).
     station: Option<station::Station>,
-    /// What the mouse points at in the open chest or on the open table, and the corners of
-    /// its highlighted slot.
-    station_hover: Option<gui::SlotRef>,
-    station_frame: Option<[Vec3; 4]>,
-    /// The mouse is over the open chest or table, or the inventory under it: a click there
-    /// does not throw the held stack.
-    station_inside: bool,
-    /// The side each crafting table was last used from (its grid faces that way).
-    table_sides: crate::world::FastMap<IVec3, u8>,
     /// What was crafted at the open table, lying in the middle of its grid until taken.
     craft_out: Slot,
     /// The ingredients sliding into the middle of the table: seconds since, and the grid as
     /// it was.
     craft_fx: Option<(f32, [Slot; 9])>,
 
-    /// Time and slot of the last left click, for double-click collecting.
-    slot_click: (f32, Option<gui::SlotRef>),
-    block_entities: BlockEntities,
     /// Shooting and the gun station.
     guns: guns::Guns,
     /// Sound effects, and how much each furnace near by had made when last heard (it dings
     /// when that grows).
     audio: crate::audio::Audio,
-    furnace_heard: std::collections::HashMap<IVec3, u32>,
     grenades: grenades::Grenades,
     /// The fishing rod's line, bobber and the fish on it.
     fishing: fishing::Fishing,
     /// The guide book in the hands: its open page, and its pages' textures.
     book: book::Book,
-    items: Vec<ItemEntity>,
-    falling: Vec<FallingBlock>,
-    /// Trees felled with an axe, falling over.
-    falling_trees: Vec<felling::FallingTree>,
+    /// What is in the world being played besides its blocks: dropped items, falling blocks and
+    /// trees, lying trunks, mobs, saplings, block entities and the animations of things in it.
+    /// Made anew for every world loaded, so nothing of the last one comes along.
+    level: Level,
     /// A chop with an axe going on (`felling`).
     chop: Option<crate::model::chop_rig::Swing>,
     /// What the axe is stuck in, to come apart when it is pulled out.
     struck: Option<felling::Struck>,
-    /// The trunks of felled trees lying on the ground, the last one's id, the one aimed at
-    /// with an axe, and the one (and where) the swing going on will cut.
-    lying_logs: Vec<logs::LyingLog>,
-    next_log_id: u32,
     log_aim: Option<logs::LogAim>,
     log_cut: Option<(u32, bool)>,
-    mobs: Vec<Mob>,
-    /// Seconds until the next try to spawn animals near the player.
-    mob_spawn_timer: f32,
     /// The mob the crosshair is on (its id; `target_mob` finds it), when it is closer than any
     /// block. An id, not an index: a mob removed earlier in the frame must not shift it.
     mob_target: Option<u32>,
-    saplings: Vec<(IVec3, f32)>,
-    /// Seconds until the next look round for stump marks to grow over.
-    stump_scan: f32,
 
     slot_name_timer: f32,
     hint_timer: f32,
@@ -341,38 +264,19 @@ pub struct Game {
     fov_current: f32,
     /// Field of view for simplifying detail too small for the screen (setting and zoom only).
     detail_fov: f32,
-    last_space: f32,
-    last_w: f32,
     w_sprint: bool,
     rng: Rng,
 
-    // Input
-    keys: HashSet<KeyCode>,
-    left_down: bool,
-    right_down: bool,
-    left_pressed: bool,
-    right_pressed: bool,
-    middle_pressed: bool,
-    mouse_delta: Vec2,
-    look_delta: Vec2,
-    scroll: f32,
-    cursor_grabbed: bool,
-    typed: String,
-    backspace: u32,
-    digit: Option<usize>,
+    /// The keyboard and the mouse as they are this frame (see `frame::end_input`).
+    input: Input,
 
-    last: Instant,
+    /// Frame timing: the frame rate, the F3 graph and statistics, the frame limiter.
+    clock: FrameClock,
     time: f32,
-    fps: f32,
-    fps_accum: f32,
-    fps_frames: u32,
     /// (title, description) of the resource pack in use, for the credits.
     pack_credit: Option<(String, String)>,
     /// The resource pack draws torch fire as flame/smoke particles (like Minecraft).
     torch_particles: bool,
-    /// Torches near the player (rescanned every second) and the rescan timer.
-    torches: Vec<IVec3>,
-    torch_scan: f32,
     /// Where the torch in this player's hand burns (seen last frame), for its particles.
     held_torch_tip: Option<Vec3>,
     show_debug: bool,
@@ -385,34 +289,12 @@ pub struct Game {
     testbed: Option<testbed::Testbed>,
     /// A test asked for the menus' backdrop sharp.
     test_no_blur: bool,
-    /// Max FPS: when the next frame may start.
-    next_frame: Option<Instant>,
-    /// Last frame's CPU time in ms: update, build, submit (without waiting), waiting for the GPU.
-    cpu_ms: [f32; 4],
-    /// When the previous frame finished, and the time from then until this frame started.
-    frame_end: Instant,
-    pub between_ms: f32,
     /// F1: hide the HUD and the hand (for screenshots), like Minecraft.
     hide_hud: bool,
-    /// Recent frame times in milliseconds (newest last), for the F3 graph.
-    frame_times: std::collections::VecDeque<f32>,
-    sys_stats: crate::stats::Monitor,
-    /// Video memory (used, budget) in bytes, refreshed once a second.
-    vram: Option<(u64, u64)>,
-    vram_timer: f32,
     /// LAN game: hosting or joined, the other players, and the multiplayer screen state.
     net: Option<multi::Net>,
     remotes: Vec<multi::RemotePlayer>,
-    /// The game window is in front (not tabbed out): the others see "away" otherwise.
-    focused: bool,
     next_entity_id: u32,
-    finder: Option<crate::net::Finder>,
-    mp_address: String,
-    mp_selected: Option<std::net::SocketAddr>,
-    /// Connecting to a LAN game (on a thread of its own, the window going on meanwhile): its
-    /// address, and the connection when it is made.
-    joining: Option<(String, std::sync::mpsc::Receiver<std::io::Result<crate::net::Conn>>)>,
-    net_message: String,
     /// The other player the crosshair is on.
     player_target: Option<u8>,
     /// Spectator mode: the player whose eyes the camera is in.
@@ -423,10 +305,6 @@ pub struct Game {
     view_bob: Mat4,
     /// Swing of the lantern in this player's hand (third person and body model).
     lantern_swing: crate::model::lantern::SmoothSwing,
-    /// Open tab of the options screen.
-    options: screens::OptionsState,
-    pack_screen: screens::PackScreen,
-    menu_preview: screens::PreviewRotation,
     /// All texture layers but the uploaded skins (see `textures::generate_base`).
     texture_base: Vec<u8>,
     /// The start-up screen, while it is up.
@@ -434,7 +312,6 @@ pub struct Game {
     custom_skins: std::collections::HashMap<u8, crate::pack::Image>,
     skin_pngs: std::collections::HashMap<u8, Vec<u8>>,
     local_skin_png: Option<Vec<u8>>,
-    skin_error: String,
     pub quit: bool,
 }
 
@@ -483,6 +360,12 @@ impl Game {
         let pano = Self::panorama_pos(&terrain, spawn);
 
         Self {
+            level: Level::new(),
+            input: Input::new(),
+            clock: FrameClock::new(),
+            bench_ui: BenchUi::new(),
+            inv_ui: InventoryUi::new(),
+            menus: Menus::new(),
             renderer,
             gpu,
             window,
@@ -501,14 +384,6 @@ impl Game {
             chat: Chat::new(),
             world_meta: None,
             pending_player: None,
-            worlds: Vec::new(),
-            selected_world: None,
-            world_scroll: 0.0,
-            last_click: (usize::MAX, -10.0),
-            create_name: String::new(),
-            create_seed: String::new(),
-            create_creative: false,
-            create_cheats: false,
             autosave: AUTOSAVE_SECONDS,
             saver: ChunkSaver::default(),
             player: Player::default(),
@@ -543,68 +418,21 @@ impl Game {
             hotbar_anim: 0.0,
             cursor: None,
             craft: [None; 9],
-            creative_scroll: 0.0,
-            creative_scroll_anim: 0.0,
-            scroll_drag: false,
-            creative_search: String::new(),
-            search_focused: false,
-            jei: Default::default(),
-            creative_tab: 0,
-            chest_open: Default::default(),
-            door_swing: Default::default(),
-            bench_drawer: Default::default(),
             tp_sprint: 0.0,
-            loader_feed: Default::default(),
-            bench_brush: false,
-            bench_brush_at: None,
-            bench_spot: None,
-            bench_held_spot: None,
-            bench_drawer_spot: None,
-            bench_hold_at: None,
-            bench_pan: 0.0,
-            bench_in_drawer: false,
-            bench_focus: 0.0,
-            bench_dwell: 0.0,
-            bench_drag: None,
-            bench_hover: None,
-            bench_scrubbing: false,
-            bench_hover_ok: false,
-            bench_scrub: 0.0,
-            bench_scrub_dirty: false,
-            bench_sent: 0.0,
-            bench_anims: Default::default(),
-            drag: None,
-            press_pick: None,
             station: None,
-            station_hover: None,
-            station_frame: None,
-            station_inside: false,
-            table_sides: Default::default(),
             craft_out: None,
             craft_fx: None,
 
-            slot_click: (-1.0, None),
-            block_entities: BlockEntities::default(),
             guns: Default::default(),
             audio: crate::audio::Audio::new(),
-            furnace_heard: Default::default(),
             grenades: Default::default(),
             fishing: Default::default(),
             book: Default::default(),
-            items: Vec::new(),
-            falling: Vec::new(),
-            falling_trees: Vec::new(),
             chop: None,
             struck: None,
-            lying_logs: Vec::new(),
-            next_log_id: 0,
             log_aim: None,
             log_cut: None,
-            mobs: Vec::new(),
-            mob_spawn_timer: 5.0,
             mob_target: None,
-            saplings: Vec::new(),
-            stump_scan: 0.0,
             slot_name_timer: 0.0,
             hint_timer: 0.0,
             mining: None,
@@ -614,70 +442,31 @@ impl Game {
             particles: Particles::new(),
             scene: Default::default(),
             time_of_day: MENU_TIME_OF_DAY,
-            last_space: -1.0,
-            last_w: -1.0,
             w_sprint: false,
             rng: Rng::new(seed),
-            keys: HashSet::new(),
-            left_down: false,
-            right_down: false,
-            left_pressed: false,
-            right_pressed: false,
-            middle_pressed: false,
-            mouse_delta: Vec2::ZERO,
-            look_delta: Vec2::ZERO,
-            scroll: 0.0,
-            cursor_grabbed: false,
-            typed: String::new(),
-            backspace: 0,
-            digit: None,
-            last: Instant::now(),
             time: 0.0,
-            fps: 0.0,
-            fps_accum: 0.0,
-            fps_frames: 0,
             pack_credit,
             torch_particles,
-            torches: Vec::new(),
-            torch_scan: 0.0,
             held_torch_tip: None,
             show_debug: false,
             bench: bench.then(Default::default),
             shots: shots.map(bench::Shots::new),
             testbed: test.map(|(what, dir)| testbed::Testbed::new(&what, dir)),
             test_no_blur: false,
-            next_frame: None,
-            cpu_ms: [0.0; 4],
-            frame_end: Instant::now(),
-            between_ms: 0.0,
             hide_hud: false,
-            frame_times: std::collections::VecDeque::with_capacity(hud::FRAME_GRAPH),
-            sys_stats: crate::stats::start(),
-            vram: None,
-            vram_timer: 0.0,
             net: None,
             remotes: Vec::new(),
-            focused: true,
             next_entity_id: 0,
-            finder: None,
-            mp_address: String::new(),
-            mp_selected: None,
-            joining: None,
-            net_message: String::new(),
             player_target: None,
             spectating: None,
             view_proj: Mat4::IDENTITY,
             view_bob: Mat4::IDENTITY,
             lantern_swing: Default::default(),
-            options: Default::default(),
-            pack_screen: Default::default(),
-            menu_preview: Default::default(),
             texture_base,
             boot: Some(boot),
             custom_skins,
             skin_pngs,
             local_skin_png,
-            skin_error: String::new(),
             quit: false,
         }
     }
@@ -811,7 +600,7 @@ impl Game {
 
     /// The key of this action is held.
     fn bind_down(&self, b: Bind) -> bool {
-        self.keys.contains(&self.settings.keys.get(b))
+        self.input.keys.contains(&self.settings.keys.get(b))
     }
 
     /// Item in the selected hotbar slot.
@@ -833,19 +622,19 @@ impl Game {
                 let pressed = *state == ElementState::Pressed;
                 match button {
                     MouseButton::Left => {
-                        self.left_down = pressed;
-                        self.left_pressed |= pressed;
+                        self.input.left_down = pressed;
+                        self.input.left_pressed |= pressed;
                     }
                     MouseButton::Right => {
-                        self.right_down = pressed;
-                        self.right_pressed |= pressed;
+                        self.input.right_down = pressed;
+                        self.input.right_pressed |= pressed;
                     }
-                    MouseButton::Middle => self.middle_pressed |= pressed,
+                    MouseButton::Middle => self.input.middle_pressed |= pressed,
                     _ => {}
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                self.scroll += match delta {
+                self.input.scroll += match delta {
                     MouseScrollDelta::LineDelta(_, y) => *y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
                 };
@@ -857,13 +646,13 @@ impl Game {
                 if event.state == ElementState::Pressed {
                     // Options: the next key goes to the action waiting for one.
                     if let (Screen::KeyBinds { .. }, Some(i)) =
-                        (self.screen, self.options.listening)
+                        (self.screen, self.menus.options.listening)
                     {
                         if code == KeyCode::Escape {
-                            self.options.listening = None;
+                            self.menus.options.listening = None;
                         } else if crate::keys::bindable(code) {
                             self.settings.keys.0[i] = code;
-                            self.options.listening = None;
+                            self.menus.options.listening = None;
                         }
                         return;
                     }
@@ -883,15 +672,15 @@ impl Game {
                         self.screen,
                         Screen::Playing | Screen::Chat | Screen::Container(_) | Screen::Spectate | Screen::Loading
                     );
-                    let shift = self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
+                    let shift = self.input.keys.contains(&KeyCode::ShiftLeft) || self.input.keys.contains(&KeyCode::ShiftRight);
                     if menu && self.ui.nav_key(code, shift) {
                         return;
                     }
-                    if matches!(self.screen, Screen::Container(_)) && self.jei.focused {
+                    if matches!(self.screen, Screen::Container(_)) && self.inv_ui.jei.focused {
                         self.jei_key(code, event.text.as_ref().map(|t| t.as_str()));
                         return;
                     }
-                    if self.screen == Screen::Container(Container::Creative) && self.search_focused
+                    if self.screen == Screen::Container(Container::Creative) && self.inv_ui.search_focused
                     {
                         self.search_key(code, event.text.as_ref().map(|t| t.as_str()));
                         return;
@@ -899,20 +688,20 @@ impl Game {
                     if self.screen == Screen::Multiplayer {
                         match code {
                             KeyCode::Escape => {
-                                self.finder = None;
+                                self.menus.finder = None;
                                 self.settings.save();
                                 self.screen = Screen::MainMenu;
                             }
-                            KeyCode::Backspace => self.backspace += 1,
+                            KeyCode::Backspace => self.input.backspace += 1,
                             KeyCode::Enter | KeyCode::NumpadEnter => {
-                                if !self.mp_address.trim().is_empty() {
-                                    let addr = self.mp_address.clone();
+                                if !self.menus.mp_address.trim().is_empty() {
+                                    let addr = self.menus.mp_address.clone();
                                     self.join_server(&addr);
                                 }
                             }
                             _ => {
                                 if let Some(t) = &event.text {
-                                    self.typed.push_str(t);
+                                    self.input.typed.push_str(t);
                                 }
                             }
                         }
@@ -921,11 +710,11 @@ impl Game {
                     if self.screen == Screen::CreateWorld {
                         match code {
                             KeyCode::Escape => self.screen = Screen::SelectWorld,
-                            KeyCode::Backspace => self.backspace += 1,
+                            KeyCode::Backspace => self.input.backspace += 1,
                             KeyCode::Enter | KeyCode::NumpadEnter => self.create_world(),
                             _ => {
                                 if let Some(t) = &event.text {
-                                    self.typed.push_str(t);
+                                    self.input.typed.push_str(t);
                                 }
                             }
                         }
@@ -934,22 +723,22 @@ impl Game {
                     if !event.repeat {
                         self.key_pressed(code);
                     }
-                    self.keys.insert(code);
+                    self.input.keys.insert(code);
                 } else {
-                    self.keys.remove(&code);
+                    self.input.keys.remove(&code);
                     if self.settings.keys.is(Bind::Forward, code) {
                         self.w_sprint = false;
                     }
                 }
             }
-            WindowEvent::Focused(true) => self.focused = true,
+            WindowEvent::Focused(true) => self.input.focused = true,
             WindowEvent::Focused(false) => {
-                self.focused = false;
-                self.keys.clear();
+                self.input.focused = false;
+                self.input.keys.clear();
                 self.w_sprint = false;
-                self.last_w = -1.0;
-                self.left_down = false;
-                self.right_down = false;
+                self.input.last_w = -1.0;
+                self.input.left_down = false;
+                self.input.right_down = false;
                 // Bench and shot runs keep going in the background.
                 if self.screen == Screen::Playing && self.bench.is_none() && self.testbed.is_none() {
                     self.pause();
@@ -960,8 +749,8 @@ impl Game {
     }
 
     pub fn mouse_motion(&mut self, dx: f32, dy: f32) {
-        if self.cursor_grabbed && self.screen == Screen::Playing {
-            self.mouse_delta += Vec2::new(dx, dy);
+        if self.input.cursor_grabbed && self.screen == Screen::Playing {
+            self.input.mouse_delta += Vec2::new(dx, dy);
         }
     }
 
@@ -1028,7 +817,7 @@ impl Game {
             }
         }
         if let Screen::Container(_) = self.screen {
-            self.digit = digit;
+            self.input.digit = digit;
             return;
         }
         if self.screen == Screen::Spectate {
@@ -1042,12 +831,12 @@ impl Game {
         }
         if self.spectator() {
             // Nothing in the hands: the hotbar, dropping and reloading do nothing.
-            if forward && !self.keys.contains(&code) {
-                if self.time - self.last_w < 0.3 {
+            if forward && !self.input.keys.contains(&code) {
+                if self.time - self.input.last_w < 0.3 {
                     self.w_sprint = true;
-                    self.last_w = -1.0;
+                    self.input.last_w = -1.0;
                 } else {
-                    self.last_w = self.time;
+                    self.input.last_w = self.time;
                 }
             }
             if stop_sprint {
@@ -1076,31 +865,31 @@ impl Game {
             self.start_inspect();
         }
         // Double tap forward to sprint.
-        if forward && !self.keys.contains(&code) {
-            if self.time - self.last_w < 0.3 {
+        if forward && !self.input.keys.contains(&code) {
+            if self.time - self.input.last_w < 0.3 {
                 self.w_sprint = true;
-                self.last_w = -1.0;
+                self.input.last_w = -1.0;
             } else {
-                self.last_w = self.time;
+                self.input.last_w = self.time;
             }
         }
         if stop_sprint {
             self.w_sprint = false;
         }
         if drop {
-            let all = self.keys.contains(&KeyCode::ControlLeft)
-                || self.keys.contains(&KeyCode::ControlRight);
+            let all = self.input.keys.contains(&KeyCode::ControlLeft)
+                || self.input.keys.contains(&KeyCode::ControlRight);
             self.drop_held(all);
         }
         if fly && self.creative() && !inspecting {
             self.player.flying = !self.player.flying;
         }
         if jump && self.creative() {
-            if self.time - self.last_space < 0.3 {
+            if self.time - self.input.last_space < 0.3 {
                 self.player.flying = !self.player.flying;
-                self.last_space = -1.0;
+                self.input.last_space = -1.0;
             } else {
-                self.last_space = self.time;
+                self.input.last_space = self.time;
             }
         }
         // Last: these leave the game screen.
@@ -1115,26 +904,26 @@ impl Game {
         self.chat.open(prefix);
         self.screen = Screen::Chat;
         self.set_grab(false);
-        self.keys.clear();
+        self.input.keys.clear();
     }
 
     fn end_input(&mut self) {
-        self.left_pressed = false;
-        self.right_pressed = false;
-        self.middle_pressed = false;
-        self.look_delta = self.mouse_delta;
-        self.mouse_delta = Vec2::ZERO;
-        self.scroll = 0.0;
-        self.typed.clear();
-        self.backspace = 0;
-        self.digit = None;
+        self.input.left_pressed = false;
+        self.input.right_pressed = false;
+        self.input.middle_pressed = false;
+        self.input.look_delta = self.input.mouse_delta;
+        self.input.mouse_delta = Vec2::ZERO;
+        self.input.scroll = 0.0;
+        self.input.typed.clear();
+        self.input.backspace = 0;
+        self.input.digit = None;
     }
 
     fn set_grab(&mut self, grab: bool) {
         let grab = grab && self.bench.is_none() && self.testbed.is_none();
         if !grab {
             self.w_sprint = false;
-            self.last_w = -1.0;
+            self.input.last_w = -1.0;
         }
         let size = self.window.inner_size();
         let center = PhysicalPosition::new(size.width as f64 / 2.0, size.height as f64 / 2.0);
@@ -1147,15 +936,15 @@ impl Game {
         } else {
             let _ = self.window.set_cursor_grab(CursorGrabMode::None);
             self.window.set_cursor_visible(true);
-            if self.cursor_grabbed {
+            if self.input.cursor_grabbed {
                 let _ = self.window.set_cursor_position(center);
                 self.ui.mouse = Vec2::new(center.x as f32, center.y as f32);
             }
         }
-        self.cursor_grabbed = grab;
-        self.mouse_delta = Vec2::ZERO;
-        self.left_down = false;
-        self.right_down = false;
+        self.input.cursor_grabbed = grab;
+        self.input.mouse_delta = Vec2::ZERO;
+        self.input.left_down = false;
+        self.input.right_down = false;
         self.mining = None;
     }
 
@@ -1188,7 +977,7 @@ impl Game {
     fn go_back(&mut self) {
         match self.screen {
             Screen::KeyBinds { in_game } => {
-                self.options.listening = None;
+                self.menus.options.listening = None;
                 self.settings.save();
                 self.screen = Screen::Options { in_game };
             }
@@ -1201,7 +990,7 @@ impl Game {
                 };
             }
             Screen::ResourcePacks { in_game } => {
-                let enabled = self.pack_screen.enabled();
+                let enabled = self.menus.pack_screen.enabled();
                 if enabled != self.settings.resource_packs {
                     self.settings.resource_packs = enabled;
                     self.settings.save();
@@ -1221,7 +1010,7 @@ impl Game {
             Action::Singleplayer => self.open_world_list(),
             Action::Multiplayer => self.open_multiplayer(),
             Action::SkinMenu => {
-                self.skin_error.clear();
+                self.menus.skin_error.clear();
                 self.screen = Screen::Skin;
             }
             Action::SelectSkin(skin) => {
@@ -1248,10 +1037,10 @@ impl Game {
                                 self.settings.save();
                                 self.screen = Screen::MainMenu;
                             } else {
-                                self.skin_error = "Nem sikerült menteni a skint.".into();
+                                self.menus.skin_error = "Nem sikerült menteni a skint.".into();
                             }
                         }
-                        Err(msg) => self.skin_error = msg.into(),
+                        Err(msg) => self.menus.skin_error = msg.into(),
                     }
                 }
             }
@@ -1276,7 +1065,7 @@ impl Game {
             Action::OpenLink(url) => open_url(url),
             Action::ResourcePacks => {
                 if let Screen::Options { in_game } = self.screen {
-                    self.pack_screen.open(&self.settings.resource_packs);
+                    self.menus.pack_screen.open(&self.settings.resource_packs);
                     self.screen = Screen::ResourcePacks { in_game };
                 }
             }

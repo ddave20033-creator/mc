@@ -12,10 +12,10 @@ impl Game {
             // Slower turning while zoomed in.
             let zoom = (self.fov_current / self.settings.fov).min(1.0);
             let sens = 0.0022 * self.settings.sensitivity / 100.0 * zoom;
-            self.yaw += self.mouse_delta.x * sens;
-            self.pitch = (self.pitch - self.mouse_delta.y * sens).clamp(-1.55, 1.55);
-            if self.scroll != 0.0 && !self.spectator() && !self.fishing_scroll() {
-                let d = if self.scroll > 0.0 { -1 } else { 1 };
+            self.yaw += self.input.mouse_delta.x * sens;
+            self.pitch = (self.pitch - self.input.mouse_delta.y * sens).clamp(-1.55, 1.55);
+            if self.input.scroll != 0.0 && !self.spectator() && !self.fishing_scroll() {
+                let d = if self.input.scroll > 0.0 { -1 } else { 1 };
                 self.hotbar_slot = (self.hotbar_slot as i32 + d).rem_euclid(9) as usize;
                 self.slot_name_timer = 2.0;
             }
@@ -37,12 +37,12 @@ impl Game {
             self.player.flying = false;
         }
         // Holding the right mouse button with a sword blocks (Minecraft 1.8).
-        self.blocking = control && self.right_down && is_sword(self.held());
+        self.blocking = control && self.input.right_down && is_sword(self.held());
         self.hand.blocking = self.blocking;
         self.update_using(dt, control);
 
         // Aiming a gun (right button held): no sprinting, and the double-tap sprint ends.
-        let aiming = control && self.right_down && self.holding_gun();
+        let aiming = control && self.input.right_down && self.holding_gun();
         let firing = self.guns.no_sprint > 0.0;
         if aiming {
             self.w_sprint = false;
@@ -128,7 +128,7 @@ impl Game {
                 .unwrap_or(f32::INFINITY);
             let reach = if self.creative() { 5.0 } else { 3.0 };
             let mob = self
-                .mobs
+                .level.mobs
                 .iter()
                 .enumerate()
                 .filter_map(|(i, m)| m.ray_hit(eye, dir, reach).map(|d| (i, d)))
@@ -139,7 +139,7 @@ impl Game {
                 .pick_player(eye, dir, reach)
                 .filter(|&(_, d)| d < block_dist && mob.is_none_or(|(_, md)| d < md));
             self.player_target = player.map(|(id, _)| id);
-            self.mob_target = mob.filter(|_| player.is_none()).map(|(i, _)| self.mobs[i].id);
+            self.mob_target = mob.filter(|_| player.is_none()).map(|(i, _)| self.level.mobs[i].id);
             if self.mob_target.is_some() || self.player_target.is_some() {
                 self.target = None;
             }
@@ -159,7 +159,7 @@ impl Game {
         // Holding the guide book: the buttons turn its pages (they never hit blocks).
         let reading = control && self.book_in_hand();
         if reading {
-            let (left, right) = (self.left_pressed, self.right_down);
+            let (left, right) = (self.input.left_pressed, self.input.right_down);
             self.book_buttons(dt, left, right);
         }
         if sword || gun || reading {
@@ -172,7 +172,7 @@ impl Game {
         if control
             && !chopping
             && !reading
-            && self.left_down
+            && self.input.left_down
             && self.action_cooldown <= 0.0
             && !sword
             && !gun
@@ -206,14 +206,14 @@ impl Game {
             } else {
                 self.mining = None;
             }
-        } else if !self.left_down {
+        } else if !self.input.left_down {
             self.mining = None;
             self.dig_timer = 0.0;
         }
         // Hitting: either block with the sword or strike, not both.
         if control
             && !reading
-            && self.left_pressed
+            && self.input.left_pressed
             && (self.target.is_none() || sword)
             && !self.blocking
             && !gun
@@ -228,7 +228,7 @@ impl Game {
         }
         // One shot per click; an automatic gun keeps firing while the button is held.
         let auto = GunKind::of(self.held()).is_some_and(|k| k.stats().auto);
-        if control && gun && (self.left_pressed || (auto && self.left_down)) {
+        if control && gun && (self.input.left_pressed || (auto && self.input.left_down)) {
             self.shoot();
         }
         if let Some(p) = breaking {
@@ -236,12 +236,12 @@ impl Game {
         }
         if control
             && !reading
-            && (self.right_pressed || (self.right_down && self.action_cooldown <= 0.0))
+            && (self.input.right_pressed || (self.input.right_down && self.action_cooldown <= 0.0))
         {
             self.use_item();
         }
         // Pick block (creative).
-        if control && self.middle_pressed && self.creative() {
+        if control && self.input.middle_pressed && self.creative() {
             if let Some((hit, _)) = self.target {
                 if let Some(item) = item_of_block(self.terrain.world.geti(hit)) {
                     if let Some(i) = self.inventory.slots[..9]
@@ -288,9 +288,9 @@ impl Game {
             open_chests.push(p);
         }
         for p in &open_chests {
-            self.chest_open.entry(*p).or_insert(0.0);
+            self.level.chest_open.entry(*p).or_insert(0.0);
         }
-        self.chest_open.retain(|p, k| {
+        self.level.chest_open.retain(|p, k| {
             let target = if open_chests.contains(p) { 1.0 } else { 0.0 };
             *k = if target > *k {
                 (*k + dt * 3.5).min(1.0)
@@ -338,18 +338,18 @@ impl Game {
         let mut grow = Vec::new();
         let world = &self.terrain.world;
         let area_loaded = |p: IVec3| [(-8, -8), (-8, 8), (8, -8), (8, 8)].iter().all(|&(dx, dz)| world.is_loaded(p.x + dx, p.z + dz));
-        for (p, t) in self.saplings.iter_mut() {
+        for (p, t) in self.level.saplings.iter_mut() {
             *t = (*t - dt).max(0.0);
             if *t <= 0.0 && area_loaded(*p) {
                 grow.push(*p);
             }
         }
         for p in grow {
-            self.saplings.retain(|(q, _)| *q != p);
+            self.level.saplings.retain(|(q, _)| *q != p);
             let b = self.terrain.world.geti(p);
             if is_sapling(b) && !self.grow_tree(p, b) {
                 // No room yet: try again later.
-                self.saplings.push((p, 30.0));
+                self.level.saplings.push((p, 30.0));
             }
         }
 
@@ -363,17 +363,17 @@ impl Game {
         let alive = self.player.spawned && self.screen != Screen::Dead && !self.spectator();
         let mut pickup_visuals = Vec::new();
         let mut i = 0;
-        while i < self.items.len() {
-            if self.items[i].is_picking_up() {
-                if !alive || self.items[i].update_pickup(dt, pickup_target) {
-                    self.items.swap_remove(i);
+        while i < self.level.items.len() {
+            if self.level.items[i].is_picking_up() {
+                if !alive || self.level.items[i].update_pickup(dt, pickup_target) {
+                    self.level.items.swap_remove(i);
                     continue;
                 }
                 i += 1;
                 continue;
             }
             // Items in unloaded chunks wait there instead of falling through the missing ground.
-            let p = self.items[i].pos;
+            let p = self.level.items[i].pos;
             if !self
                 .terrain
                 .world
@@ -382,20 +382,20 @@ impl Game {
                 i += 1;
                 continue;
             }
-            self.items[i].update(dt, &self.terrain.world);
-            let it = &self.items[i];
+            self.level.items[i].update(dt, &self.terrain.world);
+            let it = &self.level.items[i];
             let (pos, age, pickup_delay, stack) = (it.pos, it.age, it.pickup_delay, it.stack);
             if age > 300.0 || pos.y < -64.0 {
-                self.items.swap_remove(i);
+                self.level.items.swap_remove(i);
                 continue;
             }
             if alive && pickup_delay <= 0.0 && (pos + Vec3::Y * 0.2).distance(center) < 1.5 {
                 match self.inventory.add(stack) {
                     None => {
-                        self.items[i].start_pickup(self.time);
+                        self.level.items[i].start_pickup(self.time);
                     }
                     Some(left) => {
-                        self.items[i].stack = left;
+                        self.level.items[i].stack = left;
                         if left.count < stack.count {
                             let collected = Stack {
                                 count: stack.count - left.count,
@@ -411,7 +411,7 @@ impl Game {
             }
             i += 1;
         }
-        self.items.extend(pickup_visuals);
+        self.level.items.extend(pickup_visuals);
         self.merge_items();
 
         // The rifle stations' magazine loaders.
@@ -429,8 +429,8 @@ impl Game {
         // Falling sand / gravel.
         let mut landed = Vec::new();
         let mut i = 0;
-        while i < self.falling.len() {
-            let p = self.falling[i].pos;
+        while i < self.level.falling.len() {
+            let p = self.level.falling[i].pos;
             if !self
                 .terrain
                 .world
@@ -439,8 +439,8 @@ impl Game {
                 i += 1;
                 continue;
             }
-            if self.falling[i].update(dt, &self.terrain.world) {
-                landed.push(self.falling.swap_remove(i));
+            if self.level.falling[i].update(dt, &self.terrain.world) {
+                landed.push(self.level.falling.swap_remove(i));
             } else {
                 i += 1;
             }
@@ -471,13 +471,13 @@ impl Game {
     /// Resource-pack torch fire: flame and smoke particles rising from the tips of the torches
     /// around the player, like Minecraft's torches.
     pub(super) fn torch_fire(&mut self, dt: f32) {
-        self.torch_scan -= dt;
-        if self.torch_scan <= 0.0 {
-            self.torch_scan = 1.0;
+        self.level.torch_scan -= dt;
+        if self.level.torch_scan <= 0.0 {
+            self.level.torch_scan = 1.0;
             let c = self.player.pos.floor().as_ivec3();
             let w = &self.terrain.world;
-            self.torches.clear();
-            self.torches.extend(crate::world::terrain::listed_near(&self.terrain.torches, c, 20, 12).filter(|&p| is_torch(w.geti(p))));
+            self.level.torches.clear();
+            self.level.torches.extend(crate::world::terrain::listed_near(&self.terrain.torches, c, 20, 12).filter(|&p| is_torch(w.geti(p))));
         }
         // Torches in hands burn too: this player's (where it was drawn) and the others'
         // (about where they hold it up).
@@ -498,8 +498,8 @@ impl Game {
                 self.particles.smoke(tip + Vec3::Y * 0.08, sky, blk);
             }
         }
-        for i in 0..self.torches.len() {
-            let p = self.torches[i];
+        for i in 0..self.level.torches.len() {
+            let p = self.level.torches[i];
             let b = self.terrain.world.geti(p);
             if !is_torch(b) {
                 continue; // broken since the last scan
@@ -523,7 +523,7 @@ impl Game {
     /// every pair, as there can be hundreds after a tree comes down.)
     pub(super) fn merge_items(&mut self) {
         const NEAR: f32 = 0.5;
-        let items = &mut self.items;
+        let items = &mut self.level.items;
         let mut order: Vec<usize> = (0..items.len()).collect();
         order.sort_unstable_by(|&a, &b| items[a].pos.x.total_cmp(&items[b].pos.x));
         let mut gone = vec![false; items.len()];

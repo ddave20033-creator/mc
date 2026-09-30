@@ -108,7 +108,7 @@ pub fn parse_logs(text: &str) -> Vec<LyingLog> {
 
 impl Game {
     fn log_index(&self, id: u32) -> Option<usize> {
-        self.lying_logs.iter().position(|l| l.id == id)
+        self.level.lying_logs.iter().position(|l| l.id == id)
     }
 
     /// A felled trunk comes to lie on the ground: from `start` (the cut's middle, where the
@@ -173,10 +173,10 @@ impl Game {
             }
         }
         if !lying.is_empty() {
-            self.next_log_id += 1;
-            let id = self.next_log_id;
+            self.level.next_log_id += 1;
+            let id = self.level.next_log_id;
             let next = 1 + (self.random() * 3.0) as usize;
-            self.lying_logs.push(LyingLog { id, base, dir, pieces: lying, next });
+            self.level.lying_logs.push(LyingLog { id, base, dir, pieces: lying, next });
         }
     }
 
@@ -195,7 +195,7 @@ impl Game {
             .and_then(|(hit, _)| crate::util::ray_box(eye, dir, hit.as_vec3(), hit.as_vec3() + Vec3::ONE, AIM_REACH))
             .unwrap_or(AIM_REACH);
         let mut best: Option<(f32, LogAim)> = None;
-        for l in &self.lying_logs {
+        for l in &self.level.lying_logs {
             let mid = l.base + l.dir * (l.len() * 0.5);
             if mid.distance(eye) > AIM_REACH + l.len() * 0.5 + 1.0 {
                 continue;
@@ -219,12 +219,12 @@ impl Game {
     /// The axe struck down into the lying trunk `id`: chips fly from where it went in.
     pub(in crate::game) fn log_hit(&mut self, id: u32, point: Vec3) {
         let Some(i) = self.log_index(id) else { return };
-        let b = self.lying_logs[i].pieces[0];
+        let b = self.level.lying_logs[i].pieces[0];
         self.chips(point.floor().as_ivec3(), b, point, Vec3::Y);
         let from_base = match self.log_cut {
             Some((c_id, from_base)) if c_id == id => from_base,
             _ => {
-                let l = &self.lying_logs[i];
+                let l = &self.level.lying_logs[i];
                 l.from_base_at((point - l.base).dot(l.dir))
             }
         };
@@ -237,7 +237,7 @@ impl Game {
     pub(in crate::game) fn cut_log(&mut self, id: u32, from_base: bool) {
         let Some(i) = self.log_index(id) else { return };
         let next = 1 + (self.random() * 3.0) as usize;
-        let l = &mut self.lying_logs[i];
+        let l = &mut self.level.lying_logs[i];
         let taken = l.taken(from_base);
         let at: Vec<Vec3> = taken.clone().map(|j| l.piece_middle(j)).collect();
         let off: Vec<u8> = l.pieces.drain(taken.clone()).collect();
@@ -245,8 +245,8 @@ impl Game {
             l.base += l.dir * taken.end as f32;
         }
         l.next = next;
-        if self.lying_logs[i].pieces.is_empty() {
-            self.lying_logs.remove(i);
+        if self.level.lying_logs[i].pieces.is_empty() {
+            self.level.lying_logs.remove(i);
         }
         let held = self.held();
         let creative = self.creative();
@@ -276,7 +276,7 @@ impl Game {
         use crate::model::emit_item;
         let fl = crate::world::mesh::flags::ENTITY;
         let aim = self.log_aim.or(self.log_cut.map(|(id, from_base)| LogAim { id, from_base }));
-        for l in &self.lying_logs {
+        for l in &self.level.lying_logs {
             let length = l.pieces.len() as f32;
             if (l.base + l.dir * length * 0.5).distance(eye) > sight + length {
                 continue;

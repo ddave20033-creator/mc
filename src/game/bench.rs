@@ -112,7 +112,7 @@ impl Game {
             return;
         };
         if b.t.is_some_and(|t| t > WARMUP) {
-            let c = self.cpu_ms;
+            let c = self.clock.cpu_ms;
             let g = self.renderer.gpu_ms.unwrap_or_default();
             let r = self.renderer.cpu_detail;
             b.rec.push(self.renderer.rec_detail);
@@ -128,7 +128,7 @@ impl Game {
                 r[0],
                 r[1],
                 r[2],
-                self.between_ms,
+                self.clock.between_ms,
             ]);
         }
     }

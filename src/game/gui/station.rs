@@ -149,7 +149,7 @@ impl Game {
             Container::Crafting(p) => {
                 // The grid reads like a page from where the player stands.
                 let d = self.player.pos - (p.as_vec3() + Vec3::splat(0.5));
-                self.table_sides.insert(p, facing_of(d.x, d.z));
+                self.level.table_sides.insert(p, facing_of(d.x, d.z));
                 p
             }
             _ => return,
@@ -185,14 +185,14 @@ impl Game {
         for (p, at) in self.remote_open_blocks() {
             if self.terrain.world.geti(p) == CRAFTING_TABLE {
                 let d = at - (p.as_vec3() + Vec3::splat(0.5));
-                self.table_sides.insert(p, facing_of(d.x, d.z));
+                self.level.table_sides.insert(p, facing_of(d.x, d.z));
             }
         }
     }
 
     /// Which way a crafting table's grid faces (toward who last used it).
     pub(in crate::game) fn table_side(&self, p: IVec3) -> u8 {
-        self.table_sides.get(&p).copied().unwrap_or(2)
+        self.level.table_sides.get(&p).copied().unwrap_or(2)
     }
 
     /// The ingredients slide into the middle of the table.
@@ -227,9 +227,9 @@ impl Game {
             let strip = (96.0 * self.ui.s / self.ui.h.max(1.0)).clamp(0.0, 0.6);
             let (over, over_fwd) = bench_framing(table.center, table.right, table.toward, table.half_w, aspect, strip, false);
             let (into, into_fwd) = bench_framing(table.center, table.right, table.toward, table.half_w, aspect, strip, true);
-            let k = smoothstep(0.0, 1.0, self.bench_focus);
+            let k = smoothstep(0.0, 1.0, self.bench_ui.focus);
             let (want, fwd) = (over.lerp(into, k), over_fwd.lerp(into_fwd, k).normalize());
-            let sway = self.bench_pan;
+            let sway = self.bench_ui.pan;
             let want = want + table.right * sway * GUN_SWAY;
             // Moved to one side, it turns a little back toward the middle.
             let fwd = glam::Quat::from_rotation_y(sway * GUN_TURN.to_radians()) * fwd;
@@ -272,8 +272,8 @@ impl Game {
             ) if p == pos
         );
         if !open {
-            self.station_hover = None;
-            self.station_frame = None;
+            self.inv_ui.station_hover = None;
+            self.inv_ui.station_frame = None;
         }
         let Some(st) = &mut self.station else {
             return (cam, fwd, fov);
@@ -414,8 +414,8 @@ impl Game {
                     .text_centered(&text, sp.x, sp.y - 3.5 * fs, fs, WHITE, true);
             }
         }
-        self.station_hover = hovered.filter(|r| !matches!(r, SlotRef::Inv(_)));
-        self.station_frame = frame;
+        self.inv_ui.station_hover = hovered.filter(|r| !matches!(r, SlotRef::Inv(_)));
+        self.inv_ui.station_frame = frame;
         // Over the chest (both halves) or the table itself, or the inventory.
         let blocks: Vec<IVec3> = match c {
             Container::Chest(p) => {
@@ -429,7 +429,7 @@ impl Game {
             let min = q.as_vec3();
             crate::util::ray_box(o, d, min, min + Vec3::ONE, 64.0).is_some()
         });
-        self.station_inside = over_inventory || over_block;
+        self.inv_ui.station_inside = over_inventory || over_block;
         hovered
     }
 }

@@ -76,7 +76,7 @@ impl Game {
         // Everything you carry drops where you died (a crafting table keeps its own grid); a
         // magazine being put in goes back among it first.
         self.cancel_reload();
-        self.drag = None;
+        self.inv_ui.drag = None;
         self.stash_table(true);
         let mut loose: Vec<Stack> = self.craft.iter_mut().filter_map(|s| s.take()).collect();
         loose.extend(self.cursor.take());

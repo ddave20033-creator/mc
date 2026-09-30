@@ -544,8 +544,8 @@ pub fn draw_stack(ui: &mut Ui, x: f32, y: f32, size: f32, st: &Stack) {
 impl Game {
     /// The search changed: the list starts from the top again.
     fn scroll_creative_to_top(&mut self) {
-        self.creative_scroll = 0.0;
-        self.creative_scroll_anim = 0.0;
+        self.inv_ui.creative_scroll = 0.0;
+        self.inv_ui.creative_scroll_anim = 0.0;
     }
 
     /// Keyboard input while the creative search box is focused.
@@ -553,15 +553,15 @@ impl Game {
         const MAX: usize = 24;
         match code {
             KeyCode::Escape => self.close_container(),
-            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab => self.search_focused = false,
+            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab => self.inv_ui.search_focused = false,
             KeyCode::Backspace => {
-                self.creative_search.pop();
+                self.inv_ui.creative_search.pop();
                 self.scroll_creative_to_top();
             }
             _ => {
                 for c in text.unwrap_or("").chars() {
-                    if !c.is_control() && self.creative_search.chars().count() < MAX {
-                        self.creative_search.push(c);
+                    if !c.is_control() && self.inv_ui.creative_search.chars().count() < MAX {
+                        self.inv_ui.creative_search.push(c);
                         self.scroll_creative_to_top();
                     }
                 }
@@ -578,15 +578,15 @@ impl Game {
         let (y, w, h) = (py + 4.0 * s, px + 187.0 * s - x, 11.0 * s);
         let hovered = self.ui.hit(x, y, w, h);
         if self.ui.pressed {
-            self.search_focused = hovered;
+            self.inv_ui.search_focused = hovered;
         }
         if hovered && self.ui.right_pressed {
-            self.creative_search.clear();
+            self.inv_ui.creative_search.clear();
             self.scroll_creative_to_top();
-            self.search_focused = true;
+            self.inv_ui.search_focused = true;
         }
         let th = self.theme();
-        let border = if self.search_focused {
+        let border = if self.inv_ui.search_focused {
             rgba(98, 214, 120, 255)
         } else if hovered {
             th.slot_light
@@ -609,19 +609,19 @@ impl Game {
         let fs = (s * 0.75).round().max(1.0);
         let (tx, ty) = (x + 10.0 * s, (y + (h - 7.0 * fs) * 0.5).round());
         let room = w - 13.0 * s;
-        if self.creative_search.is_empty() && !self.search_focused {
+        if self.inv_ui.creative_search.is_empty() && !self.inv_ui.search_focused {
             self.ui
                 .text(t("gui.search"), tx, ty, fs, rgba(125, 125, 132, 255), false);
         } else {
             // Show the end of a long query.
-            let mut shown = self.creative_search.as_str();
+            let mut shown = self.inv_ui.creative_search.as_str();
             while self.ui.text_width(shown, fs) > room - 2.0 * fs {
                 let mut it = shown.chars();
                 it.next();
                 shown = it.as_str();
             }
             let tw = self.ui.text(shown, tx, ty, fs, WHITE, true);
-            if self.search_focused && (self.time * 2.5) as i32 % 2 == 0 {
+            if self.inv_ui.search_focused && (self.time * 2.5) as i32 % 2 == 0 {
                 self.ui.text("_", tx + tw + fs * 0.5, ty, fs, WHITE, true);
             }
         }
@@ -632,23 +632,23 @@ impl Game {
             // LAN player: ask the host for the contents.
             self.net_container_opened(p);
         }
-        self.drag = None;
-        self.press_pick = None;
-        self.search_focused = false;
-        self.jei.focused = false;
+        self.inv_ui.drag = None;
+        self.inv_ui.press_pick = None;
+        self.inv_ui.search_focused = false;
+        self.inv_ui.jei.focused = false;
         self.open_station(c);
         self.screen = Screen::Container(c);
         self.set_grab(false);
-        self.keys.clear();
+        self.input.keys.clear();
     }
 
     /// Stores the crafting grid of an open crafting table back into the table.
     pub(super) fn stash_table(&mut self, clear: bool) {
         if let Screen::Container(Container::Crafting(p)) = self.screen {
             if self.craft.iter().any(|s| s.is_some()) {
-                self.block_entities.tables.insert(p, self.craft);
+                self.level.block_entities.tables.insert(p, self.craft);
             } else {
-                self.block_entities.tables.remove(&p);
+                self.level.block_entities.tables.remove(&p);
             }
             if clear {
                 self.craft = [None; 9];
@@ -659,9 +659,9 @@ impl Game {
     /// Closes an item screen: a crafting table keeps its grid, the 2x2 grid and the cursor
     /// go back to the inventory.
     pub(super) fn close_container(&mut self) {
-        self.drag = None;
-        self.press_pick = None;
-        self.search_focused = false;
+        self.inv_ui.drag = None;
+        self.inv_ui.press_pick = None;
+        self.inv_ui.search_focused = false;
         if let Screen::Container(c) = self.screen {
             if Self::container_pos(c).is_some() {
                 // LAN player: the last changes go to the host before closing.
@@ -695,7 +695,7 @@ impl Game {
     pub(super) fn chest_slots(&self, p: IVec3) -> Vec<Slot> {
         let (a, b) = self.chest_halves(p);
         let get = |q: IVec3| {
-            self.block_entities
+            self.level.block_entities
                 .chests
                 .get(&q)
                 .map_or([None; 27], |c| **c)
@@ -712,7 +712,7 @@ impl Game {
         let (a, b) = self.chest_halves(p);
         for (q, part) in std::iter::once(a).chain(b).zip(slots.chunks(27)) {
             let c = self
-                .block_entities
+                .level.block_entities
                 .chests
                 .entry(q)
                 .or_insert_with(|| Box::new([None; 27]));
@@ -738,7 +738,7 @@ impl Game {
                 Container::Chest(p) => {
                     let (a, b) = self.chest_halves(p);
                     let (q, i) = if i < 27 { (a, i) } else { (b?, i - 27) };
-                    self.block_entities.chests.get_mut(&q).map(|ch| &mut ch[i])
+                    self.level.block_entities.chests.get_mut(&q).map(|ch| &mut ch[i])
                 }
                 _ => None,
             },
@@ -1343,7 +1343,7 @@ impl Game {
                 i as f32 * TAB_STEP
             };
             let x = px + (gx - 1.0) * s;
-            let open = i == self.creative_tab;
+            let open = i == self.inv_ui.creative_tab;
             let y = py - (TAB_H + if open { 3.0 } else { 0.0 }) * s;
             let w = TAB_W * s;
             let hovered = self.ui.hit(x, y, w, py - y);
@@ -1396,10 +1396,10 @@ impl Game {
                     self.ui.set_tooltip(tab.name());
                 }
                 if self.ui.pressed && !open {
-                    self.creative_tab = i;
-                    self.creative_search.clear();
-                    self.search_focused = false;
-                    self.scroll_drag = false;
+                    self.inv_ui.creative_tab = i;
+                    self.inv_ui.creative_search.clear();
+                    self.inv_ui.search_focused = false;
+                    self.inv_ui.scroll_drag = false;
                     self.scroll_creative_to_top();
                 }
             }
@@ -1429,7 +1429,7 @@ impl Game {
     pub(super) fn container_screen(&mut self, c: Container) {
         if let Container::GunStation(p) = c {
             let hovered = self.gun_station_screen(p);
-            let inside = self.station_inside;
+            let inside = self.inv_ui.station_inside;
             self.slot_input(c, hovered, None, inside);
             return;
         }
@@ -1439,7 +1439,7 @@ impl Game {
             let mut hovered_stack = None;
             let strip_right = (self.ui.w + 176.0 * self.ui.s) * 0.5;
             let over_jei = self.jei_panel(strip_right, &mut hovered, &mut hovered_stack);
-            let inside = self.station_inside || over_jei;
+            let inside = self.inv_ui.station_inside || over_jei;
             self.slot_input(c, hovered, hovered_stack, inside);
             return;
         }
@@ -1509,7 +1509,7 @@ impl Game {
                 }
                 self.inventory_slots(px, py, 84.0, &mut hovered);
             }
-            Container::Creative if TABS[self.creative_tab] == Tab::Inventory => {
+            Container::Creative if TABS[self.inv_ui.creative_tab] == Tab::Inventory => {
                 // The player's own inventory: the figure, the main rows and the hotbar.
                 let (ax, ay) = at(9.0, 6.0);
                 self.player_preview(ax, ay, 51.0 * s, 66.0 * s);
@@ -1535,8 +1535,8 @@ impl Game {
                 self.creative_hotbar(px, py, &mut hovered);
             }
             Container::Creative => {
-                let tab = TABS[self.creative_tab];
-                let title = if self.creative_search.trim().is_empty() {
+                let tab = TABS[self.inv_ui.creative_tab];
+                let title = if self.inv_ui.creative_search.trim().is_empty() {
                     tab.name()
                 } else {
                     t("gui.tab.search")
@@ -1546,7 +1546,7 @@ impl Game {
                 let fs = (s * 0.75).round().max(1.0);
                 let title_end = tx + self.ui.text_width(title, fs);
                 self.search_box(px, py, title_end);
-                let all = creative_grid(tab, &self.creative_search);
+                let all = creative_grid(tab, &self.inv_ui.creative_search);
                 if all.iter().all(|i| i.is_none()) {
                     let (cx, cy) = at(9.0 + 4.5 * SLOT, 18.0 + 2.6 * SLOT);
                     self.ui.text_centered(
@@ -1566,27 +1566,27 @@ impl Game {
                 let bar_h = 15.0 * s;
                 // Grabbing the scroll bar (or clicking its track) follows the mouse directly.
                 if self.ui.pressed && self.ui.hit(sx, sy, 12.0 * s, track_h) {
-                    self.scroll_drag = true;
+                    self.inv_ui.scroll_drag = true;
                 }
-                if !self.left_down {
-                    self.scroll_drag = false;
+                if !self.input.left_down {
+                    self.inv_ui.scroll_drag = false;
                 }
-                if self.scroll_drag && max_scroll > 0.0 {
+                if self.inv_ui.scroll_drag && max_scroll > 0.0 {
                     let k =
                         ((self.ui.mouse.y - sy - bar_h * 0.5) / (track_h - bar_h)).clamp(0.0, 1.0);
-                    self.creative_scroll = k * max_scroll;
-                    self.creative_scroll_anim = self.creative_scroll;
+                    self.inv_ui.creative_scroll = k * max_scroll;
+                    self.inv_ui.creative_scroll_anim = self.inv_ui.creative_scroll;
                 }
                 // The wheel moves the target one row per notch; the list glides there.
-                self.creative_scroll =
-                    (self.creative_scroll - self.ui.scroll).clamp(0.0, max_scroll);
+                self.inv_ui.creative_scroll =
+                    (self.inv_ui.creative_scroll - self.ui.scroll).clamp(0.0, max_scroll);
                 let ease = 1.0 - (-18.0 * self.ui.dt).exp();
-                self.creative_scroll_anim +=
-                    (self.creative_scroll - self.creative_scroll_anim) * ease;
-                if (self.creative_scroll - self.creative_scroll_anim).abs() < 0.002 {
-                    self.creative_scroll_anim = self.creative_scroll;
+                self.inv_ui.creative_scroll_anim +=
+                    (self.inv_ui.creative_scroll - self.inv_ui.creative_scroll_anim) * ease;
+                if (self.inv_ui.creative_scroll - self.inv_ui.creative_scroll_anim).abs() < 0.002 {
+                    self.inv_ui.creative_scroll_anim = self.inv_ui.creative_scroll;
                 }
-                let scroll = self.creative_scroll_anim.clamp(0.0, max_scroll);
+                let scroll = self.inv_ui.creative_scroll_anim.clamp(0.0, max_scroll);
                 let first = scroll.floor() as usize;
                 let frac = scroll - first as f32;
                 // Partly scrolled rows are cut off at the edges of the grid.
@@ -1640,7 +1640,7 @@ impl Game {
 
         // JEI: every item beside the inventory (and the creative "inventory" tab).
         let jei = matches!(c, Container::Inventory)
-            || (c == Container::Creative && TABS[self.creative_tab] == Tab::Inventory);
+            || (c == Container::Creative && TABS[self.inv_ui.creative_tab] == Tab::Inventory);
         let over_jei = jei && self.jei_panel(px + panel_w * s, &mut hovered, &mut hovered_stack);
         let panel = (px, py, panel_w * s, panel_h * s);
         let inside = over_tabs || over_jei || self.ui.hit(panel.0, panel.1, panel.2, panel.3);
@@ -1659,9 +1659,9 @@ impl Game {
     ) {
         let s = self.ui.s;
         // A stack dragged out of a slot and let go over another slot goes there.
-        if let Some(from) = self.press_pick {
-            if !self.left_down {
-                self.press_pick = None;
+        if let Some(from) = self.inv_ui.press_pick {
+            if !self.input.left_down {
+                self.inv_ui.press_pick = None;
                 if let Some(r) = hovered.filter(|&r| r != from && droppable(r)) {
                     if self.cursor.is_some() {
                         self.click_slot(c, r, false, false);
@@ -1687,7 +1687,7 @@ impl Game {
 
         // Clicks
         let shift = self.ui.shift;
-        if let Some(mut d) = self.drag.take() {
+        if let Some(mut d) = self.inv_ui.drag.take() {
             // Dragging: add newly entered slots and respread.
             if let Some(r) = hovered {
                 let cur = self.slot_mut(c, r).and_then(|s| *s);
@@ -1701,16 +1701,16 @@ impl Game {
                 }
             }
             let held = if d.right {
-                self.right_down
+                self.input.right_down
             } else {
-                self.left_down
+                self.input.left_down
             };
             if held {
-                self.drag = Some(d);
+                self.inv_ui.drag = Some(d);
             }
         } else if let Some(r) = hovered {
             // Middle click (creative): a full stack of the hovered item on the cursor.
-            let middle = self.middle_pressed && !self.cursor_grabbed;
+            let middle = self.input.middle_pressed && !self.input.cursor_grabbed;
             if middle && self.creative() && self.cursor.is_none() {
                 let st = match r {
                     SlotRef::Creative(id) => Some(Stack::one(id)),
@@ -1724,10 +1724,10 @@ impl Game {
                 let right = !self.ui.pressed;
                 let double = !right
                     && !shift
-                    && self.slot_click.1 == Some(r)
-                    && self.time - self.slot_click.0 < 0.3;
+                    && self.inv_ui.slot_click.1 == Some(r)
+                    && self.time - self.inv_ui.slot_click.0 < 0.3;
                 if !right {
-                    self.slot_click = (self.time, Some(r));
+                    self.inv_ui.slot_click = (self.time, Some(r));
                 }
                 let cur = self.slot_mut(c, r).and_then(|s| *s);
                 match self.cursor {
@@ -1739,18 +1739,18 @@ impl Game {
                             slots: vec![(r, cur)],
                         };
                         self.apply_drag(c, &d);
-                        self.drag = Some(d);
+                        self.inv_ui.drag = Some(d);
                     }
                     _ => {
                         let empty = self.cursor.is_none();
                         self.click_slot(c, r, right, shift && !right);
                         if empty && !right && !shift && self.cursor.is_some() {
-                            self.press_pick = Some(r);
+                            self.inv_ui.press_pick = Some(r);
                         }
                     }
                 }
             }
-            if let Some(d) = self.digit {
+            if let Some(d) = self.input.digit {
                 // Number key: swap with that hotbar slot.
                 // Swapping a hotbar slot with itself is a no-op (and would otherwise lose the item).
                 if r != SlotRef::Inv(d)
@@ -1796,7 +1796,7 @@ impl Game {
         // Stack on the mouse cursor (over a gun station's table it is shown there, in 3D).
         // (only what may lie there: anything else stays a picture on the mouse)
         let on_bench = matches!(c, Container::GunStation(_))
-            && (self.bench_spot.is_some() || self.bench_drawer_spot.is_some())
+            && (self.bench_ui.spot.is_some() || self.bench_ui.drawer_spot.is_some())
             && self.cursor.is_some_and(|st| {
                 let rifle = matches!(c, Container::GunStation(p) if is_rifle_bench(self.terrain.world.geti(p)));
                 gun_station::belongs_on_bench(st.item, rifle)

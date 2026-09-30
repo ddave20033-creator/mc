@@ -64,7 +64,7 @@ impl Game {
     pub(in crate::game) fn open_spectate_menu(&mut self) {
         self.screen = Screen::Spectate;
         self.set_grab(false);
-        self.keys.clear();
+        self.input.keys.clear();
     }
 
     /// The i-th player of the menu (number keys).

@@ -10,7 +10,7 @@ impl Game {
         } else {
             format!("{addr}:{}", crate::net::DEFAULT_PORT)
         };
-        self.finder = None;
+        self.menus.finder = None;
         self.settings.save();
         // (looking the address up and connecting can take seconds: not on the window's thread)
         let (tx, rx) = std::sync::mpsc::channel();
@@ -18,20 +18,20 @@ impl Game {
         std::thread::spawn(move || {
             let _ = tx.send(Conn::connect(&target));
         });
-        self.joining = Some((addr.clone(), rx));
-        self.net_message = tf("mp.connecting_to", &[&addr]);
+        self.menus.joining = Some((addr.clone(), rx));
+        self.menus.net_message = tf("mp.connecting_to", &[&addr]);
         self.screen = Screen::Connecting;
     }
 
     /// Connecting to a LAN game: once connected, says hello (the host answers with its world).
     pub(super) fn poll_joining(&mut self) {
-        let Some((_, rx)) = &self.joining else { return };
+        let Some((_, rx)) = &self.menus.joining else { return };
         let result = match rx.try_recv() {
             Ok(r) => r,
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(std::io::Error::other("?")),
         };
-        self.joining = None;
+        self.menus.joining = None;
         match result {
             Ok(conn) => {
                 conn.send(&Msg::Hello {
@@ -47,7 +47,7 @@ impl Game {
                 }));
             }
             Err(e) => {
-                self.net_message = tf("mp.connect_failed", &[&e]);
+                self.menus.net_message = tf("mp.connect_failed", &[&e]);
                 self.screen = Screen::Disconnected;
             }
         }
@@ -56,7 +56,7 @@ impl Game {
     /// LAN player: leaves the game (saying goodbye to the host with the latest state).
     pub(in crate::game) fn leave_server(&mut self, message: Option<String>) {
         // (still connecting: given up; the connection, if it is made, is dropped)
-        self.joining = None;
+        self.menus.joining = None;
         if self.is_client() {
             if self.player.spawned {
                 let state = self.client_state();
@@ -78,7 +78,7 @@ impl Game {
         self.set_grab(false);
         match message {
             Some(m) => {
-                self.net_message = m;
+                self.menus.net_message = m;
                 self.screen = Screen::Disconnected;
             }
             None => self.screen = Screen::MainMenu,
@@ -339,7 +339,7 @@ impl Game {
         // Mobs
         let ids: FastSet<u32> = mobs.iter().map(|m| m.id).collect();
         let mut gone = Vec::new();
-        self.mobs.retain(|m| {
+        self.level.mobs.retain(|m| {
             let keep = ids.contains(&m.id);
             if !keep && m.death.is_some_and(|d| d > 0.6) {
                 gone.push(m.center());
@@ -352,28 +352,28 @@ impl Game {
             self.particles.poof(c, sky, blk);
         }
         // (found by id through a map: after a tree comes down there can be hundreds)
-        let at: FastMap<u32, usize> = self.mobs.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
+        let at: FastMap<u32, usize> = self.level.mobs.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
         for s in &mobs {
-            match at.get(&s.id).map(|&i| &mut self.mobs[i]) {
+            match at.get(&s.id).map(|&i| &mut self.level.mobs[i]) {
                 Some(m) => m.apply_net(s),
                 None => {
                     if let Some(m) = Mob::from_net(s) {
-                        self.mobs.push(m);
+                        self.level.mobs.push(m);
                     }
                 }
             }
         }
         // Items
         let ids: FastSet<u32> = items.iter().map(|i| i.id).collect();
-        self.items.retain(|it| ids.contains(&it.id));
+        self.level.items.retain(|it| ids.contains(&it.id));
         let Some(Net::Client(c)) = &mut self.net else {
             return;
         };
         c.item_targets.clear();
-        let at: FastMap<u32, usize> = self.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
+        let at: FastMap<u32, usize> = self.level.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
         for s in &items {
             c.item_targets.insert(s.id, s.pos);
-            match at.get(&s.id).map(|&i| &mut self.items[i]) {
+            match at.get(&s.id).map(|&i| &mut self.level.items[i]) {
                 Some(it) => {
                     it.stack = s.stack;
                     it.age = s.age;
@@ -382,12 +382,12 @@ impl Game {
                     let mut it = ItemEntity::new(s.pos, Vec3::ZERO, s.stack, 0.0);
                     it.id = s.id;
                     it.age = s.age;
-                    self.items.push(it);
+                    self.level.items.push(it);
                 }
             }
         }
         // Falling blocks
-        self.falling = falling
+        self.level.falling = falling
             .into_iter()
             .map(|(pos, block)| FallingBlock {
                 pos,
@@ -399,7 +399,7 @@ impl Game {
 
     /// LAN player's `update_world`: things move toward what the host sent.
     pub(in crate::game) fn client_world(&mut self, dt: f32) {
-        for m in &mut self.mobs {
+        for m in &mut self.level.mobs {
             m.follow(dt);
             if let Some(s) = m.sound(dt) {
                 self.audio.play(s, Some(m.center()), 1.0);
@@ -407,7 +407,7 @@ impl Game {
         }
         if let Some(Net::Client(c)) = &self.net {
             let k = 1.0 - (-15.0 * dt).exp();
-            for it in &mut self.items {
+            for it in &mut self.level.items {
                 if let Some(&target) = c.item_targets.get(&it.id) {
                     it.pos = it.pos.lerp(target, k);
                 }

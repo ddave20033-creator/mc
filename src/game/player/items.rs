@@ -39,7 +39,7 @@ impl Game {
     /// The mob the crosshair is on, as an index into `mobs` (if it is still there).
     pub(in crate::game) fn target_mob(&self) -> Option<usize> {
         let id = self.mob_target?;
-        self.mobs.iter().position(|m| m.id == id)
+        self.level.mobs.iter().position(|m| m.id == id)
     }
 
     /// The inventory as it is saved: items in the 2x2 grid or on the cursor count as carried
@@ -67,7 +67,7 @@ impl Game {
     pub(in crate::game) fn use_item(&mut self) {
         let held = self.held();
         // The grenade crate on a rifle station: grenades in, or one out.
-        if self.right_pressed && self.crate_click() {
+        if self.input.right_pressed && self.crate_click() {
             return;
         }
         // With a gun the right mouse button aims: no opening or placing with it.
@@ -95,7 +95,7 @@ impl Game {
         }
         // Armor in hand: put it on (swapping with what is worn).
         if let Some((piece, _)) = armor_of(held) {
-            if self.right_pressed {
+            if self.input.right_pressed {
                 let slot = self.hotbar_slot;
                 std::mem::swap(&mut self.inventory.slots[slot], &mut self.inventory.armor[piece]);
                 self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
@@ -105,11 +105,11 @@ impl Game {
         }
         let sneaking = self.sneaking();
         if let Some(i) = self.target_mob() {
-            if held == SHEARS && self.mobs[i].can_shear() {
+            if held == SHEARS && self.level.mobs[i].can_shear() {
                 self.shear(i);
                 return;
             }
-            if self.right_pressed && self.use_on_wolf(i) {
+            if self.input.right_pressed && self.use_on_wolf(i) {
                 return;
             }
         }
@@ -124,12 +124,12 @@ impl Game {
                 || is_door(hb)
                 || is_bed(hb)
                 || is_chest(hb);
-            if !sneaking && opens && !self.right_pressed {
+            if !sneaking && opens && !self.input.right_pressed {
                 return;
             }
             // Furnaces have no screen: meat goes on top, the rest into the front.
             if let Some((p, k)) = self.furnace_part.filter(|(p, _)| *p == hit) {
-                if self.right_pressed && self.use_furnace(p, k, false) {
+                if self.input.right_pressed && self.use_furnace(p, k, false) {
                     return;
                 }
             }
@@ -137,7 +137,7 @@ impl Game {
                 if hb == CRAFTING_TABLE {
                     // Whatever was left on the table is still there.
                     self.craft = self
-                        .block_entities
+                        .level.block_entities
                         .tables
                         .get(&hit)
                         .copied()
@@ -182,7 +182,7 @@ impl Game {
                 if is_chest(hb) {
                     let (a, b) = self.chest_halves(hit);
                     for q in std::iter::once(a).chain(b) {
-                        self.block_entities
+                        self.level.block_entities
                             .chests
                             .entry(q)
                             .or_insert_with(|| Box::new([None; 27]));
@@ -241,7 +241,7 @@ impl Game {
                     || is_bed(b)
             });
         let ok = control
-            && self.right_down
+            && self.input.right_down
             && !self.creative()
             && !at_container
             && c.as_ref().is_some_and(|c| self.needs.wants(c));

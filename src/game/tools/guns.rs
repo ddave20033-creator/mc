@@ -304,7 +304,7 @@ impl Game {
         }
         let sprinting = self.player.sprinting;
         let g = &mut self.guns;
-        let aiming = held.is_some() && control && self.right_down && g.reload.is_none();
+        let aiming = held.is_some() && control && self.input.right_down && g.reload.is_none();
         let step = dt / AIM_TIME;
         g.aim = if aiming {
             (g.aim + step).min(1.0)
@@ -839,7 +839,7 @@ impl Game {
             .map(|(d, _)| d);
         let reach = block.unwrap_or(range);
         let mob = self
-            .mobs
+            .level.mobs
             .iter()
             .filter_map(|m| m.ray_hit(eye, dir, reach))
             .fold(None, |a: Option<f32>, d| Some(a.map_or(d, |a| a.min(d))));
@@ -874,7 +874,7 @@ impl Game {
             });
             let reach = block.map_or(len, |(_, d, _)| d);
             let mob = self
-                .mobs
+                .level.mobs
                 .iter()
                 .enumerate()
                 .filter(|(_, m)| m.alive())
@@ -904,16 +904,16 @@ impl Game {
                 return false;
             }
             if let Some((i, d)) = mob.filter(|_| !b.visual) {
-                if self.mobs[i].kind == crate::entity::mob::MobKind::Dummy {
+                if self.level.mobs[i].kind == crate::entity::mob::MobKind::Dummy {
                     // Straw flies out of the sack.
                     self.particles.impact(&self.terrain.world, b.pos + dir * d, -dir, WOOL, [224, 196, 118]);
                 }
                 if self.is_client() {
-                    let id = self.mobs[i].id;
+                    let id = self.level.mobs[i].id;
                     self.send(Msg::AttackMob { id, dmg, knock });
                 } else {
-                    self.mobs[i].hurt(dmg, Some(from), knock);
-                    let foe = crate::entity::mob::Foe::Mob(self.mobs[i].id);
+                    self.level.mobs[i].hurt(dmg, Some(from), knock);
+                    let foe = crate::entity::mob::Foe::Mob(self.level.mobs[i].id);
                     self.attacked(foe, crate::game::multi::HOST_ID);
                 }
                 return false;

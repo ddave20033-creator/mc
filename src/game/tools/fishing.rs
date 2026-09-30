@@ -439,7 +439,7 @@ impl Game {
             return false;
         }
         let f = &mut self.fishing;
-        f.scroll += self.scroll;
+        f.scroll += self.input.scroll;
         let whole = f.scroll.trunc();
         f.scroll -= whole;
         let n = whole as i32;
@@ -509,7 +509,7 @@ impl Game {
             return;
         }
         // Drawing back, and letting go to cast.
-        if control && self.right_pressed {
+        if control && self.input.right_pressed {
             let can_cast = self.fishing.cast.is_none() && !self.opens_target() && self.action_cooldown <= 0.0;
             match &mut self.fishing.line {
                 Some(line) if line.fight.is_none() => line.auto_reel = true,
@@ -523,7 +523,7 @@ impl Game {
         if let Some(c) = self.fishing.charge {
             if !control {
                 self.fishing.charge = None;
-            } else if self.right_down {
+            } else if self.input.right_down {
                 self.fishing.charge = Some(c + dt);
             } else {
                 self.fishing.charge = None;

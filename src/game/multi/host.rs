@@ -217,13 +217,13 @@ impl Game {
                 let at = pose.pos;
                 let name = self.player_name(*id);
                 let mobs = self
-                    .mobs
+                    .level.mobs
                     .iter()
                     .filter(|m| m.pos.distance(at) < MOB_RANGE)
                     .map(|m| crate::net::MobNet { flags: m.wolf_flags(name.as_deref()), ..m.to_net() })
                     .collect();
                 let items = self
-                    .items
+                    .level.items
                     .iter()
                     .filter(|it| !it.is_picking_up() && it.pos.distance(at) < ITEM_RANGE)
                     .map(|it| ItemNet {
@@ -234,7 +234,7 @@ impl Game {
                     })
                     .collect();
                 let falling = self
-                    .falling
+                    .level.falling
                     .iter()
                     .filter(|f| f.pos.distance(at) < ITEM_RANGE)
                     .map(|f| (f.pos, f.block))
@@ -275,7 +275,7 @@ impl Game {
     /// Crafting table grids as everyone sees them: the stored ones, and the host's live grid
     /// while the host has a table open.
     pub(super) fn table_grids(&self) -> FastMap<IVec3, [Slot; 9]> {
-        let mut grids = self.block_entities.tables.clone();
+        let mut grids = self.level.block_entities.tables.clone();
         if let Screen::Container(Container::Crafting(p)) = self.screen {
             if self.craft.iter().any(|s| s.is_some()) {
                 grids.insert(p, self.craft);
@@ -323,7 +323,7 @@ impl Game {
         let mut sent = FastMap::default();
         {
             let Some(host) = self.host_ref() else { return };
-            for (p, f) in &self.block_entities.furnaces {
+            for (p, f) in &self.level.block_entities.furnaces {
                 let key = Self::furnace_key(f);
                 let full = Self::furnace_msg(*p, f).encode();
                 let entry = match host.furnaces_sent.get(p) {
@@ -342,7 +342,7 @@ impl Game {
             host.furnaces_sent = sent;
         }
         for p in send {
-            if let Some(f) = self.block_entities.furnaces.get(&p) {
+            if let Some(f) = self.level.block_entities.furnaces.get(&p) {
                 let msg = Self::furnace_msg(p, f);
                 self.broadcast(&msg, None);
             }
@@ -407,8 +407,8 @@ impl Game {
             return;
         }
         let mut i = 0;
-        while i < self.items.len() {
-            let it = &self.items[i];
+        while i < self.level.items.len() {
+            let it = &self.level.items[i];
             let near = (it.pickup_delay <= 0.0 && !it.is_picking_up())
                 .then(|| {
                     takers
@@ -417,7 +417,7 @@ impl Game {
                 })
                 .flatten();
             if let Some(&(id, _)) = near {
-                let it = self.items.swap_remove(i);
+                let it = self.level.items.swap_remove(i);
                 self.send_to(id, &Msg::Give(it.stack));
                 continue;
             }
@@ -470,7 +470,7 @@ impl Game {
                 dmg,
                 knock,
             } => {
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                if let Some(m) = self.level.mobs.iter_mut().find(|m| m.id == mob) {
                     m.hurt(dmg, Some(from), knock);
                     self.attacked(crate::entity::mob::Foe::Mob(mob), id);
                 }
@@ -512,17 +512,17 @@ impl Game {
                 }
             }
             Msg::UseOnMob { id: mob, item } => {
-                if let Some(i) = self.mobs.iter().position(|m| m.id == mob) {
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
                     self.wolf_used(i, item, id);
                 }
             }
             Msg::BreakDummy { id: mob } => {
-                if let Some(i) = self.mobs.iter().position(|m| m.id == mob) {
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
                     self.break_dummy(i, true);
                 }
             }
             Msg::Shear { id: mob } => {
-                if let Some(i) = self.mobs.iter().position(|m| m.id == mob) {
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
                     self.shear_mob(i);
                 }
             }
@@ -540,7 +540,7 @@ impl Game {
                 } else {
                     // Make sure the block entity exists.
                     let b = self.terrain.world.geti(p);
-                    if let Some(bench) = self.block_entities.benches.get(&p).filter(|_| is_gun_bench(b)) {
+                    if let Some(bench) = self.level.block_entities.benches.get(&p).filter(|_| is_gun_bench(b)) {
                         // What lies on the gun station, as it is now.
                         let msg = Msg::Bench { p, bench: bench.clone() };
                         self.send_to(id, &msg);
@@ -548,7 +548,7 @@ impl Game {
                     if is_chest(b) {
                         let (a, other) = self.chest_halves(p);
                         for q in std::iter::once(a).chain(other) {
-                            self.block_entities
+                            self.level.block_entities
                                 .chests
                                 .entry(q)
                                 .or_insert_with(|| Box::new([None; 27]));
@@ -712,7 +712,7 @@ impl Game {
         }));
         // What lies on the gun stations.
         others.extend(
-            self.block_entities
+            self.level.block_entities
                 .benches
                 .iter()
                 .map(|(p, b)| Msg::Bench { p: *p, bench: b.clone() }),
@@ -724,7 +724,7 @@ impl Game {
                 .map(|(p, grid)| table_msg(p, &grid)),
         );
         others.extend(
-            self.block_entities
+            self.level.block_entities
                 .furnaces
                 .iter()
                 .map(|(p, f)| Self::furnace_msg(*p, f)),

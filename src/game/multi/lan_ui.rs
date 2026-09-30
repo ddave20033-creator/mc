@@ -130,15 +130,15 @@ impl Game {
     }
 
     pub(in crate::game) fn open_multiplayer(&mut self) {
-        self.finder = Some(Finder::start());
-        self.mp_selected = None;
+        self.menus.finder = Some(Finder::start());
+        self.menus.mp_selected = None;
         self.screen = Screen::Multiplayer;
     }
 
     pub(in crate::game) fn multiplayer_screen(&mut self) -> Action {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         screens::backdrop(&mut self.ui, 1.5);
-        if let Some(f) = &mut self.finder {
+        if let Some(f) = &mut self.menus.finder {
             f.update();
         }
         self.ui
@@ -174,14 +174,14 @@ impl Game {
         let list_h = (h - y - 118.0 * s).max(row_h * 2.0);
         self.ui.solid(lx, y, lw, list_h, rgba(0, 0, 0, 110));
         let games = self
-            .finder
+            .menus.finder
             .as_ref()
             .map(|f| f.games.clone())
             .unwrap_or_default();
         let mut join = None;
         if games.is_empty() {
             let dots = ".".repeat(1 + (self.time * 2.0) as usize % 3);
-            let text = if self.finder.as_ref().is_some_and(|f| f.error) {
+            let text = if self.menus.finder.as_ref().is_some_and(|f| f.error) {
                 t("mp.search_failed").to_string()
             } else {
                 format!("{}{dots}", t("mp.searching"))
@@ -194,7 +194,7 @@ impl Game {
             if ry + row_h > y + list_h {
                 break;
             }
-            let selected = self.mp_selected == Some(g.addr);
+            let selected = self.menus.mp_selected == Some(g.addr);
             let hovered = self.ui.hit(lx, ry, lw, row_h - 2.0 * s);
             if selected || hovered {
                 let a = if selected { 60 } else { 25 };
@@ -208,9 +208,9 @@ impl Game {
                 );
             }
             if hovered && self.ui.pressed {
-                let double = self.mp_selected == Some(g.addr) && self.last_click.0 == i && self.time - self.last_click.1 < 0.35;
-                self.mp_selected = Some(g.addr);
-                self.last_click = (i, self.time);
+                let double = self.menus.mp_selected == Some(g.addr) && self.menus.last_click.0 == i && self.time - self.menus.last_click.1 < 0.35;
+                self.menus.mp_selected = Some(g.addr);
+                self.menus.last_click = (i, self.time);
                 if double && g.compatible {
                     join = Some(g.addr.to_string());
                 }
@@ -230,7 +230,7 @@ impl Game {
 
         // Direct connection
         self.ui.text(t("mp.direct"), lx, y + 6.0 * s, s, gray, true);
-        let mut addr = std::mem::take(&mut self.mp_address);
+        let mut addr = std::mem::take(&mut self.menus.mp_address);
         let field_w = lw - 90.0 * s - 84.0 * s;
         self.ui.text_field(
             "mp_addr",
@@ -242,8 +242,8 @@ impl Game {
             "192.168.1.10",
             64,
         );
-        self.mp_address = addr;
-        let can_direct = !self.mp_address.trim().is_empty();
+        self.menus.mp_address = addr;
+        let can_direct = !self.menus.mp_address.trim().is_empty();
         if self.ui.button(
             t("mp.connect"),
             lx + lw - 80.0 * s,
@@ -252,14 +252,14 @@ impl Game {
             20.0 * s,
             can_direct,
         ) {
-            join = Some(self.mp_address.clone());
+            join = Some(self.menus.mp_address.clone());
         }
         y += 30.0 * s;
 
         // Buttons
         let bw = (lw - 8.0 * s) / 2.0;
         let chosen = self
-            .mp_selected
+            .menus.mp_selected
             .and_then(|a| games.iter().find(|g| g.addr == a))
             .filter(|g| g.compatible);
         if self
@@ -272,7 +272,7 @@ impl Game {
             .ui
             .button(t("gui.back"), lx + bw + 8.0 * s, y, bw, 20.0 * s, true)
         {
-            self.finder = None;
+            self.menus.finder = None;
             self.settings.save();
             self.screen = Screen::MainMenu;
         }
@@ -296,7 +296,7 @@ impl Game {
         };
         self.ui
             .text_centered(title, w * 0.5, cy - 14.0 * s, s, WHITE, true);
-        let msg = self.net_message.clone();
+        let msg = self.menus.net_message.clone();
         self.ui.text_centered(
             &msg,
             w * 0.5,

@@ -26,7 +26,7 @@ impl Game {
         let cam = self.player.eye();
         let focal = 1.0 / (self.fov_current.to_radians() * 0.5).tan();
         let tags: Vec<(Vec3, f32, f32, f32)> = self
-            .mobs
+            .level.mobs
             .iter()
             .filter(|m| m.kind == MobKind::Dummy && m.taken > 0.0 && m.since_hit < DUMMY_RESET)
             .map(|m| (m.pos + Vec3::Y * (m.size().1 + 0.35), m.taken, m.last_hit, m.since_hit))
@@ -667,7 +667,7 @@ impl Game {
             let hours = (self.time_of_day * 24.0 + 6.0) % 24.0;
             let lines = [
                 crate::ui::VERSION.to_string(),
-                format!("{:.0} fps", self.fps),
+                format!("{:.0} fps", self.clock.fps),
                 format!("GPU: {}", self.gpu.device_name),
                 format!(
                     "Chunks: {} drawn / {} loaded, {} pending",
@@ -690,7 +690,7 @@ impl Game {
                     self.game_mode,
                     if self.player.flying { " (flying)" } else { "" },
                     self.health,
-                    self.items.len()
+                    self.level.items.len()
                 ),
             ];
             for (i, line) in lines.iter().enumerate() {
@@ -708,7 +708,7 @@ impl Game {
             self.draw_performance(fs);
         } else if self.settings.show_fps {
             ui.text(
-                &format!("{:.0} FPS", self.fps),
+                &format!("{:.0} FPS", self.clock.fps),
                 3.0 * s,
                 3.0 * s,
                 fs,
@@ -721,21 +721,21 @@ impl Game {
     /// Right side of the F3 screen: frame rate and frame times (with a graph), and how much
     /// processor, memory, video memory and GPU this program and the whole system use.
     fn draw_performance(&mut self, fs: f32) {
-        let st = self.sys_stats.get();
+        let st = self.clock.sys_stats.get();
         let mb = |b: u64| b / (1024 * 1024);
         let gb = |b: u64| b as f32 / (1024.0 * 1024.0 * 1024.0);
-        let times = &self.frame_times;
+        let times = &self.clock.frame_times;
         let n = times.len().max(1) as f32;
         let avg = times.iter().sum::<f32>() / n;
         let max = times.iter().copied().fold(0.0, f32::max);
         let min = times.iter().copied().fold(f32::MAX, f32::min).min(max);
         let pct = |v: Option<f32>| v.map_or("n/a".to_string(), |v| format!("{v:.0}%"));
         let lines = [
-            format!("FPS: {:.0}", self.fps),
+            format!("FPS: {:.0}", self.clock.fps),
             format!("Frame: {avg:.1} ms (min {min:.1} / max {max:.1})"),
             format!(
                 "CPU ms: update {:.1} / build {:.1} / submit {:.1}, wait {:.1}",
-                self.cpu_ms[0], self.cpu_ms[1], self.cpu_ms[2], self.cpu_ms[3]
+                self.clock.cpu_ms[0], self.clock.cpu_ms[1], self.clock.cpu_ms[2], self.clock.cpu_ms[3]
             ),
             match self.renderer.gpu_ms {
                 Some([sh, wo, ui]) => {
@@ -762,7 +762,7 @@ impl Game {
                 pct(st.gpu_game),
                 pct(st.gpu_total)
             ),
-            match self.vram {
+            match self.clock.vram {
                 Some((used, budget)) => format!("VRAM: {} MB / {} MB", mb(used), mb(budget)),
                 None => "VRAM: n/a".to_string(),
             },
