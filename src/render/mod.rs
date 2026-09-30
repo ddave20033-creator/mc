@@ -33,6 +33,28 @@ const SCOPE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
 const SHADOW_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 const UI_MAX_VERTS: usize = 150_000;
 const DYN_MAX_VERTS: usize = 1_000_000;
+
+/// How many vertices of each dynamic range (particles, overlay, viewmodel, lines, entity,
+/// translucent, viewmodel glass, lens) fit into the dynamic buffer. Over its size the least
+/// needed are cut first (particles and the loose things drawn with them, then entities),
+/// never the hand, the gun or the lens, and only whole triangles (lines: whole segments).
+fn dyn_budget(lens: [usize; 8]) -> [usize; 8] {
+    const KEEP_FIRST: [usize; 8] = [6, 7, 2, 1, 3, 5, 4, 0];
+    let mut left = DYN_MAX_VERTS;
+    let mut out = [0; 8];
+    for i in KEEP_FIRST {
+        let whole = if i == 3 { 2 } else { 3 };
+        out[i] = lens[i].min(left) / whole * whole;
+        left -= out[i];
+    }
+    if lens.iter().sum::<usize>() > DYN_MAX_VERTS {
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("dynamic vertex buffer full: {} of {} vertices drawn", out.iter().sum::<usize>(), lens.iter().sum::<usize>());
+        }
+    }
+    out
+}
 const MAX_UPLOADS_PER_FRAME: usize = 24;
 /// Indirect draw commands per frame (chunks' opaque parts, a few each).
 const MAX_INDIRECT: usize = 65536;
@@ -1492,10 +1514,11 @@ impl Renderer {
                 f.viewmodel_glass,
                 f.lens,
             ];
+            let counts = dyn_budget(ranges.map(|r| r.len()));
             let mut offsets = [0u32; 9];
             let mut cursor = 0usize;
             for (i, r) in ranges.iter().enumerate() {
-                let n = r.len().min(DYN_MAX_VERTS - cursor);
+                let n = counts[i];
                 if n > 0 {
                     self.dyn_bufs[slot].write(cursor * size_of::<Vertex>(), &r[..n]);
                 }
@@ -2260,5 +2283,20 @@ impl Renderer {
             self.block_tex.destroy(d);
             self.font_tex.destroy(d);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_full_dynamic_buffer_cuts_particles_before_the_hand() {
+        let all = dyn_budget([30, 6, 300, 4, 60, 9, 3, 6]);
+        assert_eq!(all, [30, 6, 300, 4, 60, 9, 3, 6]);
+        let over = dyn_budget([DYN_MAX_VERTS, 6, 300, 4, 60, 9, 3, 6]);
+        assert_eq!(&over[1..], &[6, 300, 4, 60, 9, 3, 6]);
+        assert!(over.iter().sum::<usize>() <= DYN_MAX_VERTS);
+        assert_eq!(over[0] % 3, 0);
     }
 }

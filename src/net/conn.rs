@@ -15,6 +15,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 const DISCOVERY_PORT: u16 = 4446;
 const AD_PREFIX: &str = "RUSTCRAFT_LAN";
 const MAX_FRAME: usize = 64 << 20;
+/// How long a connection may go without sending (or a player hear nothing from the host)
+/// before it counts as lost.
+const SILENT_LIMIT: Duration = Duration::from_secs(60);
 
 /// One TCP connection with a reader and a writer thread, so the game never blocks on it.
 pub struct Conn {
@@ -41,6 +44,9 @@ fn read_frame(s: &mut TcpStream) -> io::Result<Vec<u8>> {
 impl Conn {
     pub fn new(stream: TcpStream) -> io::Result<Conn> {
         stream.set_nodelay(true)?;
+        // Unable to send for this long, the other end is gone or stuck (the writer thread ends
+        // instead of waiting forever, and the game sees the connection closed).
+        stream.set_write_timeout(Some(SILENT_LIMIT))?;
         let closed = Arc::new(AtomicBool::new(false));
         let (out_tx, out_rx) = channel::<Vec<u8>>();
         let (in_tx, in_rx) = channel::<Msg>();
@@ -60,7 +66,7 @@ impl Conn {
                         None => break,
                     }
                 }
-                flag.store(true, Ordering::Relaxed);
+                flag.store(true, Ordering::Release);
             })?;
 
         let mut writer = stream;
@@ -82,7 +88,7 @@ impl Conn {
                 // also ends the reader thread.
                 let _ = writer.flush();
                 let _ = writer.shutdown(std::net::Shutdown::Both);
-                flag.store(true, Ordering::Relaxed);
+                flag.store(true, Ordering::Release);
             })?;
 
         Ok(Conn {
@@ -99,6 +105,9 @@ impl Conn {
             .next()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no address"))?;
         let stream = TcpStream::connect_timeout(&target, Duration::from_secs(4))?;
+        // The host sends many times a second: nothing for this long, it is gone (a player
+        // may be silent a while itself, loading, so only this end waits for the other).
+        stream.set_read_timeout(Some(SILENT_LIMIT))?;
         Conn::new(stream)
     }
 
@@ -114,6 +123,9 @@ impl Conn {
 
     /// Messages received so far, and whether the connection is still open.
     pub fn poll(&self) -> (Vec<Msg>, bool) {
+        // Whether it closed is read first: everything the reader got before closing is then in
+        // the queue (the last message, e.g. why the host refused, is not lost).
+        let closed = self.closed.load(Ordering::Acquire);
         let mut v = Vec::new();
         loop {
             match self.rx.try_recv() {
@@ -122,7 +134,7 @@ impl Conn {
                 Err(TryRecvError::Disconnected) => return (v, false),
             }
         }
-        let open = !self.closed.load(Ordering::Relaxed) || !v.is_empty();
+        let open = !closed || !v.is_empty();
         (v, open)
     }
 

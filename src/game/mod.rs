@@ -414,7 +414,7 @@ pub struct Game {
     next_entity_id: u32,
     finder: Option<crate::net::Finder>,
     mp_address: String,
-    mp_selected: Option<usize>,
+    mp_selected: Option<std::net::SocketAddr>,
     net_message: String,
     /// The other player the crosshair is on.
     player_target: Option<u8>,

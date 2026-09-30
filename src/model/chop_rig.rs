@@ -195,7 +195,21 @@ pub enum Parts {
 /// elbows and knees as in the rig) and the held axe, posed by the rig, `world` placing the
 /// rig in the world.
 #[allow(clippy::too_many_arguments)]
-pub fn emit(out: &mut Vec<Vertex>, world: Mat4, pose: &ChopPose, parts: Parts, held: crate::item::ItemId, skin: u8, light: [u8; 4], fl: u8) {
+/// `tint` (hurt: reddened), `armor` (as `PlayerPose::armor`) and `shake` (the head shaking
+/// while burning, radians) as the player model has them.
+pub fn emit(
+    out: &mut Vec<Vertex>,
+    world: Mat4,
+    pose: &ChopPose,
+    parts: Parts,
+    held: crate::item::ItemId,
+    skin: u8,
+    tint: [u8; 3],
+    armor: u16,
+    shake: f32,
+    light: [u8; 4],
+    fl: u8,
+) {
     use super::player::{ARM, BODY, HEAD, LEG};
     let skinned = |layers: [u32; 6]| layers.map(|l| crate::world::textures::skin_layer(l, skin));
     let v = Vec3::new;
@@ -221,14 +235,36 @@ pub fn emit(out: &mut Vec<Vertex>, world: Mat4, pose: &ChopPose, parts: Parts, h
             Parts::Body => !arm && bone != "head",
         };
         if shown {
-            super::emit_box_rows(out, world * pose.bone(bone), lo, hi, skinned(layers), [[255; 3]; 6], light, fl, rows);
+            let m = if bone == "head" { world * pose.bone(bone) * head_shake(shake) } else { world * pose.bone(bone) };
+            super::emit_box_rows(out, m, lo, hi, skinned(layers), [tint; 6], light, fl, rows);
         }
+    }
+    // The armor on the same bones (each frame at its joint, as `build_player` has them; seen
+    // from its own eyes only the body's).
+    if parts != Parts::Arms {
+        let at = |bone: &str, x: f32, y: f32| world * pose.bone(bone) * Mat4::from_translation(Vec3::new(x, y, 0.0));
+        let all = parts == Parts::All;
+        let frames = super::player::ArmorFrames {
+            head: all.then(|| at("head", 0.0, 24.0) * Mat4::from_rotation_y(shake)),
+            body: at("torso", 0.0, 24.0),
+            right_arm: all.then(|| at("right_arm", 5.0, 22.0)),
+            left_arm: all.then(|| at("left_arm", -5.0, 22.0)),
+            legs: [at("right_leg", 1.9, 12.0), at("left_leg", -1.9, 12.0)],
+            shins: [at("right_foot", 1.9, 12.0), at("left_foot", -1.9, 12.0)],
+        };
+        super::player::emit_armor(out, &frames, armor, tint, light, fl);
     }
     if parts == Parts::Body {
         return;
     }
     let st = crate::item::Stack::one(held);
     super::emit_held_data(out, world * pose.axe() * axe_item(), &st, light, fl);
+}
+
+/// The head shaking about the neck (see `emit`).
+fn head_shake(shake: f32) -> Mat4 {
+    let neck = Vec3::new(0.0, 24.0, 0.0);
+    Mat4::from_translation(neck) * Mat4::from_rotation_y(shake) * Mat4::from_translation(-neck)
 }
 
 #[cfg(test)]

@@ -74,8 +74,10 @@ pub(super) struct Book {
     back: bool,
     /// How far the book is lifted up to read: 0 held low .. 1 in front of the eyes.
     read: f32,
-    /// The book laid out in English and in Hungarian (made when first needed).
+    /// The book laid out in English and in Hungarian (made when first needed), and the keys
+    /// its text names (bound to others, it is laid out again).
     layouts: [Option<Layout>; 2],
+    layout_keys: [Option<(String, String)>; 2],
     sheets: Vec<Sheet>,
     frame: u64,
     /// What the middle of the view was on last frame (see `book::book_hit`).
@@ -100,6 +102,7 @@ impl Default for Book {
             back: false,
             read: 0.0,
             layouts: [None, None],
+            layout_keys: [None, None],
             sheets: (0..tex::BOOK_SHEET_COUNT).map(|_| Sheet::default()).collect(),
             frame: 0,
             hit: None,
@@ -255,15 +258,21 @@ impl Game {
         crate::lang::is_hungarian()
     }
 
-    /// Lays the book out in a language, if it is not yet.
+    /// Lays the book out in a language, if it is not yet (or the keys it names were bound
+    /// to others since: its pages are drawn again).
     fn book_layout(&mut self, hu: bool) {
-        if self.book.layouts[hu as usize].is_none() {
-            use crate::keys::display;
-            let keys = (
-                display(self.settings.keys.get(Bind::Inventory)),
-                display(self.settings.keys.get(Bind::Reload)),
-            );
-            self.book.layouts[hu as usize] = Some(layout(&self.ui.pixel_font, hu, &keys));
+        use crate::keys::display;
+        let keys = (
+            display(self.settings.keys.get(Bind::Inventory)),
+            display(self.settings.keys.get(Bind::Reload)),
+        );
+        let i = hu as usize;
+        if self.book.layouts[i].is_none() || self.book.layout_keys[i].as_ref() != Some(&keys) {
+            if self.book.layouts[i].is_some() {
+                self.book.textures_remade();
+            }
+            self.book.layouts[i] = Some(layout(&self.ui.pixel_font, hu, &keys));
+            self.book.layout_keys[i] = Some(keys);
         }
     }
 

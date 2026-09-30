@@ -301,7 +301,8 @@ impl Game {
             take(&mut self.inventory.slots[slot], 1);
         }
         self.audio.play(Sound::SpoonFly, None, 0.6);
-        let seed = (self.random() * u32::MAX as f32) as u32;
+        // (two draws: one is only 24 bits, and the seed tells the grenades apart over LAN)
+        let seed = ((self.random() * 65536.0) as u32) << 16 | (self.random() * 65536.0) as u32;
         let real = !self.is_client();
         self.spawn_grenade(kind, pos, vel, seed, real, fuse);
         let msg = Msg::Grenade {

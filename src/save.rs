@@ -96,7 +96,7 @@ impl WorldMeta {
         let base = if base.is_empty() {
             "World".to_string()
         } else {
-            base
+            crate::util::windows_safe(base)
         };
         let mut folder = base.clone();
         let mut i = 1;
@@ -590,7 +590,7 @@ impl ChunkSaver {
 }
 
 fn save_chunks(folder: &str, chunks: &[(ChunkPos, Arc<ChunkData>)]) {
-    let mut out = b"RCC1".to_vec();
+    let mut out = b"RCC2".to_vec();
     let mut body = Vec::new();
     let mut count = 0u32;
     for (p, c) in chunks {
@@ -610,7 +610,9 @@ pub fn load_chunks(folder: &str) -> Vec<(ChunkPos, ChunkData)> {
     let Ok(data) = fs::read(dir(folder).join("chunks.bin")) else {
         return Vec::new();
     };
-    if data.len() < 8 || &data[..4] != b"RCC1" {
+    // RCC1: saved before trees stood on grass (their trunks' dirt is turned to grass, once).
+    let old = &data.get(..4) == &Some(b"RCC1".as_slice());
+    if data.len() < 8 || !(old || &data[..4] == b"RCC2") {
         return Vec::new();
     }
     let rd = |o: usize| i32::from_le_bytes(data[o..o + 4].try_into().unwrap());
@@ -626,7 +628,10 @@ pub fn load_chunks(folder: &str) -> Vec<(ChunkPos, ChunkData)> {
         if o + len > data.len() {
             break;
         }
-        if let Some(c) = ChunkData::from_raw(unrle(&data[o..o + len])) {
+        if let Some(mut c) = ChunkData::from_raw(unrle(&data[o..o + len])) {
+            if old {
+                c.grass_under_trunks();
+            }
             out.push(((cx, cz), c));
         }
         o += len;

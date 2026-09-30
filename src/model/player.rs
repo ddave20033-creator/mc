@@ -598,6 +598,72 @@ fn emit_bent_limb(
     quad(out, 3, bottom, &mats[last], bottom, &mats[last], [0.0, 1.0]);
 }
 
+/// Where the armor is worn, each frame at its joint as `build_player` poses the body: the
+/// head and the body at the neck, the arms at the shoulders, the legs and the shins at the
+/// hips (a part not drawn: None).
+pub struct ArmorFrames {
+    pub head: Option<Mat4>,
+    pub body: Mat4,
+    pub right_arm: Option<Mat4>,
+    pub left_arm: Option<Mat4>,
+    pub legs: [Mat4; 2],
+    pub shins: [Mat4; 2],
+}
+
+/// Armor over the body: a helmet (the face left free), a chestplate with shoulder pads,
+/// leggings from the hips, boots, and the vest over the chest with its pouches (`armor` as
+/// `item::unpack_armor` reads it).
+pub fn emit_armor(out: &mut Vec<Vertex>, f: &ArmorFrames, armor: u16, tint: [u8; 3], light: [u8; 4], fl: u8) {
+    let (worn, vest) = crate::item::unpack_armor(armor);
+    let piece = |out: &mut Vec<Vertex>, m: Mat4, min: [f32; 3], max: [f32; 3], material: usize| {
+        let (layer, color) = match material {
+            0 => (tex::ARMOR_WOOL, [196, 184, 160]),
+            1 => (tex::ARMOR_METAL, [226, 146, 96]),
+            2 => (tex::ARMOR_METAL, [176, 184, 198]),
+            _ => (tex::ARMOR_METAL, [120, 228, 232]),
+        };
+        let c: [u8; 3] = std::array::from_fn(|i| (color[i] as u32 * tint[i] as u32 / 255) as u8);
+        emit_box(out, m, Vec3::from(min), Vec3::from(max), [layer; 6], [c; 6], light, fl);
+    };
+    if let (Some(m), Some(head)) = (worn[0], f.head) {
+        piece(out, head, [-4.6, 4.6, -4.6], [4.6, 8.7, 4.6], m);
+        piece(out, head, [-4.6, 0.5, 1.2], [4.6, 4.6, 4.6], m);
+        piece(out, head, [-4.6, 1.5, -4.6], [-3.6, 4.6, 1.2], m);
+        piece(out, head, [3.6, 1.5, -4.6], [4.6, 4.6, 1.2], m);
+    }
+    if let Some(m) = worn[1] {
+        piece(out, f.body, [-4.6, -10.8, -2.6], [4.6, 0.5, 2.6], m);
+        if let Some(right) = f.right_arm {
+            piece(out, right, [-1.6, -4.0, -2.6], [3.6, 2.6, 2.6], m);
+        }
+        if let Some(left) = f.left_arm {
+            piece(out, left, [-3.6, -4.0, -2.6], [1.6, 2.6, 2.6], m);
+        }
+    }
+    if let Some(m) = worn[2] {
+        piece(out, f.body, [-4.5, -12.4, -2.5], [4.5, -9.8, 2.5], m);
+        for leg in f.legs {
+            piece(out, leg, [-2.5, -8.5, -2.5], [2.5, 0.3, 2.5], m);
+        }
+    }
+    if let Some(m) = worn[3] {
+        for shin in f.shins {
+            piece(out, shin, [-2.6, -12.4, -2.6], [2.6, -8.3, 2.6], m);
+        }
+    }
+    if vest {
+        let olive: [u8; 3] = std::array::from_fn(|i| ([118u32, 124, 92][i] * tint[i] as u32 / 255) as u8);
+        let dark: [u8; 3] = olive.map(|c| (c as u32 * 4 / 5) as u8);
+        let v = |out: &mut Vec<Vertex>, min: [f32; 3], max: [f32; 3], c: [u8; 3]| {
+            emit_box(out, f.body, Vec3::from(min), Vec3::from(max), [tex::VEST; 6], [c; 6], light, fl);
+        };
+        v(out, [-4.9, -10.2, -3.0], [4.9, 0.6, 3.0], olive);
+        for (x0, x1) in [(-3.8, -1.5), (-1.1, 1.1), (1.5, 3.8)] {
+            v(out, [x0, -9.6, -3.7], [x1, -6.6, -3.0], dark);
+        }
+    }
+}
+
 /// `glass`: where the held gun's see-through glass goes (drawn blended).
 pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u8, blk: u8) {
     let light = vertex_light(sky, blk);
@@ -614,7 +680,8 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         // same rig, where they are in the world).
         use super::chop_rig::{emit, to_world, Parts};
         let parts = if p.first_person { Parts::Body } else { Parts::All };
-        emit(out, to_world(p.pos, p.head_yaw, p.pitch), &swing.pose(), parts, p.held, p.skin, light, fl);
+        let shake = if p.burning { flail(p.time) } else { 0.0 };
+        emit(out, to_world(p.pos, p.head_yaw, p.pitch), &swing.pose(), parts, p.held, p.skin, tint, p.armor, shake, light, fl);
         return;
     }
     let root = model_root(p);
@@ -718,54 +785,15 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
     emit_bent_limb(out, leg_frame(1.9, limbs.right_leg, limbs.right_knee), lo, hi, &leg_rings, skin(LEG), tints, light, fl);
     emit_bent_limb(out, leg_frame(-1.9, limbs.left_leg, limbs.left_knee), lo, hi, &leg_rings, skin(LEG), tints, light, fl);
 
-    // Armor over the body: a helmet (the face left free), a chestplate with shoulder pads,
-    // leggings from the hips, boots, and the vest over the chest with its pouches.
-    let (worn, vest) = crate::item::unpack_armor(p.armor);
-    let piece = |out: &mut Vec<Vertex>, m: Mat4, min: [f32; 3], max: [f32; 3], material: usize| {
-        let (layer, color) = match material {
-            0 => (tex::ARMOR_WOOL, [196, 184, 160]),
-            1 => (tex::ARMOR_METAL, [226, 146, 96]),
-            2 => (tex::ARMOR_METAL, [176, 184, 198]),
-            _ => (tex::ARMOR_METAL, [120, 228, 232]),
-        };
-        let c: [u8; 3] = std::array::from_fn(|i| (color[i] as u32 * tint[i] as u32 / 255) as u8);
-        emit_box(out, m, Vec3::from(min), Vec3::from(max), [layer; 6], [c; 6], light, fl);
+    let frames = ArmorFrames {
+        head: (!p.first_person).then_some(head),
+        body,
+        right_arm: show_right.then_some(right),
+        left_arm: (!p.hide_arms).then_some(left),
+        legs: [rl, ll],
+        shins: [right_shin, left_shin],
     };
-    if let (Some(m), false) = (worn[0], p.first_person) {
-        piece(out, head, [-4.6, 4.6, -4.6], [4.6, 8.7, 4.6], m);
-        piece(out, head, [-4.6, 0.5, 1.2], [4.6, 4.6, 4.6], m);
-        piece(out, head, [-4.6, 1.5, -4.6], [-3.6, 4.6, 1.2], m);
-        piece(out, head, [3.6, 1.5, -4.6], [4.6, 4.6, 1.2], m);
-    }
-    if let Some(m) = worn[1] {
-        piece(out, body, [-4.6, -10.8, -2.6], [4.6, 0.5, 2.6], m);
-        if show_right {
-            piece(out, right, [-1.6, -4.0, -2.6], [3.6, 2.6, 2.6], m);
-        }
-        if !p.hide_arms {
-            piece(out, left, [-3.6, -4.0, -2.6], [1.6, 2.6, 2.6], m);
-        }
-    }
-    if let Some(m) = worn[2] {
-        piece(out, body, [-4.5, -12.4, -2.5], [4.5, -9.8, 2.5], m);
-        piece(out, rl, [-2.5, -8.5, -2.5], [2.5, 0.3, 2.5], m);
-        piece(out, ll, [-2.5, -8.5, -2.5], [2.5, 0.3, 2.5], m);
-    }
-    if let Some(m) = worn[3] {
-        piece(out, right_shin, [-2.6, -12.4, -2.6], [2.6, -8.3, 2.6], m);
-        piece(out, left_shin, [-2.6, -12.4, -2.6], [2.6, -8.3, 2.6], m);
-    }
-    if vest {
-        let olive: [u8; 3] = std::array::from_fn(|i| ([118u32, 124, 92][i] * tint[i] as u32 / 255) as u8);
-        let dark: [u8; 3] = olive.map(|c| (c as u32 * 4 / 5) as u8);
-        let v = |out: &mut Vec<Vertex>, min: [f32; 3], max: [f32; 3], c: [u8; 3]| {
-            emit_box(out, body, Vec3::from(min), Vec3::from(max), [tex::VEST; 6], [c; 6], light, fl);
-        };
-        v(out, [-4.9, -10.2, -3.0], [4.9, 0.6, 3.0], olive);
-        for (x0, x1) in [(-3.8, -1.5), (-1.1, 1.1), (1.5, 3.8)] {
-            v(out, [x0, -9.6, -3.7], [x1, -6.6, -3.0], dark);
-        }
-    }
+    emit_armor(out, &frames, p.armor, tint, light, fl);
 
     // Held item, placed like Minecraft's ItemInHandLayer followed by the item model's
     // `thirdperson_righthand` display transform (handheld tools, flat items, blocks).

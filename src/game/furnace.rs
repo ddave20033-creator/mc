@@ -175,7 +175,10 @@ impl Game {
         let mut relight = Vec::new();
         for (p, f) in self.block_entities.furnaces.iter_mut() {
             let b = self.terrain.world.geti(*p);
-            f.tier = furnace_tier(b);
+            // (in a chunk not loaded the block reads as air: it keeps the tier it had)
+            if self.terrain.world.is_loaded(p.x, p.z) {
+                f.tier = furnace_tier(b);
+            }
             let lit = f.update(dt);
             if let (true, Some(base), Some(fac)) = (is_furnace(b), furnace_base(b), facing(b)) {
                 // All of a big furnace glows while it burns.
@@ -232,7 +235,9 @@ impl Game {
     /// more once the side on the fire is done, dark and thick when it burns.
     pub(super) fn furnace_fx(&mut self, dt: f32) {
         for (p, f) in self.block_entities.furnaces.iter_mut() {
-            f.tier = furnace_tier(self.terrain.world.geti(*p));
+            if self.terrain.world.is_loaded(p.x, p.z) {
+                f.tier = furnace_tier(self.terrain.world.geti(*p));
+            }
         }
         if self.is_client() {
             // Between the host's updates (every second, or when something changes) the

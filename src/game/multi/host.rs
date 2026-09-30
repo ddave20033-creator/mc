@@ -29,6 +29,7 @@ impl Game {
                 }
             })
             .collect();
+        let clean = crate::util::windows_safe(clean);
         Some(self.players_dir()?.join(format!("{clean}.dat")))
     }
 

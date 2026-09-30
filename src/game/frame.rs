@@ -781,7 +781,7 @@ impl Game {
             use crate::model::chop_rig::{emit, Parts};
             let light = crate::util::vertex_light(player_sky, player_blk);
             let fl = crate::world::mesh::flags::ENTITY;
-            emit(&mut scene.particles, self.chop_world(), &swing.pose(), Parts::Arms, self.held(), self.effective_skin(), light, fl);
+            emit(&mut scene.particles, self.chop_world(), &swing.pose(), Parts::Arms, self.held(), self.effective_skin(), [255; 3], 0, 0.0, light, fl);
         }
         if own_view && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol && !book))) {
             let f = look_dir(self.yaw, self.pitch);
@@ -1092,8 +1092,11 @@ impl Game {
         );
         let near = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < 48.0 * 48.0;
         let light = |p: IVec3| world.light_estimate(p.as_vec3() + Vec3::new(0.5, 1.2, 0.5));
-        // Every chest in the loaded chunks gets its lid, known contents or not.
-        for p in self.terrain.chests.values().flatten().filter(|p| near(p)) {
+        // Every chest in sight gets its lid, known contents or not (the chunk mesh has only
+        // its body: a lid missing would leave it open-topped).
+        let sight = (self.settings.render_distance * CHUNK as f32).powi(2);
+        let in_sight = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < sight;
+        for p in self.terrain.chests.values().flatten().filter(|p| in_sight(p)) {
             let b = world.geti(*p);
             if let Some(facing) = facing(b).filter(|_| is_chest(b)) {
                 // Both halves of a double chest open together.

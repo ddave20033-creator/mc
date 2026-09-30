@@ -194,7 +194,7 @@ impl Game {
             if ry + row_h > y + list_h {
                 break;
             }
-            let selected = self.mp_selected == Some(i);
+            let selected = self.mp_selected == Some(g.addr);
             let hovered = self.ui.hit(lx, ry, lw, row_h - 2.0 * s);
             if selected || hovered {
                 let a = if selected { 60 } else { 25 };
@@ -208,8 +208,8 @@ impl Game {
                 );
             }
             if hovered && self.ui.pressed {
-                let double = self.last_click.0 == i && self.time - self.last_click.1 < 0.35;
-                self.mp_selected = Some(i);
+                let double = self.mp_selected == Some(g.addr) && self.last_click.0 == i && self.time - self.last_click.1 < 0.35;
+                self.mp_selected = Some(g.addr);
                 self.last_click = (i, self.time);
                 if double && g.compatible {
                     join = Some(g.addr.to_string());
@@ -260,7 +260,7 @@ impl Game {
         let bw = (lw - 8.0 * s) / 2.0;
         let chosen = self
             .mp_selected
-            .and_then(|i| games.get(i))
+            .and_then(|a| games.iter().find(|g| g.addr == a))
             .filter(|g| g.compatible);
         if self
             .ui

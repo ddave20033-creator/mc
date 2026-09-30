@@ -22,6 +22,21 @@ impl Rng {
     }
 }
 
+/// A file or folder name Windows accepts: its device names (CON, NUL, COM1...) get a `_`
+/// in front (a world or a player called so would not be saved at all).
+pub fn windows_safe(name: String) -> String {
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit());
+    if device {
+        format!("_{name}")
+    } else {
+        name
+    }
+}
+
 /// An angle wrapped into -PI..PI.
 pub fn wrap_angle(a: f32) -> f32 {
     (a + PI).rem_euclid(TAU) - PI
@@ -92,5 +107,14 @@ mod tests {
             ),
             Some(2.0)
         );
+    }
+
+    #[test]
+    fn windows_device_names_are_made_safe() {
+        assert_eq!(windows_safe("CON".into()), "_CON");
+        assert_eq!(windows_safe("nul".into()), "_nul");
+        assert_eq!(windows_safe("com1".into()), "_com1");
+        assert_eq!(windows_safe("Console".into()), "Console");
+        assert_eq!(windows_safe("COMx".into()), "COMx");
     }
 }
