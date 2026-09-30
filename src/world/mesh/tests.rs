@@ -1,0 +1,229 @@
+use super::shapes::bed_local;
+use super::*;
+
+/// A 3x3 neighbourhood of chunks with a stone floor at y 0, the center chunk from `edit`.
+fn hood(edit: impl Fn(&mut ChunkData)) -> [Arc<ChunkData>; 9] {
+    let floor = || {
+        let mut c = ChunkData::new();
+        for z in 0..16 {
+            for x in 0..16 {
+                c.set(x, 0, z, STONE);
+            }
+        }
+        c
+    };
+    let mut center = floor();
+    edit(&mut center);
+    std::array::from_fn(|i| Arc::new(if i == 4 { center.clone() } else { floor() }))
+}
+
+/// Prints where meshing time goes (`cargo test --release mesh_speed -- --nocapture`).
+#[test]
+fn mesh_speed() {
+    let gen = Generator::new(1201871768);
+    let chunks: Vec<Arc<ChunkData>> = (0..25)
+        .map(|i| Arc::new(gen.generate_chunk(i % 5, i / 5)))
+        .collect();
+    let at = |x: i32, z: i32| chunks[(z * 5 + x) as usize].clone();
+    let hoods: Vec<[Arc<ChunkData>; 9]> = (1..4)
+        .flat_map(|z| (1..4).map(move |x| (x, z)))
+        .map(|(x, z)| std::array::from_fn(|i| at(x + i as i32 % 3 - 1, z + i as i32 / 3 - 1)))
+        .collect();
+    let t = std::time::Instant::now();
+    let mut vertices = 0;
+    for (i, nb) in hoods.iter().enumerate() {
+        let m = mesh_chunk(((i % 3) as i32 + 1, (i / 3) as i32 + 1), nb, &[], &gen);
+        vertices += m.vertices.len();
+    }
+    println!("9 chunks meshed in {:?}, {vertices} vertices", t.elapsed());
+}
+
+#[test]
+fn beds_turn_their_head_north_for_the_textures() {
+    for f in 0..4 {
+        let head = facing_dir(f);
+        assert_eq!(bed_local(head, f), glam::IVec3::NEG_Z);
+        // The bed's right (its east when facing north) stays on its right.
+        assert_eq!(bed_local(facing_dir(f + 1), f), glam::IVec3::X);
+    }
+}
+
+#[test]
+fn glass_wall_faces_join_their_neighbours() {
+    // A glass wall three blocks wide and one high along x, at z 8.
+    let nb = hood(|c| {
+        for x in 7..10 {
+            c.set(x, 1, 8, GLASS);
+        }
+    });
+    let r = Region::new(&nb);
+    // Face -Z of the middle pane: joined left and right (u runs along -x), not up or down.
+    let mask = glass_mask(&r, 16 + 8, 1, 16 + 8, 5);
+    assert_eq!(mask & 0b11, 0b11, "{mask:08b}");
+    assert_eq!(mask & 0b1100, 0, "{mask:08b}");
+    // The end pane joins only toward the middle.
+    let end = glass_mask(&r, 16 + 7, 1, 16 + 8, 5);
+    assert_eq!((end & 0b11).count_ones(), 1, "{end:08b}");
+}
+
+#[test]
+fn a_just_broken_block_takes_the_light_around_it() {
+    // A stone block on the floor, under the open sky.
+    let nb = hood(|c| c.set(8, 1, 8, STONE));
+    let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+    let mut world = World::new();
+    world.chunks.insert((0, 0), nb[4].clone());
+    world.light.insert((0, 0), m.light.clone());
+    // Broken: its cell still has the solid block's light until the chunk is lit again.
+    world.set(8, 1, 8, AIR);
+    let at = glam::IVec3::new(8, 1, 8);
+    assert!(world.light_estimate(at.as_vec3() + glam::Vec3::splat(0.5)).0 < 15);
+    assert_eq!(world.light_around(at).0, 15);
+}
+
+#[test]
+fn chests_are_listed_for_their_lids() {
+    let nb = hood(|c| {
+        c.set(3, 1, 4, crate::world::CHEST);
+        c.set(10, 5, 12, crate::world::CHEST + 2);
+    });
+    let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+    let mut chests = m.chests.clone();
+    chests.sort_by_key(|p| p.x);
+    assert_eq!(chests, [glam::IVec3::new(3, 1, 4), glam::IVec3::new(10, 5, 12)]);
+}
+
+#[test]
+fn things_under_a_lintel_get_the_light_around_them() {
+    // A door in a wall with a beam over it: the door's cell is lit from the open sides,
+    // not dark as if it were under a roof.
+    let nb = hood(|c| {
+        for x in 6..11 {
+            for y in 1..4 {
+                c.set(x, y, 8, PLANKS);
+            }
+        }
+        c.set(8, 1, 8, door_id(0, false, false, false));
+        c.set(8, 2, 8, door_id(0, false, true, false));
+    });
+    let gen = Generator::new(1);
+    let m = mesh_chunk((0, 0), &nb, &[], &gen);
+    let mut world = World::new();
+    world.chunks.insert((0, 0), nb[4].clone());
+    world.light.insert((0, 0), m.light.clone());
+    assert_eq!(m.doors.len(), 2);
+    for y in [1.5, 2.5] {
+        let (sky, _) = world.light_estimate(glam::Vec3::new(8.5, y, 8.5));
+        assert!(sky >= 14, "door at y {y}: sky {sky}");
+    }
+    // Inside the wall: the light of its open sides.
+    assert_eq!(world.light_estimate(glam::Vec3::new(6.5, 1.5, 8.5)).0, 15);
+}
+
+/// FNV-1a over bytes: a fingerprint of generated terrain and meshes.
+struct Fnv(u64);
+impl Fnv {
+    fn bytes(&mut self, b: &[u8]) {
+        for &x in b {
+            self.0 = (self.0 ^ x as u64).wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    fn u32(&mut self, v: u32) {
+        self.bytes(&v.to_le_bytes());
+    }
+    fn f32(&mut self, v: f32) {
+        self.u32(v.to_bits());
+    }
+    fn mesh(&mut self, m: &MeshData) {
+        for v in &m.vertices {
+            v.pos.iter().chain(&v.uv).chain([&v.layer]).for_each(|&c| self.f32(c));
+            self.bytes(&v.light);
+            self.bytes(&v.tint);
+        }
+        m.indices.iter().for_each(|&i| self.u32(i));
+        for c in [m.opaque_count, m.solid_count, m.leaf_inner_count] {
+            self.u32(c);
+        }
+        m.dir_counts.iter().for_each(|&c| self.u32(c));
+        self.f32(m.min_y);
+        self.f32(m.max_y);
+        for p in m.doors.iter().chain(&m.chests).chain(&m.gun_stations).chain(&m.torches).chain(&m.stump_marks) {
+            p.to_array().iter().for_each(|&c| self.u32(c as u32));
+        }
+        self.u32(m.light.h as u32);
+        self.bytes(&m.light.data);
+    }
+}
+
+/// Generated terrain, its meshes and the block properties stay exactly the same (a
+/// guard for refactoring: the fingerprint changes only when generation or meshing does).
+#[test]
+fn terrain_and_meshes_are_unchanged() {
+    let mut h = Fnv(0xcbf2_9ce4_8422_2325);
+    for b in 0..=255u8 {
+        h.bytes(&[is_opaque(b) as u8, is_solid(b) as u8, attenuates_sky(b) as u8, emission(b)]);
+        (0..6).for_each(|f| h.u32(face_texture(b, f)));
+    }
+    let fingerprint = |h: &Fnv| format!("{:016x}", h.0);
+    let mut chunks = 0;
+    for (seed, cx, cz) in [(1201871768u32, 0, 0), (12345, 40, -7), (7, -300, 120), (99991, 5, 900)] {
+        let gen = Generator::new(seed);
+        let nb: [Arc<ChunkData>; 9] =
+            std::array::from_fn(|i| Arc::new(gen.generate_chunk(cx + i as i32 % 3 - 1, cz + i as i32 / 3 - 1)));
+        for c in &nb {
+            for y in 0..HEIGHT {
+                for z in 0..16 {
+                    h.bytes(c.row(y, z));
+                }
+            }
+            h.bytes(&c.heightmap);
+            h.bytes(&[c.max_y]);
+        }
+        // A fluid that just changed, to animate.
+        let anim = [(glam::IVec3::new(cx * 16 + 3, SEA_TEST, cz * 16 + 4), AIR, 0.5)];
+        h.mesh(&mesh_chunk((cx, cz), &nb, &anim, &gen));
+        chunks += 1;
+    }
+    // Every block id on a floor, spaced out, and a few next to each other (stairs
+    // bending, double chests, glass joining, logs meeting) in a hood far from the others.
+    let (px, pz) = (1000, -1000);
+    let nb = hood(|c| {
+        for b in 1..=255u8 {
+            let i = b as usize;
+            c.set_raw(i % 8 * 2, 1 + i / 64 * 2, i / 8 % 8 * 2, b);
+        }
+        for x in 0..16 {
+            c.set_raw(x, 12, 15, stairs_id((x % 4) as u8, x % 3 == 0));
+            c.set_raw(x, 14, 15, if x % 2 == 0 { GLASS } else { OAK_LOG_X });
+            c.set_raw(x, 15, 15, [OAK_LOG, BIRCH_BRANCH_X, SPRUCE_BRANCH_Z, OAK_LEAVES][x % 4]);
+        }
+        c.set_raw(0, 12, 14, chest_id(0, 1));
+        c.set_raw(1, 12, 14, chest_id(0, -1));
+        for y in 16..20 {
+            c.set_raw(3, y, 3, OAK_LOG);
+            c.set_raw(6, y, 3, BIRCH_LOG);
+        }
+        c.recompute();
+    });
+    let (n1, n2) = (glam::IVec3::new(px * 16 + 3, 17, pz * 16 + 3), glam::IVec3::new(px * 16 + 6, 18, pz * 16 + 3));
+    set_notch(n1, Some(Notch { angle: 0.7, height: 0.5, depth: 0.6, felled: false }));
+    set_notch(n2, Some(Notch { angle: 2.1, height: 0.4, depth: 0.8, felled: true }));
+    let m = mesh_chunk((px, pz), &nb, &[], &Generator::new(3));
+    set_notch(n1, None);
+    set_notch(n2, None);
+    h.mesh(&m);
+    println!("{chunks} generated chunks + all blocks: {}", fingerprint(&h));
+    assert_eq!(fingerprint(&h), "8b5c88996fa6e919");
+}
+const SEA_TEST: i32 = crate::world::gen::SEA;
+
+#[test]
+fn torches_and_stump_marks_are_listed() {
+    let nb = hood(|c| {
+        c.set(3, 1, 4, TORCH);
+        c.set(5, 0, 5, stump_mark(GRASS, 0));
+    });
+    let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+    assert_eq!(m.torches, vec![glam::IVec3::new(3, 1, 4)]);
+    assert_eq!(m.stump_marks, vec![glam::IVec3::new(5, 0, 5)]);
+}
