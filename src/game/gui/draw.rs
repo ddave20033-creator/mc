@@ -173,11 +173,7 @@ pub fn draw_stack(ui: &mut Ui, x: f32, y: f32, size: f32, st: &Stack) {
     let px = (size / 16.0).max(1.0);
     let max = max_damage(st.item);
     // A gun's dirt shows on the gun itself, not as a bar.
-    let dirt = GunKind::of(st.item).is_some()
-        || (PISTOL_FRAME..=PISTOL_MAGAZINE).contains(&st.item)
-        || st.item == EXTENDED_MAGAZINE
-        || REVOLVER_PARTS.contains(&st.item)
-        || AK_PARTS.contains(&st.item);
+    let dirt = gets_dirty(st.item);
     if max > 0 && st.damage > 0 && !dirt {
         let f = 1.0 - st.damage as f32 / max as f32;
         let (bx, by, bw) = (x + 2.0 * px, y + size - 3.0 * px, size - 4.0 * px);
@@ -262,12 +258,7 @@ impl Game {
                 tf("gun.magazine", &[&gun_rounds(st), &cap]),
                 crate::lang::t("gun.mag_hint")
             );
-        } else if max > 0
-            && st.damage > 0
-            && !(PISTOL_FRAME..=PISTOL_SLIDE).contains(&st.item)
-            && !REVOLVER_PARTS.contains(&st.item)
-            && !AK_PARTS.contains(&st.item)
-        {
+        } else if max > 0 && st.damage > 0 && !gets_dirty(st.item) {
             text = format!(
                 "{text}  ({})",
                 tf("gui.durability", &[&(max - st.damage), &max])

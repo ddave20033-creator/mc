@@ -6,7 +6,7 @@ blocks! {
     after super::machines::END;
 
     CHEST * 4 = BlockDef {
-        key: "chest", en: "Chest", hu: "Láda", place: Place::Chest,
+        key: "chest", en: "Chest", hu: "Láda", place: Place::Chest, fuel: Some(15.0),
         creative: Creative::Functional(1), ..CHEST_DEF
     };
     /// Double chest halves: + facing. The other half is on the chest's local +X side (the
@@ -27,8 +27,8 @@ blocks! {
     OAK_DOOR * 64 = BlockDef {
         key: "oak_door", en: "Oak Door", hu: "Tölgyfa ajtó", model: Model::Door, solid: true,
         faces: Faces::Custom(door_faces), needs_support: true, mine: axe(3.0),
-        icon: Some(tex::DOOR_ITEM), place: Place::Door, creative: Creative::Functional(1),
-        ..THIN
+        icon: Some(tex::DOOR_ITEM), place: Place::Door, fuel: Some(10.0),
+        creative: Creative::Functional(1), ..THIN
     };
     TORCH = BlockDef {
         key: "torch", en: "Torch", hu: "Fáklya", icon: Some(tex::TORCH), place: Place::Torch,

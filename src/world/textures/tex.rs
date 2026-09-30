@@ -318,7 +318,7 @@ pub const LOGO_TILES: u32 = 8;
 pub const LAYERS: usize = (LOGO + LOGO_TILES) as usize;
 
 /// Texture layer of a tool: `tier` and `kind` as `Tier as usize` and `ToolKind as usize`.
-pub fn tool_layer(tier: usize, kind: usize) -> u32 {
+pub const fn tool_layer(tier: usize, kind: usize) -> u32 {
     let i = (tier * 4 + kind) as u32;
     if i < 20 {
         TOOLS + i

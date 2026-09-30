@@ -2,7 +2,8 @@
 //! blocks, plants, ores, fluids, machines, furniture). A line gives a block its constant, its
 //! key (commands, save files), its names, how it looks (its model, faces, tint and light), what
 //! it does in the world (solid, sunlight, support, gravity, fluids), how it is mined and what
-//! it drops, the item it is, where it is in the creative inventory, and how it is placed.
+//! it drops, the item it is (and how its item burns or smelts in a furnace), where it is in
+//! the creative inventory, and how it is placed.
 //!
 //! Ids are not written anywhere: they follow from the order of the lines (and of the files,
 //! see `PARTS`). A block with a state (a facing, a door's halves...) takes `states` ids after
@@ -12,7 +13,10 @@
 //! Adding a plain block is adding a line to its file (and its texture: `tex`, the painter in
 //! `textures::procedural` and a resource pack name in `textures::pack`).
 
-use crate::item::{ItemId, Stack, ToolKind, CLAY_BALL, COAL, LAVA_BUCKET, SHEARS, STICK, WATER_BUCKET};
+use crate::item::{
+    smelts, ItemId, Smelt, Stack, ToolKind, CHARCOAL, CLAY_BALL, COAL, COPPER_INGOT, DIAMOND, GOLD_INGOT, IRON_INGOT,
+    LAVA_BUCKET, SHEARS, STICK, WATER_BUCKET,
+};
 use crate::world::block::*;
 use crate::world::textures::tex;
 
@@ -100,14 +104,7 @@ pub enum BlockItem {
     Other(ItemId),
 }
 
-/// Where the block's item is in the creative inventory: the tab and the group (each group
-/// starts on a new row; in a group, in the order of the table).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Creative {
-    None,
-    Blocks(u8),
-    Functional(u8),
-}
+pub use crate::content::Creative;
 
 /// How the block's item is placed (`game::player::items`).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -171,6 +168,10 @@ pub struct BlockDef {
     pub item: BlockItem,
     /// Its item's icon, when not the block drawn as a cube.
     pub icon: Option<u32>,
+    /// Seconds its item burns in a furnace.
+    pub fuel: Option<f32>,
+    /// What its item smelts into (`item::smelt`).
+    pub smelt: Option<Smelt>,
     pub creative: Creative,
     pub place: Place,
 }
@@ -199,6 +200,8 @@ pub(super) const CUBE: BlockDef = BlockDef {
     shears: false,
     item: BlockItem::Own { stack: 64 },
     icon: None,
+    fuel: None,
+    smelt: None,
     creative: Creative::None,
     place: Place::Plain,
 };

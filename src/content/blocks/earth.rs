@@ -29,7 +29,7 @@ blocks! {
     };
     SAND = BlockDef {
         key: "sand", en: "Sand", hu: "Homok", faces: Faces::All(tex::SAND), mine: shovel(0.5),
-        gravity: true, creative: Creative::Blocks(0), ..CUBE
+        gravity: true, smelt: smelts(GLASS, 2), creative: Creative::Blocks(0), ..CUBE
     };
     GRAVEL = BlockDef {
         key: "gravel", en: "Gravel", hu: "Kavics", faces: Faces::All(tex::GRAVEL),

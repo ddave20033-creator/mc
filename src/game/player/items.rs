@@ -70,34 +70,26 @@ impl Game {
         if self.input.right_pressed && self.crate_click() {
             return;
         }
-        // With a gun the right mouse button aims: no opening or placing with it.
-        if GunKind::of(held).is_some() {
-            return;
-        }
-        // A grenade is readied and thrown by holding the button (`update_grenade_hold`).
-        if crate::sim::grenade::GrenadeKind::of(held).is_some() {
-            return;
-        }
-        // A fishing rod casts by holding the button (`update_fishing`), unless there is
-        // something to open.
-        if held == FISHING_ROD {
-            if !self.opens_target() || self.fishing.line.is_some() {
+        let action = on_use(held);
+        match action {
+            // With a gun the button aims, a grenade is readied and thrown by holding it
+            // (`update_grenade_hold`), a magazine does nothing (it is loaded at the gun
+            // station): no opening or placing with them.
+            OnUse::Aim | OnUse::Throw | OnUse::Nothing => return,
+            // A fishing rod casts by holding the button (`update_fishing`), unless there is
+            // something to open.
+            OnUse::Cast if !self.opens_target() || self.fishing.line.is_some() => return,
+            // Armor in hand: put it on (swapping with what is worn).
+            OnUse::Wear => {
+                if let (true, Some((piece, _))) = (self.input.right_pressed, armor_of(held)) {
+                    let slot = self.hotbar_slot;
+                    std::mem::swap(&mut self.inventory.slots[slot], &mut self.inventory.armor[piece]);
+                    self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
+                    self.hand.swing();
+                }
                 return;
             }
-        }
-        // A magazine in hand does nothing (it is loaded at the gun station).
-        if magazine_capacity(held).is_some() {
-            return;
-        }
-        // Armor in hand: put it on (swapping with what is worn).
-        if let Some((piece, _)) = armor_of(held) {
-            if self.input.right_pressed {
-                let slot = self.hotbar_slot;
-                std::mem::swap(&mut self.inventory.slots[slot], &mut self.inventory.armor[piece]);
-                self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
-                self.hand.swing();
-            }
-            return;
+            _ => {}
         }
         let sneaking = self.sneaking();
         if let Some(i) = self.target_mob() {
@@ -177,12 +169,16 @@ impl Game {
                 }
             }
         }
-        match held {
-            BUCKET => self.fill_bucket(),
-            WATER_BUCKET | LAVA_BUCKET => self.empty_bucket(held),
-            _ if MobKind::by_egg(held).is_some() => self.use_spawn_egg(MobKind::by_egg(held).unwrap()),
-            GLASS_BOTTLE => self.fill_bottle(),
-            _ if block_of(held).is_some() => self.place_block(held),
+        match action {
+            OnUse::Scoop => self.fill_bucket(),
+            OnUse::Pour(fluid) => self.empty_bucket(fluid),
+            OnUse::Spawn => {
+                if let Some(kind) = MobKind::by_egg(held) {
+                    self.use_spawn_egg(kind);
+                }
+            }
+            OnUse::FillBottle => self.fill_bottle(),
+            OnUse::Place => self.place_block(held),
             _ => {}
         }
     }
@@ -297,7 +293,8 @@ impl Game {
         self.action_cooldown = 0.25;
     }
 
-    pub(in crate::game) fn empty_bucket(&mut self, held: ItemId) {
+    /// A full bucket poured out: its fluid where it points.
+    pub(in crate::game) fn empty_bucket(&mut self, fluid: Block) {
         let Some((hit, prev)) = self.target else {
             return;
         };
@@ -310,7 +307,7 @@ impl Game {
         if !is_replaceable(w.geti(at)) && !fluid_breaks(w.geti(at)) {
             return;
         }
-        self.edit_block(at, if held == WATER_BUCKET { WATER } else { LAVA });
+        self.edit_block(at, fluid);
         if !self.creative() {
             self.inventory.slots[self.hotbar_slot] = Some(Stack::one(BUCKET));
         }

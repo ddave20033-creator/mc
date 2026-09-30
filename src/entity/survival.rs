@@ -91,6 +91,7 @@ pub struct Sickness {
 }
 
 /// Food or drink.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Consumable {
     pub food: f32,
     pub saturation: f32,

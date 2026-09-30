@@ -63,13 +63,13 @@ fn dirt(st: &Stack) -> u16 {
 /// icon is it, or the item has no model to draw).
 fn key(st: &Stack) -> Option<Key> {
     let item = st.item;
-    let k = match item {
-        PISTOL | AK47 => {
+    let k = match gun_role(item) {
+        GunRole::Gun(_) if cylinder_gun(item) => dirt(st) << 12,
+        GunRole::Gun(_) => {
             let full = (gun_mods(st) as u16) | (!gun_has_mag(st) as u16) << 8 | (gun_locked(st) as u16) << 9;
             full | dirt(st) << 12
         }
-        REVOLVER => dirt(st) << 12,
-        PISTOL_MAGAZINE | EXTENDED_MAGAZINE | SPEEDLOADER | AK_MAGAZINE => {
+        GunRole::Magazine(_) | GunRole::Loader(_) => {
             let cap = magazine_capacity(item).unwrap_or(0);
             // The fixed icons are full.
             if gun_rounds(st) >= cap && dirt(st) == 0 {
@@ -77,9 +77,7 @@ fn key(st: &Stack) -> Option<Key> {
             }
             gun_rounds(st) as u16 | dirt(st) << 12 | 0x800
         }
-        _ if (PISTOL_FRAME..=PISTOL_SLIDE).contains(&item) || REVOLVER_PARTS.contains(&item) || AK_PARTS[..4].contains(&item) => {
-            (gun_mods(st) as u16) | dirt(st) << 12
-        }
+        GunRole::Part(_) => (gun_mods(st) as u16) | dirt(st) << 12,
         _ => return None,
     };
     // The fixed icons: the pistol and the AK loaded and clean, everything else clean and bare.

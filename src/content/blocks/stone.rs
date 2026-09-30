@@ -11,7 +11,7 @@ blocks! {
     };
     COBBLE = BlockDef {
         key: "cobblestone", en: "Cobblestone", hu: "Zúzottkő", faces: Faces::All(tex::COBBLE),
-        mine: pick(2.0, 0), creative: Creative::Blocks(1), ..CUBE
+        mine: pick(2.0, 0), smelt: smelts(STONE, 1), creative: Creative::Blocks(1), ..CUBE
     };
     STONE_BRICKS = BlockDef {
         key: "stone_bricks", en: "Stone Bricks", hu: "Kőtégla",

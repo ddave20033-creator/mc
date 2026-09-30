@@ -11,24 +11,24 @@ blocks! {
     };
     COPPER_ORE = BlockDef {
         key: "copper_ore", en: "Copper Ore", hu: "Rézérc", faces: Faces::All(tex::COPPER_ORE),
-        mine: pick(3.0, 1), creative: Creative::Blocks(4), ..CUBE
+        mine: pick(3.0, 1), smelt: smelts(COPPER_INGOT, 1), creative: Creative::Blocks(4), ..CUBE
     };
     IRON_ORE = BlockDef {
         key: "iron_ore", en: "Iron Ore", hu: "Vasérc", faces: Faces::All(tex::IRON_ORE),
-        mine: pick(3.0, 2), creative: Creative::Blocks(4), ..CUBE
+        mine: pick(3.0, 2), smelt: smelts(IRON_INGOT, 2), creative: Creative::Blocks(4), ..CUBE
     };
     GOLD_ORE = BlockDef {
         key: "gold_ore", en: "Gold Ore", hu: "Aranyérc", faces: Faces::All(tex::GOLD_ORE),
-        mine: pick(3.0, 3), creative: Creative::Blocks(4), ..CUBE
+        mine: pick(3.0, 3), smelt: smelts(GOLD_INGOT, 3), creative: Creative::Blocks(4), ..CUBE
     };
     DIAMOND_ORE = BlockDef {
         key: "diamond_ore", en: "Diamond Ore", hu: "Gyémántérc",
-        faces: Faces::All(tex::DIAMOND_ORE), mine: pick(3.0, 3), creative: Creative::Blocks(4),
-        ..CUBE
+        faces: Faces::All(tex::DIAMOND_ORE), mine: pick(3.0, 3), smelt: smelts(DIAMOND, 3),
+        creative: Creative::Blocks(4), ..CUBE
     };
     COAL_BLOCK = BlockDef {
         key: "coal_block", en: "Block of Coal", hu: "Szénblokk", faces: Faces::All(tex::COAL_BLOCK),
-        mine: pick(5.0, 0), creative: Creative::Blocks(5), ..CUBE
+        mine: pick(5.0, 0), fuel: Some(800.0), creative: Creative::Blocks(5), ..CUBE
     };
     COPPER_BLOCK = BlockDef {
         key: "copper_block", en: "Block of Copper", hu: "Rézblokk",

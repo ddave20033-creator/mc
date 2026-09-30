@@ -39,13 +39,13 @@ blocks! {
     SPRUCE_BRANCH_Z = BlockDef { key: "spruce_branch_z", item: BlockItem::As(SPRUCE_LOG), ..LOG };
     PLANKS = BlockDef {
         key: "oak_planks", en: "Oak Planks", hu: "Tölgyfa deszka", faces: Faces::All(tex::PLANKS),
-        mine: axe(2.0), creative: Creative::Blocks(2), ..CUBE
+        mine: axe(2.0), fuel: Some(15.0), creative: Creative::Blocks(2), ..CUBE
     };
     /// Oak stairs: + facing (bits 0-1, toward the tall back) + upside down (bit 2).
     OAK_STAIRS * 8 = BlockDef {
         key: "oak_stairs", en: "Oak Stairs", hu: "Tölgyfa lépcső", model: Model::Stairs,
         opaque: false, faces: Faces::All(tex::PLANKS), mine: axe(2.0), place: Place::Stairs,
-        creative: Creative::Blocks(2), ..CUBE
+        fuel: Some(15.0), creative: Creative::Blocks(2), ..CUBE
     };
     GLASS = BlockDef {
         key: "glass", en: "Glass", hu: "Üveg", faces: Faces::All(tex::GLASS),
@@ -58,15 +58,17 @@ blocks! {
     };
     WOOL = BlockDef {
         key: "white_wool", en: "White Wool", hu: "Fehér gyapjú", faces: Faces::All(tex::WOOL),
-        mine: mine(0.8, None, None), creative: Creative::Blocks(2), ..CUBE
+        mine: mine(0.8, None, None), fuel: Some(5.0), creative: Creative::Blocks(2), ..CUBE
     };
 }
 
-/// A round log, mined with an axe.
+/// A round log, mined with an axe; it burns, and smelts into charcoal.
 const LOG: BlockDef = BlockDef {
     model: Model::Log,
     opaque: false,
     mine: mine(2.0, Some(ToolKind::Axe), None),
     place: Place::Log,
+    fuel: Some(15.0),
+    smelt: smelts(CHARCOAL, 1),
     ..CUBE
 };

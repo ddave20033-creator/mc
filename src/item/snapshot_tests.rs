@@ -75,7 +75,12 @@ fn items_snapshot() -> String {
         );
     }
     for b in 0..BLOCK_IDS as Block {
-        let _ = writeln!(s, "b{b} {:?}", item_of_block(b));
+        // (the blocks' items by their ids, the others by their keys)
+        let item = match item_of_block(b) {
+            Some(i) if i >= FIRST_ITEM => format!("Some({:?})", key(i)),
+            i => format!("{i:?}"),
+        };
+        let _ = writeln!(s, "b{b} {item}");
     }
     let mut all: Vec<String> = all_items().into_iter().map(ik).collect();
     all.sort();
@@ -216,5 +221,5 @@ fn item_data_and_crafting_are_unchanged() {
     assert_eq!(got, EXPECTED);
 }
 
-const EXPECTED: [u64; 4] = [0xd3a7e964578f02d0, 0x5293f6a520c67988, 0x3dbc3468aa2dc181, 0x8af34cec993be3e4];
+const EXPECTED: [u64; 4] = [0xf775067e0b1760d2, 0x5293f6a520c67988, 0x3dbc3468aa2dc181, 0x8af34cec993be3e4];
 
