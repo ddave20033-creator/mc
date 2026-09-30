@@ -27,7 +27,7 @@ with PIL (resize to ~640x360 each) and reading that one image.
 | `blocks` | odd-shaped blocks on the lane from two sides, flicker + zfight |
 | `felling` | a birch chopped down (ahead, looking down with the body), its stump, struck out from above (first and third person) |
 | `mobs` | every mob summoned on the lane (front, side), the dummy hit, a sheep sheared |
-| `checks` | only the checks: zfight around, every item model, textures, flicker |
+| `checks` | only the checks: zfight around, every item model, textures, flicker; then the creative inventory, each items' tab |
 
 Write a new script for anything else (copy one); a file anywhere works:
 `--test my_test.txt`. Add it to `BUILT_IN` in `src/game/testbed/mod.rs` to keep it.

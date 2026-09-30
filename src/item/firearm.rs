@@ -1,147 +1,119 @@
-//! The guns: what kinds there are (the pistol, the revolver, loaded straight from the bullets
-//! carried, and the AK-47, a big-calibre automatic rifle), what says how one shoots (damage,
-//! rate of fire, magazine, spread, recoil, reach) and what is asked of a gun. Each gun's
-//! numbers, items and models are its row of `weapons::WEAPONS`.
+//! What a gun holds, in its stack's `data`: the rounds in its magazine, its state (a magazine
+//! in it, a round in the chamber, the slide held back) and its attachments; a revolver's (a
+//! `cylinder_gun`) is what is in each of its six chambers instead. The guns themselves are
+//! `content::items::guns`.
 
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum GunKind {
-    Pistol,
-    Revolver,
-    Ak,
+/// A gun's state besides its rounds (bits of its data; a gun without them has a magazine in,
+/// a round in the chamber and its slide forward): no magazine in it, nothing in the chamber,
+/// the slide held back (by an empty magazine, after its last round).
+pub mod gun_state {
+    pub const NO_MAG: u16 = 0x40;
+    pub const CHAMBER_EMPTY: u16 = 0x80;
+    pub const LOCKED: u16 = 0x1000;
 }
 
-/// Every gun, in the order of `kind as u8` (LAN messages).
-pub const GUN_KINDS: [GunKind; 3] = [GunKind::Pistol, GunKind::Revolver, GunKind::Ak];
-
-/// How a gun shoots.
-pub struct Stats {
-    /// Damage of one bullet (or of each pellet), and how hard it knocks back.
-    pub damage: f32,
-    pub knockback: f32,
-    /// Bullets per shot (pellets of a shotgun shell).
-    pub pellets: u8,
-    /// Seconds between shots; `auto` fires while the button is held.
-    pub fire_delay: f32,
-    pub auto: bool,
-    /// Rounds in the magazine (the standard one; the cylinder).
-    pub magazine: u8,
-    /// Cone of the shots (degrees): from the hip, from the hip with the laser, aimed.
-    pub spread_hip: f32,
-    pub spread_laser: f32,
-    pub spread_aimed: f32,
-    /// How far the view kicks up per shot (degrees), from the hip and aimed.
-    pub kick_hip: f32,
-    pub kick_aimed: f32,
-    /// Bullet speed, the pull bending it down (blocks, seconds) and how far it flies.
-    pub speed: f32,
-    pub gravity: f32,
-    pub range: f32,
-    /// Seconds to reload the whole magazine.
-    pub reload: f32,
-    /// How much the view narrows when aimed with the sights.
-    pub sight_zoom: f32,
-    /// Shots until it is too dirty to fire.
-    pub dirt_max: u16,
-    /// How big its muzzle flash is.
-    pub flash: f32,
+pub fn gun_has_mag(s: &Stack) -> bool {
+    cylinder_gun(s.item) || s.data & gun_state::NO_MAG == 0
 }
 
-impl GunKind {
-    /// Its row of `WEAPONS`.
-    pub fn def(self) -> &'static WeaponDef {
-        &WEAPONS[self as usize]
+/// A round ready to fire (a revolver: any live round in its cylinder).
+pub fn gun_chambered(s: &Stack) -> bool {
+    if cylinder_gun(s.item) {
+        return gun_rounds(s) > 0;
     }
-
-    pub fn item(self) -> ItemId {
-        self.def().item
-    }
-
-    /// The gun an item is.
-    pub fn of(item: ItemId) -> Option<GunKind> {
-        GUN_KINDS.into_iter().find(|k| k.item() == item)
-    }
-
-    /// What it fires.
-    pub fn ammo(self) -> ItemId {
-        self.def().ammo
-    }
-
-    pub fn stats(self) -> &'static Stats {
-        &self.def().stats
-    }
-
-    /// Takes magazines (the pistol, the AK); otherwise it is loaded round by round from the
-    /// bullets carried (the revolver's cylinder).
-    pub fn uses_magazine(self) -> bool {
-        self.magazine().is_some()
-    }
-
-    /// How it takes magazines (None: a cylinder).
-    pub fn magazine(self) -> Option<&'static MagazineFeed> {
-        match &self.def().feed {
-            Feed::Magazine(m) => Some(m),
-            Feed::Cylinder => None,
-        }
-    }
-
-    /// Its magazine (the standard one), for a gun that takes magazines.
-    pub fn magazine_item(self) -> Option<ItemId> {
-        self.magazine().map(|m| m.item)
-    }
-
-    /// A long gun, held in both hands (its left hand under the handguard).
-    pub fn long(self) -> bool {
-        self.def().long
-    }
-
-    /// Rounds the magazine holds with these attachments.
-    pub fn magazine_size(self, mods: u8) -> u8 {
-        match self.magazine().and_then(|m| m.extended) {
-            Some((_, n)) if mods & gun_mod::EXTENDED_MAGAZINE != 0 => n,
-            _ => self.stats().magazine,
-        }
-    }
-
-    /// Whether an attachment (a `gun_mod` bit) can be fitted (the revolver and the AK take
-    /// none).
-    pub fn fits(self, bit: u8) -> bool {
-        bit != 0 && self.def().attachments & bit == bit
-    }
-
-    /// The parts a gun goes together from (at the gun station).
-    pub fn parts(self) -> &'static [ItemId] {
-        self.def().parts
-    }
+    s.data & gun_state::CHAMBER_EMPTY == 0
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub fn gun_locked(s: &Stack) -> bool {
+    !cylinder_gun(s.item) && s.data & gun_state::LOCKED != 0
+}
 
-    #[test]
-    fn every_gun_has_its_own_item_and_ammo() {
-        for k in GUN_KINDS {
-            assert_eq!(GunKind::of(k.item()), Some(k));
-            assert_eq!(max_stack(k.item()), 1);
-            assert_eq!(max_damage(k.item()), k.stats().dirt_max);
-            let ext = k.magazine().and_then(|m| m.extended).is_some();
-            assert_eq!(k.magazine_size(gun_mod::EXTENDED_MAGAZINE) > k.magazine_size(0), ext);
-            // Rounds are kept in 6 bits of the item's data.
-            assert!(k.magazine_size(gun_mod::EXTENDED_MAGAZINE) < 64);
-            assert!(GunKind::of(k.ammo()).is_none() && max_stack(k.ammo()) == 64);
-        }
-        assert!(GunKind::Pistol.fits(gun_mod::SCOPE));
-        assert!(!GunKind::Revolver.fits(gun_mod::SCOPE));
-        assert!(!GunKind::Ak.fits(gun_mod::SCOPE));
-        // Each magazine goes into its own gun.
-        for k in GUN_KINDS {
-            if let Some(m) = k.magazine_item() {
-                assert_eq!(magazine_gun(m), Some(k));
-                assert_eq!(magazine_capacity(m), Some(k.magazine_size(0)));
-                assert_eq!(k.parts()[crate::model::gun::MAGAZINE], m);
-            }
-        }
+pub fn set_gun_state(s: &mut Stack, bit: u16, on: bool) {
+    if cylinder_gun(s.item) {
+        return;
     }
+    s.data = if on { s.data | bit } else { s.data & !bit };
+}
+
+/// What is in each of a revolver's six chambers: two bits each in its `data` (chamber k in
+/// bits 2k, 2k+1), and the chamber under the hammer in bits 12-14. Chamber k is the one the
+/// model's `chamber{k}` is; the cylinder turns the next one (`revolver_next`) under the hammer
+/// as the trigger is pulled.
+pub mod chamber {
+    pub const EMPTY: u8 = 0;
+    pub const LIVE: u8 = 1;
+    /// A fired case, left in the chamber until the cylinder is emptied.
+    pub const SPENT: u8 = 2;
+}
+
+pub fn revolver_chamber(s: &Stack, k: usize) -> u8 {
+    ((s.data >> (2 * k)) & 3) as u8
+}
+
+pub fn set_revolver_chamber(s: &mut Stack, k: usize, v: u8) {
+    s.data = (s.data & !(3 << (2 * k))) | ((v as u16 & 3) << (2 * k));
+}
+
+pub fn revolver_index(s: &Stack) -> usize {
+    (((s.data >> 12) & 7) as usize).min(5)
+}
+
+pub fn set_revolver_index(s: &mut Stack, k: usize) {
+    s.data = (s.data & !(7 << 12)) | (((k % 6) as u16) << 12);
+}
+
+/// The chamber that comes under the hammer after `k` (the cylinder turning a sixth,
+/// anticlockwise seen from behind).
+pub fn revolver_next(k: usize) -> usize {
+    (k + 5) % 6
+}
+
+/// Rounds ready to fire: in the magazine and in the chamber (a revolver's: live in its
+/// cylinder).
+pub fn gun_ready_rounds(s: &Stack) -> u8 {
+    if cylinder_gun(s.item) {
+        return gun_rounds(s);
+    }
+    (if gun_has_mag(s) { gun_rounds(s) } else { 0 }) + gun_chambered(s) as u8
+}
+
+/// Rounds in a gun's magazine (the low 6 bits of its data), or in a magazine; a revolver's
+/// live rounds.
+pub fn gun_rounds(s: &Stack) -> u8 {
+    if cylinder_gun(s.item) {
+        return (0..6).filter(|&k| revolver_chamber(s, k) == chamber::LIVE).count() as u8;
+    }
+    (s.data & 0x3f) as u8
+}
+
+/// A revolver: `n` live rounds from the chamber after the one under the hammer on, the others
+/// empty.
+pub fn set_gun_rounds(s: &mut Stack, n: u8) {
+    if cylinder_gun(s.item) {
+        let mut k = revolver_index(s);
+        for i in 0..6 {
+            k = revolver_next(k);
+            set_revolver_chamber(s, k, if i < n as usize { chamber::LIVE } else { chamber::EMPTY });
+        }
+        return;
+    }
+    s.data = (s.data & !0x3f) | (n as u16 & 0x3f);
+}
+
+/// A gun's attachments (`gun_mod` bits: the first four in bits 8-11 of the data, the weapon
+/// light and its switch in bits 13-14; a revolver takes none).
+pub fn gun_mods(s: &Stack) -> u8 {
+    if cylinder_gun(s.item) {
+        return 0;
+    }
+    ((s.data >> 8) & 0x0f) as u8 | ((s.data >> 9) & 0x30) as u8
+}
+
+pub fn set_gun_mods(s: &mut Stack, mods: u8) {
+    if cylinder_gun(s.item) {
+        return;
+    }
+    s.data = (s.data & !0x6f00) | ((mods as u16 & 0x0f) << 8) | ((mods as u16 & 0x30) << 9);
 }

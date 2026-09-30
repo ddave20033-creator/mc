@@ -893,7 +893,7 @@ fn assembled(kind: GunKind, gone: &[BenchItem]) -> Stack {
 /// magazine, or back to the player); a revolver's cylinder is emptied.
 fn emptied(st: &Stack) -> Stack {
     let mut g = *st;
-    if g.item == REVOLVER {
+    if cylinder_gun(g.item) {
         for k in 0..6 {
             set_revolver_chamber(&mut g, k, chamber::EMPTY);
         }
@@ -906,7 +906,7 @@ fn emptied(st: &Stack) -> Stack {
 /// Where the strip animation starts for a gun: with its magazine coming out, or after that
 /// part of it when there is none (a revolver: from the start).
 fn strip_start(gun: &Stack) -> f32 {
-    if gun.item == REVOLVER || gun_has_mag(gun) {
+    if cylinder_gun(gun.item) || gun_has_mag(gun) {
         0.0
     } else {
         MAG_OUT

@@ -20,17 +20,17 @@ blocks! {
     OAK_SAPLING = BlockDef {
         key: "oak_sapling", en: "Oak Sapling", hu: "Tölgycsemete",
         faces: Faces::All(tex::OAK_SAPLING), icon: Some(tex::OAK_SAPLING),
-        creative: Creative::Blocks(3), ..PLANT
+        fuel: Some(5.0), creative: Creative::Blocks(3), ..PLANT
     };
     BIRCH_SAPLING = BlockDef {
         key: "birch_sapling", en: "Birch Sapling", hu: "Nyírfacsemete",
         faces: Faces::All(tex::BIRCH_SAPLING), icon: Some(tex::BIRCH_SAPLING),
-        creative: Creative::Blocks(3), ..PLANT
+        fuel: Some(5.0), creative: Creative::Blocks(3), ..PLANT
     };
     SPRUCE_SAPLING = BlockDef {
         key: "spruce_sapling", en: "Spruce Sapling", hu: "Lucfenyőcsemete",
         faces: Faces::All(tex::SPRUCE_SAPLING), icon: Some(tex::SPRUCE_SAPLING),
-        creative: Creative::Blocks(3), ..PLANT
+        fuel: Some(5.0), creative: Creative::Blocks(3), ..PLANT
     };
     TALL_GRASS = BlockDef {
         key: "grass", en: "Grass", hu: "Fű", faces: Faces::All(tex::TALL_GRASS),

@@ -9,7 +9,7 @@ blocks! {
 
     CRAFTING_TABLE = BlockDef {
         key: "crafting_table", en: "Crafting Table", hu: "Barkácsasztal",
-        faces: Faces::Custom(crafting_table_faces), mine: axe(2.5),
+        faces: Faces::Custom(crafting_table_faces), mine: axe(2.5), fuel: Some(15.0),
         creative: Creative::Functional(0), ..CUBE
     };
     FURNACE * 4 = BlockDef {

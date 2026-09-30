@@ -56,8 +56,10 @@ fn clocked(item: ItemId, fl: u8) -> bool {
 
 fn items() -> Vec<Vertex> {
     let mut out = Vec::new();
+    // (in the order of their keys: their ids follow the items' table)
     let mut all = crate::item::all_items();
     all.push(crate::item::AMMO_BOX);
+    all.sort_by_key(|&i| crate::item::key(i));
     let m = somewhere();
     for &item in &all {
         if is_log_item(item) {
@@ -356,7 +358,7 @@ fn groups() -> Vec<(&'static str, u64)> {
 
 /// The hashes as the models were before their shared pieces were merged into `prim`.
 const EXPECTED: [(&str, u64); 9] = [
-    ("items", 0xcdebd0935725c43b),
+    ("items", 0xfa1c1547f1b81e83),
     ("logs", 0x0660b16dd6a12110),
     ("players", 0xe3ca5a17bd4b7933),
     ("hands", 0xc61a12322bfd8c68),

@@ -3,7 +3,7 @@
 //! decides the blast; the players' games fly their own copies to show them.
 
 use crate::item::mining::hardness;
-use crate::item::{ItemId, FRAG_GRENADE, SMOKE_GRENADE};
+use crate::item::ItemId;
 use crate::world::*;
 use glam::{IVec3, Quat, Vec3};
 
@@ -26,12 +26,9 @@ pub enum GrenadeKind {
 }
 
 impl GrenadeKind {
+    /// The grenade an item is (its line's `grenade`).
     pub fn of(item: ItemId) -> Option<Self> {
-        match item {
-            FRAG_GRENADE => Some(GrenadeKind::Frag),
-            SMOKE_GRENADE => Some(GrenadeKind::Smoke),
-            _ => None,
-        }
+        crate::item::item_def(item)?.grenade
     }
 
     pub fn from_u8(v: u8) -> Self {

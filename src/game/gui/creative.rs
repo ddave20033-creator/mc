@@ -75,7 +75,7 @@ impl Tab {
             Tab::Blocks => GRASS as ItemId,
             Tab::Functional => CRAFTING_TABLE as ItemId,
             Tab::Tools => PISTOL,
-            Tab::Armor => armor_id(2, 1),
+            Tab::Armor => STEEL_CHESTPLATE,
             Tab::All => GUIDE_BOOK,
             Tab::Food => COOKED_PORKCHOP,
             Tab::Mobs => PIG_SPAWN_EGG,
@@ -84,135 +84,44 @@ impl Tab {
         }
     }
 
+    /// The category tab and the group the items' lines put them in (`content::Creative`).
+    fn place(c: Creative) -> Option<(Tab, u8)> {
+        Some(match c {
+            Creative::None => return None,
+            Creative::Blocks(g) => (Tab::Blocks, g),
+            Creative::Functional(g) => (Tab::Functional, g),
+            Creative::Tools(g) => (Tab::Tools, g),
+            Creative::Armor(g) => (Tab::Armor, g),
+            Creative::Food(g) => (Tab::Food, g),
+            Creative::Mobs(g) => (Tab::Mobs, g),
+            Creative::Materials(g) => (Tab::Materials, g),
+        })
+    }
+
+    /// The category tab an item is in (one that is not listed: `All`).
+    #[cfg(test)]
     pub(super) fn of(id: ItemId) -> Tab {
-        if let Some(b) = block_of(id) {
-            // Blocks that do something: stations, storage, lights, beds and doors.
-            if matches!(
-                b,
-                CRAFTING_TABLE
-                    | FURNACE
-                    | BLAST_FURNACE
-                    | ADV_FURNACE
-                    | CHEST
-                    | GUN_STATION
-                    | RIFLE_BENCH
-                    | BED
-                    | OAK_DOOR
-                    | TORCH
-                    | LANTERN
-            ) {
-                Tab::Functional
-            } else {
-                Tab::Blocks
-            }
-        } else if armor_of(id).is_some() {
-            Tab::Armor
-        } else if tool_of(id).is_some()
-            || matches!(
-                id,
-                BUCKET | WATER_BUCKET | LAVA_BUCKET | SHEARS | GLASS_BOTTLE | GUIDE_BOOK | FISHING_ROD
-            )
-            || GunKind::of(id).is_some()
-            || matches!(
-                id,
-                BULLET
-                    | MAGNUM_ROUND
-                    | PISTOL_FRAME..=PISTOL_MAGAZINE
-                    | SCOPE..=LASER_SIGHT
-                    | FLASHLIGHT
-                    | SPEEDLOADER
-                    | REVOLVER_FRAME..=REVOLVER_HAMMER
-                    | RIFLE_ROUND
-                    | AK_MAGAZINE..=AK_COVER
-                    | MAG_LOADER
-                    | FRAG_GRENADE
-                    | SMOKE_GRENADE
-            )
-        {
-            Tab::Tools
-        } else if consumable(id).is_some() || meat(id).is_some() {
-            Tab::Food
-        } else if key(id).ends_with("_spawn_egg") || id == TARGET_DUMMY {
-            Tab::Mobs
-        } else {
-            Tab::Materials
-        }
+        Tab::place(creative(id)).map_or(Tab::All, |(tab, _)| tab)
     }
 
     /// The items of the tab in the order they are shown, in groups; each group starts on a
-    /// new row.
+    /// new row. In a group, in the order of `all_items` (the blocks' table, then the items'
+    /// files).
     pub(super) fn groups(self) -> Vec<Vec<ItemId>> {
-        // A tab's blocks, in the groups the blocks' table puts them in.
-        let blocks = |tab: fn(u8) -> Creative| {
-            let mut groups: Vec<Vec<ItemId>> = Vec::new();
-            for g in 0..=u8::MAX {
-                let ids: Vec<ItemId> = crate::item::block_items()
-                    .filter(|d| d.creative == tab(g))
-                    .map(|d| d.id as ItemId)
-                    .collect();
-                if ids.is_empty() {
-                    break;
-                }
-                groups.push(ids);
+        let mut groups: std::collections::BTreeMap<u8, Vec<ItemId>> = Default::default();
+        for id in all_items() {
+            match Tab::place(creative(id)) {
+                Some((tab, g)) if tab == self => groups.entry(g).or_default().push(id),
+                _ => {}
             }
-            groups
-        };
-        let tools = |kind| {
-            TIER_ORDER.map(|tier| tool_id(kind, tier)).to_vec()
-        };
-        match self {
-            Tab::Blocks => blocks(Creative::Blocks),
-            Tab::Functional => blocks(Creative::Functional),
-            Tab::Tools => vec![
-                tools(ToolKind::Pickaxe),
-                tools(ToolKind::Axe),
-                tools(ToolKind::Shovel),
-                tools(ToolKind::Sword),
-                vec![SHEARS, BUCKET, WATER_BUCKET, LAVA_BUCKET, GLASS_BOTTLE, GUIDE_BOOK, FISHING_ROD],
-                // The pistol, its ammunition and the extended magazine, grenades, attachments
-                // and pistol parts (the last one is the magazine).
-                vec![PISTOL, REVOLVER, BULLET, MAGNUM_ROUND, EXTENDED_MAGAZINE, SPEEDLOADER],
-                vec![AK47, RIFLE_ROUND, AK_MAGAZINE, MAG_LOADER],
-                vec![FRAG_GRENADE, SMOKE_GRENADE],
-                vec![SCOPE, SILENCER, LASER_SIGHT, FLASHLIGHT],
-                vec![
-                    PISTOL_FRAME,
-                    PISTOL_BARREL,
-                    PISTOL_SPRING,
-                    PISTOL_SLIDE,
-                    PISTOL_MAGAZINE,
-                ],
-                REVOLVER_PARTS.to_vec(),
-                AK_PARTS[..4].to_vec(),
-            ],
-            // A row per material, then the vest.
-            Tab::Armor => {
-                let mut rows: Vec<Vec<ItemId>> = (0..MATERIALS)
-                    .map(|m| (0..4).map(|p| armor_id(m, p)).collect())
-                    .collect();
-                rows.push(vec![BULLETPROOF_VEST]);
-                rows
-            }
-            Tab::Food => vec![
-                meat(PORKCHOP).unwrap().to_vec(),
-                meat(MUTTON).unwrap().to_vec(),
-                vec![WATER_BOTTLE, PURIFIED_WATER],
-                vec![RAW_FISH, COOKED_FISH],
-            ],
-            Tab::Mobs => vec![vec![PIG_SPAWN_EGG, SHEEP_SPAWN_EGG, WOLF_SPAWN_EGG], vec![TARGET_DUMMY]],
-            Tab::Materials => vec![
-                vec![STICK, BONE, COAL, CHARCOAL, CLAY_BALL, BRICK],
-                vec![COPPER_INGOT, IRON_NUGGET, IRON_INGOT, GOLD_INGOT, DIAMOND],
-                vec![STEEL_INGOT, CERAMIC_PLATE],
-            ],
-            Tab::All | Tab::Inventory => Vec::new(),
         }
+        groups.into_values().collect()
     }
 }
 
-/// The creative grid: a tab's groups, each starting on a new row (the gaps are `None`), and
-/// at the end whatever item of the tab the groups do not list. A search looks through every
-/// item instead, by display name (current language) or by item key.
+/// The creative grid: a tab's groups, each starting on a new row (the gaps are `None`). A
+/// search looks through every item instead, by display name (current language) or by item
+/// key.
 pub(super) fn creative_items(tab: Tab, query: &str) -> Vec<Option<ItemId>> {
     let q = search_fold(query.trim());
     if !q.is_empty() {
@@ -231,16 +140,8 @@ pub(super) fn creative_items(tab: Tab, query: &str) -> Vec<Option<ItemId>> {
         }
         return grid;
     }
-    let listed: Vec<ItemId> = TABS.iter().flat_map(|t| t.groups().concat()).collect();
-    let mut groups = tab.groups();
-    groups.push(
-        all_items()
-            .into_iter()
-            .filter(|id| !listed.contains(id) && Tab::of(*id) == tab)
-            .collect(),
-    );
     let mut grid = Vec::new();
-    for g in groups.into_iter().filter(|g| !g.is_empty()) {
+    for g in tab.groups() {
         grid.resize(grid.len().next_multiple_of(9), None);
         grid.extend(g.into_iter().map(Some));
     }

@@ -1,55 +1,8 @@
-//! Armor: helmets, chestplates, leggings and boots of wool, copper, steel (from the blast
-//! furnace) and diamond, and the bulletproof vest worn over them (steel and ceramic plates
-//! from the advanced furnace). What each piece protects and how long it lasts, and the worn
-//! set packed into a number for the player model (and the other players).
+//! A worn set of armor: how much of a hit gets through it, and the set packed into a number
+//! for the player model (and the other players). The pieces themselves (what each protects and
+//! how long it lasts) are `content::items::armor`.
 
 use super::*;
-
-/// The sixteen pieces, `ARMOR_BASE + material * 4 + piece`, and the vest.
-pub const ARMOR_BASE: ItemId = 1880;
-pub const BULLETPROOF_VEST: ItemId = 1128;
-/// Slots worn in: helmet, chestplate, leggings, boots, and the vest over the chestplate.
-pub const ARMOR_SLOTS: usize = 5;
-pub const VEST_SLOT: usize = 4;
-/// Materials, weakest first.
-pub const MATERIALS: usize = 4;
-
-pub fn armor_id(material: usize, piece: usize) -> ItemId {
-    ARMOR_BASE + (material * 4 + piece) as ItemId
-}
-
-/// The slot a piece is worn in and its material (the vest: its own slot, material 0).
-pub fn armor_of(id: ItemId) -> Option<(usize, usize)> {
-    if id == BULLETPROOF_VEST {
-        return Some((VEST_SLOT, 0));
-    }
-    (ARMOR_BASE..ARMOR_BASE + 16).contains(&id).then(|| {
-        let i = (id - ARMOR_BASE) as usize;
-        (i % 4, i / 4)
-    })
-}
-
-/// What a material's pieces are made of.
-pub fn material_item(material: usize) -> ItemId {
-    [WOOL as ItemId, COPPER_INGOT, STEEL_INGOT, DIAMOND][material]
-}
-
-/// Armor points (Minecraft's): each takes 4% off the damage, 20 at most.
-pub fn armor_points(id: ItemId) -> u32 {
-    match armor_of(id) {
-        Some((VEST_SLOT, _)) | None => 0,
-        Some((piece, m)) => [[1, 3, 2, 1], [2, 5, 4, 1], [2, 6, 5, 2], [3, 8, 6, 3]][m][piece],
-    }
-}
-
-/// Hits a piece takes before it breaks.
-pub fn armor_durability(id: ItemId) -> u16 {
-    match armor_of(id) {
-        Some((VEST_SLOT, _)) => 90,
-        Some((piece, m)) => [11, 16, 15, 13][piece] * [4, 10, 17, 33][m],
-        None => 0,
-    }
-}
 
 /// How much of a hit gets through the worn set (`bullet`: shot, `blast`: a grenade): the
 /// armor points take a share of everything, the vest most of a bullet and some of a blast.
@@ -108,9 +61,12 @@ mod tests {
         let full: [Slot; ARMOR_SLOTS] = std::array::from_fn(|i| (i < 4).then(|| Stack::one(armor_id(3, i))));
         assert!((armor_factor(&full, false, false) - 0.2).abs() < 1e-6);
         assert!(armor_factor(&worn, true, false) < armor_factor(&worn, false, false));
-        // (the vest's id is not next to the pieces')
-        for id in (ARMOR_BASE..ARMOR_BASE + 16).chain([BULLETPROOF_VEST]) {
-            assert!(armor_of(id).is_some() && armor_durability(id) > 0, "{id}");
+        for m in 0..MATERIALS {
+            for piece in 0..4 {
+                let id = armor_id(m, piece);
+                assert!(armor_of(id) == Some((piece, m)) && armor_durability(id) > 0, "{id}");
+            }
         }
+        assert!(armor_durability(BULLETPROOF_VEST) > 0);
     }
 }
