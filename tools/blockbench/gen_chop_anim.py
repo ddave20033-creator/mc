@@ -1,4 +1,4 @@
-"""Generates chop.bbmodel: the game's player (`model/player.rs`, the same rig as
+"""Generates chop.bbmodel: the game's player (`model/players/player.rs`, the same rig as
 `gen_tp_anim.py`: elbows and knees) holding an axe in both hands, a tree's trunk in front of
 him to aim at, a `chop` animation (a level swing from the right side into the trunk: drawn back, swung
 round, the edge biting in, stuck a moment, pulled out) and a `stump` one (the axe raised over

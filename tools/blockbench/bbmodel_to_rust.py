@@ -5,17 +5,17 @@ each) holding every face's piece of the model's texture.
 Run after changing a model in Blockbench (and saving it), then rebuild the game:
     python tools/blockbench/bbmodel_to_rust.py [path/to/model.bbmodel]
 
-Models (by file name):
-    pistol.bbmodel       -> src/model/pistol_vm_data.rs, src/model/pistol_vm.png
-    gun_station.bbmodel  -> src/model/gun_station_data.rs, src/model/gun_station.png
-    grenades.bbmodel     -> src/model/grenade_data.rs, src/model/grenade.png
-    revolver.bbmodel     -> src/model/revolver_vm_data.rs, src/model/revolver_vm.png
-    dummy.bbmodel        -> src/model/dummy_data.rs, src/model/dummy.png
-    ak.bbmodel           -> src/model/ak_vm_data.rs, src/model/ak_vm.png
-    rifle_station.bbmodel -> src/model/rifle_station_data.rs, src/model/rifle_station.png
-    fishing_rod.bbmodel  -> src/model/fishing_rod_data.rs, src/model/fishing_rod.png
-    tp_*.bbmodel         -> src/model/tp_*_data.rs (third-person rigs: bones and animations only)
-    chop.bbmodel         -> src/model/tp_chop_data.rs (the player chopping with an axe: bones and
+Models (by file name), written into the subfolder of src/model/ the module using them is in:
+    pistol.bbmodel       -> src/model/guns/pistol_vm_data.rs, src/model/guns/pistol_vm.png
+    gun_station.bbmodel  -> src/model/guns/gun_station_data.rs, src/model/guns/gun_station.png
+    grenades.bbmodel     -> src/model/guns/grenade_data.rs, src/model/guns/grenade.png
+    revolver.bbmodel     -> src/model/guns/revolver_vm_data.rs, src/model/guns/revolver_vm.png
+    dummy.bbmodel        -> src/model/items/dummy_data.rs, src/model/items/dummy.png
+    ak.bbmodel           -> src/model/guns/ak_vm_data.rs, src/model/guns/ak_vm.png
+    rifle_station.bbmodel -> src/model/guns/rifle_station_data.rs, src/model/guns/rifle_station.png
+    fishing_rod.bbmodel  -> src/model/items/fishing_rod_data.rs, src/model/items/fishing_rod.png
+    tp_*.bbmodel         -> src/model/players/tp_*_data.rs (third-person rigs: bones and animations only)
+    chop.bbmodel         -> src/model/players/tp_chop_data.rs (the player chopping with an axe: bones and
                             animations only)
 
 Conventions kept from Blockbench so the game moves exactly like the Blockbench preview:
@@ -41,8 +41,10 @@ KIND = ("tp_chop" if base.startswith("chop") else base[:-len(".bbmodel")] if bas
 OUT_NAME = {"pistol": "pistol_vm", "gun_station": "gun_station", "grenades": "grenade", "revolver": "revolver_vm",
             "dummy": "dummy", "ak": "ak_vm", "rifle_station": "rifle_station"}.get(KIND, KIND)
 TP = KIND.startswith("tp_")
-OUT_RS = os.path.join(ROOT, "src", "model", OUT_NAME + "_data.rs")
-OUT_PNG = os.path.join(ROOT, "src", "model", OUT_NAME + ".png")
+# The subfolder of src/model/ holding the module that include!s the data.
+OUT_DIR = os.path.join(ROOT, "src", "model", "players" if TP else "items" if OUT_NAME in ("dummy", "fishing_rod") else "guns")
+OUT_RS = os.path.join(OUT_DIR, OUT_NAME + "_data.rs")
+OUT_PNG = os.path.join(OUT_DIR, OUT_NAME + ".png")
 PAGE = 128
 NOT_DRAWN = {"right_arm_mesh", "left_arm_mesh", "spent_case"}
 # game face order (world::mesh::FACE_N): +X, -X, +Y, -Y, +Z, -Z

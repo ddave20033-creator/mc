@@ -2,7 +2,7 @@
 //! first-person view and on the player model) while casting, waiting, fighting a fish and
 //! landing it; the line from its tip to the bobber; and a fish on the end of the line.
 
-use super::fishing_rod::{self, RodPoints, RodPose, LENGTH};
+use crate::model::fishing_rod::{self, RodPoints, RodPose, LENGTH};
 use crate::world::mesh::{flags, Vertex};
 use crate::world::textures::tex;
 use glam::{Mat4, Vec3};
@@ -288,7 +288,7 @@ pub fn emit_fish(out: &mut Vec<Vertex>, pos: Vec3, dir: Vec3, size: f32, wiggle:
     let [back, belly] = tint;
     let sides = [back, back, back, belly, back, back];
     let w = [tex::WOOL; 6];
-    use super::emit_box;
+    use crate::model::emit_box;
     // Body, the head a little narrower, the back fin, the tail swinging.
     emit_box(out, m, Vec3::new(-0.045, -0.06, -0.12), Vec3::new(0.045, 0.065, 0.1), w, sides, light, fl);
     emit_box(out, m, Vec3::new(-0.035, -0.045, 0.1), Vec3::new(0.035, 0.05, 0.17), w, sides, light, fl);

@@ -2,10 +2,10 @@
 //! each with its own `Rig`) or the revolver (`revolver_view`). What the hand, the player model,
 //! the item and the game need of any of them.
 
-use super::pistol_view::{self as pistol, GunAnim};
-use super::revolver_view as revolver;
-use super::viewmodel::{Anim, Bone, BonePose, Cube};
-use super::{ak_vm, pistol_vm, revolver_vm};
+use crate::model::pistol_view::{self as pistol, GunAnim};
+use crate::model::revolver_view as revolver;
+use crate::model::viewmodel::{Anim, Bone, BonePose, Cube};
+use crate::model::{ak_vm, pistol_vm, revolver_vm};
 use crate::item::GunKind;
 use crate::world::mesh::Vertex;
 use glam::{Mat4, Vec3};
@@ -68,7 +68,7 @@ pub fn item_rig(st: &crate::item::Stack) -> Option<(GunKind, u64, Vec<BonePose>,
     }
     let side = Mat4::from_rotation_y((-90f32).to_radians());
     if let Some(p) = REVOLVER_PARTS.iter().position(|&i| i == st.item) {
-        return Some((GunKind::Revolver, revolver::bench::part(p), revolver::bench::pose([0.0; super::gun::PARTS], 0), None, side));
+        return Some((GunKind::Revolver, revolver::bench::part(p), revolver::bench::pose([0.0; crate::model::gun::PARTS], 0), None, side));
     }
     if st.item == MAGNUM_ROUND {
         return Some((GunKind::Revolver, revolver::bench::round(), revolver::bench::round_pose(), None, side));
@@ -92,7 +92,7 @@ pub fn anims(kind: GunKind) -> &'static [Anim] {
 /// The gun's own bone (the whole gun, without the arms).
 pub fn gun_bone(kind: GunKind) -> usize {
     match kind {
-        GunKind::Pistol | GunKind::Ak => super::viewmodel::find_bone(bones(kind), pistol::rig(kind).gun_bone).unwrap_or(0),
+        GunKind::Pistol | GunKind::Ak => crate::model::viewmodel::find_bone(bones(kind), pistol::rig(kind).gun_bone).unwrap_or(0),
         GunKind::Revolver => revolver::gun_bone(),
     }
 }
@@ -120,7 +120,7 @@ pub fn add_gun_anims(kind: GunKind, pose: &mut [BonePose], g: &GunAnim, mods: u8
 pub fn matrices(kind: GunKind, g: &GunAnim, mods: u8, parts_only: bool, root: Mat4) -> (Vec<Mat4>, Vec<bool>) {
     let mut pose = rest_pose(kind);
     add_gun_anims(kind, &mut pose, g, mods, parts_only);
-    super::viewmodel::bone_matrices(bones(kind), &pose, root)
+    crate::model::viewmodel::bone_matrices(bones(kind), &pose, root)
 }
 
 /// The gun's cubes (see `pistol_view::emit_pistol`).
@@ -217,7 +217,7 @@ pub fn round_parts(ammo: crate::item::ItemId, spent: bool) -> &'static [RoundPar
                 GunKind::Pistol | GunKind::Ak => (pistol::bench::round(pistol::rig(kind)), pistol::rest_pose(pistol::rig(kind))),
                 GunKind::Revolver => (revolver::bench::round(), revolver::bench::round_pose()),
             };
-            let (mats, _) = super::viewmodel::bone_matrices(bones(kind), &pose, Mat4::IDENTITY);
+            let (mats, _) = crate::model::viewmodel::bone_matrices(bones(kind), &pose, Mat4::IDENTITY);
             let is_bullet = |c: &Cube| c.name.contains("bullet") || c.name.contains("nose");
             let own: Vec<&'static Cube> = cubes(kind)
                 .iter()
@@ -226,7 +226,7 @@ pub fn round_parts(ammo: crate::item::ItemId, spent: bool) -> &'static [RoundPar
             // The head: the middle of the case's back.
             let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
             for c in own.iter().filter(|c| !is_bullet(c)) {
-                let m = mats[c.bone] * super::viewmodel::cube_matrix(c);
+                let m = mats[c.bone] * crate::model::viewmodel::cube_matrix(c);
                 for p in [Vec3::from(c.from), Vec3::from(c.to)] {
                     let q = m.transform_point3(p);
                     lo = lo.min(q);
@@ -237,7 +237,7 @@ pub fn round_parts(ammo: crate::item::ItemId, spent: bool) -> &'static [RoundPar
             // The models' rounds point -Z: turned nose up.
             let frame = Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-head);
             own.into_iter()
-                .map(|c| RoundPart { cube: c, m: frame * mats[c.bone] * super::viewmodel::cube_matrix(c), layer: layers(kind, 0) })
+                .map(|c| RoundPart { cube: c, m: frame * mats[c.bone] * crate::model::viewmodel::cube_matrix(c), layer: layers(kind, 0) })
                 .collect::<Vec<_>>()
         };
         [
@@ -275,7 +275,7 @@ pub fn round_size(ammo: crate::item::ItemId, spent: bool) -> (f32, f32) {
 /// Draws a round (see `round_parts`), `m` from its own frame to the world.
 pub fn emit_round(out: &mut Vec<Vertex>, ammo: crate::item::ItemId, spent: bool, m: Mat4, light: [u8; 4], fl: u8) {
     for p in round_parts(ammo, spent) {
-        super::viewmodel::emit_cube(out, p.cube, m * p.m, p.layer, light, fl);
+        crate::model::viewmodel::emit_cube(out, p.cube, m * p.m, p.layer, light, fl);
     }
 }
 

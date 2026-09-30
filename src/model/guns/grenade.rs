@@ -13,9 +13,9 @@ mod data {
 }
 use data::{ANIMS, BONES, CUBES};
 pub use data::PAGES;
-use super::viewmodel::Cube;
+use crate::model::viewmodel::Cube;
 
-use super::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, BonePose};
+use crate::model::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, BonePose};
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
 use glam::{Mat4, Vec3};

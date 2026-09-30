@@ -3,7 +3,7 @@
 //! reader turns one. Held in both hands in first person, and in front of the chest on the
 //! player model, where the others see which page it is open at and what is on it.
 
-use super::emit_box;
+use crate::model::emit_box;
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
 use glam::{Mat4, Vec2, Vec3};

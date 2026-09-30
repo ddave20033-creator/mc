@@ -1,30 +1,23 @@
 //! Geometry built on the CPU every frame (entities, held items, the hand, particles), in
 //! world-space vertices: the shared pieces (boxes, items, torches, crack overlays) and the
 //! models made of them.
+//!
+//! The models live in subfolders: `rig` (the Blockbench bone/animation sampler, springs),
+//! `guns`, `players`, `items` and `fx`. Each module is re-exported here under its old path
+//! (`crate::model::pistol_view`, `crate::model::player`...), so code elsewhere need not know
+//! which subfolder it is in.
 
-pub mod ak_vm;
-pub mod angler;
-pub mod ballistics;
-pub mod book;
-pub mod bucket;
-pub mod chop_rig;
-pub mod dummy;
-pub mod fishing_rod;
-pub mod grenade;
-pub mod gun;
-pub mod gun_station;
-pub mod gun_view;
-pub mod hand;
-pub mod lantern;
-pub mod particles;
-pub mod pistol_view;
-pub mod pistol_vm;
-pub mod player;
-pub mod revolver_view;
-pub mod revolver_vm;
-pub mod spring;
-pub mod tp_rig;
-pub mod viewmodel;
+mod fx;
+mod guns;
+mod items;
+mod players;
+mod rig;
+
+pub use fx::particles;
+pub use guns::{ak_vm, ballistics, grenade, gun, gun_station, gun_view, pistol_view, pistol_vm, revolver_view, revolver_vm};
+pub use items::{angler, book, bucket, dummy, fishing_rod, lantern};
+pub use players::{chop_rig, hand, player, tp_rig};
+pub use rig::{spring, viewmodel};
 
 use crate::item::{icon, Icon, ItemId};
 use crate::world::mesh::{corner_pos, corner_uv, flags, Vertex, CORNERS};

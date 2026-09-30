@@ -4,9 +4,9 @@
 //! a fired case, nothing), the reload (swung out, the cases thrown out, loaded one round at a
 //! time or from a speedloader, swung shut), and drawing it.
 
-use super::pistol_view::GunAnim;
-use super::revolver_vm as vm;
-use super::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, Anim, BonePose};
+use crate::model::pistol_view::GunAnim;
+use crate::model::revolver_vm as vm;
+use crate::model::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, Anim, BonePose};
 use crate::item::{chamber, revolver_next};
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
@@ -184,7 +184,7 @@ pub fn gun_bone() -> usize {
 /// right side +Z, about a centimetre a unit): the right fist's middle on the grip at the
 /// spec's `hand`, the same scale as the pistol.
 pub fn to_gun_space() -> Mat4 {
-    let spec = super::gun::spec(crate::item::GunKind::Revolver);
+    let spec = crate::model::gun::spec(crate::item::GunKind::Revolver);
     let fist = bone("right_arm_mesh").map_or(Vec3::ZERO, |b| Vec3::from(vm::BONES[b].origin));
     let scale = 18.2 / 21.8;
     Mat4::from_translation(spec.hand)
@@ -208,14 +208,14 @@ pub fn sight_point() -> Vec3 {
 /// (The rest pose's bone matrices are made once.)
 pub fn rest_point_in_gun_space((b, p): (usize, Vec3)) -> Vec3 {
     static REST: std::sync::OnceLock<Vec<Mat4>> = std::sync::OnceLock::new();
-    let mats = REST.get_or_init(|| super::viewmodel::bone_matrices(vm::BONES, &rest_pose(), to_gun_space()).0);
+    let mats = REST.get_or_init(|| crate::model::viewmodel::bone_matrices(vm::BONES, &rest_pose(), to_gun_space()).0);
     mats[b].transform_point3(p)
 }
 
 /// The revolver at the gun station: which bones each of its parts is.
 pub mod bench {
-    use super::super::gun::{BARREL, FRAME, PARTS};
-    use super::super::viewmodel::{add_anim, find_anim, BonePose};
+    use crate::model::gun::{BARREL, FRAME, PARTS};
+    use crate::model::viewmodel::{add_anim, find_anim, BonePose};
     use super::{bone, vm, STRIP};
 
     pub type Bones = u64;
