@@ -24,8 +24,10 @@ const UI_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.vert.spv"));
 const UI_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.frag.spv"));
 /// The scope eyepiece: the world's vertices, the scope's view as its colour.
 pub(super) const LENS_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lens.frag.spv"));
-/// The menus' blurred backdrop, drawn like the eyepiece.
+/// The menus' blurred backdrop, drawn like the eyepiece (blurring down what `BLUR_ACROSS_FRAG`
+/// has blurred across).
 pub(super) const BLUR_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/blur.frag.spv"));
+const BLUR_ACROSS_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/blur_across.frag.spv"));
 
 const WORLD_ATTRS: [(vk::Format, u32); 5] = [
     (vk::Format::R32G32B32_SFLOAT, 0),
@@ -241,6 +243,36 @@ pub(super) fn create_scope_view_pipe(
             color: true,
             depth_bias: None,
             samples,
+            alpha_to_coverage: false,
+        },
+    )
+}
+
+/// The backdrop's first blur pass: the scope's image blurred across, into the blur target
+/// (`render_pass`), a full-screen triangle.
+pub(super) fn create_blur_across_pipe(
+    d: &ash::Device,
+    render_pass: vk::RenderPass,
+    layout: vk::PipelineLayout,
+) -> vk::Pipeline {
+    create_pipeline(
+        d,
+        &PipelineDesc {
+            vert: SKY_VERT,
+            frag: BLUR_ACROSS_FRAG,
+            stride: 0,
+            attributes: &[],
+            layout,
+            render_pass,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            cull: false,
+            depth_test: false,
+            depth_write: false,
+            blend: false,
+            multiply: false,
+            color: true,
+            depth_bias: None,
+            samples: vk::SampleCountFlags::TYPE_1,
             alpha_to_coverage: false,
         },
     )

@@ -4,7 +4,8 @@
 use super::{chunk_draw, record_indirect, IndirectDraw, Rec};
 use crate::render::cull::{select_chunks, VisibleChunk};
 use crate::render::dynamic::{ENTITY, LENS, LINES, OVERLAY, PARTICLES, TRANSLUCENT, VIEWMODEL, VIEWMODEL_GLASS};
-use crate::render::frame::FrameInfo;
+use crate::render::frame::{FrameInfo, SCOPE_SIZE};
+use crate::render::targets::full_rect;
 use crate::render::pipelines::DrawPush;
 use crate::render::Renderer;
 use ash::vk;
@@ -188,12 +189,24 @@ impl Renderer {
         }
     }
 
-    /// A menu's blurred backdrop: the world as the scope pass drew it, over everything.
+    /// The first half of a menu's blurred backdrop, before the main pass: the scope pass's
+    /// picture blurred across.
+    pub(in crate::render) unsafe fn record_blur_across(&self, r: &Rec) {
+        self.blur.begin(r.d, r.cmd);
+        r.set_view(full_rect(SCOPE_SIZE, SCOPE_SIZE));
+        r.bind_pipe(self.blur_across_pipe);
+        r.bind_sets(self.lens_layout, &[self.desc.world_sets[r.slot], self.desc.lens_set]);
+        r.d.cmd_draw(r.cmd, 3, 1, 0, 0);
+        r.d.cmd_end_render_pass(r.cmd);
+    }
+
+    /// A menu's blurred backdrop: the world as the scope pass drew it (blurred across by
+    /// `record_blur_across`), blurred down over everything.
     pub(in crate::render) unsafe fn record_backdrop(&self, r: &Rec, f: &FrameInfo) {
         let (n0, nn) = r.range(LENS);
         if f.backdrop_blur && f.scope.is_some() && nn > 0 {
             r.bind_pipe(self.blur_pipe);
-            r.bind_sets(self.lens_layout, &[self.desc.world_sets[r.slot], self.desc.lens_set]);
+            r.bind_sets(self.lens_layout, &[self.desc.world_sets[r.slot], self.desc.blur_set]);
             r.push(self.lens_layout, &DrawPush::new(Mat4::IDENTITY, 2.0));
             r.bind_dyn();
             r.d.cmd_draw(r.cmd, nn, 1, n0, 0);

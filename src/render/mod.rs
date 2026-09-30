@@ -25,11 +25,11 @@ use chunks::{ChunkGpu, STAGING_SIZE};
 use descriptors::Descriptors;
 use dynamic::{DYN_MAX_VERTS, LENS};
 use passes::{Rec, MAX_INDIRECT};
-use pipelines::{create_scope_view_pipe, create_shadow_pipe, DrawPush, MainPipes, BLUR_FRAG, LENS_FRAG};
+use pipelines::{create_blur_across_pipe, create_scope_view_pipe, create_shadow_pipe, DrawPush, MainPipes, BLUR_FRAG, LENS_FRAG};
 use std::collections::VecDeque;
 use std::mem::size_of;
 use std::time::Instant;
-use targets::{ScopeTarget, ShadowTarget};
+use targets::{BlurTarget, ScopeTarget, ShadowTarget};
 
 const UI_MAX_VERTS: usize = 150_000;
 
@@ -65,6 +65,9 @@ pub struct Renderer {
     lens_layout: vk::PipelineLayout,
     lens_pipe: vk::Pipeline,
     blur_pipe: vk::Pipeline,
+    /// The backdrop's blur across (its first half), into `blur`.
+    blur: BlurTarget,
+    blur_across_pipe: vk::Pipeline,
     ubos: Vec<Buffer>,
     ui_bufs: Vec<Buffer>,
     dyn_bufs: Vec<Buffer>,
@@ -119,12 +122,13 @@ impl Renderer {
             let d = &gpu.device;
             let shadow = ShadowTarget::new(gpu);
             let scope = ScopeTarget::new(gpu);
+            let blur = BlurTarget::new(gpu);
 
             let desc = Descriptors::new(d);
             let ubo_size = size_of::<FrameUbo>();
             let ubos = per_slot(gpu, ubo_size, vk::BufferUsageFlags::UNIFORM_BUFFER);
             let scope_ubos = per_slot(gpu, ubo_size, vk::BufferUsageFlags::UNIFORM_BUFFER);
-            desc.write(d, &block_tex, &font_tex, &shadow, &scope, &ubos, &scope_ubos);
+            desc.write(d, &block_tex, &font_tex, &shadow, &scope, &blur, &ubos, &scope_ubos);
 
             // Pipelines
             let world_layout = create_layout(d, &[desc.world_dsl], size_of::<DrawPush>() as u32);
@@ -134,6 +138,7 @@ impl Renderer {
             let lens_layout = create_layout(d, &[desc.world_dsl, desc.lens_dsl], size_of::<DrawPush>() as u32);
             let lens_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, LENS_FRAG);
             let blur_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, BLUR_FRAG);
+            let blur_across_pipe = create_blur_across_pipe(d, blur.pass, lens_layout);
             let shadow_pipe = create_shadow_pipe(d, shadow.pass, world_layout, false);
             let shadow_plain_pipe = create_shadow_pipe(d, shadow.pass, world_layout, true);
 
@@ -157,6 +162,8 @@ impl Renderer {
                 lens_layout,
                 lens_pipe,
                 blur_pipe,
+                blur,
+                blur_across_pipe,
                 ubos,
                 ui_bufs: per_slot(gpu, UI_MAX_VERTS * size_of::<UiVertex>(), vk::BufferUsageFlags::VERTEX_BUFFER),
                 dyn_bufs: per_slot(gpu, DYN_MAX_VERTS * size_of::<Vertex>(), vk::BufferUsageFlags::VERTEX_BUFFER),
@@ -233,11 +240,14 @@ impl Renderer {
             if let Some(sv) = &f.scope {
                 indirect_used = self.record_scope_pass(&r, f, sv, indirect_used);
             }
+            // Under a menu's blurred backdrop (which covers all of it) the world is not drawn
+            // again: the scope pass has drawn it for the blur, blurred across here.
+            let blurred = f.backdrop_blur && f.scope.is_some() && r.range(LENS).1 > 0;
+            if blurred {
+                self.record_blur_across(&r);
+            }
 
             gpu.begin_render_pass(cmd, image, [0.0, 0.0, 0.0, 1.0]);
-            // Under a menu's blurred backdrop (which covers all of it) the world is not drawn
-            // again: the scope pass has drawn it for the blur.
-            let blurred = f.backdrop_blur && f.scope.is_some() && r.range(LENS).1 > 0;
             if !blurred {
                 self.record_world(&r, f, indirect_used, &mut marks);
             }
@@ -286,13 +296,14 @@ impl Renderer {
             }
             self.pipes.destroy(d);
             self.scope_pipes.destroy(d);
-            for p in [self.shadow_pipe, self.shadow_plain_pipe, self.lens_pipe, self.blur_pipe] {
+            for p in [self.shadow_pipe, self.shadow_plain_pipe, self.lens_pipe, self.blur_pipe, self.blur_across_pipe] {
                 d.destroy_pipeline(p, None);
             }
             d.destroy_pipeline_layout(self.lens_layout, None);
             d.destroy_pipeline_layout(self.world_layout, None);
             d.destroy_pipeline_layout(self.ui_layout, None);
             self.scope.destroy(d);
+            self.blur.destroy(d);
             self.desc.destroy(d);
             self.shadow.destroy(d);
             self.block_tex.destroy(d);

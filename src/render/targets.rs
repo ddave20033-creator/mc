@@ -1,5 +1,6 @@
 //! The offscreen render targets: the shadow map (the sun's square and the weapon lights'
-//! strip under it) and the scope's view, each with its render pass and framebuffer.
+//! strip under it), the scope's view and the menus' backdrop blurred across, each with its
+//! render pass and framebuffer.
 
 use super::frame::{SCOPE_SIZE, SHADOW_HEIGHT, SHADOW_SIZE};
 use crate::engine::resources::Image;
@@ -203,6 +204,113 @@ impl ScopeTarget {
         d.destroy_sampler(self.sampler, None);
         self.color.destroy(d);
         self.depth.destroy(d);
+    }
+}
+
+/// The menus' backdrop blurred across (the first half of its blur, at the scope image's size):
+/// a colour image the backdrop blurs down, as it is drawn over the screen.
+pub(super) struct BlurTarget {
+    pub color: Image,
+    pub pass: vk::RenderPass,
+    fb: vk::Framebuffer,
+}
+
+impl BlurTarget {
+    pub unsafe fn new(gpu: &Gpu) -> Self {
+        let d = &gpu.device;
+        let color = Image::new(
+            d,
+            &gpu.mem_props,
+            SCOPE_SIZE,
+            SCOPE_SIZE,
+            1,
+            1,
+            SCOPE_FORMAT,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+            vk::ImageAspectFlags::COLOR,
+            vk::ImageViewType::TYPE_2D,
+        );
+        let pass = create_blur_pass(d);
+        let views = [color.view];
+        let fb = d
+            .create_framebuffer(
+                &vk::FramebufferCreateInfo::default()
+                    .render_pass(pass)
+                    .attachments(&views)
+                    .width(SCOPE_SIZE)
+                    .height(SCOPE_SIZE)
+                    .layers(1),
+                None,
+            )
+            .unwrap();
+        Self { color, pass, fb }
+    }
+
+    /// Begins the pass (every pixel is drawn: nothing cleared).
+    pub unsafe fn begin(&self, d: &ash::Device, cmd: vk::CommandBuffer) {
+        d.cmd_begin_render_pass(
+            cmd,
+            &vk::RenderPassBeginInfo::default()
+                .render_pass(self.pass)
+                .framebuffer(self.fb)
+                .render_area(full_rect(SCOPE_SIZE, SCOPE_SIZE)),
+            vk::SubpassContents::INLINE,
+        );
+    }
+
+    pub unsafe fn destroy(&self, d: &ash::Device) {
+        d.destroy_framebuffer(self.fb, None);
+        d.destroy_render_pass(self.pass, None);
+        self.color.destroy(d);
+    }
+}
+
+/// The blur's pass: one colour image, read afterwards by the backdrop.
+fn create_blur_pass(device: &ash::Device) -> vk::RenderPass {
+    let attachments = [vk::AttachmentDescription::default()
+        .format(SCOPE_FORMAT)
+        .samples(vk::SampleCountFlags::TYPE_1)
+        .load_op(vk::AttachmentLoadOp::DONT_CARE)
+        .store_op(vk::AttachmentStoreOp::STORE)
+        .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+        .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+    let color_ref = [vk::AttachmentReference {
+        attachment: 0,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+    }];
+    let subpasses = [vk::SubpassDescription::default()
+        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+        .color_attachments(&color_ref)];
+    let deps = [
+        // The last frame's backdrop has read the image before it is drawn again.
+        vk::SubpassDependency::default()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
+            .dst_subpass(0)
+            .src_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+            .src_access_mask(vk::AccessFlags::SHADER_READ)
+            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
+        // The image is drawn before the backdrop reads it.
+        vk::SubpassDependency::default()
+            .src_subpass(0)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+            .dst_access_mask(vk::AccessFlags::SHADER_READ),
+    ];
+    unsafe {
+        device
+            .create_render_pass(
+                &vk::RenderPassCreateInfo::default()
+                    .attachments(&attachments)
+                    .subpasses(&subpasses)
+                    .dependencies(&deps),
+                None,
+            )
+            .expect("create blur render pass")
     }
 }
 

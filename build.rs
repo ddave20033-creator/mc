@@ -58,6 +58,8 @@ const VARIANTS: &[(&str, &str, &str)] = &[
     // then runs before the fragment shader.
     ("world.frag", "world_plain.frag", "NO_DISCARD"),
     ("shadow.frag", "shadow_plain.frag", "NO_DISCARD"),
+    // The menus' backdrop blurred across first (the second half is blur.frag itself).
+    ("blur.frag", "blur_across.frag", "ACROSS"),
 ];
 const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl"];
 

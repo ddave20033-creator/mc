@@ -2,7 +2,7 @@
 //! for the main pass and another for the scope's, the UI's, and the eyepiece's.
 
 use super::frame::FrameUbo;
-use super::targets::{ScopeTarget, ShadowTarget};
+use super::targets::{BlurTarget, ScopeTarget, ShadowTarget};
 use crate::engine::{Buffer, Texture, FRAMES_IN_FLIGHT};
 use ash::vk;
 use std::mem::size_of;
@@ -20,6 +20,8 @@ pub(super) struct Descriptors {
     pub scope_sets: Vec<vk::DescriptorSet>,
     pub ui_set: vk::DescriptorSet,
     pub lens_set: vk::DescriptorSet,
+    /// The backdrop blurred across (`lens_dsl` too).
+    pub blur_set: vk::DescriptorSet,
 }
 
 fn image_info(sampler: vk::Sampler, view: vk::ImageView, layout: vk::ImageLayout) -> [vk::DescriptorImageInfo; 1] {
@@ -87,12 +89,13 @@ impl Descriptors {
         let ui_dsl = layout(&ui_bindings);
         let lens_dsl = layout(&lens_bindings);
         // World sets and the scope's (block texture, shadow map, uniform buffer each), the
-        // UI's (font, blocks) and the eyepiece's (the scope's view).
+        // UI's (font, blocks), the eyepiece's (the scope's view) and the backdrop's (the view
+        // blurred across).
         let n = FRAMES_IN_FLIGHT as u32;
         let sizes = [
             vk::DescriptorPoolSize {
                 ty: cis,
-                descriptor_count: 4 * n + 2 + 1,
+                descriptor_count: 4 * n + 2 + 2,
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -102,7 +105,7 @@ impl Descriptors {
         let pool = d
             .create_descriptor_pool(
                 &vk::DescriptorPoolCreateInfo::default()
-                    .max_sets(2 * n + 2)
+                    .max_sets(2 * n + 3)
                     .pool_sizes(&sizes),
                 None,
             )
@@ -110,6 +113,7 @@ impl Descriptors {
         let mut layouts = vec![world_dsl; FRAMES_IN_FLIGHT];
         layouts.push(ui_dsl);
         layouts.extend(std::iter::repeat_n(world_dsl, FRAMES_IN_FLIGHT));
+        layouts.push(lens_dsl);
         layouts.push(lens_dsl);
         let sets = d
             .allocate_descriptor_sets(
@@ -127,6 +131,7 @@ impl Descriptors {
             ui_set: sets[FRAMES_IN_FLIGHT],
             scope_sets: sets[FRAMES_IN_FLIGHT + 1..2 * FRAMES_IN_FLIGHT + 1].to_vec(),
             lens_set: sets[2 * FRAMES_IN_FLIGHT + 1],
+            blur_set: sets[2 * FRAMES_IN_FLIGHT + 2],
         }
     }
 
@@ -140,6 +145,7 @@ impl Descriptors {
         font_tex: &Texture,
         shadow: &ShadowTarget,
         scope: &ScopeTarget,
+        blur: &BlurTarget,
         ubos: &[Buffer],
         scope_ubos: &[Buffer],
     ) {
@@ -147,6 +153,7 @@ impl Descriptors {
         let font_info = texture_info(font_tex);
         let shadow_info = image_info(shadow.sampler, shadow.image.view, vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL);
         let lens_info = image_info(scope.sampler, scope.color.view, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        let blur_info = image_info(scope.sampler, blur.color.view, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         let ubo_info = |b: &Buffer| {
             [vk::DescriptorBufferInfo {
                 buffer: b.handle,
@@ -161,6 +168,7 @@ impl Descriptors {
             writes.extend(world_set_writes(set, &block_info, &shadow_info, ubo));
         }
         writes.push(image_write(self.lens_set, 0, &lens_info));
+        writes.push(image_write(self.blur_set, 0, &blur_info));
         writes.push(image_write(self.ui_set, 0, &font_info));
         writes.push(image_write(self.ui_set, 1, &block_info));
         d.update_descriptor_sets(&writes, &[]);
