@@ -393,6 +393,7 @@ fn bounds(kind: GunKind, bones: Bones, pose: &[BonePose]) -> (Vec3, Vec3) {
 
 /// Something drawn on the table: bones of a gun's model posed where, how dirty, tinted how,
 /// and what it is to the mouse.
+#[derive(Clone)]
 struct Piece {
     kind: GunKind,
     pick: Option<Pick>,
@@ -950,6 +951,37 @@ fn event_length(e: &BenchEvent) -> f32 {
 
 /// What lies on the table as it is drawn now: the pieces of the pistol, the other things (to
 /// be drawn flat), with the last change `t` seconds into its animation.
+/// `scene` for a station seen every frame (drawn, or under the mouse): while nothing on it
+/// is moving it is posed once and kept until what lies on it changes (each gun's pieces are
+/// posed from its whole model, which is not cheap for several stations in sight).
+fn scene_at(p: IVec3, table: &Table, bench: &GunBench, t: Option<f32>) -> std::rc::Rc<(Vec<Piece>, Vec<BenchItem>)> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    type Made = crate::world::FastMap<IVec3, (Vec<BenchItem>, Vec3, Rc<(Vec<Piece>, Vec<BenchItem>)>)>;
+    thread_local! {
+        static MADE: RefCell<Made> = RefCell::new(Default::default());
+    }
+    let e = &bench.event;
+    let playing = t.is_some_and(|t| e.kind != bench_event::NONE && t < event_length(e));
+    if playing {
+        return Rc::new(scene(table, bench, t));
+    }
+    MADE.with_borrow_mut(|made| {
+        if let Some((items, toward, s)) = made.get(&p) {
+            if *items == bench.items && *toward == table.toward {
+                return s.clone();
+            }
+        }
+        if made.len() > 64 {
+            // (stations of another world, or far away)
+            made.clear();
+        }
+        let s = Rc::new(scene(table, bench, t));
+        made.insert(p, (bench.items.clone(), table.toward, s.clone()));
+        s
+    })
+}
+
 fn scene(table: &Table, bench: &GunBench, t: Option<f32>) -> (Vec<Piece>, Vec<BenchItem>) {
     let e = &bench.event;
     let playing = t.filter(|&t| e.kind != bench_event::NONE && t < event_length(e));
@@ -1456,15 +1488,23 @@ impl Game {
             }
             if let Some(bench) = self.level.block_entities.benches.get(&p) {
                 let t = self.bench_time(p);
-                let (mut pieces, flats) = scene(&table, bench, t);
-                // The magazine on the loader (with the drawer, wherever it is).
-                if let (true, Some(mag)) = (loader.there, bench.loader_mag) {
-                    if let Some(pc) = crate::model::gun_station::loader_mount(p, table.toward, drawer).and_then(|m| loader_piece(m, &mag)) {
-                        pieces.push(pc);
-                    }
-                }
+                let made = scene_at(p, &table, bench, t);
+                let (pieces, flats) = (&made.0, &made.1);
                 let hover = if open_here == Some(p) { self.bench_ui.hover.map(|h| (h, self.bench_ui.hover_ok)) } else { None };
-                emit(out, &table, &pieces, &flats, hover, light);
+                // The magazine on the loader (with the drawer, wherever it is).
+                let on_loader = if let (true, Some(mag)) = (loader.there, bench.loader_mag) {
+                    crate::model::gun_station::loader_mount(p, table.toward, drawer).and_then(|m| loader_piece(m, &mag))
+                } else {
+                    None
+                };
+                match on_loader {
+                    Some(pc) => {
+                        let mut all = pieces.clone();
+                        all.push(pc);
+                        emit(out, &table, &all, flats, hover, light);
+                    }
+                    None => emit(out, &table, pieces, flats, hover, light),
+                }
             }
             for (_, at) in remote_brushes.iter().filter(|(q, _)| *q == p) {
                 crate::model::gun_station::emit_brush(out, *at, table.toward.x.atan2(table.toward.z), 0.0, light, flags::ENTITY);
@@ -1581,7 +1621,8 @@ impl Game {
         let view = Screen2 { view_proj: self.view_proj, w, h };
         let (o, d) = view.ray(self.ui.mouse);
         let bench = self.level.block_entities.benches.get(&p).cloned().unwrap_or_default();
-        let (pieces, flats) = scene(&table, &bench, self.bench_time(p));
+        let made = scene_at(p, &table, &bench, self.bench_time(p));
+        let (pieces, flats) = (&made.0, &made.1);
         let busy = self.bench_busy(p);
         let mut found = None;
         let mut spot = None;
