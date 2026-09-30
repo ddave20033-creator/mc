@@ -12,10 +12,16 @@
 mod blocks;
 mod checks;
 mod chunks;
+mod felling;
+mod grenades;
 mod handle;
 mod items;
+mod machines;
+mod mobs;
 mod peers;
 mod save;
+#[cfg(test)]
+mod tests;
 
 use crate::entity::mob::Mob;
 use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
@@ -43,6 +49,11 @@ pub(crate) struct Level {
     pub items: Vec<ItemEntity>,
     pub falling: Vec<FallingBlock>,
     pub mobs: Vec<Mob>,
+    /// Trees felled, falling over; the trunks lying on the ground; the last ids given.
+    pub falling_trees: Vec<crate::sim::felling::FallingTree>,
+    pub lying_logs: Vec<crate::sim::felling::LyingLog>,
+    pub next_tree_id: u32,
+    pub next_log_id: u32,
     /// Seconds until the next try to spawn animals near the players.
     pub mob_spawn_timer: f32,
     pub saplings: Vec<(IVec3, f32)>,
@@ -59,6 +70,10 @@ impl Level {
             items: Vec::new(),
             falling: Vec::new(),
             mobs: Vec::new(),
+            falling_trees: Vec::new(),
+            lying_logs: Vec::new(),
+            next_tree_id: 0,
+            next_log_id: 0,
             mob_spawn_timer: 5.0,
             saplings: Vec::new(),
             stump_scan: 0.0,
@@ -140,6 +155,8 @@ pub(crate) struct Server {
     chunks: chunks::Loader,
     pub fluids: Fluids,
     pub level: Level,
+    /// Grenades flying or lying about (the copies that decide).
+    grenades: Vec<crate::sim::grenade::Grenade>,
     /// Stump marks in each loaded chunk (found when it loads, and as they are made).
     pub stump_marks: FastMap<ChunkPos, Vec<IVec3>>,
     /// Seconds the server has run (its ticks), the time of day (0..1), and how long all the
@@ -178,6 +195,7 @@ impl Server {
             gen,
             fluids: Fluids::new(),
             level: Level::new(),
+            grenades: Vec::new(),
             stump_marks: FastMap::default(),
             time: 0.0,
             time_of_day: meta.time_of_day,
@@ -278,10 +296,16 @@ impl Server {
         }
         self.world.prune_fluid_changes(self.time);
 
+        self.update_furnaces(dt);
         self.grow_saplings(dt);
         self.update_stump_marks(dt);
         self.update_items(dt);
+        self.update_loaders(dt);
+        self.update_mobs(dt);
+        self.spawn_animals(dt);
+        self.update_falling_trees(dt);
         self.update_falling(dt);
+        self.update_grenades(dt);
 
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH).fract();
         self.update_sleepers(dt);

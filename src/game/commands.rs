@@ -170,6 +170,10 @@ impl Game {
             }
             ["save"] => {
                 self.save_world();
+                // (the world itself is its server's to save)
+                if self.local.is_some() {
+                    self.send(crate::net::Msg::Command(line.to_string()));
+                }
                 self.say(t("cmd.saved"), chat::WHITE);
             }
             ["seed"] => {

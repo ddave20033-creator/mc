@@ -127,6 +127,8 @@ pub(super) struct Client {
     item_targets: FastMap<u32, Vec3>,
     /// The open container as last sent to or received from the host.
     container_known: Option<Vec<u8>>,
+    /// Dropped items flying to whoever picked them up (item, player).
+    collecting: FastMap<u32, u8>,
 }
 
 pub(super) enum Net {

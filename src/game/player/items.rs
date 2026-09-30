@@ -75,7 +75,7 @@ impl Game {
             return;
         }
         // A grenade is readied and thrown by holding the button (`update_grenade_hold`).
-        if crate::game::grenades::GrenadeKind::of(held).is_some() {
+        if crate::sim::grenade::GrenadeKind::of(held).is_some() {
             return;
         }
         // A fishing rod casts by holding the button (`update_fishing`), unless there is

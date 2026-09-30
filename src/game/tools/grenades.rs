@@ -12,24 +12,13 @@
 use crate::game::*;
 use crate::audio::Sound;
 use crate::entity::player::raycast_solid;
-use crate::item::mining::{drops, hardness};
+use crate::item::mining::drops;
 use crate::item::inventory::take;
 use crate::item::*;
 use crate::net::Msg;
 use crate::util::vertex_light;
-use glam::Quat;
+use crate::sim::grenade::*;
 
-/// Seconds from the button going down until a frag grenade explodes, and from the throw until
-/// a smoke grenade starts smoking; how long it smokes.
-const FUSE: f32 = 5.0;
-const SMOKE_FUSE: f32 = 1.6;
-const SMOKE_TIME: f32 = 16.0;
-/// How far the blast blows blocks away and hurts, and the most it hurts (at the middle).
-const BLAST_RADIUS: f32 = 2.8;
-const HURT_RADIUS: f32 = 6.5;
-const MAX_DAMAGE: f32 = 26.0;
-/// Size of a grenade, for bouncing.
-const RADIUS: f32 = 0.08;
 /// The right button held (seconds): the grenade comes up in front, then the other hand
 /// pulls the pin and it is ready to throw once the pin is out; held until `FULL_POWER`,
 /// it is thrown the farthest (`model::grenade`, as the hands show it). How fast it leaves
@@ -38,51 +27,9 @@ use crate::model::grenade::{power, RAISE_TIME};
 const PIN_OUT: f32 = RAISE_TIME + 0.35;
 const THROW_SPEED: (f32, f32) = (6.0, 21.0);
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::game) enum GrenadeKind {
-    Frag,
-    Smoke,
-}
-
-impl GrenadeKind {
-    pub(in crate::game) fn of(item: ItemId) -> Option<Self> {
-        match item {
-            FRAG_GRENADE => Some(GrenadeKind::Frag),
-            SMOKE_GRENADE => Some(GrenadeKind::Smoke),
-            _ => None,
-        }
-    }
-
-    fn from_u8(v: u8) -> Self {
-        if v == 1 {
-            GrenadeKind::Smoke
-        } else {
-            GrenadeKind::Frag
-        }
-    }
-}
-
-struct Grenade {
-    kind: GrenadeKind,
-    pos: Vec3,
-    vel: Vec3,
-    rot: Quat,
-    spin: Vec3,
-    fuse: f32,
-    /// Seconds of smoke left once a smoke grenade went off.
-    smoke: Option<f32>,
-    /// The copy that decides (host or single player); the others wait to be told where it
-    /// went off.
-    real: bool,
-    /// The same on every computer: which blocks the blast takes.
-    seed: u32,
-    /// When the next puff of smoke comes out.
-    puff: f32,
-}
-
 #[derive(Default)]
 pub(in crate::game) struct Grenades {
-    list: Vec<Grenade>,
+    pub(in crate::game) list: Vec<Grenade>,
     /// The view shaking after a blast near by.
     pub(in crate::game) shake: f32,
     /// The grenade in the hand being readied (the right button held).
@@ -101,92 +48,6 @@ pub(in crate::game) struct Hold {
     item: ItemId,
     pub(in crate::game) t: f32,
     released: bool,
-}
-
-/// A hash 0..1 of a block and a seed.
-fn hash3(p: IVec3, seed: u32) -> f32 {
-    let mut h = (p.x as u32).wrapping_mul(0x8da6_b343)
-        ^ (p.y as u32).wrapping_mul(0xd816_3841)
-        ^ (p.z as u32).wrapping_mul(0xcb1a_b31f)
-        ^ seed.wrapping_mul(0x9e37_79b9);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0x5bd1_e995);
-    h ^= h >> 15;
-    (h >> 8) as f32 / (1 << 24) as f32
-}
-
-/// Whether a blast can blow `b` away: not bedrock, obsidian, fluids or anything holding
-/// things (chests, furnaces, tables, the gun station), doors or beds.
-fn blastable(b: Block) -> bool {
-    b != AIR
-        && !is_fluid(b)
-        && !is_chest(b)
-        && furnace_base(b).is_none()
-        && b != GUN_STATION
-        && !is_gun_bench(b)
-        && b != CRAFTING_TABLE
-        && !is_door(b)
-        && !is_bed(b)
-        && hardness(b).is_some_and(|h| h < 10.0)
-}
-
-/// The blocks a blast at `pos` blows away: within a ragged ball (the same for the same seed).
-fn blast_blocks(world: &World, pos: Vec3, seed: u32) -> Vec<IVec3> {
-    let c = pos.floor().as_ivec3();
-    let r = BLAST_RADIUS.ceil() as i32;
-    let mut out = Vec::new();
-    for x in -r..=r {
-        for y in -r..=r {
-            for z in -r..=r {
-                let q = c + IVec3::new(x, y, z);
-                let d = (q.as_vec3() + Vec3::splat(0.5)).distance(pos);
-                let reach = BLAST_RADIUS * (0.7 + 0.4 * hash3(q, seed));
-                if d < reach && blastable(world.geti(q)) {
-                    out.push(q);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// Falls, bounces off blocks (losing speed) and rolls to a stop. Returns how hard it hit
-/// something this step (blocks per second).
-fn fly(g: &mut Grenade, dt: f32, world: &World) -> f32 {
-    let solid = |p: Vec3| is_solid(world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32));
-    g.vel.y -= 22.0 * dt;
-    let mut p = g.pos;
-    let mut hit = 0.0f32;
-    for axis in 0..3 {
-        let mut q = p;
-        q[axis] += g.vel[axis] * dt;
-        let mut probe = q;
-        probe[axis] += g.vel[axis].signum() * RADIUS;
-        if !solid(probe) {
-            p = q;
-            continue;
-        }
-        hit = hit.max(g.vel[axis].abs());
-        g.vel[axis] *= -0.35;
-        g.spin *= 0.6;
-        if axis == 1 {
-            g.vel.x *= 0.75;
-            g.vel.z *= 0.75;
-        }
-    }
-    g.pos = p;
-    // Rolling along the ground slows it down.
-    if solid(p - Vec3::Y * (RADIUS + 0.02)) && g.vel.y.abs() < 1.0 {
-        let k = (-3.5 * dt).exp();
-        g.vel.x *= k;
-        g.vel.z *= k;
-        g.spin *= k;
-    }
-    let angle = g.spin.length() * dt;
-    if angle > 0.0 {
-        g.rot = (Quat::from_axis_angle(g.spin.normalize(), angle) * g.rot).normalize();
-    }
-    hit
 }
 
 impl Game {
@@ -323,23 +184,7 @@ impl Game {
     /// A grenade starts flying (thrown here, or by someone else: `kind` as in the message),
     /// going off after `fuse` seconds.
     pub(in crate::game) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, real: bool, fuse: f32) {
-        let spin = Vec3::new(
-            hash3(IVec3::X, seed) - 0.5,
-            hash3(IVec3::Y, seed) - 0.5,
-            hash3(IVec3::Z, seed) - 0.5,
-        ) * 18.0;
-        self.grenades.list.push(Grenade {
-            kind,
-            pos,
-            vel,
-            rot: Quat::IDENTITY,
-            spin,
-            fuse,
-            smoke: None,
-            real,
-            seed,
-            puff: 0.0,
-        });
+        self.grenades.list.push(Grenade::new(kind, pos, vel, seed, real, fuse));
     }
 
     /// Someone else threw a grenade (host: from player `id`, which goes on to the others).

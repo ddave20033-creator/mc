@@ -11,7 +11,7 @@ mod gun_bench;
 mod render;
 
 pub use furnace::{doneness, grill_box, part, Doneness, Furnace, Grilled, BURN_TIME, FLIP_TIME, GRILL_TIME};
-pub use gun_bench::{bench_event, BenchEvent, BenchItem, GunBench};
+pub use gun_bench::{bench_event, BenchEvent, BenchItem, GunBench, LOADER_ROUND};
 pub use render::{
     build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow,
     build_table_items, build_table_made, chest_cell, chest_cell_at, chest_cell_size, chest_side,

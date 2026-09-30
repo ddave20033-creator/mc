@@ -293,7 +293,7 @@ impl Game {
         save::apply_notches(&mut self.terrain.world, &save::load_notches(&meta.folder));
         self.chop = None;
         self.struck = None;
-        self.level.lying_logs = logs::parse_logs(&save::load_logs(&meta.folder));
+        self.level.lying_logs = crate::sim::felling::parse_logs(&save::load_logs(&meta.folder));
         self.level.next_log_id = self.level.lying_logs.len() as u32;
         self.log_aim = None;
         self.log_cut = None;
@@ -518,7 +518,7 @@ impl Game {
         let folder = meta.folder.clone();
         save::save_inventory(&folder, &slots);
         save::save_notches(&folder, &save::notches_text(&self.terrain.world));
-        save::save_logs(&folder, &logs::logs_text(&self.level.lying_logs));
+        save::save_logs(&folder, &crate::sim::felling::logs_text(&self.level.lying_logs));
         save::save_entities(
             &folder,
             &self.level.block_entities,

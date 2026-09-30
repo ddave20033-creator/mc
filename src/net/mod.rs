@@ -71,6 +71,17 @@ pub mod hurt {
     pub const WOLF: u8 = 3;
 }
 
+/// What a `Msg::Fx` shows (and sounds) at its place: what the server does that everyone
+/// should see, but what is only a sight.
+pub mod fx {
+    /// A wolf took a bone: crumbs of it, and it barks.
+    pub const WOLF_TAKES: u8 = 0;
+    /// A wolf would not have the bone: crumbs, and a puff of smoke.
+    pub const WOLF_REFUSES: u8 = 1;
+    /// A puff of smoke (a mob gone, a dummy taken down).
+    pub const POOF: u8 = 2;
+}
+
 /// Block entity kinds in `Msg::Container`.
 pub mod container {
     pub const CHEST: u8 = 0;

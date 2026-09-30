@@ -4,7 +4,9 @@
 use super::{ItemNet, MobNet, Msg, PlayerState, Pose};
 use crate::entity::{BenchEvent, BenchItem, GunBench, Grilled};
 use crate::item::{Slot, Stack};
+use crate::sim::felling::{FallingTree, LyingLog};
 use crate::world::block::valid;
+use crate::world::mesh::Notch;
 use glam::{IVec3, Vec3};
 
 // Limits on what is read from a peer: anything larger means a broken or hostile peer, and the
@@ -672,6 +674,82 @@ impl Msg {
                 w.u32(*seed);
                 w.f32(*fuse);
             }
+            Msg::Notch { p, notch } => {
+                w.u8(52);
+                w.ivec3(*p);
+                w.bool(notch.is_some());
+                if let Some(n) = notch {
+                    w.f32(n.angle);
+                    w.f32(n.height);
+                    w.f32(n.depth);
+                    w.bool(n.felled);
+                }
+            }
+            Msg::Edit(list) => {
+                w.u8(58);
+                w.u32(list.len() as u32);
+                for (p, b) in list {
+                    w.ivec3(*p);
+                    w.u16(*b);
+                }
+            }
+            Msg::Stump { p } => {
+                w.u8(53);
+                w.ivec3(*p);
+            }
+            Msg::CutLog { id, from_base } => {
+                w.u8(54);
+                w.u32(*id);
+                w.bool(*from_base);
+            }
+            Msg::TreeFalls(t) => {
+                w.u8(55);
+                w.u32(t.id);
+                w.vec3(t.pivot);
+                w.vec3(t.axis);
+                w.f32(t.height);
+                w.u32(t.blocks.len() as u32);
+                for (o, b) in &t.blocks {
+                    w.vec3(*o);
+                    w.u16(*b);
+                }
+                w.u32(t.trunk as u32);
+                w.vec3(t.stump);
+                w.vec3(t.stub.0);
+                w.u16(t.stub.1);
+                w.f32(t.stub.2);
+                for c in t.leaf_tint {
+                    w.u8(c);
+                }
+            }
+            Msg::Collect { item, by } => {
+                w.u8(59);
+                w.u32(*item);
+                w.u8(*by);
+            }
+            Msg::TreeLands { id } => {
+                w.u8(56);
+                w.u32(*id);
+            }
+            Msg::Logs(list) => {
+                w.u8(57);
+                w.u32(list.len() as u32);
+                for l in list {
+                    w.u32(l.id);
+                    w.vec3(l.base);
+                    w.vec3(l.dir);
+                    w.u32(l.pieces.len() as u32);
+                    for b in &l.pieces {
+                        w.u16(*b);
+                    }
+                    w.u8(l.next as u8);
+                }
+            }
+            Msg::Fx { kind, pos } => {
+                w.u8(51);
+                w.u8(*kind);
+                w.vec3(*pos);
+            }
             Msg::Pause(on) => {
                 w.u8(50);
                 w.u8(*on as u8);
@@ -871,6 +949,45 @@ impl Msg {
                 fuse: r.f32()?,
             },
             50 => Msg::Pause(r.u8()? != 0),
+            51 => Msg::Fx { kind: r.u8()?, pos: r.vec3()? },
+            52 => Msg::Notch {
+                p: r.ivec3()?,
+                notch: if r.bool()? {
+                    Some(Notch { angle: r.f32()?, height: r.f32()?, depth: r.f32()?, felled: r.bool()? })
+                } else {
+                    None
+                },
+            },
+            53 => Msg::Stump { p: r.ivec3()? },
+            58 => Msg::Edit(r.list(|r| Some((r.ivec3()?, valid(r.u16()?))))?),
+            54 => Msg::CutLog { id: r.u32()?, from_base: r.bool()? },
+            55 => Msg::TreeFalls(Box::new(FallingTree {
+                id: r.u32()?,
+                pivot: r.vec3()?,
+                axis: r.vec3()?,
+                height: r.f32()?,
+                blocks: r.list(|r| Some((r.vec3()?, valid(r.u16()?))))?,
+                trunk: r.u32()? as usize,
+                stump: r.vec3()?,
+                stub: (r.vec3()?, valid(r.u16()?), r.f32()?),
+                leaf_tint: [r.u8()?, r.u8()?, r.u8()?],
+                angle: 0.02,
+                prev_angle: 0.02,
+                speed: 0.15,
+                tool: crate::item::NONE,
+                creative: false,
+            })),
+            56 => Msg::TreeLands { id: r.u32()? },
+            59 => Msg::Collect { item: r.u32()?, by: r.u8()? },
+            57 => Msg::Logs(r.list(|r| {
+                Some(LyingLog {
+                    id: r.u32()?,
+                    base: r.vec3()?,
+                    dir: r.vec3()?,
+                    pieces: r.list(|r| Some(valid(r.u16()?)))?,
+                    next: r.u8()? as usize,
+                })
+            })?),
             46 => Msg::Blast {
                 pos: r.vec3()?,
                 seed: r.u32()?,

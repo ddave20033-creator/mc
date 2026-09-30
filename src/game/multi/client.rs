@@ -60,15 +60,16 @@ impl Game {
             tick: 0.0,
             item_targets: FastMap::default(),
             container_known: None,
+            collecting: FastMap::default(),
         }));
         self.screen = Screen::Connecting;
     }
 
     /// Plays the world `meta`: a server for it runs on a thread of its own, and this game joins
-    /// it like any player. (Without `RUSTCRAFT_SERVER=1`, for now, the game runs the world
+    /// it like any player. (With `RUSTCRAFT_SERVER=0`, for now, the game runs the world
     /// itself, as it used to.)
     pub(in crate::game) fn play_world(&mut self, meta: WorldMeta) {
-        if std::env::var("RUSTCRAFT_SERVER").is_ok_and(|v| v == "1") {
+        if !std::env::var("RUSTCRAFT_SERVER").is_ok_and(|v| v == "0") {
             let (local, conn) = crate::sim::server::start(meta);
             self.local = Some(local);
             self.menus.net_message = t("mp.connecting").to_string();
@@ -251,6 +252,26 @@ impl Game {
             } => self.remote_grenade(id, kind, pos, vel, seed, fuse),
             Msg::Blast { pos, seed } => self.remote_blast(pos, seed),
             Msg::BreakFx { p, block } => self.break_fx(p, block, true, None),
+            Msg::Fx { kind, pos } => self.show_fx(kind, pos),
+            Msg::Notch { p, notch } => {
+                self.terrain.world.set_notch(p, notch);
+                self.terrain.block_changed(p, false);
+            }
+            Msg::TreeFalls(t) => {
+                self.level.falling_trees.retain(|f| f.id != t.id);
+                self.level.falling_trees.push(*t);
+            }
+            Msg::TreeLands { id } => self.tree_landed(id),
+            Msg::Collect { item, by } => {
+                let now = self.time;
+                if let Some(it) = self.level.items.iter_mut().find(|it| it.id == item && !it.is_picking_up()) {
+                    it.start_pickup(now);
+                    if let Some(Net::Client(c)) = &mut self.net {
+                        c.collecting.insert(item, by);
+                    }
+                }
+            }
+            Msg::Logs(list) => self.level.lying_logs = list,
             Msg::Furnace {
                 p,
                 burn,
@@ -288,6 +309,26 @@ impl Game {
                     let _ = self.set_skin_png(id, png);
                 }
             }
+            _ => {}
+        }
+    }
+
+    /// Something the server did, to see and hear (`net::fx`).
+    fn show_fx(&mut self, kind: u8, pos: Vec3) {
+        use crate::net::fx;
+        let (sky, blk) = self.terrain.world.light_estimate(pos);
+        match kind {
+            fx::WOLF_TAKES | fx::WOLF_REFUSES => {
+                self.particles.crumbs(pos, crate::world::textures::tex::BONE, 6, sky, blk);
+                if kind == fx::WOLF_TAKES {
+                    self.audio.play(crate::audio::Sound::WolfBark, Some(pos), 0.8);
+                } else {
+                    for _ in 0..4 {
+                        self.particles.smoke_shaded(pos + Vec3::Y * 0.3, 70, sky, blk);
+                    }
+                }
+            }
+            fx::POOF => self.particles.poof(pos, sky, blk),
             _ => {}
         }
     }
@@ -420,7 +461,8 @@ impl Game {
         // Items
         let ids: FastSet<u32> = items.iter().map(|i| i.id).collect();
         let gone_ids: FastSet<u32> = gone_items.iter().copied().collect();
-        self.level.items.retain(|it| stays(&ids, &gone_ids, it.id));
+        // (one flying to whoever picked it up goes on until it is there)
+        self.level.items.retain(|it| it.is_picking_up() || stays(&ids, &gone_ids, it.id));
         let Some(Net::Client(c)) = &mut self.net else {
             return;
         };
@@ -460,20 +502,44 @@ impl Game {
 
     /// LAN player's `update_world`: things move toward what the host sent.
     pub(in crate::game) fn client_world(&mut self, dt: f32) {
+        self.fall_trees_here(dt);
         for m in &mut self.level.mobs {
             m.follow(dt);
             if let Some(s) = m.sound(dt) {
                 self.audio.play(s, Some(m.center()), 1.0);
             }
         }
-        if let Some(Net::Client(c)) = &self.net {
+        // Items fly to whoever picked them up (this player's eye, or another player).
+        let me = match &self.net {
+            Some(Net::Client(c)) => c.id,
+            _ => 0,
+        };
+        let eye = self.eye() - Vec3::Y * 0.25;
+        let remotes: Vec<(u8, Vec3)> = self.remotes.iter().map(|r| (r.id, r.pose.pos + Vec3::Y * 1.2)).collect();
+        if let Some(Net::Client(c)) = &mut self.net {
             let k = crate::util::damp(15.0, dt);
+            let mut landed = Vec::new();
             for it in &mut self.level.items {
+                if it.is_picking_up() {
+                    let by = c.collecting.get(&it.id).copied();
+                    let target = match by {
+                        Some(id) if id != me => remotes.iter().find(|r| r.0 == id).map_or(it.pos, |r| r.1),
+                        _ => eye,
+                    };
+                    if it.update_pickup(dt, target) {
+                        landed.push(it.id);
+                    }
+                    continue;
+                }
                 if let Some(&target) = c.item_targets.get(&it.id) {
                     it.pos = it.pos.lerp(target, k);
                 }
                 it.age += dt;
             }
+            for id in &landed {
+                c.collecting.remove(id);
+            }
+            self.level.items.retain(|it| !(it.is_picking_up() && landed.contains(&it.id)));
         }
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH).fract();
         self.autosave -= dt;

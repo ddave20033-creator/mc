@@ -10,10 +10,11 @@ pub(super) struct Level {
     pub(super) items: Vec<ItemEntity>,
     pub(super) falling: Vec<FallingBlock>,
     /// Trees felled with an axe, falling over.
-    pub(super) falling_trees: Vec<felling::FallingTree>,
+    pub(super) falling_trees: Vec<crate::sim::felling::FallingTree>,
+    pub(super) next_tree_id: u32,
     /// The trunks of felled trees lying on the ground, the last one's id, the one aimed at
     /// with an axe, and the one (and where) the swing going on will cut.
-    pub(super) lying_logs: Vec<logs::LyingLog>,
+    pub(super) lying_logs: Vec<crate::sim::felling::LyingLog>,
     pub(super) next_log_id: u32,
     pub(super) mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
@@ -46,6 +47,7 @@ impl Level {
             items: Vec::new(),
             falling: Vec::new(),
             falling_trees: Vec::new(),
+            next_tree_id: 0,
             lying_logs: Vec::new(),
             next_log_id: 0,
             mobs: Vec::new(),

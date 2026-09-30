@@ -13,14 +13,10 @@
 //! pulled out again the stump comes apart into its logs.
 
 use crate::game::*;
-use crate::item::{inventory, tool_of, Tier, ToolKind};
+use crate::item::{inventory, tool_of};
 use crate::model::chop_rig::{self, ChopPose, Kind, Swing, EDGE};
-use crate::world::mesh::{stump_heights, Notch};
-
-/// How deep (of the trunk's width) the cut goes before the trunk breaks.
-const FELL_DEPTH: f32 = 0.75;
-/// The most blocks a falling tree takes with it.
-const MAX_BLOCKS: usize = 900;
+use crate::sim::felling::*;
+use crate::world::mesh::Notch;
 
 /// What the axe is stuck in, to come apart when it is pulled out: a stump, or a lying trunk
 /// (which, and where it is cut).
@@ -35,127 +31,6 @@ enum Contact {
     Trunk(IVec3),
     Log(u32),
     Ground,
-}
-
-/// A tree falling over: its blocks turning about the hinge left by the cut.
-pub(in crate::game) struct FallingTree {
-    /// Where it turns about (on the trunk's far side from the cut, at the cut's height), and
-    /// the axis it turns about (level, across the way it falls).
-    pivot: Vec3,
-    axis: Vec3,
-    /// How far over it is (radians from upright) and how fast it is going over, and how far
-    /// before the last tick (drawn between).
-    angle: f32,
-    prev_angle: f32,
-    speed: f32,
-    /// How high it reaches over the hinge (its fall is slower, the taller it is).
-    height: f32,
-    /// Its blocks: their lower corner from the pivot as it stood, and the block; the first
-    /// `trunk` of them its trunk from the cut up (which stays lying where it falls).
-    blocks: Vec<(Vec3, Block)>,
-    trunk: usize,
-    /// The middle of the stump's top (where the trunk lies from).
-    stump: Vec3,
-    /// The part of the cut block above the cut (its lower corner from the pivot, the block
-    /// and the cut's height in it), which goes with the tree.
-    stub: (Vec3, Block, f32),
-    leaf_tint: [u8; 3],
-    /// What it was felled with (for the drops), and whether in creative (none).
-    tool: ItemId,
-    creative: bool,
-}
-
-impl FallingTree {
-    fn turn(&self) -> Mat4 {
-        self.turned(self.angle)
-    }
-
-    fn turned(&self, angle: f32) -> Mat4 {
-        Mat4::from_translation(self.pivot) * Mat4::from_axis_angle(self.axis, angle)
-    }
-
-    /// Where a block's middle is now.
-    fn at(&self, turn: &Mat4, o: Vec3) -> Vec3 {
-        turn.transform_point3(o + Vec3::splat(0.5))
-    }
-}
-
-/// The trunk of a standing tree (an upright log, not a branch), which an axe fells.
-fn is_trunk(b: Block) -> bool {
-    is_log(b) && !is_branch(b) && log_axis(b) == 1
-}
-
-/// Chops it takes an axe to fell a tree (None: not an axe): each chop cuts this much of the
-/// way through, a weak axe little, a strong one more.
-fn chops_needed(held: ItemId) -> Option<f32> {
-    match tool_of(held)? {
-        (ToolKind::Axe, tier) => Some(match tier {
-            Tier::Wood => 10.0,
-            Tier::Stone => 8.0,
-            Tier::Copper => 7.0,
-            Tier::Iron => 6.0,
-            Tier::Diamond => 5.0,
-            Tier::Gold => 4.0,
-        }),
-        _ => None,
-    }
-}
-
-/// Whether the point `q` is in the wood of an upright trunk (not in the air round it, nor in
-/// a cut already taken out of it), and which trunk.
-fn in_trunk(w: &World, q: Vec3) -> Option<IVec3> {
-    let p = q.floor().as_ivec3();
-    let b = w.geti(p);
-    if !is_trunk(b) {
-        return None;
-    }
-    let rel = Vec2::new(q.x - (p.x as f32 + 0.5), q.z - (p.z as f32 + 0.5));
-    let r = log_radius(b);
-    if rel.length() > r {
-        return None;
-    }
-    if let Some(n) = w.notch(p) {
-        let y = q.y - p.y as f32;
-        let h = n.height.clamp(0.12, 0.88);
-        let deep = n.depth.clamp(0.0, 1.0) * 2.0 * r;
-        if n.felled {
-            // A stump: flat, the hinge standing on its far side.
-            let (flat, hinge) = stump_heights(n, r);
-            let far = rel.dot(Vec2::new(n.angle.cos(), n.angle.sin())) <= r - deep;
-            return (y <= flat || (y <= hinge && far)).then_some(p);
-        }
-        let half = (deep * 0.8).max(0.08);
-        let cut = r - deep * (1.0 - (y - h).abs() / half).max(0.0);
-        if rel.dot(Vec2::new(n.angle.cos(), n.angle.sin())) > cut {
-            return None;
-        }
-    }
-    Some(p)
-}
-
-/// The stump that `p` is part of, if it is one: its cut block (left by a felled tree) on top
-/// and the trunk under it down to what it stands on, top first.
-fn stump_of(w: &World, p: IVec3) -> Option<Vec<IVec3>> {
-    let b = w.geti(p);
-    if !is_trunk(b) {
-        return None;
-    }
-    let same = |q: IVec3| is_trunk(w.geti(q)) && log_base(w.geti(q)) == log_base(b);
-    // Up to the cut (a trunk still standing above is no stump).
-    let mut top = p;
-    while !w.notch(top).is_some_and(|n| n.felled) {
-        top += IVec3::Y;
-        if !same(top) || top.y - p.y > 64 {
-            return None;
-        }
-    }
-    let mut column = vec![top];
-    let mut q = top - IVec3::Y;
-    while same(q) && w.notch(q).is_none() && top.y - q.y < 64 {
-        column.push(q);
-        q -= IVec3::Y;
-    }
-    Some(column)
 }
 
 impl Game {
@@ -179,9 +54,6 @@ impl Game {
     /// client mines trunks like any block).
     fn chop_target(&self) -> Option<Kind> {
         chops_needed(self.held())?;
-        if self.is_client() {
-            return None;
-        }
         // (a lying trunk is cut up struck from above too)
         if self.log_aim.is_some() {
             return Some(Kind::Stump);
@@ -315,6 +187,13 @@ impl Game {
         let Some(column) = stump_of(&self.terrain.world, p) else { return };
         let held = self.held();
         let creative = self.creative();
+        if self.is_client() {
+            self.send(crate::net::Msg::Stump { p });
+            if !creative {
+                self.wear_axe(crate::entity::survival::cost::MINE, p);
+            }
+            return;
+        }
         for q in column {
             let b = self.terrain.world.geti(q);
             self.break_world(q, held, creative);
@@ -375,7 +254,12 @@ impl Game {
             self.wear_axe(crate::entity::survival::cost::MINE * 0.5, p);
         }
         let notch = Notch { depth, ..notch };
-        if depth >= FELL_DEPTH - 1e-3 {
+        if self.is_client() {
+            // The server fells it (cut through, it answers with the stump and the tree
+            // falling); meanwhile the cut shows.
+            self.terrain.world.set_notch(p, Some(notch));
+            self.send(crate::net::Msg::Notch { p, notch: Some(notch) });
+        } else if depth >= FELL_DEPTH - 1e-3 {
             self.fell_tree(p, notch);
         } else {
             self.terrain.world.set_notch(p, Some(notch));
@@ -383,90 +267,12 @@ impl Game {
         self.terrain.block_changed(p, false);
     }
 
-    /// The trunk at `p` breaks at the cut: everything of its tree above it (the trunk, the
-    /// branches, and the leaves round them that are no other tree's) comes away and falls
-    /// over, away from the cut's side. Below the cut its stump is left.
+    /// The trunk at `p` breaks at the cut: everything of its tree above it comes away and
+    /// falls over (`sim::felling::fell`). Below the cut its stump is left.
     fn fell_tree(&mut self, p: IVec3, notch: Notch) {
-        let w = &self.terrain.world;
-        let b0 = w.geti(p);
-        let kind = log_base(b0);
-        let leaves = leaves_of(kind);
-        const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
-        let mut wood = vec![p];
-        let mut seen: HashSet<IVec3> = HashSet::from([p]);
-        let mut i = 0;
-        while i < wood.len() && wood.len() < MAX_BLOCKS {
-            let q = wood[i];
-            i += 1;
-            for d in SIDES {
-                let r = q + d;
-                if r.y < p.y || seen.contains(&r) {
-                    continue;
-                }
-                // Only what a tree is made of: its trunk straight up from the cut, and its
-                // branches within a tree's reach. Logs laid by a player (a wall, a house) or
-                // the trunk of another tree the branches touch stay.
-                let b = w.geti(r);
-                let own = if is_branch(b) {
-                    (r.x - p.x).abs().max((r.z - p.z).abs()) <= crate::world::trees::REACH
-                } else {
-                    is_trunk(b) && r.x == p.x && r.z == p.z
-                };
-                if own && log_base(b) == kind {
-                    seen.insert(r);
-                    wood.push(r);
-                }
-            }
-        }
-        // The leaves within a few steps of its wood, but none next to another tree's wood.
-        let mut leaf = Vec::new();
-        let mut front = wood.clone();
-        for _ in 0..5 {
-            let mut next = Vec::new();
-            for q in front {
-                for d in SIDES {
-                    let r = q + d;
-                    if seen.contains(&r) || w.geti(r) != leaves {
-                        continue;
-                    }
-                    seen.insert(r);
-                    let foreign = (-1..=1).any(|dy| {
-                        (-1..=1).any(|dz| {
-                            (-1..=1).any(|dx| {
-                                let s = r + IVec3::new(dx, dy, dz);
-                                is_log(w.geti(s)) && !seen.contains(&s)
-                            })
-                        })
-                    });
-                    if !foreign {
-                        leaf.push(r);
-                        next.push(r);
-                    }
-                }
-            }
-            front = next;
-        }
-        // It falls away from the side the cut was made on, about a hinge on the far side.
-        let toward = Vec3::new(-notch.angle.cos(), 0.0, -notch.angle.sin());
-        let pivot = p.as_vec3() + Vec3::new(0.5, notch.height, 0.5) + toward * log_radius(b0) * 0.7;
-        // The stump stays; the rest of its block goes with the tree. Its trunk from the cut up
-        // first (it will lie where it falls), then the rest of its wood and its leaves.
-        wood.retain(|&q| q != p);
-        let trunk: Vec<IVec3> = (1..)
-            .map(|dy| p + IVec3::Y * dy)
-            .take_while(|&q| seen.contains(&q) && is_trunk(w.geti(q)) && log_base(w.geti(q)) == kind)
-            .collect();
-        let mut blocks: Vec<(Vec3, Block)> = Vec::with_capacity(wood.len() + leaf.len());
-        for &q in trunk.iter().chain(wood.iter().filter(|q| !trunk.contains(q))).chain(&leaf) {
-            blocks.push((q.as_vec3() - pivot, w.geti(q)));
-        }
-        let height = blocks.iter().map(|(o, _)| o.y + 1.0).fold(1.0f32, f32::max);
-        let leaf_tint = match leaf.first() {
-            Some(&q) => self.block_tint(q, leaves),
-            None => [255; 3],
-        };
-        let tool = self.held();
-        let creative = self.creative();
+        let (tool, creative) = (self.held(), self.creative());
+        let leaves = leaves_of(log_base(self.terrain.world.geti(p)));
+        let (mut tree, leaf, wood) = fell(&self.terrain.world, p, notch, tool, creative, |q| self.block_tint(q, leaves));
         for &q in leaf.iter().chain(&wood) {
             self.set_block(q, AIR);
         }
@@ -474,53 +280,56 @@ impl Game {
             self.block_updated(q);
         }
         self.terrain.world.set_notch(p, Some(Notch { felled: true, ..notch }));
-        self.level.falling_trees.push(FallingTree {
-            pivot,
-            axis: Vec3::Y.cross(toward).normalize(),
-            angle: 0.02,
-            prev_angle: 0.02,
-            speed: 0.15,
-            height,
-            blocks,
-            trunk: trunk.len(),
-            stump: p.as_vec3() + Vec3::new(0.5, notch.height, 0.5),
-            stub: (p.as_vec3() - pivot, b0, notch.height),
-            leaf_tint,
-            tool,
-            creative,
-        });
+        self.level.next_tree_id += 1;
+        tree.id = self.level.next_tree_id;
+        self.level.falling_trees.push(tree);
     }
 
     /// The falling trees go over (like a pole tipping about its foot) until one of them
     /// hits something solid (leaves do not stop it) or lies flat; then it breaks up into
     /// its drops with a crash.
     pub(in crate::game) fn update_falling_trees(&mut self, dt: f32) {
-        const GRAVITY: f32 = 28.0;
         let mut landed = Vec::new();
         for (i, t) in self.level.falling_trees.iter_mut().enumerate() {
-            t.prev_angle = t.angle;
-            let pull = 1.5 * GRAVITY / t.height.max(1.5) * t.angle.sin().max(0.04);
-            t.speed += pull * dt;
-            t.angle += t.speed * dt;
-            let turn = t.turn();
-            let w = &self.terrain.world;
-            // Its wood stops on anything solid but leaves (its own leaves and other trees'
-            // crash through).
-            let hit = t.angle > 1.65
-                || t.blocks.iter().any(|&(o, b)| {
-                    if is_leaves(b) || o.y < 0.6 {
-                        return false;
-                    }
-                    let g = w.geti(t.at(&turn, o).floor().as_ivec3());
-                    is_solid(g) && !is_leaves(g)
-                });
-            if hit {
+            if t.step(dt, &self.terrain.world) {
                 landed.push(i);
             }
         }
         for i in landed.into_iter().rev() {
             let t = self.level.falling_trees.swap_remove(i);
             self.tree_lands(t);
+        }
+    }
+
+    /// The server says a falling tree is down: it breaks up in a burst of bark and leaves.
+    pub(in crate::game) fn tree_landed(&mut self, id: u32) {
+        let Some(i) = self.level.falling_trees.iter().position(|t| t.id == id) else { return };
+        let t = self.level.falling_trees.swap_remove(i);
+        self.crash_fx(&t);
+    }
+
+    /// The bark and leaves flying where a fallen tree breaks up.
+    fn crash_fx(&mut self, t: &FallingTree) {
+        let turn = t.turn();
+        for (n, &(o, b)) in t.blocks.iter().enumerate().skip(t.trunk) {
+            let q = t.at(&turn, o).floor().as_ivec3();
+            let tint = if is_leaves(b) { t.leaf_tint } else { [255; 3] };
+            if !is_leaves(b) || n % 3 == 0 {
+                self.particles.burst(&self.terrain.world, q, b, if is_leaves(b) { 3 } else { 6 }, tint);
+            }
+        }
+    }
+
+    /// A LAN player's (or the server's player's) copies of the falling trees go over, as the
+    /// server's do, until it says they are down.
+    pub(in crate::game) fn fall_trees_here(&mut self, dt: f32) {
+        for t in &mut self.level.falling_trees {
+            let angle = t.angle;
+            if t.step(dt, &self.terrain.world) {
+                // (it waits lying there for the word)
+                (t.angle, t.speed) = (angle, 0.0);
+            }
+            t.prev_angle = t.angle;
         }
     }
 
@@ -531,8 +340,7 @@ impl Game {
         let turn = t.turn();
         // The trunk from just past the stump, the way it fell (the ground's lie of it).
         let pieces: Vec<Block> = t.blocks[..t.trunk].iter().map(|&(_, b)| b).collect();
-        let fell = turn.transform_vector3(Vec3::Y);
-        let fell = Vec3::new(fell.x, 0.0, fell.z).normalize_or_zero();
+        let fell = t.fell_toward();
         self.lay_log(t.stump + fell * 0.5, fell, pieces, t.tool, t.creative);
         let (mut leaves, mut branches) = (Vec::new(), Vec::new());
         for (n, &(o, b)) in t.blocks.iter().enumerate().skip(t.trunk) {

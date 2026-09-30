@@ -2,6 +2,8 @@
 //! frame rate.
 
 pub mod clock;
+pub mod felling;
+pub mod grenade;
 pub mod rules;
 pub mod server;
 

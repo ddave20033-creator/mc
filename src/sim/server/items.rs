@@ -39,13 +39,14 @@ impl Server {
                 .flatten();
             if let Some(&(id, _)) = taker {
                 let it = self.level.items.swap_remove(i);
-                given.push((id, it.stack));
+                given.push((id, it.stack, it.id));
                 continue;
             }
             i += 1;
         }
-        for (id, stack) in given {
+        for (id, stack, item) in given {
             self.send_to(id, &Msg::Give(stack));
+            self.broadcast(&Msg::Collect { item, by: id }, None);
         }
         self.merge_items();
     }

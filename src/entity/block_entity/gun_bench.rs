@@ -68,7 +68,22 @@ impl Default for GunBench {
     }
 }
 
+/// Seconds the rifle station's loader takes to push each round into the magazine on it (its
+/// "feed" animation's length).
+pub const LOADER_ROUND: f32 = 0.35;
+
 impl GunBench {
+    /// The box the loader takes its next round from (for the magazine on it): which, if any.
+    pub fn loader_source(&self) -> Option<usize> {
+        use crate::item::{box_ammo, gun_rounds, magazine_capacity, magazine_gun};
+        let mag = self.loader_mag.filter(|_| self.loader)?;
+        let kind = magazine_gun(mag.item)?;
+        if gun_rounds(&mag) >= magazine_capacity(mag.item).unwrap_or(0) {
+            return None;
+        }
+        self.boxes.iter().position(|b| b.and_then(box_ammo) == Some(kind.ammo()))
+    }
+
     /// Puts a stack on the table; returns its id.
     pub fn add(&mut self, stack: Stack, x: f32, z: f32, turn: f32) -> u16 {
         self.next_id = self.next_id.wrapping_add(1).max(1);

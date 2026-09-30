@@ -183,7 +183,7 @@ impl WorldMeta {
         write(dir(&self.folder).join("level.txt"), s.as_bytes());
     }
 
-    fn load(folder: &str) -> Option<Self> {
+    pub fn load(folder: &str) -> Option<Self> {
         let text = fs::read_to_string(dir(folder).join("level.txt")).ok()?;
         let mut m = Self {
             folder: folder.to_string(),

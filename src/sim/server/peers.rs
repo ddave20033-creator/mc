@@ -236,6 +236,9 @@ impl Server {
     }
 
     pub(super) fn save_player(&self, name: &str, state: &PlayerState) {
+        if self.meta.folder.is_empty() {
+            return;
+        }
         let _ = std::fs::create_dir_all(self.players_dir());
         let _ = std::fs::write(self.player_file(name), Msg::Save(state.clone()).encode());
     }
@@ -294,6 +297,9 @@ impl Server {
         others.extend(self.level.block_entities.benches.iter().map(|(p, b)| Msg::Bench { p: *p, bench: b.clone() }));
         others.extend(self.level.block_entities.tables.iter().map(|(p, grid)| table_msg(*p, grid)));
         others.extend(self.level.block_entities.furnaces.iter().map(|(p, f)| furnace_msg(*p, f)));
+        // The cuts in trunks, and the trunks lying about.
+        others.extend(self.world.notches.iter().map(|(p, n)| Msg::Notch { p: *p, notch: Some(*n) }));
+        others.push(Msg::Logs(self.level.lying_logs.clone()));
         let Some(peer) = self.peer(id) else { return };
         peer.view = (view as i32).clamp(2, 64);
         peer.conn.send(&welcome);

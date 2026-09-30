@@ -2,7 +2,9 @@
 
 use crate::entity::{GunBench, Grilled};
 use crate::item::{Slot, Stack};
+use crate::sim::felling::{FallingTree, LyingLog};
 use crate::world::block::Block;
+use crate::world::mesh::Notch;
 use glam::{IVec3, Vec3};
 
 /// "No block" in `Pose::open`.
@@ -207,6 +209,24 @@ pub enum Msg {
     Save(PlayerState),
     /// The world's owner paused the game (or goes on): alone in it, the world stands still.
     Pause(bool),
+    /// An axe's stroke into the trunk at `p` left this cut (deep enough, the tree falls).
+    /// From the server: the cut there now (none: gone).
+    Notch {
+        p: IVec3,
+        notch: Option<Notch>,
+    },
+    /// Blocks set as they are, without the world's rules (the world's owner only: the
+    /// testbed's scripts).
+    Edit(Vec<(IVec3, Block)>),
+    /// The stump at `p` struck with an axe came apart.
+    Stump {
+        p: IVec3,
+    },
+    /// The lying trunk `id` struck with an axe: a piece comes off the end `from_base` or not.
+    CutLog {
+        id: u32,
+        from_base: bool,
+    },
     /// Used a part of a furnace (`block_entity::part`): a left click (`take`) takes out
     /// what is there, a right click puts in or turns meat over. The player already took
     /// `offered` from their hand; the host gives back what did not go in, and what came out.
@@ -263,6 +283,24 @@ pub enum Msg {
         block: Block,
     },
     /// Hit by another player (or their grenade).
+    /// A tree felled: it falls over (every game shows it going; `TreeLands` says when it is
+    /// down).
+    TreeFalls(Box<FallingTree>),
+    TreeLands {
+        id: u32,
+    },
+    /// Player `by` picked up the dropped item `item`: it flies to them.
+    Collect {
+        item: u32,
+        by: u8,
+    },
+    /// The trunks lying on the ground (all of them, when they change).
+    Logs(Vec<LyingLog>),
+    /// Something to see (and hear) at `pos` (`fx`).
+    Fx {
+        kind: u8,
+        pos: Vec3,
+    },
     Hurt {
         dmg: f32,
         from: Vec3,

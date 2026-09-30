@@ -4,8 +4,12 @@
 use super::checks::{self, known_item, valid_slot, valid_stack};
 use super::peers::{CLOSED_Y, RED, WHITE};
 use super::Server;
+use crate::entity::mob::{Foe, MobKind};
 use crate::entity::ItemEntity;
-use crate::net::{pose_flags, Msg};
+use crate::net::{hurt, pose_flags, Msg};
+
+/// Seconds after a shot its bullets may still hit (they fly a few hundred blocks at most).
+const BULLET_TIME: f32 = 10.0;
 use crate::world::*;
 use glam::IVec3;
 
@@ -19,11 +23,14 @@ impl Server {
             return;
         }
         let pose = self.peers.iter().find(|p| p.id == id).and_then(|p| p.pose);
+        let owner = self.peers.iter().any(|p| p.id == id && p.owner);
         // What a player does has to be where they stand (their latest pose: a player sends it
         // right before anything checked here).
         let feet = pose.map(|p| p.pos);
         let near_block = |p: IVec3| feet.is_some_and(|f| checks::block_near(f, p, checks::BLOCK_REACH));
         let near_hand = |at: glam::Vec3| feet.is_some_and(|f| checks::point_near(f, at, checks::HAND_REACH));
+        let held = pose.map_or(crate::item::NONE, |p| p.held);
+        let from = feet.unwrap_or_default();
         match m {
             Msg::Pose(mut pose) => {
                 // (a custom skin is in the player's own slot)
@@ -54,8 +61,118 @@ impl Server {
                 let actual = self.world.geti(p);
                 self.send_to(id, &Msg::Blocks(vec![(p, actual)]));
             }
+            Msg::AttackMob { id: mob, dmg, knock } => {
+                let (melee, bullet) = self.damage_caps(id, held);
+                let Some((dmg, knock)) = checks::clamp_hit(dmg, knock, melee.max(bullet)) else { return };
+                if let Some(m) = self.level.mobs.iter_mut().find(|m| m.id == mob) {
+                    m.hurt(dmg, Some(from), knock);
+                    self.attacked(Foe::Mob(mob), id);
+                }
+            }
+            Msg::AttackPlayer { id: target, dmg, knock, kind } => {
+                // (a player hits with their hand or their bullets; blasts and bites are the
+                // server's own)
+                let (melee, bullet) = self.damage_caps(id, held);
+                let cap = match kind {
+                    hurt::MELEE => melee,
+                    hurt::BULLET => bullet,
+                    _ => return,
+                };
+                let Some((dmg, knock)) = checks::clamp_hit(dmg, knock, cap) else { return };
+                self.attacked(Foe::Player(target), id);
+                self.send_to(target, &Msg::Hurt { dmg, from, knock, kind });
+            }
+            Msg::Grenade { kind, pos, vel, seed, fuse, .. } => {
+                if kind <= 1 && near_hand(pos) {
+                    self.thrown_grenade(id, kind, pos, vel, seed, fuse.clamp(0.0, 10.0));
+                }
+            }
+            Msg::SpawnMob { kind, pos } => {
+                // A spawn egg puts it in front of the player; farther only by a command.
+                let allowed = self.cheats || feet.is_some_and(|f| checks::point_near(f, pos, checks::SPAWN_REACH));
+                if let (true, Some(kind)) = (allowed, MobKind::from_u8(kind)) {
+                    self.spawn_mob(kind, pos);
+                }
+            }
+            Msg::UseOnMob { id: mob, item } => {
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob).filter(|_| known_item(item)) {
+                    self.wolf_used(i, item, id);
+                }
+            }
+            Msg::BreakDummy { id: mob } => {
+                let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
+                    self.break_dummy(i, !creative);
+                }
+            }
+            Msg::Shear { id: mob } => {
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
+                    self.shear_mob(i);
+                }
+            }
+            Msg::FurnaceUse { p, part, take, offered } => {
+                if !valid_slot(&offered) {
+                    return;
+                }
+                if near_block(p) {
+                    self.use_furnace(id, p, part, take, offered);
+                } else if let Some(st) = offered {
+                    // (too far: what they offered goes back)
+                    self.send_to(id, &Msg::Give(st));
+                }
+            }
+            Msg::Bench { p, bench } => {
+                // A player changed what lies on a gun station: the others see it too.
+                let valid = bench.items.iter().all(|i| valid_stack(&i.stack)) && bench.loader_mag.as_ref().is_none_or(valid_stack);
+                if valid && near_block(p) && is_gun_bench(self.world.geti(p)) {
+                    self.set_bench(p, bench.clone());
+                    self.broadcast(&Msg::Bench { p, bench }, Some(id));
+                }
+            }
+            Msg::Shot { kind, mods, eye, seed, bullets, .. } => {
+                let Some(gun) = crate::item::GUN_KINDS.get(kind as usize) else { return };
+                if !near_hand(eye) {
+                    return;
+                }
+                // Its bullets may hit for a while (even after the gun is put away).
+                let (damage, until) = (gun.stats().damage, self.time + BULLET_TIME);
+                if let Some(p) = self.peer(id) {
+                    p.shot_damage = (damage, until);
+                }
+                self.broadcast(&Msg::Shot { id, kind, mods, eye, seed, bullets }, Some(id));
+            }
+            Msg::Notch { p, notch: Some(n) } => {
+                let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
+                if near_block(p) && known_item(held) {
+                    self.player_notch(id, p, n, held, creative);
+                }
+            }
+            Msg::Stump { p } => {
+                let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
+                if near_block(p) && known_item(held) {
+                    self.break_stump(id, p, held, creative);
+                }
+            }
+            Msg::CutLog { id: log, from_base } => {
+                let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
+                if known_item(held) {
+                    self.cut_log(id, log, from_base, held, creative);
+                }
+            }
+            Msg::Edit(list) if owner => {
+                for (p, b) in list {
+                    self.set_block(p, b);
+                    let entities = &mut self.level.block_entities;
+                    if is_furnace(b) {
+                        entities.furnaces.entry(p).or_default();
+                    } else if is_chest(b) {
+                        entities.chests.entry(p).or_insert_with(|| Box::new([None; 27]));
+                    }
+                }
+            }
             Msg::DropItem { pos, vel, stack, delay } => {
-                if valid_stack(&stack) && near_hand(pos) {
+                // (the world's owner anywhere: the testbed's scripts)
+                if valid_stack(&stack) && (near_hand(pos) || owner) {
                     self.add_item(ItemEntity::new(pos, vel, stack, delay.max(0.0)));
                 }
             }
@@ -114,6 +231,14 @@ impl Server {
         }
     }
 
+    /// The most damage player `id` can deal now: with what they hold (a critical hit, a
+    /// bullet of the gun) or with the bullets of their last shot (`melee`, `bullet`).
+    fn damage_caps(&mut self, id: u8, held: crate::item::ItemId) -> (f32, f32) {
+        let now = self.time;
+        let shot = self.peer(id).map_or(0.0, |p| if now <= p.shot_damage.1 { p.shot_damage.0 } else { 0.0 });
+        (checks::melee_cap(held), checks::gun_cap(held).max(shot))
+    }
+
     /// A player changed the container they have open. Only the slots this player changed
     /// (from what they last got) are taken, so two players working in the same chest do not
     /// undo each other.
@@ -150,6 +275,11 @@ impl Server {
     fn command(&mut self, id: u8, line: &str) {
         use crate::lang::{t, tf};
         let args: Vec<&str> = line.trim_start_matches('/').split_whitespace().collect();
+        let owner = self.peers.iter().any(|p| p.id == id && p.owner);
+        if args.as_slice() == ["save"] && owner {
+            self.save_all();
+            return;
+        }
         if !self.cheats {
             self.send_to(id, &Msg::Chat { text: t("cmd.no_cheats").to_string(), color: RED });
             return;

@@ -8,5 +8,5 @@ pub mod skin_pages;
 pub mod player;
 pub mod survival;
 
-pub use block_entity::{bench_event, BenchEvent, BenchItem, BlockEntities, Furnace, GunBench, Grilled};
+pub use block_entity::{bench_event, BenchEvent, BenchItem, BlockEntities, Furnace, GunBench, Grilled, LOADER_ROUND};
 pub use dropped::{FallingBlock, ItemEntity};

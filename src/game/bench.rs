@@ -71,7 +71,7 @@ impl Game {
                     })
                 };
                 println!("bench world: seed {}", meta.seed);
-                self.load_world(meta);
+                self.play_world(meta);
             }
             Screen::Playing => {
                 let t = b.t.get_or_insert(0.0);

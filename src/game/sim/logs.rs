@@ -7,138 +7,17 @@
 
 use crate::game::*;
 use crate::game::felling::Struck;
+use crate::sim::felling::*;
 use crate::item::{tool_of, ToolKind};
 
 /// How far from the eye a lying trunk can be aimed at.
 const AIM_REACH: f32 = 5.0;
-
-/// A trunk lying on the ground.
-pub(in crate::game) struct LyingLog {
-    pub id: u32,
-    /// Its base end's middle, and the way it lies (level) from there.
-    pub base: Vec3,
-    pub dir: Vec3,
-    /// Its pieces from the base: the trunk's blocks they were.
-    pub pieces: Vec<Block>,
-    /// How many blocks the next stroke takes off (1 to 3, rolled after each).
-    pub next: usize,
-}
-
-impl LyingLog {
-    fn len(&self) -> f32 {
-        self.pieces.len() as f32
-    }
-
-    fn radius(&self) -> f32 {
-        self.pieces.first().map_or(0.44, |&b| log_radius(b))
-    }
-
-    /// How far along it (from its base) the point `q` is, if it is in its wood.
-    pub fn contains(&self, q: Vec3) -> Option<f32> {
-        let s = (q - self.base).dot(self.dir);
-        if !(0.0..=self.len()).contains(&s) {
-            return None;
-        }
-        let off = q - (self.base + self.dir * s);
-        (off.length() <= self.radius()).then_some(s)
-    }
-
-    /// Where the ray from `o` along `d` (a unit vector) first meets its wood within `max`:
-    /// how far along the ray, and how far along the trunk (from its base). Worked out
-    /// exactly (a ray against a round trunk with flat ends), not stepped along.
-    pub fn ray_hit(&self, o: Vec3, d: Vec3, max: f32) -> Option<(f32, f32)> {
-        let (a, r, len) = (self.dir, self.radius(), self.len());
-        let w = o - self.base;
-        let (wa, da) = (w.dot(a), d.dot(a));
-        // Round side: the part of the ray within `r` of the axis.
-        let (wp, dp) = (w - a * wa, d - a * da);
-        let (qa, qb, qc) = (dp.dot(dp), 2.0 * wp.dot(dp), wp.dot(wp) - r * r);
-        let (mut t0, mut t1) = if qa > 1e-9 {
-            let disc = qb * qb - 4.0 * qa * qc;
-            if disc < 0.0 {
-                return None;
-            }
-            let root = disc.sqrt();
-            ((-qb - root) / (2.0 * qa), (-qb + root) / (2.0 * qa))
-        } else if qc <= 0.0 {
-            (f32::NEG_INFINITY, f32::INFINITY)
-        } else {
-            return None;
-        };
-        // Its ends: the part of the ray between them.
-        if da.abs() > 1e-9 {
-            let (e0, e1) = ((0.0 - wa) / da, (len - wa) / da);
-            t0 = t0.max(e0.min(e1));
-            t1 = t1.min(e0.max(e1));
-        } else if !(0.0..=len).contains(&wa) {
-            return None;
-        }
-        let t = t0.max(0.0);
-        (t <= t1 && t < max).then(|| (t, (wa + da * t).clamp(0.0, len)))
-    }
-
-    /// The middle of the piece `i`.
-    fn piece_middle(&self, i: usize) -> Vec3 {
-        self.base + self.dir * (i as f32 + 0.5)
-    }
-
-    /// Which end a stroke at `s` along it takes the next piece off: the nearer one.
-    fn from_base_at(&self, s: f32) -> bool {
-        s < self.len() * 0.5
-    }
-
-    /// The pieces the next stroke takes off from that end (the rest too, if only one would be
-    /// left).
-    fn taken(&self, from_base: bool) -> std::ops::Range<usize> {
-        let n = self.pieces.len();
-        let k = self.next.clamp(1, 3).min(n);
-        let k = if n - k <= 1 { n } else { k };
-        if from_base {
-            0..k
-        } else {
-            n - k..n
-        }
-    }
-}
 
 /// A lying trunk aimed at with an axe: which, and which end a stroke would cut from.
 #[derive(Clone, Copy, Debug)]
 pub(in crate::game) struct LogAim {
     pub id: u32,
     pub from_base: bool,
-}
-
-/// Lying trunks saved with a world: `x,y,z,dx,dz,piece;piece;...` a line (the pieces by
-/// their blocks' keys).
-pub fn logs_text(logs: &[LyingLog]) -> String {
-    logs.iter()
-        .map(|l| {
-            let pieces: Vec<&str> = l.pieces.iter().map(|&b| def(b).key).collect();
-            format!("{},{},{},{},{},{}\n", l.base.x, l.base.y, l.base.z, l.dir.x, l.dir.z, pieces.join(";"))
-        })
-        .collect()
-}
-
-pub fn parse_logs(text: &str) -> Vec<LyingLog> {
-    let mut out = Vec::new();
-    for line in text.lines() {
-        let v: Vec<&str> = line.trim().split(',').collect();
-        if v.len() != 6 {
-            continue;
-        }
-        let f: Vec<f32> = v[..5].iter().filter_map(|x| x.parse().ok()).collect();
-        let pieces: Vec<Block> = v[5].split(';').filter_map(by_key).filter(|&b| is_log(b)).collect();
-        if f.len() != 5 || pieces.is_empty() {
-            continue;
-        }
-        let dir = Vec3::new(f[3], 0.0, f[4]).normalize_or_zero();
-        if dir == Vec3::ZERO {
-            continue;
-        }
-        let id = out.len() as u32 + 1;
-        out.push(LyingLog { id, base: Vec3::new(f[0], f[1], f[2]), dir, pieces, next: 1 + id as usize % 3 });
-    }
-    out
 }
 
 impl Game {
@@ -150,46 +29,7 @@ impl Game {
     /// tree came down) along `dir` (level), as long as its `pieces`, on whatever is under it.
     /// Pieces that would go into something solid break off there and drop what they are.
     pub(in crate::game) fn lay_log(&mut self, start: Vec3, dir: Vec3, pieces: Vec<Block>, tool: ItemId, creative: bool) {
-        let dir = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero();
-        if dir == Vec3::ZERO || pieces.is_empty() {
-            return;
-        }
-        let w = &self.terrain.world;
-        let r = log_radius(pieces[0]);
-        let solid = |q: Vec3| {
-            let b = w.geti(q.floor().as_ivec3());
-            is_solid(b) && !is_leaves(b)
-        };
-        // The ground under a point: the top of the first solid block below it.
-        let ground = |at: Vec3| {
-            let mut y = at.y.floor();
-            for _ in 0..12 {
-                if solid(Vec3::new(at.x, y - 0.5, at.z)) {
-                    return y;
-                }
-                y -= 1.0;
-            }
-            y
-        };
-        // It rests on the highest ground under its first pieces.
-        let reach = pieces.len().min(4);
-        let mut floor = f32::MIN;
-        for i in 0..reach {
-            let at = start + dir * (i as f32 + 0.5) + Vec3::Y * 0.5;
-            floor = floor.max(ground(at));
-        }
-        let base = Vec3::new(start.x, floor + r, start.z);
-        // It goes as far as it is free of the world.
-        let free = pieces
-            .iter()
-            .enumerate()
-            .take_while(|&(i, _)| {
-                let m = base + dir * (i as f32 + 0.5);
-                !solid(m) && !solid(m + Vec3::Y * (r * 0.5))
-            })
-            .count();
-        // (a single block left lying comes apart at once)
-        let free = if free == 1 { 0 } else { free };
+        let Some((base, dir, free)) = log_rest(&self.terrain.world, start, dir, &pieces) else { return };
         let (lying, broken) = pieces.split_at(free);
         let lying = lying.to_vec();
         for (i, &b) in broken.iter().enumerate() {
@@ -219,7 +59,7 @@ impl Game {
     /// crosshair from the block then.
     pub(in crate::game) fn aim_lying_logs(&mut self, control: bool) {
         self.log_aim = None;
-        if !control || self.is_client() || !matches!(tool_of(self.held()), Some((ToolKind::Axe, _))) {
+        if !control || !matches!(tool_of(self.held()), Some((ToolKind::Axe, _))) {
             return;
         }
         // (a swing going on keeps to the trunk it began on)
@@ -266,6 +106,10 @@ impl Game {
     /// worn by the stroke.
     pub(in crate::game) fn cut_log(&mut self, id: u32, from_base: bool) {
         let Some(i) = self.log_index(id) else { return };
+        if self.is_client() {
+            // The server cuts it for real (and drops the logs); here it shows at once.
+            self.send(crate::net::Msg::CutLog { id, from_base });
+        }
         let next = 1 + (self.random() * 3.0) as usize;
         let l = &mut self.level.lying_logs[i];
         let taken = l.taken(from_base);
@@ -283,7 +127,7 @@ impl Game {
         for (&b, &p) in off.iter().zip(&at) {
             let q = p.floor().as_ivec3();
             self.particles.burst(&self.terrain.world, q, b, 8, [255; 3]);
-            if !creative {
+            if !creative && !self.is_client() {
                 let r = self.random();
                 for s in crate::item::drops(b, held, r) {
                     self.spawn_drop(p, s);

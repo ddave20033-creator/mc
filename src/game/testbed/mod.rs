@@ -47,6 +47,8 @@ pub struct Testbed {
     shots: Vec<(String, String)>,
     problems: Vec<String>,
     started: std::time::Instant,
+    /// Blocks set by the script, for the world's server (`Msg::Edit`).
+    edits: Vec<(IVec3, crate::world::block::Block)>,
 }
 
 impl Testbed {
@@ -85,6 +87,7 @@ impl Testbed {
             shots: Vec::new(),
             problems: errors,
             started: std::time::Instant::now(),
+            edits: Vec::new(),
         }
     }
 
@@ -162,8 +165,25 @@ impl Game {
                 return;
             };
             tb.next += 1;
-            if self.testbed_run(cmd) {
+            let wait = self.testbed_run(cmd);
+            // The blocks the command set go to the world's server.
+            let edits = self.testbed.as_mut().map(|tb| std::mem::take(&mut tb.edits)).unwrap_or_default();
+            if !edits.is_empty() {
+                self.send(crate::net::Msg::Edit(edits));
+            }
+            if wait {
                 return;
+            }
+        }
+    }
+
+    /// A block the script sets: here at once, and (the world having a server of this game's)
+    /// there too.
+    fn test_set(&mut self, p: IVec3, b: Block) {
+        self.set_block(p, b);
+        if self.local.is_some() {
+            if let Some(tb) = self.testbed.as_mut() {
+                tb.edits.push((p, b));
             }
         }
     }
@@ -210,7 +230,7 @@ impl Game {
                 for y in 0..h {
                     for z in -r..=r {
                         for x in -r..=r {
-                            self.set_block(b + IVec3::new(x, y, z), AIR);
+                            self.test_set(b + IVec3::new(x, y, z), AIR);
                         }
                     }
                 }
@@ -261,7 +281,7 @@ impl Game {
                         Origin::Rel => origin.floor().as_ivec3() + IVec3::from(v),
                         Origin::Abs => IVec3::from(v),
                     };
-                    self.set_block(p, b);
+                    self.test_set(p, b);
                 }
                 None => tb.problems.push(format!("place: no block `{name}`")),
             },
@@ -272,7 +292,7 @@ impl Game {
                     for y in lo.y..=hi.y {
                         for z in lo.z..=hi.z {
                             for x in lo.x..=hi.x {
-                                self.set_block(o + IVec3::new(x, y, z), blk);
+                                self.test_set(o + IVec3::new(x, y, z), blk);
                             }
                         }
                     }
@@ -289,11 +309,15 @@ impl Game {
                 for (d, b, soft) in crate::world::trees::tree_shape(log, seed) {
                     let q = base + d;
                     if !soft || self.terrain.world.geti(q) == AIR {
-                        self.set_block(q, b);
+                        self.test_set(q, b);
                     }
                 }
             }
             Cmd::Drop(name, v) => match crate::item::from_key(&name) {
+                Some(id) if self.local.is_some() => {
+                    let pos = origin + Vec3::from(v);
+                    self.send(crate::net::Msg::DropItem { pos, vel: Vec3::ZERO, stack: Stack::one(id), delay: 1000.0 });
+                }
                 Some(id) => self.level.items.push(crate::entity::dropped::ItemEntity::new(origin + Vec3::from(v), Vec3::ZERO, Stack::one(id), 1000.0)),
                 None => tb.problems.push(format!("drop: no item `{name}`")),
             },
@@ -502,15 +526,15 @@ impl Game {
         }
         for x in x0 - 3..x0 + 42 {
             for z in z0 - 7..=z0 + 7 {
-                self.set_block(IVec3::new(x, ground, z), STONE);
+                self.test_set(IVec3::new(x, ground, z), STONE);
                 for y in ground + 1..ground + 7 {
-                    self.set_block(IVec3::new(x, y, z), AIR);
+                    self.test_set(IVec3::new(x, y, z), AIR);
                 }
             }
         }
         for y in ground + 1..ground + 4 {
             for z in z0 - 1..=z0 + 1 {
-                self.set_block(IVec3::new(x0 + 40, y, z), PLANKS);
+                self.test_set(IVec3::new(x0 + 40, y, z), PLANKS);
             }
         }
         Vec3::new(x0 as f32 + 0.5, ground as f32 + 1.0, z0 as f32 + 0.5)

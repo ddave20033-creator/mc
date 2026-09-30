@@ -43,21 +43,9 @@ const FLY: f32 = 0.45;
 const ASSEMBLE_SPEED: f32 = 1.6;
 /// Seconds for each round to go into a magazine: brought over its lips, then pushed down in.
 const ROUND_TIME: f32 = 0.34;
-/// Seconds the rifle station's loader takes to push each round into the magazine on it (its
-/// "feed" animation's length).
-const LOADER_ROUND: f32 = 0.35;
 /// Gun model units to the station model's pixels (the table's `PX`, a pixel a sixteenth).
 const MODEL_TO_STATION: f32 = PX * 16.0;
 
-/// The box the loader takes its next round from (for the magazine on it): which, if any.
-fn loader_source(bench: &GunBench) -> Option<usize> {
-    let mag = bench.loader_mag.filter(|_| bench.loader)?;
-    let kind = magazine_gun(mag.item)?;
-    if gun_rounds(&mag) >= magazine_capacity(mag.item).unwrap_or(0) {
-        return None;
-    }
-    bench.boxes.iter().position(|b| b.and_then(box_ammo) == Some(kind.ammo()))
-}
 
 /// The magazine on the loader as it is drawn, lying in its cradle on its side, its feed lips
 /// toward the feed block (`mount`: the loader's frame there, `loader_mount`).
@@ -1477,7 +1465,7 @@ impl Game {
             let handle_lit = open_here == Some(p) && self.bench_ui.hover == Some(Pick::Handle);
             let loader = self.level.block_entities.benches.get(&p).map_or(Default::default(), |b| crate::model::gun_station::Loader {
                 there: b.loader && table.rifle(),
-                feed: loader_source(b).map(|_| self.time),
+                feed: b.loader_source().map(|_| self.time),
             });
             crate::model::gun_station::emit_block(out, table.rifle(), p, table.toward, drawer, !brush_out, ammo, loader, handle_lit, light, flags::ENTITY);
             if table.rifle() {
@@ -2175,16 +2163,16 @@ impl Game {
             .level.block_entities
             .benches
             .iter()
-            .filter_map(|(p, b)| loader_source(b).map(|i| (*p, i)))
+            .filter_map(|(p, b)| b.loader_source().map(|i| (*p, i)))
             .collect();
         self.level.loader_feed.retain(|p, _| busy.iter().any(|(q, _)| q == p));
         for (p, i) in busy {
             let t = self.level.loader_feed.entry(p).or_insert(0.0);
             *t += dt;
-            if *t < LOADER_ROUND {
+            if *t < crate::entity::LOADER_ROUND {
                 continue;
             }
-            *t -= LOADER_ROUND;
+            *t -= crate::entity::LOADER_ROUND;
             let Some(bench) = self.level.block_entities.benches.get_mut(&p) else { continue };
             let (Some(v), Some(mag)) = (bench.boxes[i], bench.loader_mag.as_mut()) else { continue };
             bench.boxes[i] = Some(box_without(v, 1));
