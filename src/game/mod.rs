@@ -6,7 +6,7 @@ mod frame;
 mod gui;
 mod multi;
 mod player;
-mod sim;
+mod shown;
 mod state;
 mod testbed;
 mod tools;
@@ -15,7 +15,7 @@ mod worlds;
 
 use gui::{hud, station};
 use player::{camera, sleep};
-use sim::{felling, logs};
+use shown::{felling, logs};
 use tools::{fishing, grenades, guns, revolver};
 use state::{BenchUi, FrameClock, Input, InventoryUi, Level, Menus};
 
