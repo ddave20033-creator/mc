@@ -52,7 +52,7 @@ impl Game {
         };
         if let Some(made) = boot.textures.as_ref().and_then(|rx| rx.try_recv().ok()) {
             boot.textures = None;
-            self.texture_base = made.base;
+            self.texture_base = Arc::new(made.base);
             self.torch_particles = made.torch_particles;
             self.pack_credit = made.credit;
             self.renderer.replace_block_textures(&self.gpu, &made.levels);

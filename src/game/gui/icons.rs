@@ -3,8 +3,8 @@
 //! and what is fitted on it. The fixed icons (`world::textures::render_item_icons`) show each
 //! item one way; one in another state gets its own icon, drawn from its 3D model the same way
 //! into one of `tex::STATE_ICON_COUNT` texture layers kept for this, the ones not seen for
-//! longest drawn over first. An icon asked for is drawn the next frame (until then the fixed
-//! one shows).
+//! longest drawn over first. An icon asked for is drawn on a thread of its own (a few
+//! milliseconds each) and shows once it is done; until then the fixed one shows.
 
 use crate::game::*;
 use crate::item::*;
@@ -14,13 +14,40 @@ use std::cell::RefCell;
 /// What an icon shows of a stack: its item and the state that changes how it looks.
 type Key = (ItemId, u16);
 
+/// An icon to draw (with the textures to draw it with), and one drawn: its mip levels.
+type Job = (Key, Stack, std::sync::Arc<Vec<u8>>);
+type Done = (Key, Vec<Vec<u8>>);
+
 #[derive(Default)]
 struct Cache {
     /// Each layer's icon and the frame it was last shown.
     slots: Vec<Option<(Key, u64)>>,
-    /// Icons asked for that are not drawn yet (with a stack in that state).
+    /// Icons asked for that are not drawn yet (with a stack in that state), and those being
+    /// drawn.
     wanted: Vec<(Key, Stack)>,
+    drawing: Vec<Key>,
     frame: u64,
+    /// The thread drawing them (started when the first is asked for).
+    worker: Option<(std::sync::mpsc::Sender<Job>, std::sync::mpsc::Receiver<Done>)>,
+}
+
+/// The thread the icons are drawn on.
+fn start_worker() -> Option<(std::sync::mpsc::Sender<Job>, std::sync::mpsc::Receiver<Done>)> {
+    let (job_tx, job_rx) = std::sync::mpsc::channel::<Job>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<Done>();
+    std::thread::Builder::new()
+        .name("item-icons".into())
+        .spawn(move || {
+            for (k, st, base) in job_rx {
+                let img = crate::world::textures::render_icon(&base, &Stack { count: 1, ..st });
+                let px: Vec<[u8; 4]> = img.chunks_exact(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+                if done_tx.send((k, crate::game::book::sheet_levels(&px, TILE, 1, 1))).is_err() {
+                    break;
+                }
+            }
+        })
+        .ok()?;
+    Some((job_tx, done_rx))
 }
 
 thread_local! {
@@ -72,7 +99,7 @@ pub fn state_icon(st: &Stack) -> Option<u32> {
             }
             return Some(tex::STATE_ICONS + i as u32);
         }
-        if !c.wanted.iter().any(|w| w.0 == k) {
+        if !c.wanted.iter().any(|w| w.0 == k) && !c.drawing.contains(&k) {
             c.wanted.push((k, *st));
         }
         None
@@ -80,23 +107,34 @@ pub fn state_icon(st: &Stack) -> Option<u32> {
 }
 
 impl Game {
-    /// Draws an icon asked for (one a frame), into a layer not in use or not seen for
-    /// longest.
+    /// Sends the icons asked for to be drawn, and puts those drawn into a layer not in use or
+    /// not seen for longest.
     pub(in crate::game) fn update_state_icons(&mut self) {
-        let wanted: Vec<(Key, Stack)> = CACHE.with(|c| {
+        let base = self.texture_base.clone();
+        let done: Vec<Done> = CACHE.with(|c| {
             let mut c = c.borrow_mut();
             c.frame += 1;
             if c.slots.is_empty() {
                 c.slots = vec![None; tex::STATE_ICON_COUNT as usize];
             }
-            // One a frame (each takes a few milliseconds).
-            let n = c.wanted.len().min(1);
-            c.wanted.drain(..n).collect()
+            if base.is_empty() {
+                return Vec::new();
+            }
+            if c.worker.is_none() && !c.wanted.is_empty() {
+                c.worker = start_worker();
+            }
+            let wanted: Vec<(Key, Stack)> = c.wanted.drain(..).collect();
+            for (k, st) in wanted {
+                let sent = c.worker.as_ref().is_some_and(|(tx, _)| tx.send((k, st, base.clone())).is_ok());
+                if sent {
+                    c.drawing.push(k);
+                }
+            }
+            let done: Vec<Done> = c.worker.as_ref().map_or(Vec::new(), |(_, rx)| rx.try_iter().collect());
+            c.drawing.retain(|k| !done.iter().any(|d| d.0 == *k));
+            done
         });
-        for (k, st) in wanted {
-            let img = crate::world::textures::render_icon(&self.texture_base, &Stack { count: 1, ..st });
-            let px: Vec<[u8; 4]> = img.chunks_exact(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
-            let levels = crate::game::book::sheet_levels(&px, TILE, 1, 1);
+        for (k, levels) in done {
             let slot = CACHE.with(|c| {
                 let mut c = c.borrow_mut();
                 let frame = c.frame;

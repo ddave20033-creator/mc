@@ -304,7 +304,7 @@ pub struct Game {
     /// Swing of the lantern in this player's hand (third person and body model).
     lantern_swing: crate::model::lantern::SmoothSwing,
     /// All texture layers but the uploaded skins (see `textures::generate_base`).
-    texture_base: Vec<u8>,
+    texture_base: Arc<Vec<u8>>,
     /// The start-up screen, while it is up.
     boot: Option<boot::Boot>,
     custom_skins: std::collections::HashMap<u8, crate::pack::Image>,
@@ -344,7 +344,7 @@ impl Game {
         // (the only textures it needs); they replace these when they are ready.
         let boot = boot::Boot::start(settings.resource_packs.clone(), custom_skins.clone());
         let renderer = Renderer::new(&gpu, &textures::logo_levels(), &ui.font.atlas);
-        let texture_base = Vec::new();
+        let texture_base = Arc::new(Vec::new());
         let torch_particles = false;
         // The credits name the built-in pack (always in use).
         let pack_credit = None;
@@ -550,7 +550,7 @@ impl Game {
     /// Remakes the textures from the enabled resource packs (after the pack screen).
     fn reload_packs(&mut self) {
         let packs = crate::pack::Packs::load(&self.settings.resource_packs);
-        self.texture_base = textures::generate_base(&packs);
+        self.texture_base = Arc::new(textures::generate_base(&packs));
         self.torch_particles = packs.texture("particle/flame").is_some();
         self.refresh_skin_textures();
     }
