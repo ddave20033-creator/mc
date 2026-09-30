@@ -1,6 +1,5 @@
-//! Mobs from the game's side: attacking mobs and other players, spawn eggs, natural
-//! spawning, wolves (taming, their bites, going for whoever their owner attacks), and
-//! updating them (with their loot and sounds).
+//! Mobs from the game's side: attacking mobs and other players, items used on mobs, spawn
+//! eggs. (The server runs them; what a kind does is in its file, `content::mobs`.)
 
 use crate::game::*;
 use crate::item::inventory::{self, take};
@@ -11,10 +10,11 @@ impl Game {
     /// (x1.5 for a critical hit while falling), knockback (more while sprinting), and tool
     /// wear like Minecraft (swords 1, tools 2).
     pub(in crate::game) fn attack(&mut self, mob: Option<usize>, player: Option<u8>) {
-        // Sneaking, a hit takes a target dummy down (it drops as an item).
-        if let Some(i) = mob.filter(|&i| self.level.mobs[i].kind == MobKind::Dummy && self.player.sneaking) {
+        // Sneaking, a hit takes a static mob (a target dummy) down (it drops as its item).
+        let fixed = |m: &Mob| m.def().behavior == crate::content::mobs::Behavior::Static;
+        if let Some(i) = mob.filter(|&i| fixed(&self.level.mobs[i]) && self.player.sneaking) {
             let id = self.level.mobs[i].id;
-            self.send(crate::net::Msg::BreakDummy { id });
+            self.send(crate::net::Msg::TakeDown { id });
             return;
         }
         let held = self.held();
@@ -72,26 +72,29 @@ impl Game {
         }
     }
 
-    /// Right click on a wolf: a wild one is given a bone (it may take to this player), and a
-    /// tame one of theirs sits down or stands up. True if something happened.
-    pub(in crate::game) fn use_on_wolf(&mut self, i: usize) -> bool {
+    /// Right click on a mob holding an item: what its kind does with it (`Hooks::use_on`:
+    /// shears on a sheep, a bone for a wild wolf, sitting down one's own...); the server
+    /// decides. True if something happened.
+    pub(in crate::game) fn use_on_mob(&mut self, i: usize) -> bool {
         let held = self.held();
-        let m = &self.level.mobs[i];
-        if m.kind != MobKind::Wolf || !m.alive() {
+        let fresh = self.input.right_pressed;
+        let m = &mut self.level.mobs[i];
+        let Some(use_on) = m.def().hooks.use_on else {
             return false;
-        }
-        let wild = !m.tame();
-        let bone = held == BONE && wild && m.foe.is_none();
-        if !bone && !m.yours {
+        };
+        let Some(used) = use_on(m, held, fresh) else {
             return false;
-        }
+        };
         let id = m.id;
         self.send(crate::net::Msg::UseOnMob { id, item: held });
-        if !bone {
-            self.level.mobs[i].toggle_sit();
-        }
-        if bone && !self.creative() {
-            take(&mut self.inventory.slots[self.hotbar_slot], 1);
+        if !self.creative() {
+            let slot = &mut self.inventory.slots[self.hotbar_slot];
+            if used.consume {
+                take(slot, 1);
+            }
+            if used.wear > 0 {
+                inventory::damage(slot, used.wear);
+            }
         }
         self.hand.swing();
         self.action_cooldown = 0.25;
@@ -117,25 +120,9 @@ impl Game {
         self.action_cooldown = 0.25;
     }
 
-    /// Right click on a sheep with shears: 1-3 wool pops off (the host drops it).
-    pub(in crate::game) fn shear(&mut self, i: usize) {
-        if !self.level.mobs[i].can_shear() {
-            return;
-        }
-        let id = self.level.mobs[i].id;
-        self.level.mobs[i].sheared = true;
-        self.send(crate::net::Msg::Shear { id });
-        if !self.creative() {
-            let slot = self.hotbar_slot;
-            inventory::damage(&mut self.inventory.slots[slot], 1);
-        }
-        self.hand.swing();
-        self.action_cooldown = 0.25;
-    }
-
     pub(in crate::game) fn spawn_mob(&mut self, kind: MobKind, pos: Vec3) {
         self.send(crate::net::Msg::SpawnMob {
-            kind: kind as u8,
+            kind: kind.0,
             pos,
         });
     }

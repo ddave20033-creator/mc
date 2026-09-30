@@ -31,6 +31,7 @@ pub fn mob_changed(was: &MobNet, now: &MobNet) -> bool {
         || was.hurt != now.hurt
         || (was.death >= 0.0) != (now.death >= 0.0)
         || (was.death - now.death).abs() > DEATH_EPS
+        || was.health != now.health
         || was.sheared != now.sheared
         || was.taken != now.taken
         || was.last_hit != now.last_hit
@@ -178,6 +179,7 @@ mod tests {
             limb_amount: 0.5,
             hurt: false,
             death: -1.0,
+            health: 10.0,
             sheared: false,
             taken: 0.0,
             last_hit: 0.0,

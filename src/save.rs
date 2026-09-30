@@ -365,20 +365,16 @@ pub fn save_entities(
         );
     }
     for m in mobs.iter().filter(|m| m.alive()) {
-        // (a wolf's owner, its name without the separators)
-        let owner = m.owner.as_deref().map_or("-".to_string(), |o| o.replace([':', '\n'], "_"));
+        // (its kind's own state last: `MobState::save`)
         s += &format!(
-            "mob:{}:{},{},{}:{}:{}:{}:{}:{}:{}\n",
+            "mob:{}:{},{},{}:{}:{}:{}\n",
             m.kind.key(),
             m.pos.x,
             m.pos.y,
             m.pos.z,
             m.body_yaw,
             m.health,
-            m.sheared as u8,
-            owner,
-            m.sitting as u8,
-            m.collar
+            m.state.save()
         );
     }
     for (p, f) in &be.furnaces {
@@ -461,13 +457,10 @@ pub fn load_entities(
         if parts[0] == "mob" && parts.len() >= 5 {
             let p: Vec<f32> = parts[2].split(',').filter_map(|x| x.parse().ok()).collect();
             if let (3, Some(kind)) = (p.len(), MobKind::from_key(parts[1])) {
-                let seed = (mobs.len() as u32 * 7919 + p[0].to_bits()) ^ p[2].to_bits();
+                // (the server gives it its id, and its random numbers with it)
                 let yaw = parts[3].parse().unwrap_or(0.0);
-                let mut m = Mob::new(kind, Vec3::new(p[0], p[1], p[2]), yaw, seed);
-                m.sheared = parts.get(5) == Some(&"1");
-                m.owner = parts.get(6).filter(|o| !o.is_empty() && **o != "-").map(|o| o.to_string());
-                m.sitting = parts.get(7) == Some(&"1");
-                m.collar = parts.get(8).and_then(|c| c.parse().ok()).unwrap_or(0);
+                let mut m = Mob::new(kind, Vec3::new(p[0], p[1], p[2]), yaw, 0);
+                m.state.load(parts.get(5).copied().unwrap_or(""));
                 m.health = parts[4].parse().unwrap_or(m.max_health()).min(m.max_health());
                 mobs.push(m);
             }

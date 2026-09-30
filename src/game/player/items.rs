@@ -101,11 +101,7 @@ impl Game {
         }
         let sneaking = self.sneaking();
         if let Some(i) = self.target_mob() {
-            if held == SHEARS && self.level.mobs[i].can_shear() {
-                self.shear(i);
-                return;
-            }
-            if self.input.right_pressed && self.use_on_wolf(i) {
+            if self.use_on_mob(i) {
                 return;
             }
         }
@@ -184,10 +180,7 @@ impl Game {
         match held {
             BUCKET => self.fill_bucket(),
             WATER_BUCKET | LAVA_BUCKET => self.empty_bucket(held),
-            PIG_SPAWN_EGG => self.use_spawn_egg(MobKind::Pig),
-            SHEEP_SPAWN_EGG => self.use_spawn_egg(MobKind::Sheep),
-            WOLF_SPAWN_EGG => self.use_spawn_egg(MobKind::Wolf),
-            TARGET_DUMMY => self.use_spawn_egg(MobKind::Dummy),
+            _ if MobKind::by_egg(held).is_some() => self.use_spawn_egg(MobKind::by_egg(held).unwrap()),
             GLASS_BOTTLE => self.fill_bottle(),
             _ if block_of(held).is_some() => self.place_block(held),
             _ => {}

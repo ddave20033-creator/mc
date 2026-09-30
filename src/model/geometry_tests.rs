@@ -276,15 +276,21 @@ fn block_entities() -> Vec<Vertex> {
 }
 
 fn mobs() -> Vec<Vertex> {
-    use crate::entity::mob::{Mob, MobKind};
+    use crate::content::mobs::{pig::PIG, sheep::SHEEP, wolf::WOLF, MobState, TARGET_DUMMY};
+    use crate::entity::mob::Mob;
     let mut out = Vec::new();
-    for kind in [MobKind::Pig, MobKind::Sheep, MobKind::Dummy, MobKind::Wolf] {
+    for kind in [PIG, SHEEP, TARGET_DUMMY, WOLF] {
         let mut m = Mob::new(kind, Vec3::new(2.0, 70.0, -4.0), 0.8, 11);
         m.build(&mut out, 12, 3);
-        m.sheared = true;
-        m.owner = Some("x".into());
-        m.sitting = true;
-        m.collar = 3;
+        match &mut m.state {
+            MobState::Sheep(w) => w.sheared = true,
+            MobState::Wolf(p) => {
+                p.owner = Some("x".into());
+                p.sitting = true;
+                p.collar = 3;
+            }
+            _ => {}
+        }
         m.build(&mut out, 9, 1);
     }
     out

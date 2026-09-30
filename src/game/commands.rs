@@ -130,7 +130,7 @@ impl Game {
                 Some(kind) => match parse_pos(coords, self.player.pos) {
                     Some(p) => {
                         self.spawn_mob(kind, p);
-                        self.say(tf("cmd.summon", &[&kind.key()]), chat::WHITE);
+                        self.say(tf("cmd.summon", &[&kind.name()]), chat::WHITE);
                     }
                     None => self.say(t("cmd.bad_coords"), chat::RED),
                 },

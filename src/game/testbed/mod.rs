@@ -22,6 +22,7 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("checks", include_str!("../../../testbed/checks.txt")),
     ("blocks", include_str!("../../../testbed/blocks.txt")),
     ("felling", include_str!("../../../testbed/felling.txt")),
+    ("mobs", include_str!("../../../testbed/mobs.txt")),
 ];
 
 pub struct Testbed {

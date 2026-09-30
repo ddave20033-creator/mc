@@ -21,15 +21,16 @@ impl Game {
     /// Over each target dummy that was hit lately: the damage it has taken in all, and the
     /// last hit under it. The number pops a little with each hit and fades before it resets.
     fn draw_dummy_tags(&mut self) {
-        use crate::entity::mob::{MobKind, DUMMY_RESET};
+        use crate::content::mobs::target_dummy::DUMMY_RESET;
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let cam = self.eye();
         let focal = 1.0 / (self.fov_current.to_radians() * 0.5).tan();
         let tags: Vec<(Vec3, f32, f32, f32)> = self
             .level.mobs
             .iter()
-            .filter(|m| m.kind == MobKind::Dummy && m.taken > 0.0 && m.since_hit < DUMMY_RESET)
-            .map(|m| (m.pos + Vec3::Y * (m.size().1 + 0.35), m.taken, m.last_hit, m.since_hit))
+            .filter_map(|m| m.tally().map(|t| (m, t)))
+            .filter(|(_, t)| t.taken > 0.0 && t.since_hit < DUMMY_RESET)
+            .map(|(m, t)| (m.pos + Vec3::Y * (m.size().1 + 0.35), t.taken, t.last_hit, t.since_hit))
             .collect();
         for (top, taken, last, since) in tags {
             let dist = top.distance(cam);

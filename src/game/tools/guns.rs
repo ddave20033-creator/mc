@@ -873,7 +873,7 @@ impl Game {
                 return false;
             }
             if let Some((i, d)) = mob.filter(|_| !b.visual) {
-                if self.level.mobs[i].kind == crate::entity::mob::MobKind::Dummy {
+                if self.level.mobs[i].kind == crate::content::mobs::TARGET_DUMMY {
                     // Straw flies out of the sack.
                     self.particles.impact(&self.terrain.world, b.pos + dir * d, -dir, WOOL, [224, 196, 118]);
                 }
