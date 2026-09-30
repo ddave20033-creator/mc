@@ -56,14 +56,13 @@ pub fn smelt_tier(id: ItemId) -> u8 {
     }
 }
 
-/// What `id` smelts into, whatever the furnace (see `smelt_tier`).
+/// What `id` smelts into, whatever the furnace (see `smelt_tier`). Meat is not smelted but
+/// grilled on the furnace's top (`meat`).
 pub fn smelt(id: ItemId) -> Option<ItemId> {
     Some(match id {
         CLAY_BALL => BRICK,
         IRON_INGOT => STEEL_INGOT,
         BRICK => CERAMIC_PLATE,
-        PORKCHOP => COOKED_PORKCHOP,
-        MUTTON => COOKED_MUTTON,
         RAW_FISH => COOKED_FISH,
         WATER_BOTTLE => PURIFIED_WATER,
         _ => match id as Block {

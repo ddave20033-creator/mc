@@ -112,7 +112,7 @@ pub fn click(slot: &mut Slot, cursor: &mut Slot, right: bool) {
         }
         (Some(s), Some(c)) => {
             if s.stacks_with(c) {
-                let room = max_stack(s.item) - s.count;
+                let room = max_stack(s.item).saturating_sub(s.count);
                 let n = if right {
                     1.min(room)
                 } else {

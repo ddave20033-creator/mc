@@ -402,7 +402,7 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
     )));
     let mut smeltable: Vec<ItemId> = all_items()
         .into_iter()
-        .filter(|&id| smelt(id).is_some() && meat(id).is_none())
+        .filter(|&id| smelt(id).is_some())
         .collect();
     smeltable.sort_by_key(|&id| smelt_tier(id));
     for id in smeltable {

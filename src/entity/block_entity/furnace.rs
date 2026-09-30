@@ -212,7 +212,7 @@ impl Furnace {
         };
         match part {
             0..=3 => self.grill[part as usize].is_none() && Grilled::new(item).is_some(),
-            part::INPUT => meat(item).is_none() && self.smelts(item).is_some() && fits(self.input),
+            part::INPUT => self.smelts(item).is_some() && fits(self.input),
             part::FUEL => fuel_time(item).is_some() && fits(self.fuel),
             _ => false,
         }
