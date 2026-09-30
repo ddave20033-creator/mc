@@ -288,7 +288,11 @@ impl Game {
         felling::load_notches(&save::load_notches(&meta.folder));
         self.falling_trees.clear();
         self.chop = None;
-        self.stump_struck = None;
+        self.struck = None;
+        self.lying_logs = logs::parse_logs(&save::load_logs(&meta.folder));
+        self.next_log_id = self.lying_logs.len() as u32;
+        self.log_aim = None;
+        self.log_cut = None;
         self.cursor = None;
         self.craft = [None; 9];
         self.bench_anims.clear();
@@ -493,6 +497,7 @@ impl Game {
         let folder = meta.folder.clone();
         save::save_inventory(&folder, &slots);
         save::save_notches(&folder, &felling::notches_text());
+        save::save_logs(&folder, &logs::logs_text(&self.lying_logs));
         save::save_entities(
             &folder,
             &self.block_entities,

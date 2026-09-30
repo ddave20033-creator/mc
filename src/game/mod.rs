@@ -5,6 +5,7 @@ mod blocks;
 mod camera;
 mod commands;
 mod felling;
+mod logs;
 mod fishing;
 mod frame;
 mod furnace;
@@ -315,8 +316,14 @@ pub struct Game {
     falling_trees: Vec<felling::FallingTree>,
     /// A chop with an axe going on (`felling`).
     chop: Option<crate::model::chop_rig::Swing>,
-    /// The stump the axe is stuck in, to come apart when it is pulled out.
-    stump_struck: Option<IVec3>,
+    /// What the axe is stuck in, to come apart when it is pulled out.
+    struck: Option<felling::Struck>,
+    /// The trunks of felled trees lying on the ground, the last one's id, the one aimed at
+    /// with an axe, and the one (and where) the swing going on will cut.
+    lying_logs: Vec<logs::LyingLog>,
+    next_log_id: u32,
+    log_aim: Option<logs::LogAim>,
+    log_cut: Option<(u32, usize)>,
     mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
     mob_spawn_timer: f32,
@@ -588,7 +595,11 @@ impl Game {
             falling: Vec::new(),
             falling_trees: Vec::new(),
             chop: None,
-            stump_struck: None,
+            struck: None,
+            lying_logs: Vec::new(),
+            next_log_id: 0,
+            log_aim: None,
+            log_cut: None,
             mobs: Vec::new(),
             mob_spawn_timer: 5.0,
             mob_target: None,

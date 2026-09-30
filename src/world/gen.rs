@@ -790,6 +790,17 @@ impl Generator {
                 if tree_roll >= chance {
                     continue;
                 }
+                // One tree to a spot: of trees that would stand closer than three blocks
+                // (their trunks side by side under one crown, like one tree with several
+                // trunks), only the one with the lowest roll grows.
+                let crowded = (-2..=2).any(|dz: i32| {
+                    (-2..=2).any(|dx: i32| {
+                        (dx, dz) != (0, 0) && dx * dx + dz * dz <= 8 && hash(self.seed ^ 0x7EE5, wx + dx, 0, wz + dz) < tree_roll
+                    })
+                });
+                if crowded {
+                    continue;
+                }
                 if self.carved(wx, h, wz, h, false) || self.carved(wx, h - 1, wz, h, false) {
                     continue;
                 }
@@ -924,6 +935,34 @@ mod tests {
     }
 
     /// Prints the chunk generation speed (`cargo test --release gen_speed -- --nocapture`).
+    /// No two trees' trunks side by side (which look like one tree with several trunks).
+    #[test]
+    fn trees_stand_apart() {
+        let gen = Generator::new(12345);
+        let mut bases = Vec::new();
+        for i in 0..400 {
+            let (cx, cz) = (i % 20, i / 20);
+            let c = gen.generate_chunk(cx, cz);
+            for y in 1..HEIGHT {
+                for z in 0..16 {
+                    for x in 0..16 {
+                        let b = c.get(x, y, z);
+                        if is_log(b) && !is_branch(b) && log_axis(b) == 1 && !is_log(c.get(x, y - 1, z)) {
+                            bases.push((cx * 16 + x as i32, cz * 16 + z as i32));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(bases.len() > 50, "{} trees", bases.len());
+        for (i, a) in bases.iter().enumerate() {
+            for b in &bases[i + 1..] {
+                let (dx, dz) = (a.0 - b.0, a.1 - b.1);
+                assert!(dx * dx + dz * dz > 8, "trunks at {a:?} and {b:?}");
+            }
+        }
+    }
+
     #[test]
     fn gen_speed() {
         let gen = Generator::new(12345);

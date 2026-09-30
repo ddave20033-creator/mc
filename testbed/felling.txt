@@ -32,6 +32,10 @@ click left 0.2
 shots strike 10 0.08
 wait 1
 shot after
+pos 14 3 4.5
+look -130 -35
+wait 0.2
+shot log_lying
 tree birch 12 5 2
 pos 10.8 0 4.95
 look 0 -18

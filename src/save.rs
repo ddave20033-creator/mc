@@ -317,6 +317,15 @@ pub fn load_notches(folder: &str) -> String {
     fs::read_to_string(dir(folder).join("notches.txt")).unwrap_or_default()
 }
 
+/// The trunks of felled trees lying on the ground (`game::logs`).
+pub fn save_logs(folder: &str, text: &str) {
+    write(dir(folder).join("logs.txt"), text.as_bytes());
+}
+
+pub fn load_logs(folder: &str) -> String {
+    fs::read_to_string(dir(folder).join("logs.txt")).unwrap_or_default()
+}
+
 /// Block entities, growing saplings (position -> seconds until it grows), dropped items and mobs.
 pub fn save_entities(
     folder: &str,

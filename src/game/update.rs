@@ -144,6 +144,8 @@ impl Game {
                 self.target = None;
             }
         }
+        // A felled trunk lying there, aimed at with an axe.
+        self.aim_lying_logs(control && self.mob_target.is_none() && self.player_target.is_none());
         self.action_cooldown -= dt;
         self.update_guns(dt, control);
         self.update_grenades(dt);

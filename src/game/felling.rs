@@ -22,6 +22,21 @@ const FELL_DEPTH: f32 = 0.75;
 /// The most blocks a falling tree takes with it (a trunk in a wall of logs stays).
 const MAX_BLOCKS: usize = 900;
 
+/// What the axe is stuck in, to come apart when it is pulled out: a stump, or a lying trunk
+/// (which, and where it is cut).
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Struck {
+    Stump(IVec3),
+    Log(u32, usize),
+}
+
+/// What the axe's edge came into.
+enum Contact {
+    Trunk(IVec3),
+    Log(u32),
+    Ground,
+}
+
 /// A tree falling over: its blocks turning about the hinge left by the cut.
 pub(super) struct FallingTree {
     /// Where it turns about (on the trunk's far side from the cut, at the cut's height), and
@@ -33,8 +48,12 @@ pub(super) struct FallingTree {
     speed: f32,
     /// How high it reaches over the hinge (its fall is slower, the taller it is).
     height: f32,
-    /// Its blocks: their lower corner from the pivot as it stood, and the block.
+    /// Its blocks: their lower corner from the pivot as it stood, and the block; the first
+    /// `trunk` of them its trunk from the cut up (which stays lying where it falls).
     blocks: Vec<(Vec3, u8)>,
+    trunk: usize,
+    /// The middle of the stump's top (where the trunk lies from).
+    stump: Vec3,
     /// The part of the cut block above the cut (its lower corner from the pivot, the block
     /// and the cut's height in it), which goes with the tree.
     stub: (Vec3, u8, f32),
@@ -166,24 +185,27 @@ impl Game {
     /// The trunk the player is aiming an axe at, if any, and the swing it takes: a standing
     /// trunk is chopped level, a stump struck from above (felling is the host's; a LAN
     /// client mines trunks like any block).
-    fn chop_target(&self) -> Option<(Kind, IVec3)> {
+    fn chop_target(&self) -> Option<Kind> {
         chops_needed(self.held())?;
         if self.is_client() {
             return None;
+        }
+        // (a lying trunk is cut up struck from above too)
+        if self.log_aim.is_some() {
+            return Some(Kind::Stump);
         }
         let (hit, _) = self.target?;
         let w = &self.terrain.world;
         if !is_trunk(w.geti(hit)) {
             return None;
         }
-        let kind = if stump_of(w, hit).is_some() { Kind::Stump } else { Kind::Chop };
-        Some((kind, hit))
+        Some(if stump_of(w, hit).is_some() { Kind::Stump } else { Kind::Chop })
     }
 
-    /// Where the axe's edge first comes into a trunk's wood between the animation's times
-    /// `t0` and `t1`: the time, the trunk and the point. Struck down, the ground stops it
-    /// too (no trunk then).
-    fn edge_contact(&self, kind: Kind, t0: f32, t1: f32) -> Option<(f32, Option<IVec3>, Vec3)> {
+    /// Where the axe's edge first comes into a trunk's wood (standing, or lying) between the
+    /// animation's times `t0` and `t1`: the time, what it came into and the point. Struck
+    /// down, the ground stops it too.
+    fn edge_contact(&self, kind: Kind, t0: f32, t1: f32) -> Option<(f32, Contact, Vec3)> {
         let world = self.chop_world();
         let w = &self.terrain.world;
         let steps = ((t1 - t0) / 0.004).ceil().max(1.0) as usize;
@@ -193,12 +215,15 @@ impl Game {
             for e in EDGE {
                 let q = axe.transform_point3(e);
                 if let Some(p) = in_trunk(w, q) {
-                    return Some((t, Some(p), q));
+                    return Some((t, Contact::Trunk(p), q));
                 }
                 if kind == Kind::Stump {
+                    if let Some(l) = self.lying_logs.iter().find(|l| l.contains(q).is_some()) {
+                        return Some((t, Contact::Log(l.id), q));
+                    }
                     let b = w.geti(q.floor().as_ivec3());
                     if is_solid(b) && !is_leaves(b) && !is_log(b) {
-                        return Some((t, None, q));
+                        return Some((t, Contact::Ground, q));
                     }
                 }
             }
@@ -221,24 +246,22 @@ impl Game {
                     sw.hit = Some(t);
                     sw.clock = t;
                     match (sw.kind, p) {
-                        (Kind::Chop, Some(p)) => self.chop_hit(p, point),
-                        (Kind::Stump, Some(p)) => self.stump_hit(p, point),
-                        (_, None) => self.ground_hit(point),
+                        (Kind::Chop, Contact::Trunk(p)) => self.chop_hit(p, point),
+                        (Kind::Stump, Contact::Trunk(p)) => self.stump_hit(p, point),
+                        (_, Contact::Log(id)) => self.log_hit(id, point),
+                        (_, _) => self.ground_hit(point),
                     }
                 }
             }
-            // Pulled out of the stump, it comes apart.
+            // Pulled out of the stump (or the lying trunk), it comes apart.
             if sw.pulling() {
-                if let Some(p) = self.stump_struck.take() {
-                    self.break_stump(p);
-                }
+                self.come_apart();
             }
             self.chop = (!sw.done()).then_some(sw);
         }
         if self.chop.is_none() {
-            if let Some(p) = self.stump_struck.take() {
-                self.break_stump(p);
-            }
+            self.come_apart();
+            self.log_cut = None;
         }
         let target = if active { self.chop_target() } else { None };
         if self.chop.is_none() && (target.is_none() || !self.left_down) {
@@ -246,11 +269,21 @@ impl Game {
             return target.is_some();
         }
         self.mining = None;
-        if let (None, Some((kind, _))) = (self.chop, target) {
+        if let (None, Some(kind)) = (self.chop, target) {
             self.chop = Some(Swing { kind, ..Swing::default() });
+            self.log_cut = self.log_aim.map(|a| (a.id, a.cut));
         }
         self.hand.hidden = true;
         true
+    }
+
+    /// What the axe was stuck in comes apart as it is pulled out.
+    fn come_apart(&mut self) {
+        match self.struck.take() {
+            Some(Struck::Stump(p)) => self.break_stump(p),
+            Some(Struck::Log(id, cut)) => self.cut_log(id, cut),
+            None => {}
+        }
     }
 
     /// Struck down into the stump at `p`: the edge stuck in it, chips flying up; it comes
@@ -260,7 +293,7 @@ impl Game {
         self.chips(p, b, point, Vec3::Y);
         // (a standing trunk in the way only gives chips)
         if stump_of(&self.terrain.world, p).is_some() {
-            self.stump_struck = Some(p);
+            self.struck = Some(Struck::Stump(p));
         }
     }
 
@@ -273,7 +306,7 @@ impl Game {
     }
 
     /// Chips of the trunk at `p` flying out at `at` (the way `out`).
-    fn chips(&mut self, p: IVec3, b: u8, at: Vec3, out: Vec3) {
+    pub(super) fn chips(&mut self, p: IVec3, b: u8, at: Vec3, out: Vec3) {
         let tint = self.block_tint(p, b);
         for _ in 0..3 {
             self.particles.impact(&self.terrain.world, at, out, b, tint);
@@ -310,10 +343,9 @@ impl Game {
         for t in std::mem::take(&mut self.falling_trees) {
             self.tree_lands(t);
         }
-        if let Some(p) = self.stump_struck.take() {
-            self.break_stump(p);
-        }
+        self.come_apart();
         self.chop = None;
+        self.log_cut = None;
     }
 
     /// The axe's edge has bitten into the trunk at `p` at `point`: the cut is made there, on
@@ -429,10 +461,15 @@ impl Game {
         // It falls away from the side the cut was made on, about a hinge on the far side.
         let toward = Vec3::new(-notch.angle.cos(), 0.0, -notch.angle.sin());
         let pivot = p.as_vec3() + Vec3::new(0.5, notch.height, 0.5) + toward * log_radius(b0) * 0.7;
-        // The stump stays; the rest of its block goes with the tree.
+        // The stump stays; the rest of its block goes with the tree. Its trunk from the cut up
+        // first (it will lie where it falls), then the rest of its wood and its leaves.
         wood.retain(|&q| q != p);
+        let trunk: Vec<IVec3> = (1..)
+            .map(|dy| p + IVec3::Y * dy)
+            .take_while(|&q| seen.contains(&q) && is_trunk(w.geti(q)) && log_base(w.geti(q)) == kind)
+            .collect();
         let mut blocks: Vec<(Vec3, u8)> = Vec::with_capacity(wood.len() + leaf.len());
-        for &q in wood.iter().chain(&leaf) {
+        for &q in trunk.iter().chain(wood.iter().filter(|q| !trunk.contains(q))).chain(&leaf) {
             blocks.push((q.as_vec3() - pivot, w.geti(q)));
         }
         let height = blocks.iter().map(|(o, _)| o.y + 1.0).fold(1.0f32, f32::max);
@@ -456,6 +493,8 @@ impl Game {
             speed: 0.15,
             height,
             blocks,
+            trunk: trunk.len(),
+            stump: p.as_vec3() + Vec3::new(0.5, notch.height, 0.5),
             stub: (p.as_vec3() - pivot, b0, notch.height),
             leaf_tint,
             tool,
@@ -495,11 +534,16 @@ impl Game {
         }
     }
 
-    /// A fallen tree breaks up where it lies: its wood and leaves drop what they would when
-    /// mined, in a burst of bark and leaves.
+    /// A fallen tree breaks up where it lies: its leaves and branches drop what they would
+    /// when mined, in a burst of bark and leaves; its trunk stays lying there, to be cut up.
     fn tree_lands(&mut self, t: FallingTree) {
         let turn = t.turn();
-        for (n, &(o, b)) in t.blocks.iter().enumerate() {
+        // The trunk from just past the stump, the way it fell (the ground's lie of it).
+        let pieces: Vec<u8> = t.blocks[..t.trunk].iter().map(|&(_, b)| b).collect();
+        let fell = turn.transform_vector3(Vec3::Y);
+        let fell = Vec3::new(fell.x, 0.0, fell.z).normalize_or_zero();
+        self.lay_log(t.stump + fell * 0.5, fell, pieces, t.tool, t.creative);
+        for (n, &(o, b)) in t.blocks.iter().enumerate().skip(t.trunk) {
             let at = t.at(&turn, o);
             let q = at.floor().as_ivec3();
             let tint = if is_leaves(b) { t.leaf_tint } else { [255; 3] };
