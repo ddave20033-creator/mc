@@ -37,14 +37,21 @@ impl Loader {
         let near = |p: ChunkPos, r: i32| centers.iter().any(|c| (p.0 - c.0).pow(2) + (p.1 - c.1).pow(2) <= r * r);
         let mut loaded = Vec::new();
         while let Ok(done) = self.workers.rx.try_recv() {
-            if let Done::Generated(p, data) = done {
-                self.generating.remove(&p);
-                if near(p, KEEP) && !world.chunks.contains_key(&p) {
-                    // (an edited copy wins over the generated one)
-                    let data = world.saved.remove(&p).unwrap_or_else(|| Arc::new(*data));
-                    world.chunks.insert(p, data);
-                    loaded.push(p);
+            match done {
+                Done::Generated(p, data) => {
+                    self.generating.remove(&p);
+                    if near(p, KEEP) && !world.chunks.contains_key(&p) {
+                        // (an edited copy wins over the generated one)
+                        let data = world.saved.remove(&p).unwrap_or_else(|| Arc::new(*data));
+                        world.chunks.insert(p, data);
+                        loaded.push(p);
+                    }
                 }
+                // (its generation failed: asked for again)
+                Done::Failed(p, None) => {
+                    self.generating.remove(&p);
+                }
+                _ => {}
             }
         }
         // Far ones go (the edited ones are kept, to be saved and to come back).
