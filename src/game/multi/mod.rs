@@ -86,6 +86,9 @@ struct Peer {
     /// Chests others have open (their contents show in them), as this player last got them.
     seen_chests: FastMap<IVec3, Vec<u8>>,
     leaving: bool,
+    /// Seconds since it connected: one that never says hello is let go (it would hold a
+    /// player slot for ever).
+    age: f32,
 }
 
 pub(super) struct Host {
@@ -436,6 +439,7 @@ impl Game {
 
     /// Network work for this frame (host or player).
     pub(super) fn net_tick(&mut self, dt: f32) {
+        self.poll_joining();
         match self.net {
             Some(Net::Host(_)) => self.host_tick(dt),
             Some(Net::Client(_)) => self.client_tick(dt),

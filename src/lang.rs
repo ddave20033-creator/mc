@@ -377,6 +377,7 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("death.title_screen", "Title Screen", "Főmenü"),
     ("loading.generating", "Generating world", "Világ generálása"),
     ("loading.saving", "Saving world", "Világ mentése"),
+    ("save.failed", "Could not save the world: {}", "Nem sikerült menteni a világot: {}"),
     (
         "tip.1",
         "Tip: /gamemode creative lets you fly (needs cheats)",

@@ -57,6 +57,11 @@ pub struct MeshData {
     /// Gun stations in the chunk (world positions): their Blockbench model is drawn every
     /// frame (its drawer slides out while one is used).
     pub gun_stations: Vec<glam::IVec3>,
+    /// Torches and the marks of cut-down trunks in the chunk (world positions): the torches'
+    /// fire and the grass growing back over the marks look for them here, not through every
+    /// block around.
+    pub torches: Vec<glam::IVec3>,
+    pub stump_marks: Vec<glam::IVec3>,
     /// The chunk's light (see `ChunkLight`), for things drawn outside chunk meshes.
     pub light: ChunkLight,
 }
@@ -1398,6 +1403,8 @@ pub fn mesh_chunk(
     let mut doors = Vec::new();
     let mut chests = Vec::new();
     let mut gun_stations = Vec::new();
+    let mut torches = Vec::new();
+    let mut stump_marks = Vec::new();
     let top = (nb[4].max_y as i32 + 1).min(r.h as i32 - 1);
     for y in 0..=top {
         for z in 16..32 {
@@ -1428,6 +1435,7 @@ pub fn mesh_chunk(
                 }
                 if is_torch(b) {
                     m.torch(&r, x, y, z, b);
+                    torches.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
                     continue;
                 }
                 if is_chest(b) {
@@ -1442,6 +1450,9 @@ pub fn mesh_chunk(
                 if is_chimney(b) {
                     m.chimney(&r, x, y, z, b);
                     continue;
+                }
+                if is_stump_mark(b) {
+                    stump_marks.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
                 }
                 if is_door(b) {
                     doors.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
@@ -1556,6 +1567,8 @@ pub fn mesh_chunk(
         doors,
         chests,
         gun_stations,
+        torches,
+        stump_marks,
         light: ChunkLight {
             h: r.h,
             data: light.into(),
@@ -1684,6 +1697,17 @@ mod tests {
         }
         // Inside the wall: the light of its open sides.
         assert_eq!(world.light_estimate(glam::Vec3::new(6.5, 1.5, 8.5)).0, 15);
+    }
+
+    #[test]
+    fn torches_and_stump_marks_are_listed() {
+        let nb = hood(|c| {
+            c.set(3, 1, 4, TORCH);
+            c.set(5, 0, 5, stump_mark(GRASS, 0));
+        });
+        let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+        assert_eq!(m.torches, vec![glam::IVec3::new(3, 1, 4)]);
+        assert_eq!(m.stump_marks, vec![glam::IVec3::new(5, 0, 5)]);
     }
 }
 

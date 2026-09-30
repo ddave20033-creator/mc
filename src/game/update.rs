@@ -477,16 +477,7 @@ impl Game {
             let c = self.player.pos.floor().as_ivec3();
             let w = &self.terrain.world;
             self.torches.clear();
-            for dy in -12..=12 {
-                for dz in -20..=20 {
-                    for dx in -20..=20 {
-                        let p = c + IVec3::new(dx, dy, dz);
-                        if is_torch(w.geti(p)) {
-                            self.torches.push(p);
-                        }
-                    }
-                }
-            }
+            self.torches.extend(crate::world::terrain::listed_near(&self.terrain.torches, c, 20, 12).filter(|&p| is_torch(w.geti(p))));
         }
         // Torches in hands burn too: this player's (where it was drawn) and the others'
         // (about where they hold it up).

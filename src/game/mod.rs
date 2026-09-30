@@ -417,6 +417,9 @@ pub struct Game {
     finder: Option<crate::net::Finder>,
     mp_address: String,
     mp_selected: Option<std::net::SocketAddr>,
+    /// Connecting to a LAN game (on a thread of its own, the window going on meanwhile): its
+    /// address, and the connection when it is made.
+    joining: Option<(String, std::sync::mpsc::Receiver<std::io::Result<crate::net::Conn>>)>,
     net_message: String,
     /// The other player the crosshair is on.
     player_target: Option<u8>,
@@ -667,6 +670,7 @@ impl Game {
             finder: None,
             mp_address: String::new(),
             mp_selected: None,
+            joining: None,
             net_message: String::new(),
             player_target: None,
             spectating: None,

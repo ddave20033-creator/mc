@@ -55,11 +55,28 @@ pub fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Writes a file atomically (temp file + rename).
+/// The last save that failed (a full disk, no permission...), for the game to tell.
+static SAVE_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Why the last save failed, if one did since asked.
+pub fn take_save_error() -> Option<String> {
+    SAVE_ERROR.lock().ok()?.take()
+}
+
+/// Writes a file atomically: into a temp file, on the disk (not only in its cache, so a crash
+/// or a power cut does not leave it empty), then renamed over the old one.
 fn write(path: PathBuf, data: &[u8]) {
     let tmp = path.with_extension("tmp");
-    if fs::write(&tmp, data).is_ok() {
-        let _ = fs::rename(&tmp, &path);
+    let result = (|| {
+        let mut f = fs::File::create(&tmp)?;
+        std::io::Write::write_all(&mut f, data)?;
+        f.sync_all()?;
+        fs::rename(&tmp, &path)
+    })();
+    if let Err(e) = result {
+        if let Ok(mut last) = SAVE_ERROR.lock() {
+            *last = Some(format!("{}: {e}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())));
+        }
     }
 }
 

@@ -17,19 +17,57 @@ pub(in crate::game) struct Jei {
     page: usize,
 }
 
+/// The JEI's items: every item in the creative tabs' order, those matching the search (by
+/// name or key). Remembered for the search and language (it is drawn every frame).
+fn jei_items(search: &str) -> std::rc::Rc<Vec<ItemId>> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    thread_local! {
+        static MADE: RefCell<Option<((String, bool), Rc<Vec<ItemId>>)>> = const { RefCell::new(None) };
+    }
+    let wanted = (search.to_string(), crate::lang::is_hungarian());
+    MADE.with_borrow_mut(|made| {
+        if let Some((k, items)) = made.as_ref() {
+            if *k == wanted {
+                return items.clone();
+            }
+        }
+        let q = search_fold(search.trim());
+        let items: Rc<Vec<ItemId>> = Rc::new(
+            creative_grid(Tab::All, "")
+                .iter()
+                .flatten()
+                .copied()
+                .filter(|&id| q.is_empty() || search_fold(&name(id)).contains(&q) || search_fold(&key(id)).contains(&q))
+                .collect(),
+        );
+        *made = Some((wanted, items.clone()));
+        items
+    })
+}
+
 /// One way to get an item.
 enum Way {
     Craft([Vec<ItemId>; 9], u8),
     Smelt(ItemId, u8),
 }
 
-fn ways(item: ItemId) -> Vec<Way> {
-    let mut v: Vec<Way> = recipes_for(item)
-        .into_iter()
-        .map(|(g, n)| Way::Craft(g, n))
-        .collect();
-    v.extend(smelted_from(item).into_iter().map(|(i, t)| Way::Smelt(i, t)));
-    v
+fn ways(item: ItemId) -> std::rc::Rc<Vec<Way>> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    // (the recipes never change: each item's are worked out once, as it is looked at)
+    thread_local! {
+        static MADE: RefCell<crate::world::FastMap<ItemId, Rc<Vec<Way>>>> = RefCell::new(Default::default());
+    }
+    MADE.with_borrow_mut(|made| {
+        made.entry(item)
+            .or_insert_with(|| {
+                let mut v: Vec<Way> = recipes_for(item).into_iter().map(|(g, n)| Way::Craft(g, n)).collect();
+                v.extend(smelted_from(item).into_iter().map(|(i, t)| Way::Smelt(i, t)));
+                Rc::new(v)
+            })
+            .clone()
+    })
 }
 
 impl Game {
@@ -107,12 +145,7 @@ impl Game {
         self.jei_search_box(gx, by, pw - 8.0 * s, bh);
 
         // The items.
-        let q = search_fold(self.jei.search.trim());
-        let items: Vec<ItemId> = creative_items(Tab::All, "")
-            .into_iter()
-            .flatten()
-            .filter(|&id| q.is_empty() || search_fold(&name(id)).contains(&q) || search_fold(&key(id)).contains(&q))
-            .collect();
+        let items = jei_items(&self.jei.search);
         let gy = top;
         let visible = (((by - 3.0 * s - gy) / cell).floor().max(0.0)) as usize;
         let rows = items.len().div_ceil(cols);

@@ -139,7 +139,7 @@ fn search_fold(s: &str) -> String {
 
 /// Tabs along the top of the creative inventory, like Minecraft's: the item categories, and
 /// the player's own inventory at the right end.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(super) enum Tab {
     Blocks,
     Functional,
@@ -383,6 +383,31 @@ fn creative_items(tab: Tab, query: &str) -> Vec<Option<ItemId>> {
         grid.extend(g.into_iter().map(Some));
     }
     grid
+}
+
+/// `creative_items`, remembered: the grid is drawn every frame an inventory is open, and
+/// working it out goes through every item (by name, with a search). Made again for another
+/// tab, search or language.
+pub(super) fn creative_grid(tab: Tab, query: &str) -> std::rc::Rc<Vec<Option<ItemId>>> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    type Key = (Tab, String, bool);
+    thread_local! {
+        static MADE: RefCell<Vec<(Key, Rc<Vec<Option<ItemId>>>)>> = const { RefCell::new(Vec::new()) };
+    }
+    let key = (tab, query.to_string(), crate::lang::is_hungarian());
+    MADE.with_borrow_mut(|made| {
+        if let Some((_, grid)) = made.iter().find(|(k, _)| *k == key) {
+            return grid.clone();
+        }
+        let grid = Rc::new(creative_items(tab, query));
+        // (the few last ones: the tab and the JEI's list are drawn in the same frame)
+        if made.len() >= 8 {
+            made.remove(0);
+        }
+        made.push((key, grid.clone()));
+        grid
+    })
 }
 
 /// Draws an item icon with its stack count and durability bar. `size` is the icon size in pixels.
@@ -1518,7 +1543,7 @@ impl Game {
                 let fs = (s * 0.75).round().max(1.0);
                 let title_end = tx + self.ui.text_width(title, fs);
                 self.search_box(px, py, title_end);
-                let all = creative_items(tab, &self.creative_search);
+                let all = creative_grid(tab, &self.creative_search);
                 if all.iter().all(|i| i.is_none()) {
                     let (cx, cy) = at(9.0 + 4.5 * SLOT, 18.0 + 2.6 * SLOT);
                     self.ui.text_centered(

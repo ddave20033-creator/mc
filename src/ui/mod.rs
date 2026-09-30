@@ -490,6 +490,9 @@ impl Ui {
         self.time = time;
         self.age += dt;
         self.stagger = 0;
+        // Controls at rest are forgotten (their ids follow where they are: the map would
+        // grow with every resize and scroll); one hovered again starts from rest anyway.
+        self.anims.retain(|_, v| *v > 0.002);
         // The keys pressed since the last frame move the focus over the last frame's controls.
         let nav = &mut self.nav;
         nav.last_count = nav.count;

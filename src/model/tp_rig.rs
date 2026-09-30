@@ -35,6 +35,7 @@ fn rig(kind: GunKind) -> (&'static [Bone], &'static [Anim]) {
 
 /// Where the gun is held (a frame at the right fist on its grip, the muzzle toward -Z) and
 /// where the left hand is, in the player model's space, before the head's look turns them.
+#[derive(Clone, Copy)]
 pub struct Held {
     pub gun: Mat4,
     pub left_hand: Vec3,
@@ -43,8 +44,44 @@ pub struct Held {
     pub turn: f32,
 }
 
-/// The rig's pose for what the player is doing now.
+/// The rig's pose for what the player is doing now. Remembered for the last few poses: a
+/// player's model asks for it a dozen times a frame (its root, head, arms, the gun's points).
 pub fn held(kind: GunKind, p: &PlayerPose) -> Held {
+    use std::cell::RefCell;
+    type Key = (GunKind, [u32; 9]);
+    thread_local! {
+        static LAST: RefCell<Vec<(Key, Held)>> = const { RefCell::new(Vec::new()) };
+    }
+    let f = |v: f32| v.to_bits();
+    let opt = |v: Option<f32>| v.map_or(u32::MAX, f32::to_bits);
+    let key: Key = (
+        kind,
+        [
+            f(p.gun.aim),
+            f(p.sprint),
+            opt(p.gun.reload),
+            opt(p.gun.reload_time()),
+            opt(p.gun.shot),
+            f(p.time),
+            f(p.limb_swing),
+            f(p.limb_amount),
+            f(p.crouch),
+        ],
+    );
+    LAST.with_borrow_mut(|last| {
+        if let Some((_, h)) = last.iter().find(|(k, _)| *k == key) {
+            return *h;
+        }
+        let h = pose_held(kind, p);
+        if last.len() >= 8 {
+            last.remove(0);
+        }
+        last.push((key, h));
+        h
+    })
+}
+
+fn pose_held(kind: GunKind, p: &PlayerPose) -> Held {
     let (bones, anims) = rig(kind);
     let mut pose = vec![BonePose::default(); bones.len()];
     let smooth = |x: f32| {

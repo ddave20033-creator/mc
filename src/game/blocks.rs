@@ -283,19 +283,11 @@ impl Game {
         }
         self.stump_scan = EVERY;
         let c = self.player.pos.floor().as_ivec3();
-        let mut found = Vec::new();
         let w = &self.terrain.world;
-        for y in (c.y - 12).max(0)..(c.y + 12).min(HEIGHT as i32) {
-            for z in c.z - 32..=c.z + 32 {
-                for x in c.x - 32..=c.x + 32 {
-                    let p = IVec3::new(x, y, z);
-                    let b = w.geti(p);
-                    if is_stump_mark(b) {
-                        found.push((p, b));
-                    }
-                }
-            }
-        }
+        let found: Vec<(IVec3, u8)> = crate::world::terrain::listed_near(&self.terrain.stump_marks, c, 32, 12)
+            .map(|p| (p, w.geti(p)))
+            .filter(|&(_, b)| is_stump_mark(b))
+            .collect();
         for (p, b) in found {
             if self.random() >= EVERY / STAGE_SECS {
                 continue;

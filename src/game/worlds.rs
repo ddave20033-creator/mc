@@ -477,6 +477,10 @@ impl Game {
         if self.world_meta.is_none() {
             return;
         }
+        // (a save that failed since the last: the last one's chunks are written on a thread)
+        if let Some(e) = save::take_save_error() {
+            self.say(tf("save.failed", &[&e]), chat::RED);
+        }
         if self.is_client() {
             // A LAN player's things are kept by the host.
             if self.player.spawned {
@@ -547,6 +551,9 @@ impl Game {
             })
             .collect();
         self.saver.save(&folder, chunks);
+        if let Some(e) = save::take_save_error() {
+            self.say(tf("save.failed", &[&e]), chat::RED);
+        }
     }
 
     pub(super) fn quit_to_title(&mut self) {

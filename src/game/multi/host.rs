@@ -12,6 +12,9 @@ fn table_msg(p: IVec3, grid: &[Slot; 9]) -> Msg {
         slots: grid.to_vec(),
     }
 }
+/// Seconds a new connection has to say hello (`Msg::Hello`) before it is let go.
+const HELLO_WAIT: f32 = 10.0;
+
 impl Game {
     pub(super) fn players_dir(&self) -> Option<PathBuf> {
         let meta = self.world_meta.as_ref()?;
@@ -142,6 +145,7 @@ impl Game {
                     sent_container: None,
                     seen_chests: FastMap::default(),
                     leaving: false,
+                    age: 0.0,
                 });
             }
         }
@@ -150,7 +154,8 @@ impl Game {
         for p in host.peers.iter_mut() {
             let (msgs, open) = p.conn.poll();
             inbox.extend(msgs.into_iter().map(|m| (p.id, m)));
-            if !open {
+            p.age += dt;
+            if !open || (p.name.is_empty() && p.age > HELLO_WAIT) {
                 p.leaving = true;
             }
         }

@@ -205,8 +205,10 @@ pub fn sight_point() -> Vec3 {
 }
 
 /// A model point of the revolver at rest, in the old gun space.
+/// (The rest pose's bone matrices are made once.)
 pub fn rest_point_in_gun_space((b, p): (usize, Vec3)) -> Vec3 {
-    let (mats, _) = super::viewmodel::bone_matrices(vm::BONES, &rest_pose(), to_gun_space());
+    static REST: std::sync::OnceLock<Vec<Mat4>> = std::sync::OnceLock::new();
+    let mats = REST.get_or_init(|| super::viewmodel::bone_matrices(vm::BONES, &rest_pose(), to_gun_space()).0);
     mats[b].transform_point3(p)
 }
 

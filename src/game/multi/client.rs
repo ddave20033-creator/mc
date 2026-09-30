@@ -12,7 +12,27 @@ impl Game {
         };
         self.finder = None;
         self.settings.save();
-        match Conn::connect(&addr) {
+        // (looking the address up and connecting can take seconds: not on the window's thread)
+        let (tx, rx) = std::sync::mpsc::channel();
+        let target = addr.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Conn::connect(&target));
+        });
+        self.joining = Some((addr.clone(), rx));
+        self.net_message = tf("mp.connecting_to", &[&addr]);
+        self.screen = Screen::Connecting;
+    }
+
+    /// Connecting to a LAN game: once connected, says hello (the host answers with its world).
+    pub(super) fn poll_joining(&mut self) {
+        let Some((_, rx)) = &self.joining else { return };
+        let result = match rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(std::io::Error::other("?")),
+        };
+        self.joining = None;
+        match result {
             Ok(conn) => {
                 conn.send(&Msg::Hello {
                     proto: PROTOCOL,
@@ -25,8 +45,6 @@ impl Game {
                     item_targets: FastMap::default(),
                     container_known: None,
                 }));
-                self.net_message = tf("mp.connecting_to", &[&addr]);
-                self.screen = Screen::Connecting;
             }
             Err(e) => {
                 self.net_message = tf("mp.connect_failed", &[&e]);
@@ -37,6 +55,8 @@ impl Game {
 
     /// LAN player: leaves the game (saying goodbye to the host with the latest state).
     pub(in crate::game) fn leave_server(&mut self, message: Option<String>) {
+        // (still connecting: given up; the connection, if it is made, is dropped)
+        self.joining = None;
         if self.is_client() {
             if self.player.spawned {
                 let state = self.client_state();
@@ -331,8 +351,10 @@ impl Game {
             let (sky, blk) = (w.sky_estimate(c), w.block_light_estimate(c));
             self.particles.poof(c, sky, blk);
         }
+        // (found by id through a map: after a tree comes down there can be hundreds)
+        let at: FastMap<u32, usize> = self.mobs.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
         for s in &mobs {
-            match self.mobs.iter_mut().find(|m| m.id == s.id) {
+            match at.get(&s.id).map(|&i| &mut self.mobs[i]) {
                 Some(m) => m.apply_net(s),
                 None => {
                     if let Some(m) = Mob::from_net(s) {
@@ -348,9 +370,10 @@ impl Game {
             return;
         };
         c.item_targets.clear();
+        let at: FastMap<u32, usize> = self.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
         for s in &items {
             c.item_targets.insert(s.id, s.pos);
-            match self.items.iter_mut().find(|it| it.id == s.id) {
+            match at.get(&s.id).map(|&i| &mut self.items[i]) {
                 Some(it) => {
                     it.stack = s.stack;
                     it.age = s.age;

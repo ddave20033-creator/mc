@@ -22,9 +22,28 @@ pub struct Terrain {
     pub chests: FastMap<ChunkPos, Vec<IVec3>>,
     /// Gun stations of each meshed chunk (see `MeshData::gun_stations`).
     pub gun_stations: FastMap<ChunkPos, Vec<IVec3>>,
+    /// Torches and stump marks of each meshed chunk (see `MeshData::torches`).
+    pub torches: FastMap<ChunkPos, Vec<IVec3>>,
+    pub stump_marks: FastMap<ChunkPos, Vec<IVec3>>,
     /// LAN host: where the other players are. Chunks around them stay loaded (without
     /// meshes) so the world keeps running there.
     pub extra_centers: Vec<ChunkPos>,
+    /// The center and radius everything round was generated and meshed for, nothing left to
+    /// do: until either changes or a chunk needs meshing again, the walk round is skipped.
+    settled: Option<(ChunkPos, i32)>,
+}
+
+/// The positions in a per-chunk list (`Terrain::torches`...) within `reach` blocks across and
+/// `up` up and down of `c`.
+pub fn listed_near(map: &FastMap<ChunkPos, Vec<IVec3>>, c: IVec3, reach: i32, up: i32) -> impl Iterator<Item = IVec3> + '_ {
+    let (x0, x1) = ((c.x - reach).div_euclid(16), (c.x + reach).div_euclid(16));
+    let (z0, z1) = ((c.z - reach).div_euclid(16), (c.z + reach).div_euclid(16));
+    (x0..=x1)
+        .flat_map(move |cx| (z0..=z1).map(move |cz| (cx, cz)))
+        .filter_map(|p| map.get(&p))
+        .flatten()
+        .copied()
+        .filter(move |p| (p.x - c.x).abs() <= reach && (p.z - c.z).abs() <= reach && (p.y - c.y).abs() <= up)
 }
 
 /// Chunks kept loaded around each other LAN player (on the host).
@@ -61,12 +80,16 @@ impl Terrain {
             doors: FastMap::default(),
             chests: FastMap::default(),
             gun_stations: FastMap::default(),
+            torches: FastMap::default(),
+            stump_marks: FastMap::default(),
+            settled: None,
             extra_centers: Vec::new(),
         }
     }
 
     fn mark_dirty(&mut self, p: ChunkPos) {
         self.dirty.insert(p);
+        self.settled = None;
     }
 
     /// Re-mesh the chunk containing `b`. `wide` also re-meshes all 8 neighbours
@@ -137,20 +160,19 @@ impl Terrain {
                     if self.world.chunks.contains_key(&m.pos) {
                         self.meshed.insert(m.pos);
                         self.world.light.insert(m.pos, std::mem::take(&mut m.light));
-                        if m.doors.is_empty() {
-                            self.doors.remove(&m.pos);
-                        } else {
-                            self.doors.insert(m.pos, m.doors.clone());
-                        }
-                        if m.chests.is_empty() {
-                            self.chests.remove(&m.pos);
-                        } else {
-                            self.chests.insert(m.pos, m.chests.clone());
-                        }
-                        if m.gun_stations.is_empty() {
-                            self.gun_stations.remove(&m.pos);
-                        } else {
-                            self.gun_stations.insert(m.pos, m.gun_stations.clone());
+                        let pos = m.pos;
+                        for (map, list) in [
+                            (&mut self.doors, &m.doors),
+                            (&mut self.chests, &m.chests),
+                            (&mut self.gun_stations, &m.gun_stations),
+                            (&mut self.torches, &m.torches),
+                            (&mut self.stump_marks, &m.stump_marks),
+                        ] {
+                            if list.is_empty() {
+                                map.remove(&pos);
+                            } else {
+                                map.insert(pos, list.clone());
+                            }
                         }
                         out.push(TerrainEvent::Mesh(m));
                     }
@@ -177,6 +199,8 @@ impl Terrain {
             self.doors.remove(&p);
             self.chests.remove(&p);
             self.gun_stations.remove(&p);
+            self.torches.remove(&p);
+            self.stump_marks.remove(&p);
             self.world.light.remove(&p);
             self.dirty.remove(&p);
             out.push(TerrainEvent::Unload(p));
@@ -184,13 +208,18 @@ impl Terrain {
 
         // Schedule generation and meshing, nearest first.
         let cap = self.workers.threads * 3;
-        for i in 0..self.offsets.len() {
+        let walk = self.settled != Some((center, radius));
+        let mut unfinished = false;
+        for i in 0..if walk { self.offsets.len() } else { 0 } {
             let (dx, dz) = self.offsets[i];
             let r2 = dx * dx + dz * dz;
             if r2 > (radius + 1).pow(2) {
                 break;
             }
             let p = (center.0 + dx, center.1 + dz);
+            if !self.world.chunks.contains_key(&p) {
+                unfinished = true;
+            }
             if !self.world.chunks.contains_key(&p) && !self.generating.contains(&p) {
                 if let Some(c) = self.world.saved.remove(&p) {
                     self.world.chunks.insert(p, c);
@@ -232,6 +261,12 @@ impl Terrain {
                     self.in_flight += 1;
                 }
             }
+            if r2 <= radius * radius && (self.dirty.contains(&p) || self.meshing.contains(&p)) {
+                unfinished = true;
+            }
+        }
+        if walk && !unfinished {
+            self.settled = Some((center, radius));
         }
 
         // Around the other LAN players: generate or restore chunks (no meshes needed).

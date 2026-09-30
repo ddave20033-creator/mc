@@ -730,8 +730,24 @@ pub fn to_gun_space(r: &Rig) -> Mat4 {
 
 /// A model point of the gun at rest, in the old gun space (for the third-person muzzle,
 /// ejection port and laser, see `player::gun_point`).
+/// (The rest pose's bone matrices are made once for each rig: asked for every frame for the
+/// muzzle, the ejection port and the light.)
 pub fn rest_point_in_gun_space(r: &Rig, (b, p): (usize, Vec3)) -> Vec3 {
-    let (mats, _) = super::viewmodel::bone_matrices(r.bones, &rest_pose(r), to_gun_space(r));
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    thread_local! {
+        static REST: RefCell<Vec<(usize, Rc<Vec<Mat4>>)>> = const { RefCell::new(Vec::new()) };
+    }
+    let id = r.bones.as_ptr() as usize;
+    let mats = REST.with_borrow_mut(|rest| match rest.iter().find(|(k, _)| *k == id) {
+        Some((_, m)) => m.clone(),
+        None => {
+            let (mats, _) = super::viewmodel::bone_matrices(r.bones, &rest_pose(r), to_gun_space(r));
+            let m = Rc::new(mats);
+            rest.push((id, m.clone()));
+            m
+        }
+    });
     mats[b].transform_point3(p)
 }
 
