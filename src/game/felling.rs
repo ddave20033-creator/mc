@@ -19,7 +19,7 @@ use crate::world::mesh::{notch_at, set_notch, stump_heights, Notch};
 
 /// How deep (of the trunk's width) the cut goes before the trunk breaks.
 const FELL_DEPTH: f32 = 0.75;
-/// The most blocks a falling tree takes with it (a trunk in a wall of logs stays).
+/// The most blocks a falling tree takes with it.
 const MAX_BLOCKS: usize = 900;
 
 /// What the axe is stuck in, to come apart when it is pulled out: a stump, or a lying trunk
@@ -423,8 +423,16 @@ impl Game {
                 if r.y < p.y || seen.contains(&r) {
                     continue;
                 }
+                // Only what a tree is made of: its trunk straight up from the cut, and its
+                // branches within a tree's reach. Logs laid by a player (a wall, a house) or
+                // the trunk of another tree the branches touch stay.
                 let b = w.geti(r);
-                if is_log(b) && log_base(b) == kind {
+                let own = if is_branch(b) {
+                    (r.x - p.x).abs().max((r.z - p.z).abs()) <= crate::world::trees::REACH
+                } else {
+                    is_trunk(b) && r.x == p.x && r.z == p.z
+                };
+                if own && log_base(b) == kind {
                     seen.insert(r);
                     wood.push(r);
                 }

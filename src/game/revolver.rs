@@ -269,19 +269,19 @@ impl Game {
     }
 
     /// The speedloader lets go of its rounds into the chambers it was lined up with.
+    /// Only as many as the speedloader still holds (it may have been moved or swapped since it
+    /// was lined up).
     fn revolver_from_loader(&mut self, c: &Cylinder) {
-        let n = c.loader.count_ones() as u8;
+        let mut n = 0;
         if let Some(slot) = c.loader_slot {
             if let Some(l) = self.inventory.slots[slot].as_mut().filter(|s| s.item == SPEEDLOADER) {
-                let left = gun_rounds(l).saturating_sub(n);
-                set_gun_rounds(l, left);
+                n = gun_rounds(l).min(c.loader.count_ones() as u8);
+                set_gun_rounds(l, gun_rounds(l) - n);
             }
         }
         if let Some(g) = self.held_revolver_mut() {
-            for k in 0..6 {
-                if c.loader & (1 << k) != 0 {
-                    set_revolver_chamber(g, k, chamber::LIVE);
-                }
+            for k in (0..6).filter(|k| c.loader & (1 << k) != 0).take(n as usize) {
+                set_revolver_chamber(g, k, chamber::LIVE);
             }
         }
     }

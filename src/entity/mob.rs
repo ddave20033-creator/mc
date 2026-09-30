@@ -1059,9 +1059,20 @@ impl Mob {
         true
     }
 
-    /// Advances the mob by `dt` seconds.
+    /// Advances the mob by `dt` seconds: in steps of at most 1/20 s, so a slow frame does not
+    /// slow it down (the first thing that happens ends it).
     pub fn update(&mut self, dt: f32, w: &World, ctx: &MobCtx) -> MobEvent {
-        let dt = dt.min(0.05);
+        let steps = (dt / 0.05).ceil().max(1.0) as usize;
+        for _ in 0..steps {
+            let event = self.step(dt / steps as f32, w, ctx);
+            if !matches!(event, MobEvent::None) {
+                return event;
+            }
+        }
+        MobEvent::None
+    }
+
+    fn step(&mut self, dt: f32, w: &World, ctx: &MobCtx) -> MobEvent {
         if self.kind == MobKind::Dummy {
             return self.update_dummy(dt, w);
         }

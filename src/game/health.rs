@@ -7,7 +7,7 @@ impl Game {
     pub(super) fn damage(&mut self, amount: f32, cause: &'static str) {
         if self.creative()
             || self.spectator()
-            || self.invuln > 0.0 || self.screen == Screen::Dead || self.health <= 0.0
+            || self.screen == Screen::Dead || self.health <= 0.0
         {
             return;
         }
@@ -19,10 +19,20 @@ impl Game {
         } else {
             amount
         };
-        self.health -= amount;
-        self.invuln = 0.5;
-        self.hurt_time = 0.4;
-        self.last_damage = self.time;
+        // Just hurt (Minecraft's rule): only as much as it is harder than the hit before
+        // does anything, and the moment of invulnerability does not start again.
+        if self.invuln > 0.0 {
+            if amount <= self.last_hit {
+                return;
+            }
+            self.health -= amount - self.last_hit;
+            self.last_hit = amount;
+        } else {
+            self.health -= amount;
+            self.last_hit = amount;
+            self.invuln = 0.5;
+            self.hurt_time = 0.4;
+        }
         self.needs.exhaust(crate::entity::survival::cost::HURT);
         if self.health <= 0.0 {
             self.health = 0.0;
@@ -63,7 +73,9 @@ impl Game {
         self.death_message = t(cause).to_string();
         let msg = self.death_message.clone();
         self.say(msg, chat::WHITE);
-        // Everything you carry drops where you died (a crafting table keeps its own grid).
+        // Everything you carry drops where you died (a crafting table keeps its own grid); a
+        // magazine being put in goes back among it first.
+        self.cancel_reload();
         self.drag = None;
         self.stash_table(true);
         let mut loose: Vec<Stack> = self.craft.iter_mut().filter_map(|s| s.take()).collect();

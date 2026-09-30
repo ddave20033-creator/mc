@@ -4,7 +4,7 @@ use std::hash::{BuildHasherDefault, Hasher};
 
 pub const CHUNK: usize = 16;
 pub const HEIGHT: usize = 256;
-const VOL: usize = CHUNK * CHUNK * HEIGHT;
+pub const VOL: usize = CHUNK * CHUNK * HEIGHT;
 
 pub type ChunkPos = (i32, i32);
 

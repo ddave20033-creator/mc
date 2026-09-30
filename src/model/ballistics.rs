@@ -86,10 +86,6 @@ impl Cases {
         });
     }
 
-    pub fn clear(&mut self) {
-        self.list.clear();
-    }
-
     /// Falls, bounces off blocks (a little less each time) and comes to rest lying down.
     /// Returns where cases hit the ground hard enough to be heard: (where, which case, how
     /// hard 0..1).

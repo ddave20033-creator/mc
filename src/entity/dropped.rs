@@ -91,7 +91,7 @@ impl ItemEntity {
             self.vel.x *= 1.0 - dt * 2.0;
             self.vel.z *= 1.0 - dt * 2.0;
         } else {
-            self.vel.y -= 20.0 * dt;
+            self.vel.y = (self.vel.y - 20.0 * dt).max(-40.0);
         }
         // Pushed out of blocks it ends up inside (e.g. a placed block).
         if solid_at(w, self.pos + Vec3::Y * 0.1) {
@@ -99,6 +99,16 @@ impl ItemEntity {
             self.vel = Vec3::ZERO;
             return;
         }
+        // Moved in steps of under half a block, so a slow frame does not carry it through a
+        // floor or a wall.
+        let steps = ((self.vel.abs().max_element() * dt / 0.45).ceil() as usize).clamp(1, 16);
+        let dt = dt / steps as f32;
+        for _ in 0..steps {
+            self.move_step(dt, w);
+        }
+    }
+
+    fn move_step(&mut self, dt: f32, w: &World) {
         for axis in 0..3 {
             let mut p = self.pos;
             p[axis] += self.vel[axis] * dt;
@@ -160,13 +170,19 @@ impl FallingBlock {
     pub fn update(&mut self, dt: f32, w: &World) -> bool {
         self.vel_y = (self.vel_y - 20.0 * dt).max(-40.0);
         let next = self.pos.y + self.vel_y * dt;
-        let below = w.get(
-            self.pos.x.floor() as i32,
-            (next - 0.01).floor() as i32,
-            self.pos.z.floor() as i32,
-        );
-        if is_solid(below) || next < 0.0 {
-            self.pos.y = next.floor().max((next - 0.01).floor() + 1.0);
+        let (x, z) = (self.pos.x.floor() as i32, self.pos.z.floor() as i32);
+        // Every block passed this frame counts (a slow frame is several blocks of fall): it
+        // lands on the first solid one, not through a thin floor.
+        let from = (self.pos.y - 0.01).floor() as i32;
+        let to = (next - 0.01).floor() as i32;
+        for y in (to..=from).rev() {
+            if is_solid(w.get(x, y, z)) {
+                self.pos.y = y as f32 + 1.0;
+                return true;
+            }
+        }
+        if next < 0.0 {
+            self.pos.y = next.floor().max(to as f32 + 1.0);
             return true;
         }
         self.pos.y = next;

@@ -414,7 +414,7 @@ impl Game {
                 continue;
             }
             let event = self.mobs[i].update(dt, &self.terrain.world, &ctx);
-            if p.y < -64.0 {
+            if self.mobs[i].pos.y < -64.0 {
                 self.mobs.swap_remove(i);
                 continue;
             }

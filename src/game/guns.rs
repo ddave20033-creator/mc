@@ -106,7 +106,7 @@ pub(super) struct ReloadPlan {
     rack: bool,
     old_empty: bool,
     pub(super) length: f32,
-    new_mag: Option<Stack>,
+    pub(super) new_mag: Option<Stack>,
     out_done: bool,
     in_done: bool,
     rack_done: bool,
@@ -264,6 +264,25 @@ impl Game {
 
     /// Aiming, reloading, the bolt or pump, recoil coming back, bullets, spent cases and the
     /// laser, every frame.
+    /// What the shots left in the world goes on, whatever the player is doing (dead, asleep,
+    /// watching): bullets in flight, falling cases, the other players' flashes, the holes.
+    pub(super) fn update_shots(&mut self, dt: f32) {
+        self.update_bullets(dt);
+        for (at, kind, hard) in self.guns.cases.update(dt, &self.terrain.world) {
+            self.audio.play(kind.sound(), Some(at), 0.06 + 0.18 * hard);
+        }
+        for f in &mut self.guns.remote_flashes {
+            f.0 -= dt / 0.06;
+        }
+        self.guns.remote_flashes.retain(|f| f.0 > 0.0);
+        // Holes go with their block, and after a while.
+        let (time, world) = (self.time, &self.terrain.world);
+        self.guns
+            .holes
+            .retain(|h| time - h.born < HOLE_LIFE && world.geti(h.block) == h.id);
+        self.guns.flash_light.0 = (self.guns.flash_light.0 - dt / 0.08).max(0.0);
+    }
+
     pub(super) fn update_guns(&mut self, dt: f32, control: bool) {
         // A spectator's hands are empty; the shots, cases and holes around still go on.
         let held = self.held_gun().filter(|_| !self.spectator());
@@ -386,11 +405,6 @@ impl Game {
             None => GunAnim { chambered: true, ..GunAnim::default() },
         };
 
-        self.update_bullets(dt);
-        for (at, kind, hard) in self.guns.cases.update(dt, &self.terrain.world) {
-            self.audio.play(kind.sound(), Some(at), 0.06 + 0.18 * hard);
-        }
-
         // The flash fades in a moment; a hot barrel smokes.
         if let Some(f) = &mut self.guns.flash {
             f.0 -= dt / 0.06;
@@ -398,16 +412,6 @@ impl Game {
         if self.guns.flash.is_some_and(|f| f.0 <= 0.0) {
             self.guns.flash = None;
         }
-        for f in &mut self.guns.remote_flashes {
-            f.0 -= dt / 0.06;
-        }
-        self.guns.remote_flashes.retain(|f| f.0 > 0.0);
-        // Holes go with their block, and after a while.
-        let (time, world) = (self.time, &self.terrain.world);
-        self.guns
-            .holes
-            .retain(|h| time - h.born < HOLE_LIFE && world.geti(h.block) == h.id);
-        self.guns.flash_light.0 = (self.guns.flash_light.0 - dt / 0.08).max(0.0);
         self.guns.heat = (self.guns.heat - dt * 0.5).max(0.0);
         self.guns.wisp -= dt;
         if held.is_some() && self.guns.heat > 2.0 && self.guns.wisp <= 0.0 {
@@ -589,8 +593,12 @@ impl Game {
         if self.action_cooldown > 0.0 || self.guns.reload.is_some() {
             return;
         }
+        // Firing ends looking it over.
+        self.guns.inspect = None;
         let slot = self.hotbar_slot;
-        self.action_cooldown = stats.fire_delay;
+        // The time overshot since the gun was ready counts (up to a slow frame's worth), so
+        // the rate of fire does not drop with the frame rate.
+        self.action_cooldown = stats.fire_delay + self.action_cooldown.max(-0.05);
         // Firing ends a sprint (the gun comes up to shoot), for a moment after.
         self.guns.no_sprint = 0.4;
         self.w_sprint = false;
@@ -621,18 +629,19 @@ impl Game {
             return;
         }
         let dirt = gun.damage as f32 / stats.dirt_max as f32;
+        // Dirt makes it jam more and more often; a completely dirty one does not fire at all. A
+        // jam comes before the revolver's cylinder turns, so it costs no round.
+        if dirt >= 1.0 || (dirt > 0.6 && self.random() < (dirt - 0.6) * 1.2) {
+            self.gun_message(t("gun.jammed"));
+            self.audio.play(Sound::DryFire, None, 0.8);
+            self.hand.dry_fire();
+            return;
+        }
         // The revolver's next chamber comes under the hammer: only a live round there fires.
         if revolver && !self.revolver_pull() {
             if gun_rounds(&gun) == 0 {
                 self.gun_message(t("gun.no_ammo"));
             }
-            self.audio.play(Sound::DryFire, None, 0.8);
-            self.hand.dry_fire();
-            return;
-        }
-        // Dirt makes it jam more and more often; a completely dirty one does not fire at all.
-        if dirt >= 1.0 || (dirt > 0.6 && self.random() < (dirt - 0.6) * 1.2) {
-            self.gun_message(t("gun.jammed"));
             self.audio.play(Sound::DryFire, None, 0.8);
             self.hand.dry_fire();
             return;
@@ -661,8 +670,10 @@ impl Game {
 
         let eye = self.player.eye();
         // The shot goes where the gun points (the scope's middle, with one), not where the
-        // view looks.
-        let look = self.guns.gun_dir.unwrap_or_else(|| look_dir(self.yaw, self.pitch));
+        // view looks; but not where a gun being looked over or carried at a run points (the
+        // barrel far off the view: it would go sideways or back).
+        let view = look_dir(self.yaw, self.pitch);
+        let look = self.guns.gun_dir.filter(|d| d.dot(view) > 0.985).unwrap_or(view);
         let aim = smoothstep(0.0, 1.0, self.guns.aim);
         let spread = shot_spread(stats, mods, aim, self.guns.bloom);
         self.guns.bloom = (self.guns.bloom + BLOOM_PER_SHOT).min(BLOOM_MAX);

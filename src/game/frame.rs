@@ -163,6 +163,10 @@ impl Game {
 
         let size = self.window.inner_size();
         if size.width == 0 || size.height == 0 {
+            // Minimized: nothing is drawn, but a LAN game runs on for the other players.
+            if self.net.is_some() {
+                self.update(dt);
+            }
             self.end_input();
             return;
         }

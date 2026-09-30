@@ -795,6 +795,9 @@ fn key_label(id: &str) -> &'static str {
         "zoom" => "key.zoom",
         "inventory" => "key.inventory",
         "drop" => "key.drop",
+        "reload" => "key.reload",
+        "inspect" => "key.inspect",
+        "gunlight" => "key.gunlight",
         "chat" => "key.chat",
         "command" => "key.command",
         "playerlist" => "key.playerlist",
@@ -811,7 +814,8 @@ fn key_label(id: &str) -> &'static str {
         "hotbar6" => "key.hotbar6",
         "hotbar7" => "key.hotbar7",
         "hotbar8" => "key.hotbar8",
-        _ => "key.hotbar9",
+        "hotbar9" => "key.hotbar9",
+        _ => "",
     }
 }
 
@@ -1429,5 +1433,12 @@ mod menu_player_tests {
         ui.mouse = Vec2::new(cx + 70.0, 500.0);
         ui.pressed = false;
         assert_ne!(first, frame(&mut ui, &mut preview));
+    }
+
+    #[test]
+    fn every_key_bind_has_its_own_name() {
+        for (_, id, _) in crate::keys::BINDS {
+            assert_eq!(key_label(id), format!("key.{id}"));
+        }
     }
 }

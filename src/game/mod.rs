@@ -181,7 +181,9 @@ pub struct Game {
     /// Blocking with a sword (right mouse button held).
     blocking: bool,
     hurt_time: f32,
-    last_damage: f32,
+    /// The hit that started the moment of invulnerability (`invuln`): a harder one in it
+    /// still does the difference.
+    last_hit: f32,
     /// Hunger, thirst and effects.
     needs: Needs,
     /// Eating or drinking: the item and seconds spent so far.
@@ -327,8 +329,9 @@ pub struct Game {
     mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
     mob_spawn_timer: f32,
-    /// The mob the crosshair is on (index into `mobs`), when it is closer than any block.
-    mob_target: Option<usize>,
+    /// The mob the crosshair is on (its id; `target_mob` finds it), when it is closer than any
+    /// block. An id, not an index: a mob removed earlier in the frame must not shift it.
+    mob_target: Option<u32>,
     saplings: Vec<(IVec3, f32)>,
     /// Seconds until the next look round for stump marks to grow over.
     stump_scan: f32,
@@ -518,7 +521,7 @@ impl Game {
             invuln: 0.0,
             blocking: false,
             hurt_time: 0.0,
-            last_damage: 0.0,
+            last_hit: 0.0,
             needs: Needs::new(),
             using: None,
             fall_peak: 0.0,

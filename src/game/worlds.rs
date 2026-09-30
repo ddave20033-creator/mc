@@ -283,6 +283,14 @@ impl Game {
             &mut self.items,
             &mut self.mobs,
         );
+        // Ids are not saved: every loaded mob and item gets a fresh one (hits, bites and LAN
+        // updates find them by it).
+        for i in 0..self.mobs.len() {
+            self.mobs[i].id = self.entity_id();
+        }
+        for i in 0..self.items.len() {
+            self.items[i].id = self.entity_id();
+        }
         self.falling.clear();
         // The cuts in its trunks; nothing of the last world's felling.
         felling::load_notches(&save::load_notches(&meta.folder));
@@ -296,7 +304,28 @@ impl Game {
         self.cursor = None;
         self.craft = [None; 9];
         self.bench_anims.clear();
-        self.guns.cases.clear();
+        // Nothing of the last world's shots, grenades, fishing or effects comes along (a grenade
+        // thrown just before leaving would blow up here).
+        self.guns = Default::default();
+        self.grenades = Default::default();
+        self.fishing = Default::default();
+        self.particles = Particles::new();
+        self.station = None;
+        self.craft_out = None;
+        self.craft_fx = None;
+        self.door_swing.clear();
+        self.bench_drawer.clear();
+        self.loader_feed.clear();
+        self.table_sides.clear();
+        self.furnace_heard.clear();
+        self.torches.clear();
+        self.furnace_part = None;
+        self.furnace_hold = false;
+        self.player_target = None;
+        self.blocking = false;
+        self.fall_peak = 0.0;
+        self.fire_tick = 0.0;
+        self.drown_tick = 0.0;
         self.drag = None;
         self.mining = None;
         self.target = None;

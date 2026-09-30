@@ -36,13 +36,21 @@ impl Game {
         }
     }
 
+    /// The mob the crosshair is on, as an index into `mobs` (if it is still there).
+    pub(super) fn target_mob(&self) -> Option<usize> {
+        let id = self.mob_target?;
+        self.mobs.iter().position(|m| m.id == id)
+    }
+
     /// The inventory as it is saved: items in the 2x2 grid or on the cursor count as carried
     /// (an open crafting table keeps its own grid).
     pub(super) fn carried_slots(&self) -> [Slot; crate::item::inventory::SIZE] {
         let at_table = matches!(self.screen, Screen::Container(Container::Crafting(_)));
         let mut slots = self.inventory.slots;
         let grid = if at_table { &[][..] } else { &self.craft[..] };
-        let held = [self.cursor, self.craft_out];
+        // A magazine on its way into a gun (a reload going on) is still the player's.
+        let reloading = self.guns.reload.is_some() && !self.creative();
+        let held = [self.cursor, self.craft_out, self.guns.plan.new_mag.filter(|_| reloading)];
         for s in grid.iter().chain(held.iter()).flatten() {
             let _ = inventory::add_to(&mut slots, *s);
         }
@@ -96,7 +104,7 @@ impl Game {
             return;
         }
         let sneaking = self.sneaking();
-        if let Some(i) = self.mob_target {
+        if let Some(i) = self.target_mob() {
             if held == SHEARS && self.mobs[i].can_shear() {
                 self.shear(i);
                 return;

@@ -139,7 +139,7 @@ impl Game {
                 .pick_player(eye, dir, reach)
                 .filter(|&(_, d)| d < block_dist && mob.is_none_or(|(_, md)| d < md));
             self.player_target = player.map(|(id, _)| id);
-            self.mob_target = mob.filter(|_| player.is_none()).map(|(i, _)| i);
+            self.mob_target = mob.filter(|_| player.is_none()).map(|(i, _)| self.mobs[i].id);
             if self.mob_target.is_some() || self.player_target.is_some() {
                 self.target = None;
             }
@@ -148,7 +148,6 @@ impl Game {
         self.aim_lying_logs(control && self.mob_target.is_none() && self.player_target.is_none());
         self.action_cooldown -= dt;
         self.update_guns(dt, control);
-        self.update_grenades(dt);
         let book = self.book_in_hand();
         self.update_grenade_hold(dt, control && !book);
         self.update_fishing(dt, control);
@@ -219,7 +218,7 @@ impl Game {
             && !self.blocking
             && !gun
         {
-            if let Some(i) = self.mob_target {
+            if let Some(i) = self.target_mob() {
                 self.attack(Some(i), None);
             }
             if let Some(id) = self.player_target {
@@ -301,6 +300,10 @@ impl Game {
             *k > 0.0 || target > 0.0
         });
 
+        // Shots and thrown grenades go on whatever the player is doing (dead, asleep).
+        self.update_shots(dt);
+        self.update_grenades(dt);
+
         self.furnace_fx(dt);
         let mut loops = self.furnace_sounds();
         loops.extend(self.grenade_sounds());
@@ -330,11 +333,14 @@ impl Game {
         // Furnaces: cook, smelt, and switch between lit/unlit blocks.
         self.update_furnaces(dt);
 
-        // Saplings grow into trees.
+        // Saplings grow into trees. One whose tree would reach into a chunk not loaded waits
+        // (ready) until it is: the tree is neither cut off nor the sapling forgotten.
         let mut grow = Vec::new();
+        let world = &self.terrain.world;
+        let area_loaded = |p: IVec3| [(-8, -8), (-8, 8), (8, -8), (8, 8)].iter().all(|&(dx, dz)| world.is_loaded(p.x + dx, p.z + dz));
         for (p, t) in self.saplings.iter_mut() {
-            *t -= dt;
-            if *t <= 0.0 {
+            *t = (*t - dt).max(0.0);
+            if *t <= 0.0 && area_loaded(*p) {
                 grow.push(*p);
             }
         }

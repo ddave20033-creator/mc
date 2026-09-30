@@ -80,17 +80,6 @@ impl Game {
                 let address = format!("{ip}:{}", server.port);
                 self.say(tf("lan.opened", &[&address]), chat::YELLOW);
                 self.terrain.world.log = Some(Vec::new());
-                // Existing mobs and items get ids for the players.
-                for i in 0..self.mobs.len() {
-                    if self.mobs[i].id == 0 {
-                        self.mobs[i].id = self.entity_id();
-                    }
-                }
-                for i in 0..self.items.len() {
-                    if self.items[i].id == 0 {
-                        self.items[i].id = self.entity_id();
-                    }
-                }
                 self.net = Some(Net::Host(Host {
                     server,
                     peers: Vec::new(),

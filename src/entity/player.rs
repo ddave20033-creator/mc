@@ -223,6 +223,8 @@ impl Player {
         let target = if self.sneaking { 1.0 } else { 0.0 };
         self.crouch += (target - self.crouch) * (1.0 - (-14.0 * dt).exp());
 
+        // The upward speed the move uses (see falling, below).
+        let mut mean_vy = None;
         if self.flying {
             let speed = if input.sprint { 22.0 } else { 11.0 };
             let mut target = wish * speed;
@@ -266,14 +268,15 @@ impl Player {
                     }
                 }
             } else {
-                self.vel.y = (self.vel.y - 28.0 * dt).max(-60.0);
-                if input.up && self.on_ground {
-                    self.vel.y = 8.7;
-                }
+                // Moved by the mean of the speed before and after gravity this frame: a jump
+                // goes as high at any frame rate.
+                let before = if input.up && self.on_ground { 8.7 } else { self.vel.y };
+                self.vel.y = (before - 28.0 * dt).max(-60.0);
+                mean_vy = Some((before + self.vel.y) * 0.5);
             }
         }
 
-        let delta = self.vel * dt;
+        let delta = Vec3::new(self.vel.x, mean_vy.unwrap_or(self.vel.y), self.vel.z) * dt;
         let steps = (delta.abs().max_element() / 0.4).ceil().max(1.0) as i32;
         let mut d = delta / steps as f32;
         // The collision epsilon can make on_ground false for one frame at high FPS.

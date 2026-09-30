@@ -552,9 +552,14 @@ pub fn rle(data: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Expands run-length chunk data. Stops at one chunk's size, so a bad or hostile message cannot
+/// make it allocate more (the too-long result is then rejected by `ChunkData::from_raw`).
 pub fn unrle(data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(crate::world::chunk::VOL);
     for pair in data.chunks_exact(2) {
+        if out.len() + pair[0] as usize > crate::world::chunk::VOL {
+            return Vec::new();
+        }
         out.extend(std::iter::repeat_n(pair[1], pair[0] as usize));
     }
     out
