@@ -7,7 +7,8 @@
 //! bone turns about its origin (Euler order ZYX, degrees); an animation adds its position and
 //! rotation to the bone's and sets its scale, and several animations add up.
 
-use crate::world::mesh::{corner_pos, corner_uv, Vertex, CORNERS, FACE_N};
+use crate::model::prim::{self, BoxUv, Paint};
+use crate::world::mesh::{Vertex, FACE_N};
 use glam::{Mat4, Vec3};
 
 pub struct Bone {
@@ -215,26 +216,17 @@ fn face_of(n: Vec3) -> u8 {
 /// One cube with transform `m` (model space to the world), its faces on the texture layers
 /// from `first_layer`.
 pub fn emit_cube(out: &mut Vec<Vertex>, c: &Cube, m: Mat4, first_layer: u32, light: [u8; 4], fl: u8) {
-    let (from, to) = (Vec3::from(c.from), Vec3::from(c.to));
-    for (face, f) in c.faces.iter().enumerate() {
-        if f.page == u8::MAX {
-            continue;
-        }
-        let normal = face_of(m.transform_vector3(Vec3::from(FACE_N[face].map(|v| v as f32))));
-        let mut quad = [Vertex::default(); 4];
-        for (i, &(su, sv)) in CORNERS.iter().enumerate() {
-            let p = from + (to - from) * Vec3::from(corner_pos(face, su, sv));
-            let [cu, cv] = corner_uv(su, sv);
-            quad[i] = Vertex {
-                pos: m.transform_point3(p).to_array(),
-                uv: [f.uv[0] + (f.uv[2] - f.uv[0]) * cu, f.uv[1] + (f.uv[3] - f.uv[1]) * cv],
-                layer: (first_layer + f.page as u32) as f32,
-                light: [light[0], light[1], light[2], normal],
-                tint: [255, 255, 255, fl],
-            };
-        }
-        out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
-    }
+    let uv = BoxUv::Rects(c.faces.map(|f| f.uv));
+    prim::cuboid(out, m, Vec3::from(c.from), Vec3::from(c.to), uv, |face| {
+        let f = c.faces[face];
+        (f.page != u8::MAX).then(|| Paint {
+            layer: first_layer + f.page as u32,
+            light,
+            face: face_of(m.transform_vector3(Vec3::from(FACE_N[face].map(|v| v as f32)))),
+            tint: [255; 3],
+            fl,
+        })
+    });
 }
 
 #[cfg(test)]

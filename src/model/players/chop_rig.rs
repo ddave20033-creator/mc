@@ -147,14 +147,48 @@ impl ChopPose {
         ChopPose { mats: mats.collect() }
     }
 
-    pub fn bone(&self, name: &str) -> Mat4 {
-        find_bone(data::BONES, name).map_or(Mat4::IDENTITY, |i| self.mats[i])
+    /// Where one of the bones in `bone` is.
+    fn bone(&self, b: usize) -> Mat4 {
+        BONE_IDS[b].map_or(Mat4::IDENTITY, |i| self.mats[i])
     }
 
     pub fn axe(&self) -> Mat4 {
-        self.bone("axe")
+        self.bone(bone::AXE)
     }
 }
+
+/// The rig's bones the player and the axe are drawn on (indices into `BONE_NAMES`).
+mod bone {
+    pub const AXE: usize = 0;
+    pub const RIGHT_ARM: usize = 1;
+    pub const RIGHT_HAND: usize = 2;
+    pub const LEFT_ARM: usize = 3;
+    pub const LEFT_HAND: usize = 4;
+    pub const TORSO: usize = 5;
+    pub const HEAD: usize = 6;
+    pub const RIGHT_LEG: usize = 7;
+    pub const RIGHT_FOOT: usize = 8;
+    pub const LEFT_LEG: usize = 9;
+    pub const LEFT_FOOT: usize = 10;
+}
+
+const BONE_NAMES: [&str; 11] = [
+    "axe",
+    "right_arm",
+    "right_hand",
+    "left_arm",
+    "left_hand",
+    "torso",
+    "head",
+    "right_leg",
+    "right_foot",
+    "left_leg",
+    "left_foot",
+];
+
+/// Those bones' places in the rig, looked up by name once.
+static BONE_IDS: std::sync::LazyLock<[Option<usize>; 11]> =
+    std::sync::LazyLock::new(|| BONE_NAMES.map(|name| find_bone(data::BONES, name)));
 
 /// The rig in the world: standing at `feet`, turned the way the head looks (`yaw`, as the
 /// player model's), the swing tipped a little up or down with where it looks (`pitch`) about
@@ -210,47 +244,48 @@ pub fn emit(
     light: [u8; 4],
     fl: u8,
 ) {
-    use crate::model::player::{ARM, BODY, HEAD, LEG};
-    let skinned = |layers: [u32; 6]| layers.map(|l| crate::world::textures::skin_layer(l, skin));
+    use crate::model::player::{skinned, ARM, BODY, HEAD, LEG};
+    use bone::*;
     let v = Vec3::new;
     // (bone, lower corner, upper corner, layers, rows of the texture on its sides); the
     // upper halves of the limbs reach 2 px past the joint, the lower ones a hair thinner.
-    let boxes: [(&str, Vec3, Vec3, [u32; 6], [f32; 2]); 10] = [
-        ("right_arm", v(4.0, 16.0, -2.0), v(8.0, 24.0, 2.0), ARM, [0.0, 0.67]),
-        ("right_hand", v(4.04, 12.0, -1.96), v(7.96, 18.0, 1.96), ARM, [0.5, 1.0]),
-        ("left_arm", v(-8.0, 16.0, -2.0), v(-4.0, 24.0, 2.0), ARM, [0.0, 0.67]),
-        ("left_hand", v(-7.96, 12.0, -1.96), v(-4.04, 18.0, 1.96), ARM, [0.5, 1.0]),
-        ("torso", v(-4.0, 12.0, -2.0), v(4.0, 24.0, 2.0), BODY, [0.0, 1.0]),
-        ("head", v(-4.0, 24.0, -4.0), v(4.0, 32.0, 4.0), HEAD, [0.0, 1.0]),
-        ("right_leg", v(-0.1, 4.0, -2.0), v(3.9, 12.0, 2.0), LEG, [0.0, 0.67]),
-        ("right_foot", v(-0.06, 0.0, -1.96), v(3.86, 6.0, 1.96), LEG, [0.5, 1.0]),
-        ("left_leg", v(-3.9, 4.0, -2.0), v(0.1, 12.0, 2.0), LEG, [0.0, 0.67]),
-        ("left_foot", v(-3.86, 0.0, -1.96), v(0.06, 6.0, 1.96), LEG, [0.5, 1.0]),
+    let boxes: [(usize, Vec3, Vec3, [u32; 6], [f32; 2]); 10] = [
+        (RIGHT_ARM, v(4.0, 16.0, -2.0), v(8.0, 24.0, 2.0), ARM, [0.0, 0.67]),
+        (RIGHT_HAND, v(4.04, 12.0, -1.96), v(7.96, 18.0, 1.96), ARM, [0.5, 1.0]),
+        (LEFT_ARM, v(-8.0, 16.0, -2.0), v(-4.0, 24.0, 2.0), ARM, [0.0, 0.67]),
+        (LEFT_HAND, v(-7.96, 12.0, -1.96), v(-4.04, 18.0, 1.96), ARM, [0.5, 1.0]),
+        (TORSO, v(-4.0, 12.0, -2.0), v(4.0, 24.0, 2.0), BODY, [0.0, 1.0]),
+        (bone::HEAD, v(-4.0, 24.0, -4.0), v(4.0, 32.0, 4.0), HEAD, [0.0, 1.0]),
+        (RIGHT_LEG, v(-0.1, 4.0, -2.0), v(3.9, 12.0, 2.0), LEG, [0.0, 0.67]),
+        (RIGHT_FOOT, v(-0.06, 0.0, -1.96), v(3.86, 6.0, 1.96), LEG, [0.5, 1.0]),
+        (LEFT_LEG, v(-3.9, 4.0, -2.0), v(0.1, 12.0, 2.0), LEG, [0.0, 0.67]),
+        (LEFT_FOOT, v(-3.86, 0.0, -1.96), v(0.06, 6.0, 1.96), LEG, [0.5, 1.0]),
     ];
-    for (bone, lo, hi, layers, rows) in boxes {
-        let arm = bone.ends_with("_arm") || bone.ends_with("_hand");
+    for (b, lo, hi, layers, rows) in boxes {
+        let arm = matches!(b, RIGHT_ARM | RIGHT_HAND | LEFT_ARM | LEFT_HAND);
+        let head = b == bone::HEAD;
         let shown = match parts {
             Parts::All => true,
             Parts::Arms => arm,
-            Parts::Body => !arm && bone != "head",
+            Parts::Body => !arm && !head,
         };
         if shown {
-            let m = if bone == "head" { world * pose.bone(bone) * head_shake(shake) } else { world * pose.bone(bone) };
-            crate::model::emit_box_rows(out, m, lo, hi, skinned(layers), [tint; 6], light, fl, rows);
+            let m = if head { world * pose.bone(b) * head_shake(shake) } else { world * pose.bone(b) };
+            crate::model::emit_box_rows(out, m, lo, hi, skinned(layers, skin), [tint; 6], light, fl, rows);
         }
     }
     // The armor on the same bones (each frame at its joint, as `build_player` has them; seen
     // from its own eyes only the body's).
     if parts != Parts::Arms {
-        let at = |bone: &str, x: f32, y: f32| world * pose.bone(bone) * Mat4::from_translation(Vec3::new(x, y, 0.0));
+        let at = |b: usize, x: f32, y: f32| world * pose.bone(b) * Mat4::from_translation(Vec3::new(x, y, 0.0));
         let all = parts == Parts::All;
         let frames = crate::model::player::ArmorFrames {
-            head: all.then(|| at("head", 0.0, 24.0) * Mat4::from_rotation_y(shake)),
-            body: at("torso", 0.0, 24.0),
-            right_arm: all.then(|| at("right_arm", 5.0, 22.0)),
-            left_arm: all.then(|| at("left_arm", -5.0, 22.0)),
-            legs: [at("right_leg", 1.9, 12.0), at("left_leg", -1.9, 12.0)],
-            shins: [at("right_foot", 1.9, 12.0), at("left_foot", -1.9, 12.0)],
+            head: all.then(|| at(bone::HEAD, 0.0, 24.0) * Mat4::from_rotation_y(shake)),
+            body: at(TORSO, 0.0, 24.0),
+            right_arm: all.then(|| at(RIGHT_ARM, 5.0, 22.0)),
+            left_arm: all.then(|| at(LEFT_ARM, -5.0, 22.0)),
+            legs: [at(RIGHT_LEG, 1.9, 12.0), at(LEFT_LEG, -1.9, 12.0)],
+            shins: [at(RIGHT_FOOT, 1.9, 12.0), at(LEFT_FOOT, -1.9, 12.0)],
         };
         crate::model::player::emit_armor(out, &frames, armor, tint, light, fl);
     }

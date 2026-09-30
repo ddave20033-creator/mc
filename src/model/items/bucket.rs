@@ -4,6 +4,7 @@
 //! around and swinging back, never far enough to spill.
 
 use crate::item::{ItemId, BUCKET, LAVA_BUCKET, WATER_BUCKET};
+use crate::model::prim::{tri_at, Paint, Sides};
 use crate::world::mesh::{flags, Vertex};
 use crate::world::textures::tex;
 use glam::{Mat4, Vec2, Vec3};
@@ -388,19 +389,9 @@ struct Quads<'a> {
 impl Quads<'_> {
     fn tri(&mut self, p: [Vec3; 3], uv: [[f32; 2]; 3], facing: Vec3, layer: u32, tint: [u8; 3]) {
         let n = (p[1] - p[0]).cross(p[2] - p[0]);
-        let face = face_index(facing);
-        let v: [Vertex; 3] = std::array::from_fn(|i| Vertex {
-            pos: self.m.transform_point3(p[i]).to_array(),
-            uv: uv[i],
-            layer: layer as f32,
-            light: [self.light[0], self.light[1], self.light[2], face],
-            tint: [tint[0], tint[1], tint[2], self.fl],
-        });
-        if (n.dot(facing) < 0.0) != self.flip {
-            self.out.extend_from_slice(&[v[0], v[2], v[1]]);
-        } else {
-            self.out.extend_from_slice(&v);
-        }
+        let paint = Paint { layer, light: self.light, face: face_index(facing), tint, fl: self.fl };
+        let sides = if (n.dot(facing) < 0.0) != self.flip { Sides::Back } else { Sides::Front };
+        tri_at(self.out, p.map(|p| self.m.transform_point3(p)), uv, &paint, sides);
     }
 
     fn quad(&mut self, p: [Vec3; 4], uv: [[f32; 2]; 4], facing: Vec3, layer: u32, tint: [u8; 3]) {

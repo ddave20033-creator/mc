@@ -20,6 +20,7 @@
 //! (`super::skin_pages`).
 
 use crate::entity::skin_pages::{face_uv, SkinPages};
+use crate::model::prim::{quad_at, Paint, Sides};
 use crate::util::{ray_box, vertex_light, wrap_angle, Rng};
 use crate::world::mesh::{flags, Vertex};
 use crate::world::textures::tex;
@@ -1530,18 +1531,9 @@ fn emit_paged(
             let (pa, pb) = if ua <= ub { (l, r) } else { (r, l) };
             let (qa, qb) = if va <= vb { (t, bt) } else { (bt, t) };
             let uvs = [[pb, qa], [pa, qa], [pa, qb], [pb, qb]];
-            let quad: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-                pos: at(uvs[i][0], uvs[i][1]).to_array(),
-                uv: skin.page_uv(piece, uvs[i][0], uvs[i][1]),
-                layer: (base + piece.page) as f32,
-                light,
-                tint: [tint[0], tint[1], tint[2], flags::ENTITY],
-            });
-            if outward {
-                out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
-            } else {
-                out.extend_from_slice(&[quad[0], quad[2], quad[1], quad[0], quad[3], quad[2]]);
-            }
+            let paint = Paint { layer: base + piece.page, light, face: light[3], tint, fl: flags::ENTITY };
+            let sides = if outward { Sides::Front } else { Sides::Back };
+            quad_at(out, uvs.map(|[u, v]| at(u, v)), uvs.map(|[u, v]| skin.page_uv(piece, u, v)), &paint, sides);
         }
     }
 }

@@ -2,7 +2,7 @@
 //! and attack animations.
 //! Model space is in pixels (1 px = 1/16 of the model height unit), Y up, facing -Z.
 
-use crate::model::{emit_box, emit_box_rows};
+use crate::model::emit_box;
 use crate::item::{icon, tool_of, Icon, ItemId, NONE, STICK};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
@@ -523,6 +523,17 @@ fn blend_down(y: f32, from: f32, to: f32) -> f32 {
     x * x * (3.0 - 2.0 * x)
 }
 
+/// Where along a limb (model pixels down it, from its pivot) it bends from one bone into the
+/// next: through the elbow, from the body into the thigh, and through the knee.
+const ELBOW_ZONE: (f32, f32) = (-UPPER_ARM + JOINT_BLEND, -UPPER_ARM - JOINT_BLEND);
+const HIP_ZONE: (f32, f32) = (0.0, -2.0 * JOINT_BLEND);
+const KNEE_ZONE: (f32, f32) = (-THIGH + JOINT_BLEND, -THIGH - JOINT_BLEND);
+
+/// The rings of an arm (from 2 above its pivot, the shoulder, to the hand) and of a leg (from
+/// the hips to the foot): the same for every player, worked out once.
+static ARM_RINGS: std::sync::LazyLock<Vec<f32>> = std::sync::LazyLock::new(|| limb_rings(2.0, -10.0, &[ELBOW_ZONE]));
+static LEG_RINGS: std::sync::LazyLock<Vec<f32>> = std::sync::LazyLock::new(|| limb_rings(0.0, -12.0, &[HIP_ZONE, KNEE_ZONE]));
+
 /// Heights (model pixels down a limb, from its pivot) where a limb's mesh has a ring of
 /// vertices: every half pixel through the bends, far apart elsewhere.
 fn limb_rings(top: f32, bottom: f32, bends: &[(f32, f32)]) -> Vec<f32> {
@@ -556,12 +567,13 @@ fn emit_bent_limb(
     light: [u8; 4],
     fl: u8,
 ) {
+    use crate::model::prim::{quad_at, Paint, Sides};
     use crate::world::mesh::{corner_pos, corner_uv, CORNERS};
     let (top, bottom) = (rings[0], rings[rings.len() - 1]);
     let row = |y: f32| (top - y) / (top - bottom);
-    let mats: Vec<Mat4> = rings.iter().map(|&y| frame(y)).collect();
     let quad = |out: &mut Vec<Vertex>, face: usize, ya: f32, ma: &Mat4, yb: f32, mb: &Mat4, v: [f32; 2]| {
-        let mut q = [Vertex::default(); 4];
+        let mut pos = [Vec3::ZERO; 4];
+        let mut uvs = [[0.0; 2]; 4];
         for (i, &(su, sv)) in CORNERS.iter().enumerate() {
             let c = Vec3::from(corner_pos(face, su, sv));
             let (y, m) = if face == 2 || face == 3 {
@@ -576,26 +588,24 @@ fn emit_bent_limb(
             if face != 2 && face != 3 {
                 uv[1] = v[0] + (v[1] - v[0]) * uv[1];
             }
-            let tn = tints[face];
-            q[i] = Vertex {
-                pos: m.transform_point3(local).to_array(),
-                uv,
-                layer: layers[face] as f32,
-                light: [light[0], light[1], light[2], face as u8],
-                tint: [tn[0], tn[1], tn[2], fl],
-            };
+            (pos[i], uvs[i]) = (m.transform_point3(local), uv);
         }
-        out.extend_from_slice(&[q[0], q[1], q[2], q[0], q[2], q[3]]);
+        let paint = Paint { layer: layers[face], light, face: face as u8, tint: tints[face], fl };
+        quad_at(out, pos, uvs, &paint, Sides::Front);
     };
+    // Each ring's frame worked out once, going down the limb.
+    let first = frame(top);
+    let mut upper = first;
     for k in 0..rings.len() - 1 {
         let (ya, yb) = (rings[k], rings[k + 1]);
+        let lower = frame(yb);
         for face in [0, 1, 4, 5] {
-            quad(out, face, ya, &mats[k], yb, &mats[k + 1], [row(ya), row(yb)]);
+            quad(out, face, ya, &upper, yb, &lower, [row(ya), row(yb)]);
         }
+        upper = lower;
     }
-    quad(out, 2, top, &mats[0], top, &mats[0], [0.0, 1.0]);
-    let last = rings.len() - 1;
-    quad(out, 3, bottom, &mats[last], bottom, &mats[last], [0.0, 1.0]);
+    quad(out, 2, top, &first, top, &first, [0.0, 1.0]);
+    quad(out, 3, bottom, &upper, bottom, &upper, [0.0, 1.0]);
 }
 
 /// Where the armor is worn, each frame at its joint as `build_player` poses the body: the
@@ -664,6 +674,11 @@ pub fn emit_armor(out: &mut Vec<Vertex>, f: &ArmorFrames, armor: u16, tint: [u8;
     }
 }
 
+/// A body part's texture layers (`HEAD`, `BODY`, `ARM`, `LEG`) in the player's skin `skin`.
+pub fn skinned(layers: [u32; 6], skin: u8) -> [u32; 6] {
+    layers.map(|layer| crate::world::textures::skin_layer(layer, skin))
+}
+
 /// `glass`: where the held gun's see-through glass goes (drawn blended).
 pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPose, limbs: &Limbs, sky: u8, blk: u8) {
     let light = vertex_light(sky, blk);
@@ -685,24 +700,11 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         return;
     }
     let root = model_root(p);
-    // A part of the body; `rows`: the rows of its texture its sides show (half an arm or leg).
-    let part = |out: &mut Vec<Vertex>, m: Mat4, min: [f32; 3], max: [f32; 3], layers: [u32; 6], rows: [f32; 2]| {
-        emit_box_rows(
-            out,
-            m,
-            Vec3::from(min),
-            Vec3::from(max),
-            layers.map(|layer| crate::world::textures::skin_layer(layer, p.skin)),
-            tints,
-            light,
-            fl,
-            rows,
-        );
-    };
+    let skin = |layers: [u32; 6]| skinned(layers, p.skin);
+    // A part of the body.
     let box_ = |out: &mut Vec<Vertex>, m: Mat4, min: [f32; 3], max: [f32; 3], layers: [u32; 6]| {
-        part(out, m, min, max, layers, [0.0, 1.0]);
+        emit_box(out, m, Vec3::from(min), Vec3::from(max), skin(layers), tints, light, fl);
     };
-    let skin = |layers: [u32; 6]| layers.map(|layer| crate::world::textures::skin_layer(layer, p.skin));
 
     let c = p.crouch;
     let torso = torso_of(p, root);
@@ -748,16 +750,15 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
     let show_right = !p.hide_arms && !p.hide_right_arm;
     // Each arm one mesh from the shoulder (2 above its pivot) to the hand, bending smoothly
     // through the elbow.
-    let elbow_zone = (-UPPER_ARM + JOINT_BLEND, -UPPER_ARM - JOINT_BLEND);
-    let arm_rings = limb_rings(2.0, -10.0, &[elbow_zone]);
-    let arm_frame = |arm: Mat4, bend: f32| move |y: f32| bent(arm, UPPER_ARM, bend * blend_down(y, elbow_zone.0, elbow_zone.1));
+    let arm_rings: &[f32] = &ARM_RINGS;
+    let arm_frame = |arm: Mat4, bend: f32| move |y: f32| bent(arm, UPPER_ARM, bend * blend_down(y, ELBOW_ZONE.0, ELBOW_ZONE.1));
     if show_right {
         let (lo, hi) = (Vec3::new(-1.0, 0.0, -2.0), Vec3::new(3.0, 0.0, 2.0));
-        emit_bent_limb(out, arm_frame(right, limbs.right_elbow), lo, hi, &arm_rings, skin(ARM), tints, light, fl);
+        emit_bent_limb(out, arm_frame(right, limbs.right_elbow), lo, hi, arm_rings, skin(ARM), tints, light, fl);
     }
     if !p.hide_arms {
         let (lo, hi) = (Vec3::new(-3.0, 0.0, -2.0), Vec3::new(1.0, 0.0, 2.0));
-        emit_bent_limb(out, arm_frame(left, limbs.left_elbow), lo, hi, &arm_rings, skin(ARM), tints, light, fl);
+        emit_bent_limb(out, arm_frame(left, limbs.left_elbow), lo, hi, arm_rings, skin(ARM), tints, light, fl);
     }
 
     // Legs: from the hips (sunk behind the body while sneaking), bent at the knees.
@@ -769,21 +770,19 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
     // Each leg one mesh with the body: its top stays square to the body's bottom (the hips don't
     // come apart when it swings), turning into the thigh just below, and it bends smoothly
     // through the knee.
-    let hip_zone = (0.0, -2.0 * JOINT_BLEND);
-    let knee_zone = (-THIGH + JOINT_BLEND, -THIGH - JOINT_BLEND);
-    let leg_rings = limb_rings(0.0, -12.0, &[hip_zone, knee_zone]);
+    let leg_rings: &[f32] = &LEG_RINGS;
     let body_turn = glam::Quat::from_rotation_x(-g.lean) * glam::Quat::from_rotation_y(g.twist);
     let leg_frame = |x: f32, turn: Vec3, knee: f32| {
         let at = root * t(x, hip.y, hip.z);
         let leg = glam::Quat::from_mat4(&rot(turn));
         move |y: f32| {
-            let q = body_turn.slerp(leg, blend_down(y, hip_zone.0, hip_zone.1));
-            bent(at * Mat4::from_quat(q), THIGH, -knee * blend_down(y, knee_zone.0, knee_zone.1))
+            let q = body_turn.slerp(leg, blend_down(y, HIP_ZONE.0, HIP_ZONE.1));
+            bent(at * Mat4::from_quat(q), THIGH, -knee * blend_down(y, KNEE_ZONE.0, KNEE_ZONE.1))
         }
     };
     let (lo, hi) = (Vec3::new(-2.0, 0.0, -2.0), Vec3::new(2.0, 0.0, 2.0));
-    emit_bent_limb(out, leg_frame(1.9, limbs.right_leg, limbs.right_knee), lo, hi, &leg_rings, skin(LEG), tints, light, fl);
-    emit_bent_limb(out, leg_frame(-1.9, limbs.left_leg, limbs.left_knee), lo, hi, &leg_rings, skin(LEG), tints, light, fl);
+    emit_bent_limb(out, leg_frame(1.9, limbs.right_leg, limbs.right_knee), lo, hi, leg_rings, skin(LEG), tints, light, fl);
+    emit_bent_limb(out, leg_frame(-1.9, limbs.left_leg, limbs.left_knee), lo, hi, leg_rings, skin(LEG), tints, light, fl);
 
     let frames = ArmorFrames {
         head: (!p.first_person).then_some(head),

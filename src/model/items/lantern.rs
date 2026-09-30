@@ -6,6 +6,7 @@
 //! the texture's own layout; model space is in block pixels, x/z centered on the block, y up
 //! from its bottom.
 
+use crate::model::prim::{self, BoxUv, Paint, Sides};
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
 use glam::{Mat4, Quat, Vec2, Vec3};
@@ -72,19 +73,9 @@ fn quad(
     face: u8,
     both: bool,
 ) {
-    let [u0, v0, u1, v1] = uv.map(|v| v / 16.0);
-    let uvs = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
-    let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-        pos: m.transform_point3(c[i]).to_array(),
-        uv: uvs[i],
-        layer: layer as f32,
-        light: [light[0], light[1], light[2], face],
-        tint: [255, 255, 255, fl],
-    });
-    out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-    if both {
-        out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
-    }
+    let paint = Paint { layer, light, face, tint: [255; 3], fl };
+    let sides = if both { Sides::Both } else { Sides::Front };
+    prim::quad(out, m, c, prim::rect_uvs(uv.map(|v| v / 16.0)), &paint, sides);
 }
 
 /// A box with one texture rectangle for its four sides and one for the top and bottom.
@@ -99,73 +90,9 @@ fn cuboid(
     light: [u8; 4],
     fl: u8,
 ) {
-    let p = |x: f32, y: f32, z: f32| Vec3::new(x, y, z);
-    let (a, b) = (lo, hi);
-    let faces: [([Vec3; 4], [f32; 4], u8); 6] = [
-        (
-            [
-                p(b.x, a.y, b.z),
-                p(b.x, a.y, a.z),
-                p(b.x, b.y, a.z),
-                p(b.x, b.y, b.z),
-            ],
-            side,
-            0,
-        ),
-        (
-            [
-                p(a.x, a.y, a.z),
-                p(a.x, a.y, b.z),
-                p(a.x, b.y, b.z),
-                p(a.x, b.y, a.z),
-            ],
-            side,
-            1,
-        ),
-        (
-            [
-                p(a.x, b.y, b.z),
-                p(b.x, b.y, b.z),
-                p(b.x, b.y, a.z),
-                p(a.x, b.y, a.z),
-            ],
-            ends,
-            2,
-        ),
-        (
-            [
-                p(a.x, a.y, a.z),
-                p(b.x, a.y, a.z),
-                p(b.x, a.y, b.z),
-                p(a.x, a.y, b.z),
-            ],
-            ends,
-            3,
-        ),
-        (
-            [
-                p(a.x, a.y, b.z),
-                p(b.x, a.y, b.z),
-                p(b.x, b.y, b.z),
-                p(a.x, b.y, b.z),
-            ],
-            side,
-            4,
-        ),
-        (
-            [
-                p(b.x, a.y, a.z),
-                p(a.x, a.y, a.z),
-                p(a.x, b.y, a.z),
-                p(b.x, b.y, a.z),
-            ],
-            side,
-            5,
-        ),
-    ];
-    for (c, uv, face) in faces {
-        quad(out, m, c, uv, tex::LANTERN, light, fl, face, false);
-    }
+    let [side, ends] = [side, ends].map(|r| r.map(|v| v / 16.0));
+    let uv = BoxUv::Rects([side, side, ends, ends, side, side]);
+    prim::cuboid(out, m, lo, hi, uv, |face| Some(Paint { layer: tex::LANTERN, light, face: face as u8, tint: [255; 3], fl }));
 }
 
 /// Two planes crossed at 45 degrees around the vertical axis (handle loops, chains),
