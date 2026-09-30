@@ -12,6 +12,11 @@ impl Game {
         };
         self.menus.finder = None;
         self.settings.save();
+        self.connect_to(addr);
+    }
+
+    /// Connects to a LAN game at "ip:port" (the settings as they are, not saved).
+    pub(in crate::game) fn connect_to(&mut self, addr: String) {
         // (looking the address up and connecting can take seconds: not on the window's thread)
         let (tx, rx) = std::sync::mpsc::channel();
         let target = addr.clone();
@@ -37,6 +42,7 @@ impl Game {
                 conn.send(&Msg::Hello {
                     proto: PROTOCOL,
                     name: self.settings.name.clone(),
+                    view: self.settings.render_distance.round().clamp(0.0, 255.0) as u8,
                 });
                 self.net = Some(Net::Client(Client {
                     conn,
@@ -168,6 +174,10 @@ impl Game {
             Msg::Chunk { pos, rle } => {
                 if let Some(c) = ChunkData::from_raw(unrle(&rle)) {
                     let w = &mut self.terrain.world;
+                    // The host's copy as it is now: changes waiting for it are older, and it
+                    // is kept when unloaded (not generated again from the seed).
+                    w.pending.remove(&pos);
+                    w.modified.insert(pos);
                     if let Some(old) = w.chunks.get_mut(&pos) {
                         // Already generated here meanwhile: the host's copy replaces it.
                         *old = Arc::new(c);
@@ -195,10 +205,13 @@ impl Game {
                 }
             }
             Msg::Entities {
+                full,
                 mobs,
                 items,
+                gone_mobs,
+                gone_items,
                 falling,
-            } => self.sync_entities(mobs, items, falling),
+            } => self.sync_entities(full, mobs, items, &gone_mobs, &gone_items, falling),
             Msg::Give(stack) => self.give(stack),
             Msg::Hurt {
                 dmg,
@@ -325,22 +338,41 @@ impl Game {
                 );
             }
         } else {
-            w.pending.entry(cp).or_default().push((p, b));
+            // (the latest change of each block is enough: a block changing over and over,
+            // like flowing water, does not pile up)
+            let list = w.pending.entry(cp).or_default();
+            match list.iter_mut().find(|(q, _)| *q == p) {
+                Some(e) => e.1 = b,
+                None => list.push((p, b)),
+            }
         }
     }
 
-    /// LAN player: mobs, dropped items and falling blocks near this player, from the host.
+    /// LAN player: mobs, dropped items and falling blocks near this player, from the host:
+    /// the new and changed ones, those gone (`full`: all near are listed, the rest goes).
     pub(super) fn sync_entities(
         &mut self,
+        full: bool,
         mobs: Vec<crate::net::MobNet>,
         items: Vec<ItemNet>,
+        gone_mobs: &[u32],
+        gone_items: &[u32],
         falling: Vec<(Vec3, u8)>,
     ) {
+        // Whether an entity stays: listed when all are, not gone otherwise.
+        let stays = |listed: &FastSet<u32>, gone: &FastSet<u32>, id: u32| {
+            if full {
+                listed.contains(&id)
+            } else {
+                !gone.contains(&id)
+            }
+        };
         // Mobs
         let ids: FastSet<u32> = mobs.iter().map(|m| m.id).collect();
+        let gone_ids: FastSet<u32> = gone_mobs.iter().copied().collect();
         let mut gone = Vec::new();
         self.level.mobs.retain(|m| {
-            let keep = ids.contains(&m.id);
+            let keep = stays(&ids, &gone_ids, m.id);
             if !keep && m.death.is_some_and(|d| d > 0.6) {
                 gone.push(m.center());
             }
@@ -365,11 +397,17 @@ impl Game {
         }
         // Items
         let ids: FastSet<u32> = items.iter().map(|i| i.id).collect();
-        self.level.items.retain(|it| ids.contains(&it.id));
+        let gone_ids: FastSet<u32> = gone_items.iter().copied().collect();
+        self.level.items.retain(|it| stays(&ids, &gone_ids, it.id));
         let Some(Net::Client(c)) = &mut self.net else {
             return;
         };
-        c.item_targets.clear();
+        if full {
+            c.item_targets.clear();
+        }
+        for id in gone_items {
+            c.item_targets.remove(id);
+        }
         let at: FastMap<u32, usize> = self.level.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
         for s in &items {
             c.item_targets.insert(s.id, s.pos);

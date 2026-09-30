@@ -71,6 +71,9 @@ pub enum Cmd {
     PickMap(String),
     /// `echo <text>`: a line in the report.
     Echo(String),
+    /// `lan open`, `lan join <addr> <name>`, `lan report`, `lan block <x> <y> <z>`: a LAN
+    /// game (two windows, each with its script).
+    Lan(String),
     // Steps the others are made of: `flicker <name>` is two pictures of the view a hair
     // apart (`Jitter`), compared (`Compare`).
     Jitter(bool),
@@ -189,6 +192,7 @@ fn parse_line(line: &str) -> Result<Vec<Cmd>, String> {
         "check" => one(Cmd::Check(word(1)?, int(2).unwrap_or(2))),
         "pickmap" => one(Cmd::PickMap(word(1)?)),
         "echo" => one(Cmd::Echo(rest(1))),
+        "lan" => one(Cmd::Lan(rest(1))),
         "quit" => one(Cmd::Quit),
         other => Err(format!("unknown command `{other}`")),
     }

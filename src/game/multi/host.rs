@@ -2,6 +2,7 @@
 //! and sending everyone poses, entities, block changes and open containers 20 times a
 //! second. Players' inventories and positions are kept between visits.
 
+use super::checks::{self, known_item, valid_slot, valid_stack};
 use super::*;
 
 /// The items on a crafting table (everyone sees them lying on top of it).
@@ -14,6 +15,17 @@ fn table_msg(p: IVec3, grid: &[Slot; 9]) -> Msg {
 }
 /// Seconds a new connection has to say hello (`Msg::Hello`) before it is let go.
 const HELLO_WAIT: f32 = 10.0;
+/// Seconds after a shot its bullets may still hit (they fly a few hundred blocks at most).
+const BULLET_TIME: f32 = 10.0;
+
+/// Whether a player standing at `feet` with this render distance has chunk `c` loaded (or
+/// nearly): block changes there go to them one by one.
+fn chunk_in_view(feet: Vec3, c: ChunkPos, view: i32) -> bool {
+    let at = World::chunk_pos(feet.x.floor() as i32, feet.z.floor() as i32);
+    // (players unload chunks farther than their render distance + 3)
+    let r = view + 4;
+    (c.0 - at.0).pow(2) + (c.1 - at.1).pow(2) <= r * r
+}
 
 impl Game {
     pub(super) fn players_dir(&self) -> Option<PathBuf> {
@@ -146,6 +158,11 @@ impl Game {
                     seen_chests: FastMap::default(),
                     leaving: false,
                     age: 0.0,
+                    view: 12,
+                    far_chunks: FastSet::default(),
+                    entities: EntitySync::default(),
+                    entity_bytes: [0; 2],
+                    shot_damage: (0.0, 0.0),
                 });
             }
         }
@@ -170,11 +187,12 @@ impl Game {
             self.peer_left(id);
         }
 
-        // Block changes since the last frame, to everyone.
+        // Block changes since the last frame, to everyone near them.
+        self.resend_near_chunks();
         if let Some(log) = self.terrain.world.log.as_mut() {
             if !log.is_empty() {
                 let changes = std::mem::take(log);
-                self.broadcast(&Msg::Blocks(changes), None);
+                self.send_blocks(&changes);
             }
         }
 
@@ -216,13 +234,13 @@ impl Game {
             if let Some(pose) = pose {
                 let at = pose.pos;
                 let name = self.player_name(*id);
-                let mobs = self
+                let mobs: Vec<crate::net::MobNet> = self
                     .level.mobs
                     .iter()
                     .filter(|m| m.pos.distance(at) < MOB_RANGE)
                     .map(|m| crate::net::MobNet { flags: m.wolf_flags(name.as_deref()), ..m.to_net() })
                     .collect();
-                let items = self
+                let items: Vec<ItemNet> = self
                     .level.items
                     .iter()
                     .filter(|it| !it.is_picking_up() && it.pos.distance(at) < ITEM_RANGE)
@@ -233,20 +251,23 @@ impl Game {
                         age: it.age,
                     })
                     .collect();
-                let falling = self
+                let falling: Vec<(Vec3, u8)> = self
                     .level.falling
                     .iter()
                     .filter(|f| f.pos.distance(at) < ITEM_RANGE)
                     .map(|f| (f.pos, f.block))
                     .collect();
-                self.send_to(
-                    *id,
-                    &Msg::Entities {
-                        mobs,
-                        items,
-                        falling,
-                    },
-                );
+                // Only what changed since this player last got it.
+                let now = self.time;
+                if let Some(peer) = self.peer(*id) {
+                    let whole = crate::net::full_list_bytes(mobs.len(), items.len(), falling.len());
+                    peer.entity_bytes[1] += whole as u64;
+                    if let Some(msg) = peer.entities.update(now, &mobs, &items, &falling) {
+                        let frame = Frame::new(&msg);
+                        peer.entity_bytes[0] += frame.len() as u64;
+                        peer.conn.send_frame(&frame);
+                    }
+                }
             }
             if let Some(p) = open {
                 if let Some(msg) = self.container_msg(*p) {
@@ -304,10 +325,10 @@ impl Game {
         );
         host.tables_sent = now;
         for (p, grid) in changed {
-            let msg = table_msg(p, &grid);
+            let frame = Frame::new(&table_msg(p, &grid));
             for (id, _, open) in peers {
                 if *open != Some(p) {
-                    self.send_to(*id, &msg);
+                    self.send_frame_to(*id, &frame);
                 }
             }
         }
@@ -319,33 +340,33 @@ impl Game {
     /// second.
     pub(super) fn sync_furnaces(&mut self) {
         let now = self.time;
+        let Some(Net::Host(host)) = &mut self.net else { return };
+        let furnaces = &self.level.block_entities.furnaces;
+        host.furnaces_sent.retain(|p, _| furnaces.contains_key(p));
         let mut send = Vec::new();
-        let mut sent = FastMap::default();
-        {
-            let Some(host) = self.host_ref() else { return };
-            for (p, f) in &self.level.block_entities.furnaces {
-                let key = Self::furnace_key(f);
-                let full = Self::furnace_msg(*p, f).encode();
-                let entry = match host.furnaces_sent.get(p) {
-                    Some((k, m, t)) if *k == key && (now - t < 1.0 || *m == full) => {
-                        (k.clone(), m.clone(), *t)
+        for (p, f) in furnaces {
+            let key = Self::furnace_key(f);
+            match host.furnaces_sent.get_mut(p) {
+                // Nothing that shows at once changed, and the seconds went out lately.
+                Some((k, _, t)) if *k == key && now - *t < 1.0 => {}
+                // The seconds, now and then (if they moved at all).
+                Some((k, m, t)) if *k == key => {
+                    let full = Self::furnace_msg(*p, f).encode();
+                    *t = now;
+                    if *m != full {
+                        send.push(Frame::from_body(&full));
+                        *m = full;
                     }
-                    _ => {
-                        send.push(*p);
-                        (key, full, now)
-                    }
-                };
-                sent.insert(*p, entry);
+                }
+                _ => {
+                    let full = Self::furnace_msg(*p, f).encode();
+                    send.push(Frame::from_body(&full));
+                    host.furnaces_sent.insert(*p, (key, full, now));
+                }
             }
         }
-        if let Some(host) = self.host() {
-            host.furnaces_sent = sent;
-        }
-        for p in send {
-            if let Some(f) = self.level.block_entities.furnaces.get(&p) {
-                let msg = Self::furnace_msg(p, f);
-                self.broadcast(&msg, None);
-            }
+        for frame in &send {
+            self.broadcast_frame(frame, None);
         }
     }
 
@@ -371,9 +392,13 @@ impl Game {
                 chests.push((p, msg));
             }
         }
-        let encoded: Vec<(IVec3, Vec<u8>, &Msg)> = chests
+        let encoded: Vec<(IVec3, Vec<u8>, Frame)> = chests
             .iter()
-            .map(|(p, m)| (self.chest_halves(*p).0, m.encode(), m))
+            .map(|(p, m)| {
+                let bytes = m.encode();
+                let frame = Frame::from_body(&bytes);
+                (self.chest_halves(*p).0, bytes, frame)
+            })
             .collect();
         for (id, _, own) in peers {
             let own_first = own
@@ -383,12 +408,12 @@ impl Game {
             // Forget chests that were closed, so opening them again sends them again.
             peer.seen_chests
                 .retain(|q, _| encoded.iter().any(|(f, _, _)| f == q));
-            for (first, bytes, msg) in &encoded {
+            for (first, bytes, frame) in &encoded {
                 if own_first == Some(*first) {
                     continue;
                 }
                 if peer.seen_chests.get(first) != Some(bytes) {
-                    peer.conn.send(msg);
+                    peer.conn.send_frame(frame);
                     peer.seen_chests.insert(*first, bytes.clone());
                 }
             }
@@ -425,19 +450,91 @@ impl Game {
         }
     }
 
+    /// Host: block changes to every player who has (or nearly has) their chunk loaded; for
+    /// the others the chunk is marked, and goes whole when they come near
+    /// (`resend_near_chunks`). A player whose pose is not known yet gets them all.
+    pub(super) fn send_blocks(&mut self, changes: &[(IVec3, u8)]) {
+        let Some(Net::Host(h)) = &mut self.net else { return };
+        let mut all: Option<Frame> = None;
+        for peer in h.peers.iter_mut().filter(|p| p.joined) {
+            let (pose, view) = (peer.pose, peer.view);
+            let near = |p: IVec3| {
+                pose.is_none_or(|pose| chunk_in_view(pose.pos, World::chunk_pos(p.x, p.z), view))
+            };
+            if changes.iter().all(|&(p, _)| near(p)) {
+                let frame = all.get_or_insert_with(|| Frame::new(&Msg::Blocks(changes.to_vec())));
+                peer.conn.send_frame(frame);
+                continue;
+            }
+            let mut mine = Vec::new();
+            for &(p, b) in changes {
+                if near(p) {
+                    mine.push((p, b));
+                } else {
+                    peer.far_chunks.insert(World::chunk_pos(p.x, p.z));
+                }
+            }
+            if !mine.is_empty() {
+                peer.conn.send(&Msg::Blocks(mine));
+            }
+        }
+    }
+
+    /// Host: chunks that changed while a player was far from them go whole, as they are
+    /// now, once the player comes near.
+    pub(super) fn resend_near_chunks(&mut self) {
+        let Some(Net::Host(h)) = &mut self.net else { return };
+        let world = &self.terrain.world;
+        for peer in h.peers.iter_mut().filter(|p| p.joined && !p.far_chunks.is_empty()) {
+            let Some(pose) = peer.pose else { continue };
+            let view = peer.view;
+            let near: Vec<ChunkPos> = peer
+                .far_chunks
+                .iter()
+                .copied()
+                .filter(|&c| chunk_in_view(pose.pos, c, view))
+                .collect();
+            for c in near {
+                peer.far_chunks.remove(&c);
+                if let Some(data) = world.chunks.get(&c).or_else(|| world.saved.get(&c)) {
+                    peer.conn.send(&Msg::Chunk {
+                        pos: c,
+                        rle: rle(data.raw()),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Host: the most damage player `id` can deal now: with what they hold (a critical hit,
+    /// a bullet of the gun) or with the bullets of their last shot (`melee`, `bullet`).
+    fn damage_caps(&mut self, id: u8, held: ItemId) -> (f32, f32) {
+        let now = self.time;
+        let shot = self
+            .peer(id)
+            .map_or(0.0, |p| if now <= p.shot_damage.1 { p.shot_damage.0 } else { 0.0 });
+        (checks::melee_cap(held), checks::gun_cap(held).max(shot))
+    }
+
     pub(super) fn host_handle(&mut self, id: u8, m: Msg) {
         let joined = self.peer(id).is_some_and(|p| p.joined);
         if !joined {
-            if let Msg::Hello { proto, name } = m {
+            if let Msg::Hello { proto, name, view } = m {
+                if let Some(p) = self.peer(id) {
+                    p.view = (view as i32).clamp(2, 64);
+                }
                 self.host_welcome(id, proto, name);
             }
             return;
         }
-        let from = self
-            .peer(id)
-            .and_then(|p| p.pose)
-            .map(|p| p.pos)
-            .unwrap_or(self.player.pos);
+        let pose = self.peer(id).and_then(|p| p.pose);
+        let from = pose.map(|p| p.pos).unwrap_or(self.player.pos);
+        // What a player does has to be where they stand (their latest pose: a player sends
+        // it right before anything checked here).
+        let feet = pose.map(|p| p.pos);
+        let near_block = |p: IVec3| feet.is_some_and(|f| checks::block_near(f, p, checks::BLOCK_REACH));
+        let near_hand = |at: Vec3| feet.is_some_and(|f| checks::point_near(f, at, checks::HAND_REACH));
+        let held = pose.map_or(crate::item::NONE, |p| p.held);
         match m {
             Msg::Pose(mut pose) => {
                 pose.skin = if pose.skin >= 4 {
@@ -445,20 +542,28 @@ impl Game {
                 } else {
                     pose.skin.min(3)
                 };
+                if !known_item(pose.held) {
+                    pose.held = crate::item::NONE;
+                }
                 if let Some(p) = self.peer(id) {
                     p.pose = Some(pose);
                 }
                 self.set_remote_pose(id, pose);
             }
             Msg::Place { p, b } => {
-                self.place_world(p, b);
+                // (every u8 is a block id: only where it is is checked)
+                if near_block(p) {
+                    self.place_world(p, b);
+                }
                 // The player guessed the result; make sure it matches.
                 let actual = self.terrain.world.geti(p);
                 self.send_to(id, &Msg::Blocks(vec![(p, actual)]));
             }
             Msg::Break { p, held, creative } => {
                 let b = self.terrain.world.geti(p);
-                if b != AIR {
+                if b != AIR && near_block(p) && known_item(held) {
+                    // (mined as in creative, without drops, only by a player in creative)
+                    let creative = creative && pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
                     self.break_world(p, held, creative);
                     self.break_fx(p, b, true, Some(id));
                 }
@@ -470,6 +575,10 @@ impl Game {
                 dmg,
                 knock,
             } => {
+                let (melee, bullet) = self.damage_caps(id, held);
+                let Some((dmg, knock)) = checks::clamp_hit(dmg, knock, melee.max(bullet)) else {
+                    return;
+                };
                 if let Some(m) = self.level.mobs.iter_mut().find(|m| m.id == mob) {
                     m.hurt(dmg, Some(from), knock);
                     self.attacked(crate::entity::mob::Foe::Mob(mob), id);
@@ -481,9 +590,18 @@ impl Game {
                 knock,
                 kind,
             } => {
-                if kind != crate::net::hurt::BLAST {
-                    self.attacked(crate::entity::mob::Foe::Player(target), id);
-                }
+                // (a player hits with their hand or their bullets; blasts and bites are the
+                // host's own)
+                let (melee, bullet) = self.damage_caps(id, held);
+                let cap = match kind {
+                    crate::net::hurt::MELEE => melee,
+                    crate::net::hurt::BULLET => bullet,
+                    _ => return,
+                };
+                let Some((dmg, knock)) = checks::clamp_hit(dmg, knock, cap) else {
+                    return;
+                };
+                self.attacked(crate::entity::mob::Foe::Player(target), id);
                 if target == HOST_ID {
                     self.hit_by_player(dmg, from, knock, kind);
                 } else {
@@ -505,13 +623,22 @@ impl Game {
                 seed,
                 fuse,
                 ..
-            } => self.remote_grenade(id, kind, pos, vel, seed, fuse),
+            } => {
+                if kind <= 1 && near_hand(pos) {
+                    self.remote_grenade(id, kind, pos, vel, seed, fuse.clamp(0.0, 10.0));
+                }
+            }
             Msg::SpawnMob { kind, pos } => {
-                if let Some(kind) = MobKind::from_u8(kind) {
+                // A spawn egg puts it in front of the player; farther only by a command.
+                let allowed = self.cheats || feet.is_some_and(|f| checks::point_near(f, pos, checks::SPAWN_REACH));
+                if let (true, Some(kind)) = (allowed, MobKind::from_u8(kind)) {
                     self.spawn_mob(kind, pos);
                 }
             }
             Msg::UseOnMob { id: mob, item } => {
+                if !known_item(item) {
+                    return;
+                }
                 if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
                     self.wolf_used(i, item, id);
                 }
@@ -532,10 +659,12 @@ impl Game {
                 stack,
                 delay,
             } => {
-                self.add_item(ItemEntity::new(pos, vel, stack, delay));
+                if valid_stack(&stack) && near_hand(pos) {
+                    self.add_item(ItemEntity::new(pos, vel, stack, delay.max(0.0)));
+                }
             }
             Msg::Open { p } => {
-                let open = if p.y == CLOSED_Y {
+                let open = if p.y == CLOSED_Y || !near_block(p) {
                     None
                 } else {
                     // Make sure the block entity exists.
@@ -566,21 +695,44 @@ impl Game {
                 part,
                 take,
                 offered,
-            } => self.remote_use_furnace(id, p, part, take, offered),
+            } => {
+                if !valid_slot(&offered) {
+                    return;
+                }
+                if near_block(p) {
+                    self.remote_use_furnace(id, p, part, take, offered);
+                } else if let Some(st) = offered {
+                    // (too far: what they offered goes back)
+                    self.send_to(id, &Msg::Give(st));
+                }
+            }
             Msg::Bench { p, bench } => {
                 // A player changed what lies on a gun station: the others see it too.
-                if is_gun_bench(self.terrain.world.geti(p)) {
+                let valid = bench.items.iter().all(|i| valid_stack(&i.stack))
+                    && bench.loader_mag.as_ref().is_none_or(valid_stack);
+                if valid && near_block(p) && is_gun_bench(self.terrain.world.geti(p)) {
                     self.set_bench(p, bench.clone());
                     self.broadcast(&Msg::Bench { p, bench }, Some(id));
                 }
             }
             Msg::Container { p, kind, slots } => {
+                // Only into the container this player has open, and only items there are.
+                let theirs = self.peer(id).is_some_and(|peer| peer.open == Some(p));
+                let current = self.container_msg(p);
+                let fits = matches!(&current, Some(Msg::Container { kind: k, slots: now, .. }) if *k == kind && now.len() == slots.len());
+                if !theirs || !fits || !slots.iter().all(valid_slot) {
+                    // (what they have is not what is there: the next tick sends it again)
+                    if let Some(peer) = self.peer(id).filter(|peer| peer.open == Some(p)) {
+                        peer.sent_container = None;
+                    }
+                    return;
+                }
                 // Only the slots this player changed (from what they last got) are taken, so
                 // two players working in the same chest do not undo each other.
                 let base = self
                     .peer(id)
                     .and_then(|peer| peer.sent_container.as_deref().and_then(Msg::decode));
-                let merged = match (base, self.container_msg(p)) {
+                let merged = match (base, current) {
                     (
                         Some(Msg::Container {
                             p: bp,
@@ -608,13 +760,18 @@ impl Game {
                 self.announce(format!("<{name}> {text}"), chat::WHITE);
             }
             Msg::Command(line) => {
-                // Only world-wide commands come here (the time).
-                if line.starts_with("/time") {
+                // Only world-wide commands come here (the time), and only with cheats on.
+                if self.cheats && line.starts_with("/time") {
                     self.run_command(&line);
                     self.broadcast(&Msg::Time(self.time_of_day), None);
                 }
             }
-            Msg::Save(state) => {
+            Msg::Save(mut state) => {
+                for s in &mut state.inventory {
+                    if !valid_slot(s) {
+                        *s = None;
+                    }
+                }
                 if let Some(p) = self.peer(id) {
                     p.state = Some(state);
                 }
@@ -627,6 +784,17 @@ impl Game {
                 bullets,
                 ..
             } => {
+                let Some(gun) = crate::item::GUN_KINDS.get(kind as usize) else {
+                    return;
+                };
+                if !near_hand(eye) {
+                    return;
+                }
+                // Its bullets may hit for a while (even after the gun is put away).
+                let (damage, until) = (gun.stats().damage, self.time + BULLET_TIME);
+                if let Some(p) = self.peer(id) {
+                    p.shot_damage = (damage, until);
+                }
                 // Shown here, and to everyone else as this player's.
                 self.remote_shot(id, kind, mods, eye, seed, &bullets);
                 let shot = Msg::Shot {
@@ -684,17 +852,16 @@ impl Game {
             cheats: self.cheats,
             state: state.clone(),
         };
-        // The edited chunks; the rest the player generates from the seed.
+        // The edited chunks; the rest the player generates from the seed. (Shared
+        // copy-on-write: this is how they are now, whatever changes meanwhile; those changes
+        // go after them.)
         let world = &self.terrain.world;
-        let chunks: Vec<Msg> = world
+        let chunks: Vec<(ChunkPos, Arc<ChunkData>)> = world
             .chunks
             .iter()
             .filter(|(p, _)| world.modified.contains(p))
             .chain(world.saved.iter())
-            .map(|(p, c)| Msg::Chunk {
-                pos: *p,
-                rle: rle(c.raw()),
-            })
+            .map(|(p, c)| (*p, c.clone()))
             .collect();
         let mut others = vec![Msg::Join {
             id: HOST_ID,
@@ -731,10 +898,31 @@ impl Game {
         );
         let Some(peer) = self.peer(id) else { return };
         peer.conn.send(&welcome);
-        for c in &chunks {
-            peer.conn.send(c);
+        // The chunks are encoded on a worker thread (a big world has thousands: the host
+        // would stop for a while); everything sent to this player meanwhile waits for them.
+        let streamed = peer.conn.stream().is_some_and(|stream| {
+            std::thread::Builder::new()
+                .name("net-welcome".into())
+                .spawn(move || {
+                    for (pos, c) in chunks {
+                        let chunk = Msg::Chunk {
+                            pos,
+                            rle: rle(c.raw()),
+                        };
+                        if stream.send(Frame::new(&chunk)).is_err() {
+                            return;
+                        }
+                    }
+                    let _ = stream.send(Frame::new(&Msg::Ready));
+                })
+                .is_ok()
+        });
+        if !streamed {
+            peer.conn.send(&Msg::Refuse(t("mp.lost").to_string()));
+            peer.conn.close();
+            peer.leaving = true;
+            return;
         }
-        peer.conn.send(&Msg::Ready);
         for m in &others {
             peer.conn.send(m);
         }

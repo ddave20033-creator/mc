@@ -408,6 +408,11 @@ impl Game {
                 }
             }
             Cmd::Echo(text) => tb.log(format!("**{text}**")),
+            Cmd::Lan(args) => {
+                for line in self.testbed_lan(&args) {
+                    self.testbed.as_mut().unwrap().log(line);
+                }
+            }
             Cmd::Quit => {
                 tb.next = tb.cmds.len();
             }

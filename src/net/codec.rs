@@ -387,10 +387,11 @@ impl Msg {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = W(Vec::with_capacity(64));
         match self {
-            Msg::Hello { proto, name } => {
+            Msg::Hello { proto, name, view } => {
                 w.u8(0);
                 w.u16(*proto);
                 w.str(name);
+                w.u8(*view);
             }
             Msg::Pose(p) => {
                 w.u8(1);
@@ -542,11 +543,15 @@ impl Msg {
                 }
             }
             Msg::Entities {
+                full,
                 mobs,
                 items,
+                gone_mobs,
+                gone_items,
                 falling,
             } => {
                 w.u8(29);
+                w.bool(*full);
                 w.u32(mobs.len() as u32);
                 for m in mobs {
                     w.u32(m.id);
@@ -569,6 +574,12 @@ impl Msg {
                     w.vec3(it.pos);
                     w.stack(it.stack);
                     w.f32(it.age);
+                }
+                for gone in [gone_mobs, gone_items] {
+                    w.u32(gone.len() as u32);
+                    for id in gone {
+                        w.u32(*id);
+                    }
                 }
                 w.u32(falling.len() as u32);
                 for (p, b) in falling {
@@ -694,6 +705,7 @@ impl Msg {
             0 => Msg::Hello {
                 proto: r.u16()?,
                 name: r.str()?,
+                view: r.u8()?,
             },
             1 => Msg::Pose(r.pose()?),
             2 => Msg::Place {
@@ -763,6 +775,7 @@ impl Msg {
             27 => Msg::Leave { id: r.u8()? },
             28 => Msg::Poses(r.list(|r| Some((r.u8()?, r.pose()?)))?),
             29 => Msg::Entities {
+                full: r.bool()?,
                 mobs: r.list(|r| {
                     Some(MobNet {
                         id: r.u32()?,
@@ -790,6 +803,8 @@ impl Msg {
                         age: r.f32()?,
                     })
                 })?,
+                gone_mobs: r.list(|r| r.u32())?,
+                gone_items: r.list(|r| r.u32())?,
                 falling: r.list(|r| Some((r.vec3()?, r.u8()?)))?,
             },
             30 => Msg::Give(r.stack()?),
@@ -920,6 +935,7 @@ mod tests {
         roundtrip(Msg::Hello {
             proto: PROTOCOL,
             name: "Albí".into(),
+            view: 12,
         });
         roundtrip(Msg::Pose(Pose {
             pos: Vec3::ONE,
@@ -997,6 +1013,9 @@ mod tests {
             (IVec3::new(-9, 0, 4), 0),
         ]));
         roundtrip(Msg::Entities {
+            full: false,
+            gone_mobs: vec![5, 6],
+            gone_items: vec![],
             mobs: vec![MobNet {
                 id: 4,
                 kind: 0,
@@ -1021,6 +1040,14 @@ mod tests {
                 age: 2.0,
             }],
             falling: vec![(Vec3::Z, 4)],
+        });
+        roundtrip(Msg::Entities {
+            full: true,
+            mobs: vec![],
+            items: vec![],
+            gone_mobs: vec![],
+            gone_items: vec![1, 2, 3],
+            falling: vec![],
         });
         let mut bench = GunBench::default();
         let id = bench.add(stack, 0.4, -0.1, 1.2);
