@@ -17,38 +17,6 @@ pub struct Canvas<'a> {
     tex: &'a [u8],
 }
 
-/// Width of `s` at font scale `size` (as `Ui::text_width`).
-pub fn text_width(font: &Font, s: &str, size: f32) -> f32 {
-    let units: f32 = s.chars().map(|c| font.glyph(c).adv).sum();
-    if units > 0.0 {
-        (units - 1.0) * size
-    } else {
-        0.0
-    }
-}
-
-/// `text` split into lines no wider than `max_w` at `size` (at spaces, as `Ui::wrap`).
-pub fn wrap(font: &Font, text: &str, max_w: f32, size: f32) -> Vec<String> {
-    let mut rows = Vec::new();
-    let mut cur = String::new();
-    for word in text.split_whitespace() {
-        let candidate = if cur.is_empty() {
-            word.to_string()
-        } else {
-            format!("{cur} {word}")
-        };
-        if !cur.is_empty() && text_width(font, &candidate, size) > max_w {
-            rows.push(std::mem::replace(&mut cur, word.to_string()));
-        } else {
-            cur = candidate;
-        }
-    }
-    if !cur.is_empty() {
-        rows.push(cur);
-    }
-    rows
-}
-
 impl<'a> Canvas<'a> {
     pub fn new(w: usize, h: usize, fill: Color, font: &'a Font, tex: &'a [u8]) -> Self {
         Self {
@@ -146,11 +114,11 @@ impl<'a> Canvas<'a> {
             }
             pen += g.adv * size;
         }
-        text_width(self.font, s, size)
+        self.font.text_width(s, size)
     }
 
     pub fn text_centered(&mut self, s: &str, cx: f32, y: f32, size: f32, c: Color) {
-        let w = text_width(self.font, s, size);
+        let w = self.font.text_width(s, size);
         self.text(s, cx - w * 0.5, y, size, c, false);
     }
 
@@ -287,7 +255,7 @@ impl<'a> Canvas<'a> {
         }
         if st.count > 1 {
             let text = st.count.to_string();
-            let tw = text_width(self.font, &text, 1.0);
+            let tw = self.font.text_width(&text, 1.0);
             self.text(&text, x + size - tw, y + size - 7.0, 1.0, [1.0; 4], true);
         }
     }

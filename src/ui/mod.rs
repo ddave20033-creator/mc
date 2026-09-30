@@ -29,6 +29,41 @@ pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
     ]
 }
 
+/// What a key did to a one-line text box being typed in (`edit_line`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LineEdit {
+    /// The text changed (a character typed, or one taken back).
+    Changed,
+    /// Enter or Tab: done typing.
+    Done,
+    Escape,
+    None,
+}
+
+/// A key pressed while a one-line text box has the keyboard: Backspace takes the last
+/// character back, typed characters go on the end (up to `max`), Enter/Tab finish.
+pub fn edit_line(text: &mut String, code: winit::keyboard::KeyCode, typed: Option<&str>, max: usize) -> LineEdit {
+    use winit::keyboard::KeyCode;
+    match code {
+        KeyCode::Escape => LineEdit::Escape,
+        KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab => LineEdit::Done,
+        KeyCode::Backspace => {
+            text.pop();
+            LineEdit::Changed
+        }
+        _ => {
+            let mut changed = LineEdit::None;
+            for c in typed.unwrap_or("").chars() {
+                if !c.is_control() && text.chars().count() < max {
+                    text.push(c);
+                    changed = LineEdit::Changed;
+                }
+            }
+            changed
+        }
+    }
+}
+
 pub fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
 }
@@ -148,6 +183,15 @@ pub struct Font {
     pub glyphs: Vec<Glyph>,
     pub atlas: Vec<u8>,
     index: HashMap<char, usize>,
+    /// The glyph of each character up to U+00FF (most text), without hashing it; the rest are
+    /// looked up in `index`. Characters with none show as '?'.
+    latin: [u16; 256],
+}
+
+/// `Font::latin` from the glyph index.
+fn latin_table(index: &HashMap<char, usize>) -> [u16; 256] {
+    let unknown = index[&'?'] as u16;
+    std::array::from_fn(|c| index.get(&char::from(c as u8)).map_or(unknown, |&i| i as u16))
 }
 
 impl Font {
@@ -200,10 +244,12 @@ impl Font {
                 });
             }
         }
+        let latin = latin_table(&index);
         Self {
             glyphs,
             atlas,
             index,
+            latin,
         }
     }
 
@@ -271,11 +317,58 @@ impl Font {
             index.insert(ch, glyphs.len());
             glyphs.push(g);
         }
-        Self { glyphs, atlas, index }
+        let latin = latin_table(&index);
+        Self { glyphs, atlas, index, latin }
     }
 
     pub fn glyph(&self, c: char) -> &Glyph {
-        &self.glyphs[*self.index.get(&c).unwrap_or(&self.index[&'?'])]
+        let i = match self.latin.get(c as usize) {
+            Some(&i) => i as usize,
+            None => self.index.get(&c).copied().unwrap_or(self.latin[b'?' as usize] as usize),
+        };
+        &self.glyphs[i]
+    }
+
+    /// Width of `s` at scale `size` (the last glyph's gap not counted).
+    pub fn text_width(&self, s: &str, size: f32) -> f32 {
+        let units: f32 = s.chars().map(|c| self.glyph(c).adv).sum();
+        if units > 0.0 {
+            (units - 1.0) * size
+        } else {
+            0.0
+        }
+    }
+
+    /// `text` split into lines no wider than `max_w` at `size`, at spaces (a word wider than
+    /// a line gets one of its own). The width is added up as it goes, not measured again
+    /// for every word.
+    pub fn wrap(&self, text: &str, max_w: f32, size: f32) -> Vec<String> {
+        let units = |from: f32, s: &str| s.chars().fold(from, |u, c| u + self.glyph(c).adv);
+        let space = self.glyph(' ').adv;
+        let mut rows = Vec::new();
+        let mut cur = String::new();
+        let mut cur_units = 0.0f32;
+        for word in text.split_whitespace() {
+            if cur.is_empty() {
+                cur.push_str(word);
+                cur_units = units(0.0, word);
+                continue;
+            }
+            let with = units(cur_units + space, word);
+            let width = if with > 0.0 { (with - 1.0) * size } else { 0.0 };
+            if width > max_w {
+                rows.push(std::mem::replace(&mut cur, word.to_string()));
+                cur_units = units(0.0, word);
+            } else {
+                cur.push(' ');
+                cur.push_str(word);
+                cur_units = with;
+            }
+        }
+        if !cur.is_empty() {
+            rows.push(cur);
+        }
+        rows
     }
 }
 
@@ -769,12 +862,7 @@ impl Ui {
     // ---------- text ----------
 
     pub fn text_width(&self, s: &str, size: f32) -> f32 {
-        let units: f32 = s.chars().map(|c| self.font.glyph(c).adv).sum();
-        if units > 0.0 {
-            (units - 1.0) * size
-        } else {
-            0.0
-        }
+        self.font.text_width(s, size)
     }
 
     fn draw_text(
@@ -829,24 +917,7 @@ impl Ui {
 
     /// Splits `text` into lines no wider than `max_w` pixels at `size` (at spaces).
     pub fn wrap(&self, text: &str, max_w: f32, size: f32) -> Vec<String> {
-        let mut rows = Vec::new();
-        let mut cur = String::new();
-        for word in text.split_whitespace() {
-            let candidate = if cur.is_empty() {
-                word.to_string()
-            } else {
-                format!("{cur} {word}")
-            };
-            if !cur.is_empty() && self.text_width(&candidate, size) > max_w {
-                rows.push(std::mem::replace(&mut cur, word.to_string()));
-            } else {
-                cur = candidate;
-            }
-        }
-        if !cur.is_empty() {
-            rows.push(cur);
-        }
-        rows
+        self.font.wrap(text, max_w, size)
     }
 
     pub fn text_centered(&mut self, s: &str, cx: f32, y: f32, size: f32, c: Color, shadow: bool) {
@@ -1157,5 +1228,44 @@ mod nav_tests {
         ui.nav_key(K::KeyE, false);
         frame(&mut ui, &mut v);
         assert_eq!(ui.nav_tab(), 1);
+    }
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+
+    /// The wrapping as it was: every candidate line measured whole.
+    fn wrap_measuring_each(font: &Font, text: &str, max_w: f32, size: f32) -> Vec<String> {
+        let mut rows = Vec::new();
+        let mut cur = String::new();
+        for word in text.split_whitespace() {
+            let candidate = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+            if !cur.is_empty() && font.text_width(&candidate, size) > max_w {
+                rows.push(std::mem::replace(&mut cur, word.to_string()));
+            } else {
+                cur = candidate;
+            }
+        }
+        if !cur.is_empty() {
+            rows.push(cur);
+        }
+        rows
+    }
+
+    #[test]
+    fn wrapping_adds_up_widths_the_same_as_measuring() {
+        let font = Font::new();
+        let text = "A gyors barna róka átugrik a lusta kutyán, és közben 1234 ÁRVÍZTŰRŐ tükörfúrógép \
+                    hums quietly: the quick brown fox jumps over the lazy dog? Igen! verylongwordthatdoesnotfit x y z";
+        for size in [1.0, 1.5, 2.0, 3.0] {
+            for max_w in (4..400).step_by(7) {
+                let max_w = max_w as f32;
+                assert_eq!(font.wrap(text, max_w, size), wrap_measuring_each(&font, text, max_w, size), "{size} {max_w}");
+            }
+        }
+        // Characters past U+00FF and unknown ones still find their glyph.
+        assert!(!std::ptr::eq(font.glyph('ő'), font.glyph('?')));
+        assert_eq!(font.glyph('\u{2603}').adv, font.glyph('?').adv);
     }
 }

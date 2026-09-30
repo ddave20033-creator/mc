@@ -73,24 +73,12 @@ fn ways(item: ItemId) -> std::rc::Rc<Vec<Way>> {
 impl Game {
     /// Keyboard input while the JEI search box has it.
     pub(in crate::game) fn jei_key(&mut self, code: KeyCode, text: Option<&str>) {
-        const MAX: usize = 24;
+        use crate::ui::{edit_line, LineEdit};
         let jei = &mut self.inv_ui.jei;
-        match code {
-            KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab => {
-                jei.focused = false
-            }
-            KeyCode::Backspace => {
-                jei.search.pop();
-                jei.scroll = 0.0;
-            }
-            _ => {
-                for c in text.unwrap_or("").chars() {
-                    if !c.is_control() && jei.search.chars().count() < MAX {
-                        jei.search.push(c);
-                        jei.scroll = 0.0;
-                    }
-                }
-            }
+        match edit_line(&mut jei.search, code, text, 24) {
+            LineEdit::Escape | LineEdit::Done => jei.focused = false,
+            LineEdit::Changed => jei.scroll = 0.0,
+            LineEdit::None => {}
         }
     }
 

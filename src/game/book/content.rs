@@ -3,7 +3,7 @@
 //! tells how things work now), in English or Hungarian, drawn page by page onto a canvas
 //! in a light or a dark theme, with small looping animations in the pictures.
 
-use super::canvas::{text_width, wrap, Canvas};
+use super::canvas::Canvas;
 use crate::entity::block_entity::{BURN_TIME, FLIP_TIME, GRILL_TIME};
 use crate::entity::Furnace;
 use crate::item::*;
@@ -734,11 +734,11 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
 fn pieces(font: &Font, m: &Metrics, el: El) -> Vec<Piece> {
     let u = m.u;
     match el {
-        El::Chapter(t, short) => vec![Piece::Break, Piece::Title(wrap(font, &t, m.w, m.tfs), short)],
+        El::Chapter(t, short) => vec![Piece::Break, Piece::Title(font.wrap(&t, m.w, m.tfs), short)],
         El::Break => vec![Piece::Break],
         El::Head(t) => vec![Piece::Head(t)],
         El::Text(t) => {
-            let mut v: Vec<Piece> = wrap(font, &t, m.w, m.fs)
+            let mut v: Vec<Piece> = font.wrap(&t, m.w, m.fs)
                 .into_iter()
                 .map(|text| Piece::Line { text, indent: false, dash: false })
                 .collect();
@@ -746,7 +746,7 @@ fn pieces(font: &Font, m: &Metrics, el: El) -> Vec<Piece> {
             v
         }
         El::Bullet(t) => {
-            let mut v: Vec<Piece> = wrap(font, &t, m.w - INDENT * u, m.fs)
+            let mut v: Vec<Piece> = font.wrap(&t, m.w - INDENT * u, m.fs)
                 .into_iter()
                 .enumerate()
                 .map(|(i, text)| Piece::Line { text, indent: true, dash: i == 0 })
@@ -756,7 +756,7 @@ fn pieces(font: &Font, m: &Metrics, el: El) -> Vec<Piece> {
         }
         El::Recipe(id) => vec![Piece::Recipe(id)],
         El::Smelt(id) => vec![Piece::Smelt(id)],
-        El::Row(id, t) => vec![Piece::Row(id, wrap(font, &t, m.w - 22.0 * u, m.fs))],
+        El::Row(id, t) => vec![Piece::Row(id, font.wrap(&t, m.w - 22.0 * u, m.fs))],
         El::Picture(p) => vec![Piece::Pic(p)],
         El::Stat(a, k, b) => vec![Piece::Stat(a, k, b)],
     }
@@ -937,8 +937,8 @@ pub fn draw_tabs<'a>(font: &'a Font, texture: &'a [u8], lay: &Layout, open: Opti
         cv.fill(x + 3.0, top, w - 6.0, 2.0, with_a([1.0; 4], 0.25));
         let white = rgba(250, 244, 230, 255);
         let n = format!("{}", i + 1);
-        cv.text(&n, x + w * 0.5 - text_width(font, &n, 2.0) * 0.5, top + 3.0, 2.0, white, true);
-        let tw = text_width(font, short, 1.0);
+        cv.text(&n, x + w * 0.5 - font.text_width(&n, 2.0) * 0.5, top + 3.0, 2.0, white, true);
+        let tw = font.text_width(short, 1.0);
         cv.text(short, x + (w - tw) * 0.5, top + 23.0, 1.0, white, true);
     }
     cv
@@ -1069,7 +1069,7 @@ impl Draw<'_, '_> {
             Piece::Stat(label, k, value) => {
                 let ty = y + u;
                 self.cv.text(label, x, ty, m.fs, th.ink, false);
-                let vw = text_width(self.cv.font(), value, m.fs);
+                let vw = self.cv.font().text_width(value, m.fs);
                 self.cv.text(value, x + m.w - vw, ty, m.fs, th.soft, false);
                 let bx = x + m.w * 0.4;
                 let bw = m.w * 0.6 - vw - 5.0 * u;
@@ -1159,7 +1159,7 @@ impl Draw<'_, '_> {
             "Nézz le az olvasáshoz. Jobb klikk: lapozás, bal klikk: vissza.",
         );
         let mut ty = y + m.h - 26.0 * u;
-        for l in wrap(self.cv.font(), &hint, m.w, m.fs) {
+        for l in self.cv.font().wrap(&hint, m.w, m.fs) {
             self.cv.text_centered(&l, cx, ty, m.fs, th.soft);
             ty += m.lh;
         }
@@ -1182,7 +1182,7 @@ impl Draw<'_, '_> {
             }
             let c = if hover { th.red } else { th.ink };
             let lw = self.cv.text(&label, x, ty, m.fs, c, false);
-            let nw = text_width(self.cv.font(), &num, m.fs);
+            let nw = self.cv.font().text_width(&num, m.fs);
             self.cv.text(&num, x + m.w - nw, ty, m.fs, c, false);
             // Dots between the title and the page number.
             let mut dx = x + lw + 3.0 * u;
@@ -1198,7 +1198,7 @@ impl Draw<'_, '_> {
             "Olvasás közben a fejezet számával (1-8, a fenti füleken is) odalapozol. A Home ide hoz vissza.",
         );
         ty += 6.0 * u;
-        for l in wrap(self.cv.font(), &tip, m.w, m.fs) {
+        for l in self.cv.font().wrap(&tip, m.w, m.fs) {
             self.cv.text(&l, x, ty, m.fs, th.soft, false);
             ty += m.lh;
         }
@@ -1323,7 +1323,7 @@ impl Draw<'_, '_> {
                     (tr(hu, "burnt", "szenes"), gx + s + 4.0 * u, gy + s * 0.5 + 4.0 * u, false),
                 ];
                 for (l, lx, ly, left) in labels {
-                    let tw = text_width(self.cv.font(), &l, m.fs);
+                    let tw = self.cv.font().text_width(&l, m.fs);
                     let px = if left { lx - tw } else { lx };
                     self.cv.text(&l, px, ly, m.fs, th.soft, false);
                 }
@@ -1417,7 +1417,7 @@ mod tests {
                         _ => None,
                     };
                     if let Some((t, indent)) = text {
-                        assert!(text_width(&font, t, m.fs) <= m.w - indent + 0.01, "too wide: {t}");
+                        assert!(font.text_width(t, m.fs) <= m.w - indent + 0.01, "too wide: {t}");
                     }
                     if let Piece::Recipe(id) = p {
                         assert!(recipe_view(*id).is_some(), "no recipe for {id}");

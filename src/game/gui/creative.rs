@@ -301,22 +301,12 @@ impl Game {
 
     /// Keyboard input while the creative search box is focused.
     pub(in crate::game) fn search_key(&mut self, code: KeyCode, text: Option<&str>) {
-        const MAX: usize = 24;
-        match code {
-            KeyCode::Escape => self.close_container(),
-            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Tab => self.inv_ui.search_focused = false,
-            KeyCode::Backspace => {
-                self.inv_ui.creative_search.pop();
-                self.scroll_creative_to_top();
-            }
-            _ => {
-                for c in text.unwrap_or("").chars() {
-                    if !c.is_control() && self.inv_ui.creative_search.chars().count() < MAX {
-                        self.inv_ui.creative_search.push(c);
-                        self.scroll_creative_to_top();
-                    }
-                }
-            }
+        use crate::ui::{edit_line, LineEdit};
+        match edit_line(&mut self.inv_ui.creative_search, code, text, 24) {
+            LineEdit::Escape => self.close_container(),
+            LineEdit::Done => self.inv_ui.search_focused = false,
+            LineEdit::Changed => self.scroll_creative_to_top(),
+            LineEdit::None => {}
         }
     }
 
