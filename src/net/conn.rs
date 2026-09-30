@@ -1,6 +1,7 @@
 //! TCP connections (a reader and a writer thread each, so the game never blocks on the
 //! network), the host's server socket and the LAN announcements and discovery.
 
+use super::codec::MAX_FRAME;
 use super::{Msg, PROTOCOL};
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -14,7 +15,6 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// UDP port the LAN announcements go to.
 const DISCOVERY_PORT: u16 = 4446;
 const AD_PREFIX: &str = "RUSTCRAFT_LAN";
-const MAX_FRAME: usize = 64 << 20;
 /// How long a connection may go without sending (or a player hear nothing from the host)
 /// before it counts as lost.
 const SILENT_LIMIT: Duration = Duration::from_secs(60);
