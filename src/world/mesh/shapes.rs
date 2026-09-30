@@ -51,7 +51,7 @@ pub fn bed_local_f(mut x: f32, mut z: f32, f: u8) -> (f32, f32) {
 
 /// Model transform of a placed torch (`block_center` = center of the block's bottom face).
 /// In the torch model the stick runs from y -0.34 to 0.15 and the glowing tip ends at 0.19.
-pub fn torch_transform(block_center: Vec3, kind: u8) -> Mat4 {
+pub fn torch_transform(block_center: Vec3, kind: Block) -> Mat4 {
     if kind == TORCH {
         return Mat4::from_translation(block_center + Vec3::Y * 0.34);
     }
@@ -70,7 +70,7 @@ pub fn torch_transform(block_center: Vec3, kind: u8) -> Mat4 {
 
 impl Builder {
     /// Torch: the same wooden shaft and animated flame used by held torches.
-    pub(super) fn torch(&mut self, r: &Region, x: i32, y: i32, z: i32, kind: u8) {
+    pub(super) fn torch(&mut self, r: &Region, x: i32, y: i32, z: i32, kind: Block) {
         let (s, b) = r.light(x, y, z);
         let block_center = Vec3::new(
             (x + self.ox) as f32 + 0.5,
@@ -94,7 +94,7 @@ impl Builder {
     }
 
     /// Lantern standing on a block or hanging below one (emits its own light).
-    pub(super) fn lantern(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+    pub(super) fn lantern(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
         let (s, bl) = r.light(x, y, z);
         let m = Mat4::from_translation(Vec3::new(
             (x + self.ox) as f32 + 0.5,
@@ -191,7 +191,7 @@ impl Builder {
 
     /// Chest base; the lid is drawn separately every frame so it can open. A double chest
     /// half reaches the other half, with no wall between them.
-    pub(super) fn chest(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+    pub(super) fn chest(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
         let (s, bl) = r.light(x, y, z);
         let (mut lo, mut hi) = (
             [1.0 / 16.0, 0.0, 1.0 / 16.0],
@@ -243,7 +243,7 @@ impl Builder {
 
     /// Furnace: a cube whose front has two openings (the mouth above, for things to smelt,
     /// and the firebox below), each with a hollow behind it.
-    pub(super) fn furnace(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+    pub(super) fn furnace(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
         let f = facing(b).unwrap_or(0);
         let front = front_face(f);
         for (face, n) in FACE_N.iter().enumerate() {
@@ -287,7 +287,7 @@ impl Builder {
 
     /// Blast furnace chimney (`CHIMNEY_BOXES`): the slab, the stack on it and the rim round
     /// its top, without the faces hidden under each other or against solid neighbours.
-    pub(super) fn chimney(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+    pub(super) fn chimney(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
         let (s, bl) = r.light(x, y, z);
         for (i, &(lo, hi)) in CHIMNEY_BOXES.iter().enumerate() {
             for (face, &n) in FACE_N.iter().enumerate() {
@@ -326,8 +326,8 @@ impl Builder {
 
     /// Stairs: the filled eighths of the block, without the faces between them or against
     /// solid neighbours.
-    pub(super) fn stairs(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
-        let octants = |x: i32, y: i32, z: i32, b: u8| {
+    pub(super) fn stairs(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
+        let octants = |x: i32, y: i32, z: i32, b: Block| {
             stairs_octants(b, |d| r.get(x + d.x, y + d.y, z + d.z))
         };
         let bits = octants(x, y, z, b);
@@ -386,7 +386,7 @@ impl Builder {
     /// Bed half: a box 9/16 high with the pack's face textures (the legs are cut out of the
     /// sides) and the bottom at 3/16, turned toward the bed's facing. The faces between the
     /// halves are left out.
-    pub(super) fn bed(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+    pub(super) fn bed(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
         let (s, bl) = r.light(x, y, z);
         let f = bed_facing(b);
         let head = bed_head(b);

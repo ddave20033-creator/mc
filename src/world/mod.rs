@@ -23,11 +23,11 @@ pub struct World {
     pub modified: FastSet<ChunkPos>,
     /// Recent fluid changes: position -> (previous block, game time). Lets the mesher
     /// animate fluid surfaces smoothly between simulation ticks.
-    pub fluid_changes: FastMap<IVec3, (u8, f32)>,
+    pub fluid_changes: FastMap<IVec3, (Block, f32)>,
     /// LAN host: every block change, to send to the players.
-    pub log: Option<Vec<(IVec3, u8)>>,
+    pub log: Option<Vec<(IVec3, Block)>>,
     /// LAN player: changes from the host for chunks that are not here yet.
-    pub pending: FastMap<ChunkPos, Vec<(IVec3, u8)>>,
+    pub pending: FastMap<ChunkPos, Vec<(IVec3, Block)>>,
     /// The light of each meshed chunk, as the mesher flood-filled it.
     pub light: FastMap<ChunkPos, ChunkLight>,
     /// The axe's cuts in trunks and the stumps of felled trees (`game::felling`). A block
@@ -86,7 +86,7 @@ impl World {
             .collect()
     }
 
-    pub fn record_fluid_change(&mut self, p: IVec3, old: u8, new: u8, now: f32) {
+    pub fn record_fluid_change(&mut self, p: IVec3, old: Block, new: Block, now: f32) {
         if is_fluid(old) || is_fluid(new) {
             // Keep the oldest still-animating state so rapid changes blend continuously.
             let keep = self
@@ -104,7 +104,7 @@ impl World {
     }
 
     /// Fluid changes inside the 3x3 chunk neighbourhood of `p` (for a mesh job).
-    pub fn fluid_changes_near(&self, p: ChunkPos) -> Vec<(IVec3, u8, f32)> {
+    pub fn fluid_changes_near(&self, p: ChunkPos) -> Vec<(IVec3, Block, f32)> {
         let (x0, z0) = (p.0 * 16 - 16, p.1 * 16 - 16);
         self.fluid_changes
             .iter()
@@ -119,7 +119,7 @@ impl World {
     }
 
     #[inline]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub fn get(&self, x: i32, y: i32, z: i32) -> Block {
         if y < 0 {
             return BEDROCK;
         }
@@ -137,7 +137,7 @@ impl World {
     }
 
     #[inline]
-    pub fn geti(&self, p: IVec3) -> u8 {
+    pub fn geti(&self, p: IVec3) -> Block {
         self.get(p.x, p.y, p.z)
     }
 
@@ -145,7 +145,7 @@ impl World {
         self.chunks.contains_key(&Self::chunk_pos(x, z))
     }
 
-    pub fn set(&mut self, x: i32, y: i32, z: i32, b: u8) -> bool {
+    pub fn set(&mut self, x: i32, y: i32, z: i32, b: Block) -> bool {
         if y < 0 || y >= HEIGHT as i32 {
             return false;
         }
@@ -172,7 +172,7 @@ impl World {
         }
     }
 
-    pub fn seti(&mut self, p: IVec3, b: u8) -> bool {
+    pub fn seti(&mut self, p: IVec3, b: Block) -> bool {
         self.set(p.x, p.y, p.z, b)
     }
 

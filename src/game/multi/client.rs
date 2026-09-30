@@ -172,7 +172,7 @@ impl Game {
             }
             Msg::Refuse(reason) => self.leave_server(Some(reason)),
             Msg::Chunk { pos, rle } => {
-                if let Some(c) = ChunkData::from_raw(unrle(&rle)) {
+                if let Some(c) = ChunkData::from_vec(&unrle(&rle)) {
                     let w = &mut self.terrain.world;
                     // The host's copy as it is now: changes waiting for it are older, and it
                     // is kept when unloaded (not generated again from the seed).
@@ -321,7 +321,7 @@ impl Game {
     }
 
     /// LAN player: a block change from the host.
-    pub(super) fn apply_remote_block(&mut self, p: IVec3, b: u8) {
+    pub(super) fn apply_remote_block(&mut self, p: IVec3, b: Block) {
         let cp = World::chunk_pos(p.x, p.z);
         let w = &mut self.terrain.world;
         if w.chunks.contains_key(&cp) {
@@ -357,7 +357,7 @@ impl Game {
         items: Vec<ItemNet>,
         gone_mobs: &[u32],
         gone_items: &[u32],
-        falling: Vec<(Vec3, u8)>,
+        falling: Vec<(Vec3, Block)>,
     ) {
         // Whether an entity stays: listed when all are, not gone otherwise.
         let stays = |listed: &FastSet<u32>, gone: &FastSet<u32>, id: u32| {

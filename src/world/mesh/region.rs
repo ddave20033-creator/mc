@@ -6,16 +6,16 @@ use std::collections::VecDeque;
 const RW: usize = 48;
 
 pub(super) struct Region {
-    blocks: Vec<u8>,
+    blocks: Vec<Block>,
     pub(super) sky: Vec<u8>,
     pub(super) blk: Vec<u8>,
     pub(super) h: usize,
     hm: Vec<i32>,
     /// Region coords -> (previous block, change time) for recently changed fluids.
-    pub(super) old: FastMap<(i32, i32, i32), (u8, f32)>,
+    pub(super) old: FastMap<(i32, i32, i32), (Block, f32)>,
 }
 
-fn propagate(levels: &mut [u8], blocks: &[u8], h: usize, q: &mut VecDeque<u32>) {
+fn propagate(levels: &mut [u8], blocks: &[Block], h: usize, q: &mut VecDeque<u32>) {
     let layer = RW * RW;
     while let Some(i) = q.pop_front() {
         let i = i as usize;
@@ -95,7 +95,7 @@ impl Region {
     }
 
     #[inline]
-    pub(super) fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub(super) fn get(&self, x: i32, y: i32, z: i32) -> Block {
         if y < 0 {
             return BEDROCK;
         }

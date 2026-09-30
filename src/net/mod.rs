@@ -18,7 +18,7 @@ pub use delta::{full_list_bytes, EntitySync};
 pub use msg::{ItemNet, MobNet, Msg, PlayerState, Pose, NO_BLOCK};
 
 /// Bumped whenever the messages change; host and players must match.
-pub const PROTOCOL: u16 = 35;
+pub const PROTOCOL: u16 = 36;
 
 /// `Pose::book`: the book is held open; the last page turn went back; the number of page
 /// turns so far (low 6 bits, wrapping), so the others turn a page when it changes.

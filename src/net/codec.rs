@@ -4,6 +4,7 @@
 use super::{ItemNet, MobNet, Msg, PlayerState, Pose};
 use crate::entity::{BenchEvent, BenchItem, GunBench, Grilled};
 use crate::item::{Slot, Stack};
+use crate::world::block::valid;
 use glam::{IVec3, Vec3};
 
 // Limits on what is read from a peer: anything larger means a broken or hostile peer, and the
@@ -400,7 +401,7 @@ impl Msg {
             Msg::Place { p, b } => {
                 w.u8(2);
                 w.ivec3(*p);
-                w.u8(*b);
+                w.u16(*b);
             }
             Msg::Break { p, held, creative } => {
                 w.u8(3);
@@ -518,7 +519,7 @@ impl Msg {
                 w.u32(list.len() as u32);
                 for (p, b) in list {
                     w.ivec3(*p);
-                    w.u8(*b);
+                    w.u16(*b);
                 }
             }
             Msg::Time(t) => {
@@ -584,7 +585,7 @@ impl Msg {
                 w.u32(falling.len() as u32);
                 for (p, b) in falling {
                     w.vec3(*p);
-                    w.u8(*b);
+                    w.u16(*b);
                 }
             }
             Msg::Give(s) => {
@@ -594,7 +595,7 @@ impl Msg {
             Msg::BreakFx { p, block } => {
                 w.u8(32);
                 w.ivec3(*p);
-                w.u8(*block);
+                w.u16(*block);
             }
             Msg::Hurt {
                 dmg,
@@ -710,7 +711,7 @@ impl Msg {
             1 => Msg::Pose(r.pose()?),
             2 => Msg::Place {
                 p: r.ivec3()?,
-                b: r.u8()?,
+                b: valid(r.u16()?),
             },
             3 => Msg::Break {
                 p: r.ivec3()?,
@@ -766,7 +767,7 @@ impl Msg {
                 rle: r.bytes()?,
             },
             23 => Msg::Ready,
-            24 => Msg::Blocks(r.list(|r| Some((r.ivec3()?, r.u8()?)))?),
+            24 => Msg::Blocks(r.list(|r| Some((r.ivec3()?, valid(r.u16()?))))?),
             25 => Msg::Time(r.f32()?),
             26 => Msg::Join {
                 id: r.u8()?,
@@ -805,12 +806,12 @@ impl Msg {
                 })?,
                 gone_mobs: r.list(|r| r.u32())?,
                 gone_items: r.list(|r| r.u32())?,
-                falling: r.list(|r| Some((r.vec3()?, r.u8()?)))?,
+                falling: r.list(|r| Some((r.vec3()?, valid(r.u16()?))))?,
             },
             30 => Msg::Give(r.stack()?),
             32 => Msg::BreakFx {
                 p: r.ivec3()?,
-                block: r.u8()?,
+                block: valid(r.u16()?),
             },
             31 => Msg::Hurt {
                 dmg: r.f32()?,

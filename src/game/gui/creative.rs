@@ -142,47 +142,27 @@ impl Tab {
     /// The items of the tab in the order they are shown, in groups; each group starts on a
     /// new row.
     pub(super) fn groups(self) -> Vec<Vec<ItemId>> {
-        let b = |ids: &[u8]| ids.iter().map(|&b| b as ItemId).collect::<Vec<_>>();
+        // A tab's blocks, in the groups the blocks' table puts them in.
+        let blocks = |tab: fn(u8) -> Creative| {
+            let mut groups: Vec<Vec<ItemId>> = Vec::new();
+            for g in 0..=u8::MAX {
+                let ids: Vec<ItemId> = crate::item::block_items()
+                    .filter(|d| d.creative == tab(g))
+                    .map(|d| d.id as ItemId)
+                    .collect();
+                if ids.is_empty() {
+                    break;
+                }
+                groups.push(ids);
+            }
+            groups
+        };
         let tools = |kind| {
             TIER_ORDER.map(|tier| tool_id(kind, tier)).to_vec()
         };
         match self {
-            Tab::Blocks => vec![
-                b(&[GRASS, SNOWY_GRASS, DIRT, SAND, GRAVEL, CLAY, SNOW, ICE]),
-                b(&[STONE, COBBLE, STONE_BRICKS, SANDSTONE, BRICKS, OBSIDIAN, BEDROCK]),
-                b(&[OAK_LOG, BIRCH_LOG, SPRUCE_LOG, PLANKS, OAK_STAIRS, GLASS, GLOWSTONE, WOOL]),
-                b(&[
-                    OAK_LEAVES,
-                    BIRCH_LEAVES,
-                    SPRUCE_LEAVES,
-                    OAK_SAPLING,
-                    BIRCH_SAPLING,
-                    SPRUCE_SAPLING,
-                    TALL_GRASS,
-                    POPPY,
-                    DANDELION,
-                    DEAD_BUSH,
-                    CACTUS,
-                ]),
-                b(&[
-                    COAL_ORE,
-                    COPPER_ORE,
-                    IRON_ORE,
-                    GOLD_ORE,
-                    DIAMOND_ORE,
-                ]),
-                b(&[
-                    COAL_BLOCK,
-                    COPPER_BLOCK,
-                    IRON_BLOCK,
-                    GOLD_BLOCK,
-                    DIAMOND_BLOCK,
-                ]),
-            ],
-            Tab::Functional => vec![
-                b(&[CRAFTING_TABLE, FURNACE, BLAST_FURNACE, ADV_FURNACE, GUN_STATION, RIFLE_BENCH]),
-                b(&[CHEST, BED, OAK_DOOR, TORCH, LANTERN]),
-            ],
+            Tab::Blocks => blocks(Creative::Blocks),
+            Tab::Functional => blocks(Creative::Functional),
             Tab::Tools => vec![
                 tools(ToolKind::Pickaxe),
                 tools(ToolKind::Axe),

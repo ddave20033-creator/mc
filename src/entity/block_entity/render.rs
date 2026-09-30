@@ -84,7 +84,7 @@ pub fn chest_cell_at(q: IVec3, facing: u8, side: i32, point: Vec3) -> Option<usi
 }
 
 /// Where the other half of the double chest at `q` is, across (-1, 0 or 1).
-pub fn chest_side(b: u8, facing: u8) -> i32 {
+pub fn chest_side(b: Block, facing: u8) -> i32 {
     chest_partner_offset(b).map_or(0, |d| d.dot(chest_right(facing)))
 }
 
@@ -232,7 +232,7 @@ pub fn build_chest_lid(
 }
 
 /// One door half at `p`, swung `open` (0 closed .. 1 open) around its hinge edge.
-pub fn build_door(out: &mut Vec<Vertex>, p: IVec3, b: u8, open: f32, sky: u8, blk: u8) {
+pub fn build_door(out: &mut Vec<Vertex>, p: IVec3, b: Block, open: f32, sky: u8, blk: u8) {
     let light = vertex_light(sky, blk);
     let f = door_facing(b);
     let hinge_right = door_hinge_right(b);

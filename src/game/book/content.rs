@@ -99,7 +99,7 @@ pub fn metrics() -> Metrics {
 #[derive(Clone)]
 pub enum Pic {
     /// A furnace's blocks as they stand (FURNACE, BLAST_FURNACE or ADV_FURNACE).
-    Furnace(u8),
+    Furnace(Block),
     /// A furnace's front: the upper half takes what to smelt, the lower half the fuel.
     Front,
     /// The top of a furnace with meat on its corners.
@@ -233,7 +233,7 @@ fn smelt_time(tier: u8) -> f32 {
     .smelt_time()
 }
 
-fn furnace_of_tier(tier: u8) -> u8 {
+fn furnace_of_tier(tier: u8) -> Block {
     match tier {
         3 => ADV_FURNACE,
         2 => BLAST_FURNACE,
@@ -1216,7 +1216,7 @@ impl Draw<'_, '_> {
             Pic::Furnace(base) => {
                 // Iso cubes (as the item icons draw them), the furnace facing the reader's
                 // left: (right, up) steps along its front and upward.
-                let cells: Vec<(f32, f32, u8)> = match *base {
+                let cells: Vec<(f32, f32, Block)> = match *base {
                     BLAST_FURNACE => vec![(0.0, 0.0, furnace_id(*base, 0, true)), (0.0, 1.0, CHIMNEY)],
                     ADV_FURNACE => vec![
                         (0.0, 0.0, furnace_id(*base, 0, true)),

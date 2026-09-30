@@ -48,7 +48,7 @@ fn put(
     wx: i32,
     y: i32,
     wz: i32,
-    b: u8,
+    b: Block,
     only_replaceable: bool,
 ) {
     let (lx, lz) = (wx - x0, wz - z0);
@@ -73,7 +73,7 @@ impl Generator {
         // deeper the tier, the deeper and rarer the ore: coal all over, copper around sea
         // level, iron below it (and up in the mountains), gold deep, diamond at the bottom
         // among the lava lakes (y <= 10).
-        let ores: [(u8, f32, i32, i32, i32, (u32, u32)); 6] = [
+        let ores: [(Block, f32, i32, i32, i32, (u32, u32)); 6] = [
             (COAL_ORE, 30.0, 12, 130, 55, (5, 14)),
             (COPPER_ORE, 17.0, 22, 100, 52, (4, 9)),
             (IRON_ORE, 4.5, 8, 70, 36, (3, 7)),

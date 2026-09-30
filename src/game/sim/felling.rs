@@ -50,13 +50,13 @@ pub(in crate::game) struct FallingTree {
     height: f32,
     /// Its blocks: their lower corner from the pivot as it stood, and the block; the first
     /// `trunk` of them its trunk from the cut up (which stays lying where it falls).
-    blocks: Vec<(Vec3, u8)>,
+    blocks: Vec<(Vec3, Block)>,
     trunk: usize,
     /// The middle of the stump's top (where the trunk lies from).
     stump: Vec3,
     /// The part of the cut block above the cut (its lower corner from the pivot, the block
     /// and the cut's height in it), which goes with the tree.
-    stub: (Vec3, u8, f32),
+    stub: (Vec3, Block, f32),
     leaf_tint: [u8; 3],
     /// What it was felled with (for the drops), and whether in creative (none).
     tool: ItemId,
@@ -75,7 +75,7 @@ impl FallingTree {
 }
 
 /// The trunk of a standing tree (an upright log, not a branch), which an axe fells.
-fn is_trunk(b: u8) -> bool {
+fn is_trunk(b: Block) -> bool {
     is_log(b) && !is_branch(b) && log_axis(b) == 1
 }
 
@@ -316,7 +316,7 @@ impl Game {
     }
 
     /// Chips of the trunk at `p` flying out at `at` (the way `out`).
-    pub(in crate::game) fn chips(&mut self, p: IVec3, b: u8, at: Vec3, out: Vec3) {
+    pub(in crate::game) fn chips(&mut self, p: IVec3, b: Block, at: Vec3, out: Vec3) {
         let tint = self.block_tint(p, b);
         for _ in 0..3 {
             self.particles.impact(&self.terrain.world, at, out, b, tint);
@@ -474,7 +474,7 @@ impl Game {
             .map(|dy| p + IVec3::Y * dy)
             .take_while(|&q| seen.contains(&q) && is_trunk(w.geti(q)) && log_base(w.geti(q)) == kind)
             .collect();
-        let mut blocks: Vec<(Vec3, u8)> = Vec::with_capacity(wood.len() + leaf.len());
+        let mut blocks: Vec<(Vec3, Block)> = Vec::with_capacity(wood.len() + leaf.len());
         for &q in trunk.iter().chain(wood.iter().filter(|q| !trunk.contains(q))).chain(&leaf) {
             blocks.push((q.as_vec3() - pivot, w.geti(q)));
         }
@@ -546,7 +546,7 @@ impl Game {
     fn tree_lands(&mut self, t: FallingTree) {
         let turn = t.turn();
         // The trunk from just past the stump, the way it fell (the ground's lie of it).
-        let pieces: Vec<u8> = t.blocks[..t.trunk].iter().map(|&(_, b)| b).collect();
+        let pieces: Vec<Block> = t.blocks[..t.trunk].iter().map(|&(_, b)| b).collect();
         let fell = turn.transform_vector3(Vec3::Y);
         let fell = Vec3::new(fell.x, 0.0, fell.z).normalize_or_zero();
         self.lay_log(t.stump + fell * 0.5, fell, pieces, t.tool, t.creative);

@@ -27,10 +27,12 @@ impl Game {
                 let p = IVec3::from(p);
                 let cp = World::chunk_pos(p.x, p.z);
                 let w = &self.terrain.world;
+                // (by key and state: `oak_door:9`)
+                let named = |b: Block| format!("{}:{}", def(b).key, b - base(b));
                 let block = if w.chunks.contains_key(&cp) {
-                    w.geti(p).to_string()
+                    named(w.geti(p))
                 } else {
-                    let saved = w.saved.get(&cp).map(|c| c.get(p.x.rem_euclid(16) as usize, p.y as usize, p.z.rem_euclid(16) as usize));
+                    let saved = w.saved.get(&cp).map(|c| named(c.get(p.x.rem_euclid(16) as usize, p.y as usize, p.z.rem_euclid(16) as usize)));
                     format!("not loaded (saved copy: {saved:?})")
                 };
                 vec![format!("block {} {} {}: {block}", p.x, p.y, p.z)]

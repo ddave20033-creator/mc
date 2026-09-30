@@ -84,7 +84,7 @@ pub(super) fn glass_mask(r: &Region, x: i32, y: i32, z: i32, face: usize) -> u8 
 }
 
 #[inline]
-fn occludes(b: u8) -> bool {
+fn occludes(b: Block) -> bool {
     is_opaque(b) || is_leaves(b)
 }
 

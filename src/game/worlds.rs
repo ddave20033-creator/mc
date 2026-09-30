@@ -567,7 +567,7 @@ impl Game {
 
 
 /// A block drawn as a little isometric icon (a world's picture).
-fn block_icon(ui: &mut crate::ui::Ui, c: Vec2, r: f32, b: u8) {
+fn block_icon(ui: &mut crate::ui::Ui, c: Vec2, r: f32, b: Block) {
     use crate::world::{face_texture, icon_tint, tint_kind, TintKind};
     let tint = icon_tint(b);
     let top = if tint_kind(b, 2) != TintKind::None { tint } else { [255; 3] };

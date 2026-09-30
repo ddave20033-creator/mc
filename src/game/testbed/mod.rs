@@ -536,7 +536,7 @@ impl Game {
                         .is_none_or(|px| px.chunks_exact(4).all(|p| p[3] == 0))
                 };
                 let mut used: Vec<(u32, String)> = Vec::new();
-                for b in 1..=255u8 {
+                for b in 1..BLOCK_IDS as Block {
                     let Some(id) = crate::item::item_of_block(b) else { continue };
                     for face in 0..6 {
                         used.push((crate::world::face_texture(b, face), format!("block {b} ({}) face {face}", crate::item::key(id))));
@@ -633,12 +633,13 @@ fn test_world(seed: Option<u32>) -> WorldMeta {
     }
 }
 
-/// A block by its item name (`stone`, `oak_log`...).
-fn block_named(name: &str) -> Option<u8> {
-    if name == "air" {
-        return Some(AIR);
-    }
-    crate::item::from_key(name).and_then(crate::item::block_of)
+/// A block by its key in the blocks' table (`stone`, `oak_log`, `wall_torch`...), with an
+/// optional state after a colon (`oak_door:9`).
+fn block_named(name: &str) -> Option<Block> {
+    let (key, state) = name.split_once(':').unwrap_or((name, "0"));
+    let d = crate::content::blocks::def(by_key(key.strip_prefix("minecraft:").unwrap_or(key))?);
+    let state: Block = state.parse().ok()?;
+    (state < d.states).then(|| d.id + state)
 }
 
 /// A key by a bind's name (`forward`, `jump`, `reload`...), winit's name (`KeyW`, `Space`,

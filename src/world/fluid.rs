@@ -20,10 +20,10 @@ pub struct Fluids {
     /// Game time of the current update, used to timestamp changes for smooth rendering.
     now: f32,
     /// Plants and torches washed away by flowing fluid (the game turns them into drops).
-    pub broken: Vec<(IVec3, u8)>,
+    pub broken: Vec<(IVec3, Block)>,
 }
 
-fn delay(b: u8) -> u64 {
+fn delay(b: Block) -> u64 {
     if is_lava(b) {
         LAVA_DELAY
     } else {
@@ -96,7 +96,7 @@ impl Fluids {
         }
     }
 
-    fn set(&mut self, w: &mut World, p: IVec3, b: u8, changed: &mut Vec<IVec3>) {
+    fn set(&mut self, w: &mut World, p: IVec3, b: Block, changed: &mut Vec<IVec3>) {
         let old = w.geti(p);
         if fluid_breaks(old) {
             self.broken.push((p, old));
@@ -150,9 +150,9 @@ impl Fluids {
         }
         let lava = is_lava(b);
         let base = if lava { LAVA } else { WATER };
-        let same = |x: u8| if lava { is_lava(x) } else { is_water(x) };
+        let same = |x: Block| if lava { is_lava(x) } else { is_water(x) };
         let drop = if lava { 2 } else { 1 };
-        let mut level = b - base;
+        let mut level = (b - base) as u8;
 
         // Lava touching water hardens.
         if lava {
@@ -175,7 +175,7 @@ impl Fluids {
                 for d in HORIZONTAL {
                     let n = w.geti(p + d);
                     if same(n) {
-                        let l = n - base;
+                        let l = (n - base) as u8;
                         if l == 0 {
                             sources += 1;
                         }
@@ -202,7 +202,7 @@ impl Fluids {
             }
             if new != level {
                 level = new;
-                self.set(w, p, base + new, changed);
+                self.set(w, p, base + new as Block, changed);
             }
         }
 
@@ -211,7 +211,7 @@ impl Fluids {
         if Self::can_flow(w, below) {
             let bb = w.geti(below);
             if !(same(bb) && (fluid_level(bb) == 0 || fluid_level(bb) == FALLING)) {
-                self.flow_into(w, below, bb, base + FALLING, lava, changed);
+                self.flow_into(w, below, bb, base + FALLING as Block, lava, changed);
             }
             return;
         }
@@ -253,7 +253,7 @@ impl Fluids {
                     continue;
                 }
             }
-            self.flow_into(w, q, qb, base + next, lava, changed);
+            self.flow_into(w, q, qb, base + next as Block, lava, changed);
         }
     }
 
@@ -264,7 +264,7 @@ impl Fluids {
         came: IVec3,
         depth: i32,
         range: i32,
-        same: impl Fn(u8) -> bool + Copy,
+        same: impl Fn(Block) -> bool + Copy,
     ) -> i32 {
         let mut best = 1000;
         for d in HORIZONTAL {
@@ -290,8 +290,8 @@ impl Fluids {
         &mut self,
         w: &mut World,
         q: IVec3,
-        qb: u8,
-        nb: u8,
+        qb: Block,
+        nb: Block,
         lava: bool,
         changed: &mut Vec<IVec3>,
     ) {

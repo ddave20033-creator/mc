@@ -1,3 +1,4 @@
+use crate::world::block::Block;
 use crate::world::{
     block_boxes, door_closed_side, door_open, door_out, is_door, is_fluid, is_lava, is_solid,
     Boxes, World, AIR,
@@ -87,7 +88,7 @@ fn boxes_in(world: &World, min: Vec3, max: Vec3, mut f: impl FnMut(Vec3, Vec3)) 
     }
 }
 
-fn swung_out(b: u8) -> bool {
+fn swung_out(b: Block) -> bool {
     is_door(b) && door_open(b) && door_out(b)
 }
 
@@ -158,7 +159,7 @@ impl Player {
     }
 
     /// Fluid block at the player's waist, if any.
-    pub fn fluid(&self, world: &World) -> u8 {
+    pub fn fluid(&self, world: &World) -> Block {
         let p = self.pos + Vec3::Y * 0.4;
         let b = world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         if is_fluid(b) {
@@ -382,7 +383,7 @@ fn raycast_by(
     origin: Vec3,
     dir: Vec3,
     max_dist: f32,
-    hit: impl Fn(u8) -> bool,
+    hit: impl Fn(Block) -> bool,
 ) -> Option<(IVec3, IVec3)> {
     let mut pos = origin.floor().as_ivec3();
     let step = IVec3::new(
@@ -505,7 +506,7 @@ mod tests {
     use std::sync::Arc;
 
     /// A stone floor at y 0 with some blocks on it; returns the world.
-    fn floor(blocks: &[(IVec3, u8)]) -> World {
+    fn floor(blocks: &[(IVec3, Block)]) -> World {
         let mut world = World::new();
         let mut chunk = ChunkData::new();
         for x in 0..16 {

@@ -117,7 +117,7 @@ fn hash3(p: IVec3, seed: u32) -> f32 {
 
 /// Whether a blast can blow `b` away: not bedrock, obsidian, fluids or anything holding
 /// things (chests, furnaces, tables, the gun station), doors or beds.
-fn blastable(b: u8) -> bool {
+fn blastable(b: Block) -> bool {
     b != AIR
         && !is_fluid(b)
         && !is_chest(b)

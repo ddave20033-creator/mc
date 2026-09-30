@@ -10,7 +10,7 @@ pub enum Job {
     Mesh {
         pos: ChunkPos,
         nb: Box<[Arc<ChunkData>; 9]>,
-        anim: Vec<(glam::IVec3, u8, f32)>,
+        anim: Vec<(glam::IVec3, crate::world::block::Block, f32)>,
         notches: Vec<(glam::IVec3, super::mesh::Notch)>,
     },
 }

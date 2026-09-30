@@ -1,14 +1,13 @@
-//! Blocks: their ids, shapes and properties. Everything is re-exported here (and from
-//! `world`), so `use crate::world::block::*` brings all of it.
+//! Blocks: their ids, shapes and properties. The blocks themselves are defined in one table,
+//! `content::blocks`; everything is re-exported here (and from `world`), so
+//! `use crate::world::block::*` brings all of it.
 
-mod ids;
 mod props;
 mod shape;
 
-pub use ids::*;
+pub use crate::content::blocks::*;
 pub use props::*;
 pub use shape::*;
-
 #[cfg(test)]
 mod tests {
     use super::*;

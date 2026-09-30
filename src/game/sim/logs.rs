@@ -19,7 +19,7 @@ pub(in crate::game) struct LyingLog {
     pub base: Vec3,
     pub dir: Vec3,
     /// Its pieces from the base: the trunk's blocks they were.
-    pub pieces: Vec<u8>,
+    pub pieces: Vec<Block>,
     /// How many blocks the next stroke takes off (1 to 3, rolled after each).
     pub next: usize,
 }
@@ -108,11 +108,12 @@ pub(in crate::game) struct LogAim {
     pub from_base: bool,
 }
 
-/// Lying trunks saved with a world: `x,y,z,dx,dz,piece;piece;...` a line.
+/// Lying trunks saved with a world: `x,y,z,dx,dz,piece;piece;...` a line (the pieces by
+/// their blocks' keys).
 pub fn logs_text(logs: &[LyingLog]) -> String {
     logs.iter()
         .map(|l| {
-            let pieces: Vec<String> = l.pieces.iter().map(|b| b.to_string()).collect();
+            let pieces: Vec<&str> = l.pieces.iter().map(|&b| def(b).key).collect();
             format!("{},{},{},{},{},{}\n", l.base.x, l.base.y, l.base.z, l.dir.x, l.dir.z, pieces.join(";"))
         })
         .collect()
@@ -126,7 +127,7 @@ pub fn parse_logs(text: &str) -> Vec<LyingLog> {
             continue;
         }
         let f: Vec<f32> = v[..5].iter().filter_map(|x| x.parse().ok()).collect();
-        let pieces: Vec<u8> = v[5].split(';').filter_map(|x| x.parse().ok()).filter(|&b| is_log(b)).collect();
+        let pieces: Vec<Block> = v[5].split(';').filter_map(by_key).filter(|&b| is_log(b)).collect();
         if f.len() != 5 || pieces.is_empty() {
             continue;
         }
@@ -148,7 +149,7 @@ impl Game {
     /// A felled trunk comes to lie on the ground: from `start` (the cut's middle, where the
     /// tree came down) along `dir` (level), as long as its `pieces`, on whatever is under it.
     /// Pieces that would go into something solid break off there and drop what they are.
-    pub(in crate::game) fn lay_log(&mut self, start: Vec3, dir: Vec3, pieces: Vec<u8>, tool: ItemId, creative: bool) {
+    pub(in crate::game) fn lay_log(&mut self, start: Vec3, dir: Vec3, pieces: Vec<Block>, tool: ItemId, creative: bool) {
         let dir = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero();
         if dir == Vec3::ZERO || pieces.is_empty() {
             return;
@@ -269,7 +270,7 @@ impl Game {
         let l = &mut self.level.lying_logs[i];
         let taken = l.taken(from_base);
         let at: Vec<Vec3> = taken.clone().map(|j| l.piece_middle(j)).collect();
-        let off: Vec<u8> = l.pieces.drain(taken.clone()).collect();
+        let off: Vec<Block> = l.pieces.drain(taken.clone()).collect();
         if taken.start == 0 {
             l.base += l.dir * taken.end as f32;
         }

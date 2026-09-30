@@ -57,7 +57,9 @@ start after `lane`) unless `abs` follows the command.
 - `place [abs] x y z <block>` · `fill x0 y0 z0 x1 y1 z1 <block>` · `tree oak|birch|spruce x z
   [seed]` · `drop <item> x y z` (an item lying there).
 - Item/block names are the game's keys: `stone`, `oak_log`, `water_bucket`, `pistol`,
-  `pistol_magazine`, `ak47`, `magnum_round`, `red_bed`, `lantern`, `torch`...
+  `pistol_magazine`, `ak47`, `magnum_round`, `red_bed`, `lantern`, `torch`... Blocks are the
+  keys of `src/content/blocks.rs` (also the ones without an item: `wall_torch`,
+  `hanging_lantern`, `oak_log_x`...), with a state after a colon: `oak_door:9`.
 
 **Input**
 - `key <name> <secs>`: held (also pressed once). Names: binds (`forward`, `back`, `left`,

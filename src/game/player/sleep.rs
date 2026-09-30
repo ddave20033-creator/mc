@@ -144,7 +144,7 @@ impl Game {
     }
 
     /// A block anywhere in the world: loaded, saved or (for chunks never changed) empty.
-    fn block_anywhere(&self, p: IVec3) -> u8 {
+    fn block_anywhere(&self, p: IVec3) -> Block {
         let w = &self.terrain.world;
         if !(0..HEIGHT as i32).contains(&p.y) {
             return AIR;

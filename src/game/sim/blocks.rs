@@ -5,7 +5,7 @@ use crate::game::*;
 use crate::item::inventory::{self};
 use crate::item::*;
 impl Game {
-    pub(in crate::game) fn block_tint(&self, p: IVec3, b: u8) -> [u8; 3] {
+    pub(in crate::game) fn block_tint(&self, p: IVec3, b: Block) -> [u8; 3] {
         let (g, f) = self.terrain.gen.tints(p.x, p.z);
         match tint_kind(b, 0) {
             TintKind::Grass => g,
@@ -16,7 +16,7 @@ impl Game {
         }
     }
 
-    pub(in crate::game) fn set_block(&mut self, p: IVec3, b: u8) {
+    pub(in crate::game) fn set_block(&mut self, p: IVec3, b: Block) {
         let old = self.terrain.world.geti(p);
         if self.terrain.world.seti(p, b) {
             // (a cut trunk gone or changed took its cut with it: `World::set`)
@@ -66,7 +66,7 @@ impl Game {
 
     /// A block placed (or a fluid poured or scooped up) by a player, with the world's rules:
     /// plants washed away by fluids, block entities, saplings, support and falling blocks.
-    pub(in crate::game) fn place_world(&mut self, at: IVec3, b: u8) {
+    pub(in crate::game) fn place_world(&mut self, at: IVec3, b: Block) {
         let old = self.terrain.world.geti(at);
         if fluid_breaks(old) && is_fluid(b) {
             self.break_naturally(at);
@@ -86,7 +86,7 @@ impl Game {
 
     /// A double chest half placed at `at` turns the single chest it pairs with (facing the
     /// same way) into the other half. Without one it becomes a single chest.
-    pub(in crate::game) fn join_chest(&mut self, at: IVec3, b: u8) -> u8 {
+    pub(in crate::game) fn join_chest(&mut self, at: IVec3, b: Block) -> Block {
         let (Some(d), Some(f), Some(other)) =
             (chest_partner_offset(b), facing(b), chest_other_half(b))
         else {
@@ -100,7 +100,7 @@ impl Game {
     }
 
     /// A double chest half is going away: the other half becomes a single chest.
-    pub(in crate::game) fn split_chest(&mut self, p: IVec3, b: u8) {
+    pub(in crate::game) fn split_chest(&mut self, p: IVec3, b: Block) {
         let Some(d) = chest_partner_offset(b) else {
             return;
         };
@@ -130,11 +130,11 @@ impl Game {
     /// Chest to place at `at` for a player looking toward `facing`, like Minecraft: it joins a
     /// single chest beside it that faces the same way. Sneaking places a single chest, or
     /// one joining the chest it was placed against (lined up with it).
-    pub(in crate::game) fn chest_to_place(&self, at: IVec3, hit: IVec3, facing: u8, sneaking: bool) -> u8 {
+    pub(in crate::game) fn chest_to_place(&self, at: IVec3, hit: IVec3, facing: u8, sneaking: bool) -> Block {
         let w = &self.terrain.world;
         let single = |q: IVec3| {
             let b = w.geti(q);
-            (CHEST..CHEST + 4).contains(&b).then(|| b - CHEST)
+            (base(b) == CHEST).then(|| (b - CHEST) as u8)
         };
         if sneaking {
             if let Some(f) = single(hit) {
@@ -155,7 +155,7 @@ impl Game {
 
     /// Changes a block for this player: in single player and on the host with the world's
     /// rules; a LAN player shows it right away and lets the host do the rest.
-    pub(in crate::game) fn edit_block(&mut self, at: IVec3, b: u8) {
+    pub(in crate::game) fn edit_block(&mut self, at: IVec3, b: Block) {
         if self.is_client() {
             let b = self.join_chest(at, b);
             self.set_block(at, b);
@@ -167,7 +167,7 @@ impl Game {
 
     /// What a mined block leaves behind: air, or water for ice (Minecraft: unless it was
     /// floating, or mined in creative).
-    fn left_after_mining(&self, p: IVec3, b: u8, creative: bool) -> u8 {
+    fn left_after_mining(&self, p: IVec3, b: Block, creative: bool) -> Block {
         if b == ICE && !creative && self.terrain.world.geti(p - IVec3::Y) != AIR {
             WATER
         } else {
@@ -210,7 +210,7 @@ impl Game {
 
     /// A door or bed half is going away: the other half goes with it (without a second drop).
     /// So do the other blocks of a big furnace; what was in it is returned.
-    pub(in crate::game) fn remove_other_half(&mut self, p: IVec3, b: u8) -> Vec<Stack> {
+    pub(in crate::game) fn remove_other_half(&mut self, p: IVec3, b: Block) -> Vec<Stack> {
         if let (Some(base), Some(f)) = (furnace_base(b).filter(|&k| k != FURNACE), facing(b)) {
             let origin = furnace_origin(p, b);
             let contents = if origin != p {
@@ -256,7 +256,7 @@ impl Game {
 
     /// A trunk cut down off grass leaves its mark on the grass under it: a circle of bare
     /// soil the grass slowly grows back over (`update_stump_marks`).
-    pub(in crate::game) fn bare_under_trunk(&mut self, p: IVec3, b: u8) {
+    pub(in crate::game) fn bare_under_trunk(&mut self, p: IVec3, b: Block) {
         if !is_log(b) || is_branch(b) || log_axis(b) != 1 {
             return;
         }
@@ -281,7 +281,7 @@ impl Game {
         self.level.stump_scan = EVERY;
         let c = self.player.pos.floor().as_ivec3();
         let w = &self.terrain.world;
-        let found: Vec<(IVec3, u8)> = crate::world::terrain::listed_near(&self.terrain.stump_marks, c, 32, 12)
+        let found: Vec<(IVec3, Block)> = crate::world::terrain::listed_near(&self.terrain.stump_marks, c, 32, 12)
             .map(|p| (p, w.geti(p)))
             .filter(|&(_, b)| is_stump_mark(b))
             .collect();
@@ -312,7 +312,7 @@ impl Game {
         self.block_updated(p);
     }
 
-    pub(in crate::game) fn supported(w: &World, p: IVec3, b: u8) -> bool {
+    pub(in crate::game) fn supported(w: &World, p: IVec3, b: Block) -> bool {
         if let Some(offset) = torch_support_offset(b) {
             return is_opaque(w.geti(p + offset));
         }
@@ -370,12 +370,12 @@ impl Game {
 
     /// Grows a sapling into a tree (the generator's shapes). Returns false if there is not
     /// enough room for its wood.
-    pub(in crate::game) fn grow_tree(&mut self, p: IVec3, sapling: u8) -> bool {
+    pub(in crate::game) fn grow_tree(&mut self, p: IVec3, sapling: Block) -> bool {
         let log = log_of_sapling(sapling);
         let seed = (self.random() * u32::MAX as f32) as u32;
         let shape = crate::world::trees::tree_shape(log, seed);
         let w = &self.terrain.world;
-        let free = |b: u8| b == AIR || is_leaves(b) || is_plant(b) || is_sapling(b);
+        let free = |b: Block| b == AIR || is_leaves(b) || is_plant(b) || is_sapling(b);
         if shape.iter().any(|&(d, _, soft)| !soft && !free(w.geti(p + d))) {
             return false;
         }

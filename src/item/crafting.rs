@@ -48,8 +48,8 @@ pub fn smelt_tier(id: ItemId) -> u8 {
     if id == BRICK {
         return 3;
     }
-    match id as u8 {
-        _ if id >= 256 => 1,
+    match id as Block {
+        _ if id >= FIRST_ITEM => 1,
         IRON_ORE | SAND => 2,
         GOLD_ORE | DIAMOND_ORE => 3,
         _ => 1,
@@ -66,8 +66,8 @@ pub fn smelt(id: ItemId) -> Option<ItemId> {
         MUTTON => COOKED_MUTTON,
         RAW_FISH => COOKED_FISH,
         WATER_BOTTLE => PURIFIED_WATER,
-        _ => match id as u8 {
-            _ if id >= 256 => return None,
+        _ => match id as Block {
+            _ if id >= FIRST_ITEM => return None,
             COPPER_ORE => COPPER_INGOT,
             IRON_ORE => IRON_INGOT,
             GOLD_ORE => GOLD_INGOT,
@@ -91,7 +91,7 @@ fn logs() -> Vec<ItemId> {
     vec![OAK_LOG as ItemId, BIRCH_LOG as ItemId, SPRUCE_LOG as ItemId]
 }
 
-fn b(id: u8) -> Vec<ItemId> {
+fn b(id: Block) -> Vec<ItemId> {
     vec![id as ItemId]
 }
 

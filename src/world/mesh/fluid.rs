@@ -6,9 +6,9 @@ impl Builder {
     /// Fluid block. Vertices carry the previous surface height and the change time in `uv`
     /// (the shader animates between them and derives texture coordinates from position),
     /// and the flow direction in `tint`.
-    pub(super) fn fluid(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+    pub(super) fn fluid(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
         let lava = is_lava(b);
-        let same = |q: u8| if lava { is_lava(q) } else { is_water(q) };
+        let same = |q: Block| if lava { is_lava(q) } else { is_water(q) };
         let above_same = same(r.get(x, y + 1, z));
         let now_get = |x: i32, y: i32, z: i32| r.get(x, y, z);
         let h = surface_heights(&now_get, x, y, z, lava);
@@ -156,13 +156,13 @@ pub fn fluid_height(level: u8) -> f32 {
 
 /// Surface height (0..1) at the four top corners, indexed [x][z].
 fn surface_heights(
-    get: &impl Fn(i32, i32, i32) -> u8,
+    get: &impl Fn(i32, i32, i32) -> Block,
     x: i32,
     y: i32,
     z: i32,
     lava: bool,
 ) -> [[f32; 2]; 2] {
-    let same = |q: u8| if lava { is_lava(q) } else { is_water(q) };
+    let same = |q: Block| if lava { is_lava(q) } else { is_water(q) };
     if same(get(x, y + 1, z)) {
         return [[1.0; 2]; 2];
     }
@@ -172,7 +172,7 @@ fn surface_heights(
 }
 
 fn corner_height(
-    get: &impl Fn(i32, i32, i32) -> u8,
+    get: &impl Fn(i32, i32, i32) -> Block,
     x: i32,
     y: i32,
     z: i32,
@@ -180,7 +180,7 @@ fn corner_height(
     cz: i32,
     lava: bool,
 ) -> f32 {
-    let same = |q: u8| if lava { is_lava(q) } else { is_water(q) };
+    let same = |q: Block| if lava { is_lava(q) } else { is_water(q) };
     let (mut sum, mut w) = (0.0f32, 0.0f32);
     for dx in [cx - 1, cx] {
         for dz in [cz - 1, cz] {

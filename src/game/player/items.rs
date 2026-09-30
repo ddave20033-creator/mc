@@ -342,76 +342,69 @@ impl Game {
         let facing = (look + 2) & 3;
         // The face of the clicked block the new one goes against (outward).
         let normal = if at == hit { IVec3::Y } else { at - hit };
-        if base == OAK_DOOR {
-            self.place_door(at, look);
-            return;
-        }
-        if base == BED {
-            self.place_bed(at, look);
-            return;
-        }
-        if base == BLAST_FURNACE || base == ADV_FURNACE {
-            self.place_big_furnace(at, base, facing);
-            return;
-        }
-        if base == GUN_STATION || base == RIFLE_BENCH {
-            self.place_gun_bench(at, facing, base == RIFLE_BENCH);
-            return;
-        }
-        let b = if base == TORCH {
-            let support = hit - at;
-            if at == hit || support == IVec3::NEG_Y {
-                TORCH
-            } else if support.y == 0 {
-                let Some(wall) = wall_torch_for_support(support) else {
-                    return;
-                };
-                wall
-            } else {
-                return;
-            }
-        } else if base == LANTERN {
-            // Hangs when placed against the underside of a block (or when there is nothing
-            // to stand on), otherwise stands.
-            let hang = hit - at == IVec3::Y;
-            if hang || !is_opaque(w.geti(at - IVec3::Y)) {
-                LANTERN_HANGING
-            } else {
-                LANTERN
-            }
-        } else if base == CHEST {
-            let sneaking = self.sneaking();
-            self.chest_to_place(at, hit, facing, sneaking)
-        } else if base == FURNACE {
-            base + facing
-        } else if base == OAK_STAIRS {
-            // Upside down against the underside of a block or the top half of a side.
-            let upper = self.target_point.y - at.y as f32 > 0.5;
-            let upside_down = normal == IVec3::NEG_Y || (normal.y == 0 && upper);
-            stairs_id(look, upside_down)
-        } else if is_log(base) {
-            let axis = if normal.x != 0 {
-                0
-            } else if normal.z != 0 {
-                2
-            } else {
-                1
-            };
-            let on = w.geti(hit);
-            if at != hit && is_log(on) && !self.sneaking() {
-                // Grows out of the wood clicked: up a trunk it is trunk; out of a side, or
-                // on from a branch, a branch; on along a lying log, the same log.
-                if is_branch(on) || (axis != 1 && log_axis(on) != axis) {
-                    branch_with_axis(base, axis)
+        let b = match def(base).place {
+            Place::Door => return self.place_door(at, look),
+            Place::Bed => return self.place_bed(at, look),
+            Place::BigFurnace => return self.place_big_furnace(at, base, facing),
+            Place::GunBench => return self.place_gun_bench(at, facing, false),
+            Place::RifleBench => return self.place_gun_bench(at, facing, true),
+            Place::Torch => {
+                let support = hit - at;
+                if at == hit || support == IVec3::NEG_Y {
+                    TORCH
+                } else if support.y == 0 {
+                    let Some(wall) = wall_torch_for_support(support) else {
+                        return;
+                    };
+                    wall
                 } else {
+                    return;
+                }
+            }
+            Place::Lantern => {
+                // Hangs when placed against the underside of a block (or when there is nothing
+                // to stand on), otherwise stands.
+                let hang = hit - at == IVec3::Y;
+                if hang || !is_opaque(w.geti(at - IVec3::Y)) {
+                    LANTERN_HANGING
+                } else {
+                    LANTERN
+                }
+            }
+            Place::Chest => {
+                let sneaking = self.sneaking();
+                self.chest_to_place(at, hit, facing, sneaking)
+            }
+            Place::Facing => base + facing as Block,
+            Place::Stairs => {
+                // Upside down against the underside of a block or the top half of a side.
+                let upper = self.target_point.y - at.y as f32 > 0.5;
+                let upside_down = normal == IVec3::NEG_Y || (normal.y == 0 && upper);
+                stairs_id(look, upside_down)
+            }
+            Place::Log => {
+                let axis = if normal.x != 0 {
+                    0
+                } else if normal.z != 0 {
+                    2
+                } else {
+                    1
+                };
+                let on = w.geti(hit);
+                if at != hit && is_log(on) && !self.sneaking() {
+                    // Grows out of the wood clicked: up a trunk it is trunk; out of a side, or
+                    // on from a branch, a branch; on along a lying log, the same log.
+                    if is_branch(on) || (axis != 1 && log_axis(on) != axis) {
+                        branch_with_axis(base, axis)
+                    } else {
+                        log_with_axis(base, axis)
+                    }
+                } else {
+                    // Lies along the clicked face's normal, like Minecraft (sneaking: always).
                     log_with_axis(base, axis)
                 }
-            } else {
-                // Lies along the clicked face's normal, like Minecraft (sneaking: always).
-                log_with_axis(base, axis)
             }
-        } else {
-            base
+            Place::Plain => base,
         };
         if is_solid(b) && (self.player.intersects(at) || self.drawer_room(at)) {
             return;
@@ -430,7 +423,7 @@ impl Game {
 
     /// A blast furnace (with its chimney) or an advanced furnace (two wide, two tall), its
     /// furnace block at `at` facing the player: where there is room for all of it.
-    fn place_big_furnace(&mut self, at: IVec3, base: u8, facing: u8) {
+    fn place_big_furnace(&mut self, at: IVec3, base: Block, facing: u8) {
         let cells = furnace_cells(base, facing, false);
         let w = &self.terrain.world;
         let room = cells.iter().all(|&(o, _)| {
@@ -611,7 +604,7 @@ impl Game {
             !is_solid(n) || is_door(n)
         });
         let out = !from_closed_side && room;
-        let changes: Vec<(IVec3, u8)> = cells
+        let changes: Vec<(IVec3, Block)> = cells
             .iter()
             .map(|&q| (q, w.geti(q)))
             .filter(|&(_, qb)| is_door(qb))

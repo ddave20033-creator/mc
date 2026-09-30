@@ -54,7 +54,7 @@ fn items_snapshot() -> String {
             armor_of(id),
         );
     }
-    for b in 0..=255u8 {
+    for b in 0..BLOCK_IDS as Block {
         let _ = writeln!(s, "b{b} {:?}", item_of_block(b));
     }
     let _ = writeln!(s, "{:?}", all_items());
@@ -69,7 +69,7 @@ fn names_snapshot() -> String {
     for id in 0..1024u16 {
         let _ = writeln!(s, "{id} {}", name(id));
     }
-    for b in 0..=255u8 {
+    for b in 0..BLOCK_IDS as Block {
         let _ = writeln!(s, "b{b} {}", block_name(b));
     }
     s
@@ -184,4 +184,5 @@ fn item_data_and_crafting_are_unchanged() {
     assert_eq!(got, EXPECTED);
 }
 
-const EXPECTED: [u64; 4] = [0x3f879b5c97925af2, 0x144bb7fff605a1f3, 0x5f0ffdd78d34f6fc, 0x58f106ab086ab448];
+const EXPECTED: [u64; 4] = [0x60e3749d20e045a5, 0x1034e3267b837a11, 0xe20c1e6cb4959ed9, 0xe36efeceeba9c072];
+

@@ -151,7 +151,7 @@ fn has_cutout(layer: u32) -> bool {
 pub fn mesh_chunk(
     pos: ChunkPos,
     nb: &[Arc<ChunkData>; 9],
-    anim: &[(glam::IVec3, u8, f32)],
+    anim: &[(glam::IVec3, Block, f32)],
     notches: &[(glam::IVec3, Notch)],
     gen: &Generator,
 ) -> MeshData {
@@ -200,68 +200,69 @@ pub fn mesh_chunk(
                     continue;
                 }
                 let col = ((z - 16) * 16 + (x - 16)) as usize;
-                if is_plant(b) {
-                    let tint = if b == TALL_GRASS {
-                        grass[col]
-                    } else {
-                        [255; 3]
-                    };
-                    let from = m.opaque.len();
-                    m.plant(&r, x, y, z, face_texture(b, 0), tint);
-                    m.plants.extend(m.opaque.drain(from..));
-                    continue;
-                }
-                if is_fluid(b) {
-                    m.fluid(&r, x, y, z, b);
-                    continue;
-                }
-                if is_lantern(b) {
-                    m.lantern(&r, x, y, z, b);
-                    continue;
-                }
-                if is_torch(b) {
-                    m.torch(&r, x, y, z, b);
-                    torches.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
-                    continue;
-                }
-                if is_chest(b) {
-                    m.chest(&r, x, y, z, b);
-                    chests.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
-                    continue;
-                }
-                if is_furnace(b) {
-                    m.furnace(&r, x, y, z, b);
-                    continue;
-                }
-                if is_chimney(b) {
-                    m.chimney(&r, x, y, z, b);
-                    continue;
+                let at = glam::IVec3::new(x + m.ox, y, z + m.oz);
+                match def(b).model {
+                    Model::Air => continue,
+                    Model::Plant => {
+                        let tint = if def(b).tint == TintKind::Grass { grass[col] } else { [255; 3] };
+                        let from = m.opaque.len();
+                        m.plant(&r, x, y, z, face_texture(b, 0), tint);
+                        m.plants.extend(m.opaque.drain(from..));
+                        continue;
+                    }
+                    Model::Fluid => {
+                        m.fluid(&r, x, y, z, b);
+                        continue;
+                    }
+                    Model::Lantern => {
+                        m.lantern(&r, x, y, z, b);
+                        continue;
+                    }
+                    Model::Torch => {
+                        m.torch(&r, x, y, z, b);
+                        torches.push(at);
+                        continue;
+                    }
+                    Model::Chest => {
+                        m.chest(&r, x, y, z, b);
+                        chests.push(at);
+                        continue;
+                    }
+                    Model::Furnace => {
+                        m.furnace(&r, x, y, z, b);
+                        continue;
+                    }
+                    Model::Chimney => {
+                        m.chimney(&r, x, y, z, b);
+                        continue;
+                    }
+                    Model::Door => {
+                        doors.push(at);
+                        continue;
+                    }
+                    Model::GunBench => {
+                        // Drawn every frame from its left half (see `gun_stations`).
+                        if is_bench_main(b) {
+                            gun_stations.push(at);
+                        }
+                        continue;
+                    }
+                    Model::Stairs => {
+                        m.stairs(&r, x, y, z, b);
+                        continue;
+                    }
+                    Model::Log => {
+                        m.round_log(&r, x, y, z, b);
+                        continue;
+                    }
+                    Model::Bed => {
+                        m.bed(&r, x, y, z, b);
+                        continue;
+                    }
+                    Model::Cube | Model::Leaves => {}
                 }
                 if is_stump_mark(b) {
-                    stump_marks.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
-                }
-                if is_door(b) {
-                    doors.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
-                    continue;
-                }
-                if is_gun_bench(b) {
-                    // Drawn every frame from its left half (see `gun_stations`).
-                    if is_bench_main(b) {
-                        gun_stations.push(glam::IVec3::new(x + m.ox, y, z + m.oz));
-                    }
-                    continue;
-                }
-                if is_stairs(b) {
-                    m.stairs(&r, x, y, z, b);
-                    continue;
-                }
-                if is_log(b) {
-                    m.round_log(&r, x, y, z, b);
-                    continue;
-                }
-                if is_bed(b) {
-                    m.bed(&r, x, y, z, b);
-                    continue;
+                    stump_marks.push(at);
                 }
                 let fl = if is_leaves(b) {
                     flags::LEAVES
@@ -274,12 +275,7 @@ pub fn mesh_chunk(
                     let nbk = r.get(x + n[0], y + n[1], z + n[2]);
                     // Leaves keep their faces toward other leaves too (Minecraft's "Fancy"
                     // leaves), so a canopy looks full instead of a hollow see-through shell.
-                    let visible = !is_opaque(nbk)
-                        && match b {
-                            GLASS => nbk != GLASS,
-                            ICE => nbk != ICE,
-                            _ => true,
-                        };
+                    let visible = !is_opaque(nbk) && !(def(b).cull_same && nbk == b);
                     if !visible {
                         continue;
                     }

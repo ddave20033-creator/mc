@@ -20,7 +20,7 @@ impl Builder {
     /// thin), its bark around it. An end joining the same kind of log goes on into it; one
     /// meeting a log across (a branch out of a trunk, a branch turning up) reaches on into
     /// its middle, so the joint is closed; a free end is capped with the rings.
-    pub(super) fn round_log(&mut self, r: &Region, x: i32, y: i32, z: i32, b: u8) {
+    pub(super) fn round_log(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
         let axis = log_axis(b);
         let radius = log_radius(b);
         let sides = if is_branch(b) { 8 } else { 12 };

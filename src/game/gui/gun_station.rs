@@ -125,7 +125,7 @@ pub(in crate::game) struct Table {
 
 impl Table {
     /// The table of the station whose left block `p` is (block `b`).
-    pub(in crate::game) fn of(p: IVec3, b: u8) -> Option<Table> {
+    pub(in crate::game) fn of(p: IVec3, b: Block) -> Option<Table> {
         let f = facing(b).filter(|_| is_gun_bench(b))?;
         let toward = facing_dir(f).as_vec3();
         let right = chest_right(f).as_vec3();

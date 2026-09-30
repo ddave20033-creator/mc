@@ -142,7 +142,7 @@ impl Generator {
     /// (top, filler, filler depth, deep filler, deep depth) of a column. `slope` is the height
     /// difference across the column in blocks per block: steep slopes show bare rock (stone
     /// cliffs, sandstone in deserts) and hold no snow, like in Minecraft.
-    pub(super) fn surface_blocks(&self, col: &Column, x: i32, z: i32, slope: i32) -> (u8, u8, i32, u8, i32) {
+    pub(super) fn surface_blocks(&self, col: &Column, x: i32, z: i32, slope: i32) -> (Block, Block, i32, Block, i32) {
         let r = hash(self.seed, x, 7, z);
         let rock = if r < 0.15 {
             (GRAVEL, STONE, 1, STONE, 0)

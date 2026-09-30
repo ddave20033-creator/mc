@@ -1,7 +1,7 @@
 //! Items: ids, names, icons, stacking and tools; mining rules, crafting and smelting are in
 //! the submodules.
 //!
-//! Block items share the block's id (0..=255); other items start at 256.
+//! Block items share the block's id (below `FIRST_ITEM`); other items start at `FIRST_ITEM`.
 
 pub mod armor;
 pub mod crafting;
@@ -28,126 +28,128 @@ use crate::world::*;
 pub type ItemId = u16;
 
 pub const NONE: ItemId = 0;
-pub const STICK: ItemId = 256;
-pub const COAL: ItemId = 257;
-pub const CHARCOAL: ItemId = 258;
-pub const IRON_INGOT: ItemId = 259;
-pub const GOLD_INGOT: ItemId = 260;
-pub const DIAMOND: ItemId = 261;
-pub const CLAY_BALL: ItemId = 262;
-pub const BRICK: ItemId = 263;
-pub const BUCKET: ItemId = 264;
-pub const WATER_BUCKET: ItemId = 265;
-pub const LAVA_BUCKET: ItemId = 266;
-pub const PIG_SPAWN_EGG: ItemId = 267;
-pub const PORKCHOP: ItemId = 268;
-pub const COOKED_PORKCHOP: ItemId = 269;
-pub const GLASS_BOTTLE: ItemId = 270;
+/// The first id of an item that is not a block (the blocks' ids are below it).
+pub const FIRST_ITEM: ItemId = 1024;
+pub const STICK: ItemId = 1024;
+pub const COAL: ItemId = 1025;
+pub const CHARCOAL: ItemId = 1026;
+pub const IRON_INGOT: ItemId = 1027;
+pub const GOLD_INGOT: ItemId = 1028;
+pub const DIAMOND: ItemId = 1029;
+pub const CLAY_BALL: ItemId = 1030;
+pub const BRICK: ItemId = 1031;
+pub const BUCKET: ItemId = 1032;
+pub const WATER_BUCKET: ItemId = 1033;
+pub const LAVA_BUCKET: ItemId = 1034;
+pub const PIG_SPAWN_EGG: ItemId = 1035;
+pub const PORKCHOP: ItemId = 1036;
+pub const COOKED_PORKCHOP: ItemId = 1037;
+pub const GLASS_BOTTLE: ItemId = 1038;
 /// Water straight from a lake: quenches thirst, but can make you sick.
-pub const WATER_BOTTLE: ItemId = 271;
+pub const WATER_BOTTLE: ItemId = 1039;
 /// Water boiled in a furnace: safe to drink.
-pub const PURIFIED_WATER: ItemId = 272;
-pub const IRON_NUGGET: ItemId = 273;
-pub const MUTTON: ItemId = 274;
-pub const COOKED_MUTTON: ItemId = 275;
+pub const PURIFIED_WATER: ItemId = 1040;
+pub const IRON_NUGGET: ItemId = 1041;
+pub const MUTTON: ItemId = 1042;
+pub const COOKED_MUTTON: ItemId = 1043;
 /// Shear sheep, and mine leaves, grass and dead bushes so they drop themselves.
-pub const SHEARS: ItemId = 276;
-pub const SHEEP_SPAWN_EGG: ItemId = 277;
+pub const SHEARS: ItemId = 1044;
+pub const SHEEP_SPAWN_EGG: ItemId = 1045;
 /// Meat grilled on one side only (on top of a furnace): half as filling as cooked.
-pub const HALF_COOKED_PORKCHOP: ItemId = 278;
-pub const HALF_COOKED_MUTTON: ItemId = 279;
+pub const HALF_COOKED_PORKCHOP: ItemId = 1046;
+pub const HALF_COOKED_MUTTON: ItemId = 1047;
 /// Meat left on the fire too long.
-pub const BURNT_PORKCHOP: ItemId = 280;
-pub const BURNT_MUTTON: ItemId = 281;
+pub const BURNT_PORKCHOP: ItemId = 1048;
+pub const BURNT_MUTTON: ItemId = 1049;
 /// Meat burnt on one side only.
-pub const HALF_BURNT_PORKCHOP: ItemId = 293;
-pub const HALF_BURNT_MUTTON: ItemId = 294;
+pub const HALF_BURNT_PORKCHOP: ItemId = 1061;
+pub const HALF_BURNT_MUTTON: ItemId = 1062;
 /// Meat burnt on one side and still raw on the other.
-pub const RAW_BURNT_PORKCHOP: ItemId = 295;
-pub const RAW_BURNT_MUTTON: ItemId = 296;
-pub const COPPER_INGOT: ItemId = 297;
+pub const RAW_BURNT_PORKCHOP: ItemId = 1063;
+pub const RAW_BURNT_MUTTON: ItemId = 1064;
+pub const COPPER_INGOT: ItemId = 1065;
 /// Steel, from iron in a blast furnace; ceramic plates, from bricks fired again in an
 /// advanced furnace.
-pub const STEEL_INGOT: ItemId = 340;
-pub const CERAMIC_PLATE: ItemId = 341;
+pub const STEEL_INGOT: ItemId = 1108;
+pub const CERAMIC_PLATE: ItemId = 1109;
 /// Grenades: thrown with the right mouse button.
-pub const FRAG_GRENADE: ItemId = 342;
-pub const SMOKE_GRENADE: ItemId = 343;
+pub const FRAG_GRENADE: ItemId = 1110;
+pub const SMOKE_GRENADE: ItemId = 1111;
 /// The guide book: opened with a right click, it explains crafting, the furnaces and the
 /// guns (see `game::book`).
-pub const GUIDE_BOOK: ItemId = 298;
+pub const GUIDE_BOOK: ItemId = 1066;
 /// Pistol ammunition (9 mm): one is used up per shot.
-pub const BULLET: ItemId = 282;
+pub const BULLET: ItemId = 1050;
 /// The five pistol parts, in the order they go together at the gun station: frame (with the
 /// grip and trigger), barrel, recoil spring, slide and magazine.
-pub const PISTOL_FRAME: ItemId = 283;
-pub const PISTOL_BARREL: ItemId = 284;
-pub const PISTOL_SPRING: ItemId = 285;
-pub const PISTOL_SLIDE: ItemId = 286;
-pub const PISTOL_MAGAZINE: ItemId = 287;
+pub const PISTOL_FRAME: ItemId = 1051;
+pub const PISTOL_BARREL: ItemId = 1052;
+pub const PISTOL_SPRING: ItemId = 1053;
+pub const PISTOL_SLIDE: ItemId = 1054;
+pub const PISTOL_MAGAZINE: ItemId = 1055;
 /// The gun (see `firearm`), put together at the gun station. Its `damage` is how dirty it is
 /// (one per shot; cleaned at the gun station), its `data` holds the rounds in its magazine
 /// and its attachments.
-pub const PISTOL: ItemId = 288;
+pub const PISTOL: ItemId = 1056;
 /// Pistol attachments, fitted at the gun station: a scope (zooms in far when aiming), a
 /// silencer (no muzzle flash) and a laser sight (steadier from the hip). The extended magazine
 /// is a magazine (20 rounds), like `PISTOL_MAGAZINE` (12).
-pub const SCOPE: ItemId = 289;
-pub const SILENCER: ItemId = 290;
-pub const EXTENDED_MAGAZINE: ItemId = 291;
-pub const LASER_SIGHT: ItemId = 292;
+pub const SCOPE: ItemId = 1057;
+pub const SILENCER: ItemId = 1058;
+pub const EXTENDED_MAGAZINE: ItemId = 1059;
+pub const LASER_SIGHT: ItemId = 1060;
 /// A box of pistol rounds (an ammo can): its `data` is the rounds in it, up to
 /// `AMMO_BOX_ROUNDS`. It belongs to a gun station (three in its drawer, where magazines are
 /// loaded): taken out onto its table and put back, never into an inventory, and not made.
-pub const AMMO_BOX: ItemId = 361;
+pub const AMMO_BOX: ItemId = 1129;
 /// A weapon light for the pistol's accessory rail (instead of a laser sight): switched on and
 /// off in the hand, it lights up what the gun points at. Only in creative (it is not made).
-pub const FLASHLIGHT: ItemId = 362;
+pub const FLASHLIGHT: ItemId = 1130;
 /// A six-shot revolver, put together at the gun station from its five parts. It is loaded
 /// straight from the bullets carried (one at a time, or six at once from a speedloader). Its
 /// `data` is its cylinder (see `revolver_chamber`), its `damage` how dirty it is.
-pub const REVOLVER: ItemId = 363;
+pub const REVOLVER: ItemId = 1131;
 /// A speedloader: six rounds held in a ring, to load a revolver's cylinder at once. Its `data`
 /// is the rounds in it (loaded at the gun station, like a magazine).
-pub const SPEEDLOADER: ItemId = 364;
+pub const SPEEDLOADER: ItemId = 1132;
 /// The revolver's five parts, in the order of `model::gun::FRAME` ..: the frame (with the
 /// grip, trigger and sights), the barrel, the mainspring, the cylinder (on its crane, with the
 /// ejector) and the hammer.
-pub const REVOLVER_FRAME: ItemId = 365;
-pub const REVOLVER_BARREL: ItemId = 366;
-pub const REVOLVER_SPRING: ItemId = 367;
-pub const REVOLVER_CYLINDER: ItemId = 368;
-pub const REVOLVER_HAMMER: ItemId = 369;
+pub const REVOLVER_FRAME: ItemId = 1133;
+pub const REVOLVER_BARREL: ItemId = 1134;
+pub const REVOLVER_SPRING: ItemId = 1135;
+pub const REVOLVER_CYLINDER: ItemId = 1136;
+pub const REVOLVER_HAMMER: ItemId = 1137;
 /// Revolver ammunition (.357 Magnum): longer and heavier than the pistol's 9 mm, which does
 /// not fit the revolver (nor this the pistol).
-pub const MAGNUM_ROUND: ItemId = 370;
+pub const MAGNUM_ROUND: ItemId = 1138;
 /// A wooden target dummy: set up with a right click, it shows the damage it takes above its
 /// head (see `entity::mob`, `MobKind::Dummy`).
-pub const TARGET_DUMMY: ItemId = 371;
+pub const TARGET_DUMMY: ItemId = 1139;
 /// The AK-47, put together at the gun station from its five parts: the receiver (with the
 /// barrel, sights, handguard, grip and stock), the gas tube, the bolt carrier, the dust cover
 /// with the recoil spring, and its curved 30-round magazine. Its data is laid out like the
 /// pistol's (rounds, the magazine in it, the chamber), its `damage` is how dirty it is.
-pub const AK47: ItemId = 372;
+pub const AK47: ItemId = 1140;
 /// Rifle ammunition (7.62x39 mm): only for the AK.
-pub const RIFLE_ROUND: ItemId = 373;
-pub const AK_MAGAZINE: ItemId = 374;
-pub const AK_RECEIVER: ItemId = 375;
-pub const AK_GAS_TUBE: ItemId = 376;
-pub const AK_BOLT: ItemId = 377;
-pub const AK_COVER: ItemId = 378;
+pub const RIFLE_ROUND: ItemId = 1141;
+pub const AK_MAGAZINE: ItemId = 1142;
+pub const AK_RECEIVER: ItemId = 1143;
+pub const AK_GAS_TUBE: ItemId = 1144;
+pub const AK_BOLT: ItemId = 1145;
+pub const AK_COVER: ItemId = 1146;
 /// An automatic magazine loader for the rifle station's drawer: a magazine put on it is filled
 /// from the boxes of rounds beside it, one round after another.
-pub const MAG_LOADER: ItemId = 379;
+pub const MAG_LOADER: ItemId = 1147;
 /// A bone (pigs and sheep drop one now and then): tames a wolf.
-pub const BONE: ItemId = 380;
-pub const WOLF_SPAWN_EGG: ItemId = 381;
+pub const BONE: ItemId = 1148;
+pub const WOLF_SPAWN_EGG: ItemId = 1149;
 /// A fishing rod: cast with the right button held (the longer, the farther), reeled in with
 /// the mouse wheel (see `game::fishing`). Its `data` is the reel's gear (`rod_gear`).
-pub const FISHING_ROD: ItemId = 382;
+pub const FISHING_ROD: ItemId = 1150;
 /// A fish caught with the rod (any kind), and grilled in a furnace.
-pub const RAW_FISH: ItemId = 383;
-pub const COOKED_FISH: ItemId = 384;
+pub const RAW_FISH: ItemId = 1151;
+pub const COOKED_FISH: ItemId = 1152;
 /// How long a fishing rod lasts (a fish caught wears it by one, a snapped line by more).
 pub const FISHING_ROD_DURABILITY: u16 = 64;
 /// The reel's gears (1 slow and strong .. `ROD_GEARS` fast and weak).
@@ -404,9 +406,9 @@ pub fn set_gun_mods(s: &mut Stack, mods: u8) {
 }
 /// Minecraft's shears durability.
 const SHEARS_DURABILITY: u16 = 238;
-const TOOL_BASE: ItemId = 300;
+const TOOL_BASE: ItemId = 1068;
 /// Tools of the tiers after the first five (the ids after the first 20 tools are taken).
-const MORE_TOOLS_BASE: ItemId = 330;
+const MORE_TOOLS_BASE: ItemId = 1098;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolKind {
@@ -705,9 +707,9 @@ fn tool_attack(kind: ToolKind, tier: Tier) -> f32 {
     base + bonus
 }
 
-/// A hand-written line of `BLOCK_ITEMS` or `ITEMS`: the item, its key (for /give and save
-/// files), its English and Hungarian names, its icon's texture layer (a block's comes from the
-/// block), and how many stack and how long it lasts where that is its own (the families, the
+/// A hand-written line of `ITEMS` (the blocks' items come from the blocks' table): the item,
+/// its key (for /give and save files), its English and Hungarian names, its icon's texture
+/// layer, and how many stack and how long it lasts where that is its own (the families, the
 /// tools, armor and guns, are filled in by `build_table`).
 #[derive(Clone, Copy)]
 struct Row {
@@ -715,17 +717,13 @@ struct Row {
     key: &'static str,
     en: &'static str,
     hu: &'static str,
-    icon: Option<u32>,
+    icon: u32,
     stack: u8,
     lasts: u16,
 }
 
-const fn blk(b: u8, key: &'static str, en: &'static str, hu: &'static str) -> Row {
-    Row { id: b as ItemId, key, en, hu, icon: None, stack: 64, lasts: 0 }
-}
-
 const fn it(id: ItemId, key: &'static str, en: &'static str, hu: &'static str, icon: u32) -> Row {
-    Row { id, key, en, hu, icon: Some(icon), stack: 64, lasts: 0 }
+    Row { id, key, en, hu, icon, stack: 64, lasts: 0 }
 }
 
 impl Row {
@@ -750,7 +748,7 @@ struct ItemDef {
     max_damage: u16,
     attack_damage: f32,
     /// The block it places.
-    block: Option<u8>,
+    block: Option<Block>,
 }
 
 /// An id that is no item.
@@ -781,14 +779,8 @@ fn def(id: ItemId) -> &'static ItemDef {
 }
 
 /// The icon of a block's item: a cube, or a flat sprite for the ones that are not cubes.
-fn block_icon(b: u8) -> Icon {
-    match b {
-        LANTERN => Icon::Flat(tex::LANTERN_ITEM),
-        OAK_DOOR => Icon::Flat(tex::DOOR_ITEM),
-        BED => Icon::Flat(tex::BED_ITEM),
-        _ if is_plant(b) || b == TORCH => Icon::Flat(face_texture(b, 0)),
-        _ => Icon::Block(b),
-    }
+fn block_icon(d: &BlockDef) -> Icon {
+    d.icon.map_or(Icon::Block(d.id), Icon::Flat)
 }
 
 fn build_table() -> ItemTable {
@@ -799,18 +791,34 @@ fn build_table() -> ItemTable {
         }
         defs[id as usize] = d;
     };
-    for r in BLOCK_ITEMS.iter().chain(ITEMS) {
+    for d in block_items() {
+        let BlockItem::Own { stack } = d.item else { continue };
+        put(
+            d.id as ItemId,
+            ItemDef {
+                key: d.key.into(),
+                en: d.en.into(),
+                hu: d.hu.into(),
+                icon: block_icon(d),
+                max_stack: stack,
+                max_damage: 0,
+                attack_damage: 1.0,
+                block: Some(d.id),
+            },
+        );
+    }
+    for r in ITEMS {
         put(
             r.id,
             ItemDef {
                 key: r.key.into(),
                 en: r.en.into(),
                 hu: r.hu.into(),
-                icon: r.icon.map_or_else(|| block_icon(r.id as u8), Icon::Flat),
+                icon: Icon::Flat(r.icon),
                 max_stack: r.stack,
                 max_damage: r.lasts,
                 attack_damage: 1.0,
-                block: r.icon.is_none().then_some(r.id as u8),
+                block: None,
             },
         );
     }
@@ -867,67 +875,7 @@ fn build_table() -> ItemTable {
     ItemTable { defs, by_key }
 }
 
-/// Every block that exists as an item, in creative inventory order: the block, its key (for
-/// /give and save files), and its English and Hungarian names.
-const BLOCK_ITEMS: &[Row] = &[
-    blk(GRASS, "grass_block", "Grass Block", "Füves blokk"),
-    blk(DIRT, "dirt", "Dirt", "Föld"),
-    blk(STONE, "stone", "Stone", "Kő"),
-    blk(COBBLE, "cobblestone", "Cobblestone", "Zúzottkő"),
-    blk(STONE_BRICKS, "stone_bricks", "Stone Bricks", "Kőtégla"),
-    blk(SAND, "sand", "Sand", "Homok"),
-    blk(GRAVEL, "gravel", "Gravel", "Kavics"),
-    blk(CLAY, "clay", "Clay", "Agyag"),
-    blk(SANDSTONE, "sandstone", "Sandstone", "Homokkő"),
-    blk(SNOW, "snow_block", "Snow Block", "Hóblokk"),
-    blk(SNOWY_GRASS, "snowy_grass_block", "Snowy Grass Block", "Havas füves blokk"),
-    blk(ICE, "ice", "Ice", "Jég"),
-    blk(OAK_LOG, "oak_log", "Oak Log", "Tölgyfarönk"),
-    blk(BIRCH_LOG, "birch_log", "Birch Log", "Nyírfarönk"),
-    blk(SPRUCE_LOG, "spruce_log", "Spruce Log", "Lucfenyőrönk"),
-    blk(PLANKS, "oak_planks", "Oak Planks", "Tölgyfa deszka"),
-    blk(OAK_STAIRS, "oak_stairs", "Oak Stairs", "Tölgyfa lépcső"),
-    blk(OAK_DOOR, "oak_door", "Oak Door", "Tölgyfa ajtó"),
-    blk(BRICKS, "bricks", "Bricks", "Téglák"),
-    blk(GLASS, "glass", "Glass", "Üveg"),
-    blk(GLOWSTONE, "glowstone", "Glowstone", "Izzókő"),
-    blk(OAK_LEAVES, "oak_leaves", "Oak Leaves", "Tölgylevelek"),
-    blk(BIRCH_LEAVES, "birch_leaves", "Birch Leaves", "Nyírfalevelek"),
-    blk(SPRUCE_LEAVES, "spruce_leaves", "Spruce Leaves", "Lucfenyőlevelek"),
-    blk(OAK_SAPLING, "oak_sapling", "Oak Sapling", "Tölgycsemete"),
-    blk(BIRCH_SAPLING, "birch_sapling", "Birch Sapling", "Nyírfacsemete"),
-    blk(SPRUCE_SAPLING, "spruce_sapling", "Spruce Sapling", "Lucfenyőcsemete"),
-    blk(CACTUS, "cactus", "Cactus", "Kaktusz"),
-    blk(TALL_GRASS, "grass", "Grass", "Fű"),
-    blk(POPPY, "poppy", "Poppy", "Pipacs"),
-    blk(DANDELION, "dandelion", "Dandelion", "Pitypang"),
-    blk(DEAD_BUSH, "dead_bush", "Dead Bush", "Elszáradt bokor"),
-    blk(COAL_ORE, "coal_ore", "Coal Ore", "Szénérc"),
-    blk(COPPER_ORE, "copper_ore", "Copper Ore", "Rézérc"),
-    blk(IRON_ORE, "iron_ore", "Iron Ore", "Vasérc"),
-    blk(GOLD_ORE, "gold_ore", "Gold Ore", "Aranyérc"),
-    blk(DIAMOND_ORE, "diamond_ore", "Diamond Ore", "Gyémántérc"),
-    blk(COAL_BLOCK, "coal_block", "Block of Coal", "Szénblokk"),
-    blk(COPPER_BLOCK, "copper_block", "Block of Copper", "Rézblokk"),
-    blk(IRON_BLOCK, "iron_block", "Block of Iron", "Vasblokk"),
-    blk(GOLD_BLOCK, "gold_block", "Block of Gold", "Aranyblokk"),
-    blk(DIAMOND_BLOCK, "diamond_block", "Block of Diamond", "Gyémántblokk"),
-    blk(OBSIDIAN, "obsidian", "Obsidian", "Obszidián"),
-    blk(BEDROCK, "bedrock", "Bedrock", "Alapkő"),
-    blk(CRAFTING_TABLE, "crafting_table", "Crafting Table", "Barkácsasztal"),
-    blk(FURNACE, "furnace", "Furnace", "Kemence"),
-    blk(BLAST_FURNACE, "blast_furnace", "Blast Furnace", "Kohó"),
-    blk(ADV_FURNACE, "advanced_furnace", "Advanced Furnace", "Fejlett kohó"),
-    blk(CHEST, "chest", "Chest", "Láda"),
-    blk(TORCH, "torch", "Torch", "Fáklya"),
-    blk(LANTERN, "lantern", "Lantern", "Lámpás"),
-    blk(WOOL, "white_wool", "White Wool", "Fehér gyapjú"),
-    blk(BED, "red_bed", "Red Bed", "Piros ágy").stack(1),
-    blk(GUN_STATION, "gun_station", "Gun Station", "Fegyverasztal"),
-    blk(RIFLE_BENCH, "rifle_station", "Rifle Station", "Puskaasztal"),
-];
-
-/// The other items (ids from 256, tools aside), in creative inventory order: the id, key,
+/// The other items (ids from `FIRST_ITEM`, tools aside), in creative inventory order: the id, key,
 /// English and Hungarian names, and the icon's texture layer.
 const ITEMS: &[Row] = &[
     it(STICK, "stick", "Stick", "Bot", tex::STICK),
@@ -1022,7 +970,7 @@ const ITEMS: &[Row] = &[
 
 /// Creative inventory order: blocks, other items, then the tools.
 pub fn all_items() -> Vec<ItemId> {
-    let mut v: Vec<ItemId> = BLOCK_ITEMS.iter().map(|r| r.id).collect();
+    let mut v: Vec<ItemId> = block_items().map(|d| d.id as ItemId).collect();
     v.extend(ITEMS.iter().map(|r| r.id).filter(|&id| id != AMMO_BOX));
     for tier in TIER_ORDER {
         for kind in KINDS {
@@ -1032,36 +980,31 @@ pub fn all_items() -> Vec<ItemId> {
     v
 }
 
+/// The blocks that are items (their own), in the order of the blocks' table.
+pub fn block_items() -> impl Iterator<Item = &'static BlockDef> {
+    BLOCKS.iter().filter(|d| matches!(d.item, BlockItem::Own { .. }))
+}
+
 /// The block this item places (base variant for directional blocks).
-pub fn block_of(id: ItemId) -> Option<u8> {
+pub fn block_of(id: ItemId) -> Option<Block> {
     def(id).block
 }
 
 /// The item a placed block counts as (pick block / creative).
-pub fn item_of_block(b: u8) -> Option<ItemId> {
-    let base = match b {
-        _ if furnace_base(b).is_some() => furnace_base(b).unwrap(),
-        _ if is_chest(b) => CHEST,
-        _ if is_torch(b) => TORCH,
-        _ if is_lantern(b) => LANTERN,
-        _ if is_door(b) => OAK_DOOR,
-        _ if is_stairs(b) => OAK_STAIRS,
-        _ if is_bed(b) => BED,
-        _ if is_rifle_bench(b) => RIFLE_BENCH,
-        _ if is_gun_bench(b) => GUN_STATION,
-        _ if is_log(b) => log_base(b),
-        _ if is_stump_mark(b) => soil(b),
-        _ if is_water(b) => return Some(WATER_BUCKET),
-        _ if is_lava(b) => return Some(LAVA_BUCKET),
-        _ => b,
-    };
-    block_of(base as ItemId).map(|_| base as ItemId)
+pub fn item_of_block(b: Block) -> Option<ItemId> {
+    let d = crate::content::blocks::def(b);
+    match d.item {
+        BlockItem::Own { .. } => Some(d.id as ItemId),
+        BlockItem::As(other) => Some(other as ItemId),
+        BlockItem::Other(item) => Some(item),
+        BlockItem::None => None,
+    }
 }
 
 #[derive(Clone, Copy)]
 pub enum Icon {
     /// Drawn as an isometric cube.
-    Block(u8),
+    Block(Block),
     /// Drawn as a flat sprite from this texture layer.
     Flat(u32),
 }
@@ -1087,13 +1030,8 @@ pub fn name(id: ItemId) -> String {
 }
 
 /// Display name of a block in the world (for debug info).
-pub fn block_name(b: u8) -> String {
-    match b {
-        AIR => "-".into(),
-        _ if is_water(b) => (if is_hungarian() { "Víz" } else { "Water" }).into(),
-        _ if is_lava(b) => (if is_hungarian() { "Láva" } else { "Lava" }).into(),
-        _ => item_of_block(b).map(name).unwrap_or_else(|| "?".into()),
-    }
+pub fn block_name(b: Block) -> String {
+    crate::content::blocks::block_name(b)
 }
 
 #[cfg(test)]
@@ -1112,7 +1050,7 @@ mod tests {
             assert_ne!(name(id), "Unknown", "item {id} has no name");
         }
         // (all but the box of rounds, which belongs to the gun station and is not listed)
-        assert_eq!(all.len(), BLOCK_ITEMS.len() + ITEMS.len() - 1 + 4 * TIERS.len());
+        assert_eq!(all.len(), block_items().count() + ITEMS.len() - 1 + 4 * TIERS.len());
         assert_eq!(from_key(&key(AMMO_BOX)), Some(AMMO_BOX));
         // Keys stored in save files must not change.
         assert_eq!(key(GRASS as ItemId), "grass_block");

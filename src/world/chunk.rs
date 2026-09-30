@@ -1,4 +1,4 @@
-use super::block::{attenuates_sky, AIR};
+use super::block::{attenuates_sky, valid, Block, AIR};
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -48,95 +48,104 @@ impl Hasher for FxHasher {
 pub type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
 pub type FastSet<K> = HashSet<K, BuildHasherDefault<FxHasher>>;
 
-/// A 16x256x16 column of blocks, stored y-major so horizontal slices are contiguous.
+/// Blocks in a section: 16 x 16 x 16.
+pub const SECTION_VOL: usize = CHUNK * CHUNK * CHUNK;
+const SECTIONS: usize = HEIGHT / CHUNK;
+
+/// A 16x256x16 column of blocks, in 16 sections of 16x16x16 (none: all air), each y-major so
+/// horizontal rows are contiguous.
 #[derive(Clone)]
 pub struct ChunkData {
-    blocks: Box<[u8]>,
+    sections: [Option<Box<[Block; SECTION_VOL]>>; SECTIONS],
     /// Per column: y of the highest block that stops full sunlight.
     pub heightmap: [u8; 256],
     /// Highest non-air block (conservative upper bound).
     pub max_y: u8,
 }
 
+/// A row of air (`row` in an empty section).
+static AIR_ROW: [Block; CHUNK] = [AIR; CHUNK];
+
 impl ChunkData {
     pub fn new() -> Self {
         Self {
-            blocks: vec![AIR; VOL].into_boxed_slice(),
+            sections: Default::default(),
             heightmap: [0; 256],
             max_y: 0,
         }
     }
 
-    /// Raw block array (for saving).
-    pub fn raw(&self) -> &[u8] {
-        &self.blocks
+    /// All the blocks, y-major (`(y * 16 + z) * 16 + x`), for saving and sending.
+    pub fn to_vec(&self) -> Vec<Block> {
+        let mut v = Vec::with_capacity(VOL);
+        for s in &self.sections {
+            match s {
+                Some(s) => v.extend_from_slice(&s[..]),
+                None => v.resize(v.len() + SECTION_VOL, AIR),
+            }
+        }
+        v
     }
 
-    /// Rebuilds a chunk from a saved block array.
-    pub fn from_raw(blocks: Vec<u8>) -> Option<Self> {
+    /// Rebuilds a chunk from all its blocks (`to_vec`); unknown ids become air.
+    pub fn from_vec(blocks: &[Block]) -> Option<Self> {
         if blocks.len() != VOL {
             return None;
         }
-        let mut c = Self {
-            blocks: blocks.into_boxed_slice(),
-            heightmap: [0; 256],
-            max_y: 0,
-        };
+        let mut c = Self::new();
+        for (i, part) in blocks.chunks_exact(SECTION_VOL).enumerate() {
+            if part.iter().any(|&b| b != AIR) {
+                let mut s = Box::new([AIR; SECTION_VOL]);
+                for (d, &b) in s.iter_mut().zip(part) {
+                    *d = valid(b);
+                }
+                c.sections[i] = Some(s);
+            }
+        }
         c.recompute();
         Some(c)
     }
 
-    /// Trees used to stand on dirt: under the trunks of worlds made then, the grass round
-    /// them (the same kind) goes on under them too. Done once, on chunks saved in the old
-    /// format (`save::load_chunks`).
-    pub fn grass_under_trunks(&mut self) {
-        use super::block::{is_branch, is_log, log_axis, DIRT, GRASS, SNOWY_GRASS};
-        for y in 0..HEIGHT - 1 {
-            for z in 0..CHUNK {
-                for x in 0..CHUNK {
-                    let above = self.get(x, y + 1, z);
-                    if self.get(x, y, z) != DIRT || !is_log(above) || is_branch(above) || log_axis(above) != 1 {
-                        continue;
-                    }
-                    let around = [(x.wrapping_sub(1), z), (x + 1, z), (x, z.wrapping_sub(1)), (x, z + 1)];
-                    let grass = around
-                        .iter()
-                        .filter(|&&(ax, az)| ax < CHUNK && az < CHUNK)
-                        .map(|&(ax, az)| self.get(ax, y, az))
-                        .find(|&b| b == GRASS || b == SNOWY_GRASS);
-                    if let Some(g) = grass {
-                        self.blocks[Self::idx(x, y, z)] = g;
-                    }
-                }
-            }
-        }
-    }
-
     #[inline]
     fn idx(x: usize, y: usize, z: usize) -> usize {
-        (y * CHUNK + z) * CHUNK + x
+        ((y & 15) * CHUNK + z) * CHUNK + x
     }
 
     #[inline]
-    pub fn get(&self, x: usize, y: usize, z: usize) -> u8 {
-        self.blocks[Self::idx(x, y, z)]
+    pub fn get(&self, x: usize, y: usize, z: usize) -> Block {
+        match &self.sections[y >> 4] {
+            Some(s) => s[Self::idx(x, y, z)],
+            None => AIR,
+        }
     }
 
     /// The 16 blocks of row (y, z).
     #[inline]
-    pub fn row(&self, y: usize, z: usize) -> &[u8] {
-        let i = Self::idx(0, y, z);
-        &self.blocks[i..i + CHUNK]
+    pub fn row(&self, y: usize, z: usize) -> &[Block] {
+        match &self.sections[y >> 4] {
+            Some(s) => {
+                let i = Self::idx(0, y, z);
+                &s[i..i + CHUNK]
+            }
+            None => &AIR_ROW,
+        }
     }
 
     /// Raw write used during generation; call `recompute` afterwards.
     #[inline]
-    pub fn set_raw(&mut self, x: usize, y: usize, z: usize, b: u8) {
-        self.blocks[Self::idx(x, y, z)] = b;
+    pub fn set_raw(&mut self, x: usize, y: usize, z: usize, b: Block) {
+        let s = &mut self.sections[y >> 4];
+        if s.is_none() {
+            if b == AIR {
+                return;
+            }
+            *s = Some(Box::new([AIR; SECTION_VOL]));
+        }
+        s.as_mut().unwrap()[Self::idx(x, y, z)] = b;
     }
 
-    pub fn set(&mut self, x: usize, y: usize, z: usize, b: u8) {
-        self.blocks[Self::idx(x, y, z)] = b;
+    pub fn set(&mut self, x: usize, y: usize, z: usize, b: Block) {
+        self.set_raw(x, y, z, b);
         let hi = z * CHUNK + x;
         if attenuates_sky(b) {
             if y as u8 > self.heightmap[hi] {

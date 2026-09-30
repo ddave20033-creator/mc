@@ -6,8 +6,8 @@
 use super::*;
 
 /// The sixteen pieces, `ARMOR_BASE + material * 4 + piece`, and the vest.
-pub const ARMOR_BASE: ItemId = 344;
-pub const BULLETPROOF_VEST: ItemId = 360;
+pub const ARMOR_BASE: ItemId = 1880;
+pub const BULLETPROOF_VEST: ItemId = 1128;
 /// Slots worn in: helmet, chestplate, leggings, boots, and the vest over the chestplate.
 pub const ARMOR_SLOTS: usize = 5;
 pub const VEST_SLOT: usize = 4;

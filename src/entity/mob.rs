@@ -335,7 +335,7 @@ fn touching(
     p: Vec3,
     (half_w, tall): (f32, f32),
     grow: f32,
-    pred: impl Fn(u8) -> bool,
+    pred: impl Fn(Block) -> bool,
 ) -> bool {
     let min = p - Vec3::new(half_w + grow, grow, half_w + grow);
     let max = p + Vec3::new(half_w + grow, tall + grow, half_w + grow);
@@ -363,7 +363,7 @@ fn per_tick(p: f32, dt: f32) -> f32 {
 
 /// A spot a mob can stand on in column (x, z) near height `y`: solid ground below, room for
 /// its body. Returns the feet position and the ground block.
-pub fn standable(w: &World, x: i32, z: i32, y: i32, range: i32) -> Option<(Vec3, u8)> {
+pub fn standable(w: &World, x: i32, z: i32, y: i32, range: i32) -> Option<(Vec3, Block)> {
     if !w.is_loaded(x, z) {
         return None;
     }

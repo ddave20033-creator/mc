@@ -30,7 +30,7 @@ const PICKUP_TIME: f32 = 0.25;
 pub struct FallingBlock {
     pub pos: Vec3,
     pub vel_y: f32,
-    pub block: u8,
+    pub block: Block,
 }
 
 fn solid_at(w: &World, p: Vec3) -> bool {

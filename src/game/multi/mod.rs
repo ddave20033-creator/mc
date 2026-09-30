@@ -446,7 +446,7 @@ impl Game {
 
     /// Debris from a block broken by someone: shown here if `local`, and the host sends it to
     /// the other players (but `except`, who broke it).
-    pub(super) fn break_fx(&mut self, p: IVec3, block: u8, local: bool, except: Option<u8>) {
+    pub(super) fn break_fx(&mut self, p: IVec3, block: Block, local: bool, except: Option<u8>) {
         if block == AIR {
             return;
         }

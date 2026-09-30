@@ -3,7 +3,7 @@
 use crate::util::{vertex_light, Rng};
 use crate::world::mesh::{flags, Vertex};
 use crate::world::textures::{tex, SMOKE_FRAMES};
-use crate::world::{face_texture, is_solid, World};
+use crate::world::{face_texture, is_solid, Block, World};
 use glam::Vec3;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -53,7 +53,7 @@ impl Particles {
     }
 
     /// Burst of debris from a broken (or hit) block.
-    pub fn burst(&mut self, world: &World, p: glam::IVec3, b: u8, count: usize, tint: [u8; 3]) {
+    pub fn burst(&mut self, world: &World, p: glam::IVec3, b: Block, count: usize, tint: [u8; 3]) {
         let layer = face_texture(b, 0);
         let (sky, blk) = world.light_around(p);
         for _ in 0..count {
@@ -79,7 +79,7 @@ impl Particles {
     }
 
     /// Chips of block `b` flying out of a bullet hole at `pos` on a face with normal `n`.
-    pub fn impact(&mut self, world: &World, pos: Vec3, n: Vec3, b: u8, tint: [u8; 3]) {
+    pub fn impact(&mut self, world: &World, pos: Vec3, n: Vec3, b: Block, tint: [u8; 3]) {
         let layer = face_texture(b, 0);
         let sky = world.sky_estimate(pos + n * 0.3);
         let blk = world.block_light_estimate(pos + n * 0.3);

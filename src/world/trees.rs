@@ -65,15 +65,15 @@ fn noise(seed: u32, p: Vec3) -> f32 {
 
 /// A tree being grown: its wood (the first put at a place stays) and its leaves.
 struct Tree {
-    log: u8,
-    wood: HashMap<IVec3, u8>,
+    log: Block,
+    wood: HashMap<IVec3, Block>,
     order: Vec<IVec3>,
     leaves: HashSet<IVec3>,
     seed: u32,
 }
 
 impl Tree {
-    fn put_wood(&mut self, p: IVec3, b: u8) {
+    fn put_wood(&mut self, p: IVec3, b: Block) {
         if p.x.abs() > REACH || p.z.abs() > REACH || p.y < 0 {
             return;
         }
@@ -149,7 +149,7 @@ impl Tree {
 
     /// The blocks, wood first (in the order grown), then the leaves (only into air), without
     /// lone leaves sticking out.
-    fn finish(self, leaves: u8) -> Vec<(IVec3, u8, bool)> {
+    fn finish(self, leaves: Block) -> Vec<(IVec3, Block, bool)> {
         let solid = |p: IVec3| self.leaves.contains(&p) || self.wood.contains_key(&p);
         let near = |p: IVec3| {
             [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z]
@@ -166,7 +166,7 @@ impl Tree {
             .collect();
         // (the same order each time for the same seed)
         leaf.sort_by_key(|p| (p.y, p.z, p.x));
-        let mut out: Vec<(IVec3, u8, bool)> = self.order.iter().map(|p| (*p, self.wood[p], false)).collect();
+        let mut out: Vec<(IVec3, Block, bool)> = self.order.iter().map(|p| (*p, self.wood[p], false)).collect();
         out.extend(leaf.into_iter().map(|p| (p, leaves, true)));
         out
     }
@@ -192,7 +192,7 @@ fn center(p: IVec3) -> Vec3 {
 
 /// The blocks of a tree of `log` (oak, birch or spruce) standing at the origin: (offset,
 /// block, only into air). Wood first, then the leaves, which do not replace it.
-pub fn tree_shape(log: u8, seed: u32) -> Vec<(IVec3, u8, bool)> {
+pub fn tree_shape(log: Block, seed: u32) -> Vec<(IVec3, Block, bool)> {
     let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9) | 1);
     for _ in 0..3 {
         rng.next();

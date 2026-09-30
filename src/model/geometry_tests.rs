@@ -82,10 +82,16 @@ fn items() -> Vec<Vertex> {
 
 fn logs() -> Vec<Vertex> {
     let mut out = Vec::new();
-    for b in 0..=255u8 {
-        if crate::world::is_log(b) {
-            crate::model::emit_item(&mut out, somewhere(), b, LIGHT, flags::ENTITY);
-        }
+    use crate::world::block::*;
+    // (in the order they were numbered once, which the fingerprint follows)
+    let all = [
+        OAK_LOG, SPRUCE_LOG, BIRCH_LOG, OAK_LOG_X, OAK_LOG_Z, SPRUCE_LOG_X, SPRUCE_LOG_Z, BIRCH_LOG_X,
+        BIRCH_LOG_Z, OAK_BRANCH, OAK_BRANCH_X, OAK_BRANCH_Z, BIRCH_BRANCH, BIRCH_BRANCH_X, BIRCH_BRANCH_Z,
+        SPRUCE_BRANCH_X, SPRUCE_BRANCH_Z,
+    ];
+    assert_eq!(all.len(), (0..BLOCK_IDS as Block).filter(|&b| is_log(b)).count());
+    for b in all {
+        crate::model::emit_item(&mut out, somewhere(), b, LIGHT, flags::ENTITY);
     }
     out
 }
@@ -344,7 +350,7 @@ fn groups() -> Vec<(&'static str, u64)> {
 
 /// The hashes as the models were before their shared pieces were merged into `prim`.
 const EXPECTED: [(&str, u64); 9] = [
-    ("items", 0x50f68223d79efdbb),
+    ("items", 0xcdebd0935725c43b),
     ("logs", 0x0660b16dd6a12110),
     ("players", 0xee6d4c5994db6f33),
     ("hands", 0xc61a12322bfd8c68),

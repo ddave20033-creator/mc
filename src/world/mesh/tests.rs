@@ -163,7 +163,7 @@ impl Fnv {
 #[test]
 fn terrain_and_meshes_are_unchanged() {
     let mut h = Fnv(0xcbf2_9ce4_8422_2325);
-    for b in 0..=255u8 {
+    for b in 0..BLOCK_IDS as Block {
         h.bytes(&[is_opaque(b) as u8, is_solid(b) as u8, attenuates_sky(b) as u8, emission(b)]);
         (0..6).for_each(|f| h.u32(face_texture(b, f)));
     }
@@ -176,7 +176,7 @@ fn terrain_and_meshes_are_unchanged() {
         for c in &nb {
             for y in 0..HEIGHT {
                 for z in 0..16 {
-                    h.bytes(c.row(y, z));
+                    c.row(y, z).iter().for_each(|b| h.bytes(&b.to_le_bytes()));
                 }
             }
             h.bytes(&c.heightmap);
@@ -192,7 +192,7 @@ fn terrain_and_meshes_are_unchanged() {
     let m = mesh_chunk((px, pz), &nb, &[], &notches, &Generator::new(3));
     h.mesh(&m);
     println!("{chunks} generated chunks + all blocks: {}", fingerprint(&h));
-    assert_eq!(fingerprint(&h), "b2aff256cb9bc4c1");
+    assert_eq!(fingerprint(&h), "52a1fe0493e8785e");
 }
 
 /// Every block id on a floor, spaced out, and a few next to each other (stairs bending,
@@ -200,7 +200,7 @@ fn terrain_and_meshes_are_unchanged() {
 /// trunks.
 fn all_blocks(px: i32, pz: i32) -> ([Arc<ChunkData>; 9], [(glam::IVec3, Notch); 2]) {
     let nb = hood(|c| {
-        for b in 1..=255u8 {
+        for b in 1..BLOCK_IDS as Block {
             let i = b as usize;
             c.set_raw(i % 8 * 2, 1 + i / 64 * 2, i / 8 % 8 * 2, b);
         }
@@ -273,3 +273,4 @@ fn torches_and_stump_marks_are_listed() {
     assert_eq!(m.torches, vec![glam::IVec3::new(3, 1, 4)]);
     assert_eq!(m.stump_marks, vec![glam::IVec3::new(5, 0, 5)]);
 }
+

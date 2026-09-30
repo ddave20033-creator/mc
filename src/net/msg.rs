@@ -2,6 +2,7 @@
 
 use crate::entity::{GunBench, Grilled};
 use crate::item::{Slot, Stack};
+use crate::world::block::Block;
 use glam::{IVec3, Vec3};
 
 /// "No block" in `Pose::open`.
@@ -130,7 +131,7 @@ pub enum Msg {
     /// with the world's rules.
     Place {
         p: IVec3,
-        b: u8,
+        b: Block,
     },
     /// A block the player mined: the host drops what it drops.
     Break {
@@ -232,7 +233,7 @@ pub enum Msg {
     },
     /// All chunks are sent: the player can start loading.
     Ready,
-    Blocks(Vec<(IVec3, u8)>),
+    Blocks(Vec<(IVec3, Block)>),
     Time(f32),
     Join {
         id: u8,
@@ -251,13 +252,13 @@ pub enum Msg {
         items: Vec<ItemNet>,
         gone_mobs: Vec<u32>,
         gone_items: Vec<u32>,
-        falling: Vec<(Vec3, u8)>,
+        falling: Vec<(Vec3, Block)>,
     },
     Give(Stack),
     /// Someone broke a block here: debris flies (the block change comes separately).
     BreakFx {
         p: IVec3,
-        block: u8,
+        block: Block,
     },
     /// Hit by another player (or their grenade).
     Hurt {

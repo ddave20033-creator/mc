@@ -5,6 +5,7 @@
 //! itself (an item's age, a dying mob's seconds) never drifts far.
 
 use super::{ItemNet, MobNet, Msg};
+use crate::world::block::Block;
 use crate::world::{FastMap, FastSet};
 use glam::Vec3;
 
@@ -20,7 +21,7 @@ const DEATH_EPS: f32 = 0.5;
 /// Bytes of one mob, dropped item and falling block in `Msg::Entities`.
 const MOB_BYTES: usize = 53;
 const ITEM_BYTES: usize = 27;
-const FALLING_BYTES: usize = 13;
+const FALLING_BYTES: usize = 14;
 
 /// The bytes a whole list of these entities took on the wire before changes were sent
 /// (protocol 34: every mob, item and falling block near, 20 times a second), for comparing.
@@ -61,7 +62,7 @@ pub struct EntitySync {
     /// Each entry as last sent, and when (host time).
     mobs: FastMap<u32, (MobNet, f32)>,
     items: FastMap<u32, (ItemNet, f32)>,
-    falling: Vec<(Vec3, u8)>,
+    falling: Vec<(Vec3, Block)>,
     started: bool,
 }
 
@@ -74,7 +75,7 @@ impl EntitySync {
         now: f32,
         mobs: &[MobNet],
         items: &[ItemNet],
-        falling: &[(Vec3, u8)],
+        falling: &[(Vec3, Block)],
     ) -> Option<Msg> {
         let full = !self.started;
         self.started = true;
@@ -153,7 +154,7 @@ mod tests {
     struct View {
         mobs: BTreeMap<u32, MobNet>,
         items: BTreeMap<u32, ItemNet>,
-        falling: Vec<(Vec3, u8)>,
+        falling: Vec<(Vec3, Block)>,
     }
 
     impl View {
@@ -202,7 +203,7 @@ mod tests {
     }
 
     /// The player's copy matches the host's (within the tolerances), entry by entry.
-    fn same(view: &View, mobs: &[MobNet], items: &[ItemNet], falling: &[(Vec3, u8)]) {
+    fn same(view: &View, mobs: &[MobNet], items: &[ItemNet], falling: &[(Vec3, Block)]) {
         assert_eq!(view.mobs.len(), mobs.len());
         for m in mobs {
             let v = view.mobs.get(&m.id).expect("mob missing");
@@ -236,7 +237,7 @@ mod tests {
                 .filter(|i| tick < 300 || i % 3 != 0)
                 .map(|i| item(100 + i, (70.0 - t * 4.0).max(64.0 + i as f32 * 0.001), 1 + (tick > 200 && i == 4) as u8))
                 .collect();
-            let falling: Vec<(Vec3, u8)> =
+            let falling: Vec<(Vec3, Block)> =
                 if tick % 60 < 10 { vec![(Vec3::new(1.0, 80.0 - t, 1.0), 12)] } else { vec![] };
             let msg = sync.update(t, &mobs, &items, &falling);
             if tick == 0 {

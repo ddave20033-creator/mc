@@ -26,6 +26,7 @@ use crate::item::{icon, Icon, ItemId};
 use crate::world::mesh::{flags, Vertex};
 use prim::{quad, quad_at, tri_at, BoxUv, Paint, Sides};
 use crate::world::textures::{tex, ITEM_MASKS, MASK};
+use crate::world::block::Block;
 use crate::world::{
     face_texture, icon_tint, is_log, is_plant, is_stairs, is_water, log_axis, log_radius, tint_kind,
     TintKind, TORCH,
@@ -407,7 +408,7 @@ fn walls_of(mask: &[u128; MASK]) -> Vec<SpriteWall> {
 }
 
 /// A block item centered on the origin with unit size (cube, or a crossed sprite for plants).
-pub fn emit_item(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8) {
+pub fn emit_item(out: &mut Vec<Vertex>, m: Mat4, b: Block, light: [u8; 4], fl: u8) {
     let tint = icon_tint(b);
     if is_plant(b) {
         emit_cross(out, m, face_texture(b, 0), tint, light, fl);
@@ -446,7 +447,7 @@ const LOG_ITEM_SIDES: usize = 12;
 
 /// A log (or branch) item as it looks placed: round, along its axis through the unit, its
 /// bark round it and its ends' rings.
-fn emit_round_log(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8) {
+fn emit_round_log(out: &mut Vec<Vertex>, m: Mat4, b: Block, light: [u8; 4], fl: u8) {
     let axis = log_axis(b);
     let (ua, va) = match axis {
         0 => (2, 1),

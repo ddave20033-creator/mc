@@ -36,40 +36,40 @@ pub fn facing_of(dx: f32, dz: f32) -> u8 {
 }
 
 #[inline]
-pub const fn is_door(b: u8) -> bool {
-    b >= OAK_DOOR && b < OAK_DOOR + 64
+pub fn is_door(b: Block) -> bool {
+    base(b) == OAK_DOOR
 }
-pub fn door_id(facing: u8, open: bool, upper: bool, hinge_right: bool) -> u8 {
+pub fn door_id(facing: u8, open: bool, upper: bool, hinge_right: bool) -> Block {
     OAK_DOOR
-        + (facing & 3)
-        + ((open as u8) << 2)
-        + ((upper as u8) << 3)
-        + ((hinge_right as u8) << 4)
+        + (facing & 3) as Block
+        + ((open as Block) << 2)
+        + ((upper as Block) << 3)
+        + ((hinge_right as Block) << 4)
 }
-pub fn door_facing(b: u8) -> u8 {
-    (b - OAK_DOOR) & 3
+pub fn door_facing(b: Block) -> u8 {
+    ((b - OAK_DOOR) & 3) as u8
 }
-pub fn door_open(b: u8) -> bool {
+pub fn door_open(b: Block) -> bool {
     (b - OAK_DOOR) & 4 != 0
 }
-pub fn door_upper(b: u8) -> bool {
+pub fn door_upper(b: Block) -> bool {
     (b - OAK_DOOR) & 8 != 0
 }
-pub fn door_hinge_right(b: u8) -> bool {
+pub fn door_hinge_right(b: Block) -> bool {
     (b - OAK_DOOR) & 16 != 0
 }
-pub fn door_out(b: u8) -> bool {
+pub fn door_out(b: Block) -> bool {
     (b - OAK_DOOR) & 32 != 0
 }
 /// The same door half opened (swinging out or in) or closed. A closed door keeps the way it
 /// last swung, so it swings back the same way.
-pub fn door_set_open(b: u8, open: bool, out: bool) -> u8 {
+pub fn door_set_open(b: Block, open: bool, out: bool) -> Block {
     let keep = (b - OAK_DOOR) & !(4 | 32);
     let out = if open { out } else { door_out(b) };
-    OAK_DOOR + keep + ((open as u8) << 2) + ((out as u8) << 5)
+    OAK_DOOR + keep + ((open as Block) << 2) + ((out as Block) << 5)
 }
 /// Offset from a door half to its other half.
-pub fn door_other_half(b: u8) -> IVec3 {
+pub fn door_other_half(b: Block) -> IVec3 {
     if door_upper(b) {
         IVec3::NEG_Y
     } else {
@@ -87,7 +87,7 @@ pub fn door_side_facing(facing: u8, open: bool, hinge_right: bool) -> u8 {
         facing + 3
     }) & 3
 }
-pub fn door_side(b: u8) -> IVec3 {
+pub fn door_side(b: Block) -> IVec3 {
     facing_dir(door_side_facing(
         door_facing(b),
         door_open(b),
@@ -96,28 +96,28 @@ pub fn door_side(b: u8) -> IVec3 {
 }
 
 #[inline]
-pub const fn is_stairs(b: u8) -> bool {
-    b >= OAK_STAIRS && b < OAK_STAIRS + 8
+pub fn is_stairs(b: Block) -> bool {
+    def(b).model == Model::Stairs
 }
-pub fn stairs_id(facing: u8, upside_down: bool) -> u8 {
-    OAK_STAIRS + (facing & 3) + ((upside_down as u8) << 2)
+pub fn stairs_id(facing: u8, upside_down: bool) -> Block {
+    OAK_STAIRS + (facing & 3) as Block + ((upside_down as Block) << 2)
 }
-pub fn stairs_facing(b: u8) -> u8 {
-    (b - OAK_STAIRS) & 3
+pub fn stairs_facing(b: Block) -> u8 {
+    ((b - OAK_STAIRS) & 3) as u8
 }
-pub fn stairs_upside_down(b: u8) -> bool {
+pub fn stairs_upside_down(b: Block) -> bool {
     (b - OAK_STAIRS) & 4 != 0
 }
 
 /// Which eighths of the block a stair fills: bit `x + 2 * z + 4 * y` for the half-block
 /// cube at (x, y, z) in 0..2. Straight, or an inner/outer corner when it meets another stair
 /// at its front or back (Minecraft's stair shapes). `get` reads a block at an offset.
-pub fn stairs_octants(b: u8, get: impl Fn(IVec3) -> u8) -> u8 {
+pub fn stairs_octants(b: Block, get: impl Fn(IVec3) -> Block) -> u8 {
     let f = stairs_facing(b);
     let up = stairs_upside_down(b);
     let d = facing_dir(f);
     let left = facing_dir(f + 3);
-    let same_half = |o: u8| is_stairs(o) && stairs_upside_down(o) == up;
+    let same_half = |o: Block| is_stairs(o) && stairs_upside_down(o) == up;
     // A neighbour at `dir` that would not let this one bend toward it.
     let can_take = |dir: IVec3| {
         let o = get(dir);
@@ -166,32 +166,32 @@ pub fn stairs_octants(b: u8, get: impl Fn(IVec3) -> u8) -> u8 {
 }
 
 #[inline]
-pub const fn is_bed(b: u8) -> bool {
-    b >= BED && b < BED + 8
+pub fn is_bed(b: Block) -> bool {
+    def(b).model == Model::Bed
 }
-pub fn bed_id(facing: u8, head: bool) -> u8 {
-    BED + (facing & 3) + ((head as u8) << 2)
+pub fn bed_id(facing: u8, head: bool) -> Block {
+    BED + (facing & 3) as Block + ((head as Block) << 2)
 }
-pub fn bed_facing(b: u8) -> u8 {
-    (b - BED) & 3
+pub fn bed_facing(b: Block) -> u8 {
+    ((b - BED) & 3) as u8
 }
-pub fn bed_head(b: u8) -> bool {
+pub fn bed_head(b: Block) -> bool {
     (b - BED) & 4 != 0
 }
 /// Any block of a gun station (the small one or the rifle station).
 #[inline]
-pub const fn is_gun_bench(b: u8) -> bool {
-    (b >= GUN_BENCH && b < GUN_BENCH + 8) || is_rifle_bench(b)
+pub fn is_gun_bench(b: Block) -> bool {
+    def(b).model == Model::GunBench
 }
 /// Any block of a rifle station.
-pub const fn is_rifle_bench(b: u8) -> bool {
-    b >= RIFLE_BENCH && b <= RIFLE_BENCH_PART
+pub fn is_rifle_bench(b: Block) -> bool {
+    matches!(base(b), RIFLE_BENCH | RIFLE_BENCH_PART)
 }
-pub fn rifle_bench_id(facing: u8) -> u8 {
-    RIFLE_BENCH + (facing & 3)
+pub fn rifle_bench_id(facing: u8) -> Block {
+    RIFLE_BENCH + (facing & 3) as Block
 }
 /// How many blocks wide the station a block is part of is.
-pub fn bench_width(b: u8) -> i32 {
+pub fn bench_width(b: Block) -> i32 {
     if is_rifle_bench(b) {
         3
     } else {
@@ -199,7 +199,7 @@ pub fn bench_width(b: u8) -> i32 {
     }
 }
 /// The block of a station that holds what lies on it (its left one, seen from the front).
-pub fn is_bench_main(b: u8) -> bool {
+pub fn is_bench_main(b: Block) -> bool {
     if is_rifle_bench(b) {
         b != RIFLE_BENCH_PART
     } else {
@@ -208,7 +208,7 @@ pub fn is_bench_main(b: u8) -> bool {
 }
 /// The left block of the station that the block `b` at `p` is part of (`get`: the block at a
 /// place; a rifle station's other blocks look for it beside them).
-pub fn bench_main(p: IVec3, b: u8, get: impl Fn(IVec3) -> u8) -> Option<IVec3> {
+pub fn bench_main(p: IVec3, b: Block, get: impl Fn(IVec3) -> Block) -> Option<IVec3> {
     if b == RIFLE_BENCH_PART {
         for k in 1..=2 {
             for f in 0..4u8 {
@@ -223,19 +223,19 @@ pub fn bench_main(p: IVec3, b: u8, get: impl Fn(IVec3) -> u8) -> Option<IVec3> {
     is_gun_bench(b).then(|| if is_rifle_bench(b) { p } else { gun_bench_main(p, b) })
 }
 /// The blocks of the station whose left block (`main`, the block `b`) is there, left to right.
-pub fn bench_cells(main: IVec3, b: u8) -> Vec<IVec3> {
+pub fn bench_cells(main: IVec3, b: Block) -> Vec<IVec3> {
     let Some(f) = facing(b) else { return vec![main] };
     (0..bench_width(b)).map(|i| main + chest_right(f) * i).collect()
 }
-pub fn gun_bench_id(facing: u8, right: bool) -> u8 {
-    GUN_BENCH + (facing & 3) + ((right as u8) << 2)
+pub fn gun_bench_id(facing: u8, right: bool) -> Block {
+    GUN_BENCH + (facing & 3) as Block + ((right as Block) << 2)
 }
-pub fn gun_bench_right(b: u8) -> bool {
+pub fn gun_bench_right(b: Block) -> bool {
     (b - GUN_BENCH) & 4 != 0
 }
 /// Offset from a gun station half to its other half.
-pub fn gun_bench_other_half(b: u8) -> IVec3 {
-    let r = chest_right((b - GUN_BENCH) & 3);
+pub fn gun_bench_other_half(b: Block) -> IVec3 {
+    let r = chest_right(((b - GUN_BENCH) & 3) as u8);
     if gun_bench_right(b) {
         -r
     } else {
@@ -243,7 +243,7 @@ pub fn gun_bench_other_half(b: u8) -> IVec3 {
     }
 }
 /// The left half of the gun station a half belongs to (it keeps what lies on the table).
-pub fn gun_bench_main(p: IVec3, b: u8) -> IVec3 {
+pub fn gun_bench_main(p: IVec3, b: Block) -> IVec3 {
     if gun_bench_right(b) {
         p + gun_bench_other_half(b)
     } else {
@@ -251,7 +251,7 @@ pub fn gun_bench_main(p: IVec3, b: u8) -> IVec3 {
     }
 }
 /// Offset from a bed half to its other half.
-pub fn bed_other_half(b: u8) -> IVec3 {
+pub fn bed_other_half(b: Block) -> IVec3 {
     let d = facing_dir(bed_facing(b));
     if bed_head(b) {
         -d
@@ -262,15 +262,18 @@ pub fn bed_other_half(b: u8) -> IVec3 {
 
 /// A log or a branch (both round, wood).
 #[inline]
-pub const fn is_log(b: u8) -> bool {
-    matches!(b, OAK_LOG | SPRUCE_LOG | BIRCH_LOG) || (b >= OAK_LOG_X && b <= BIRCH_LOG_Z) || is_branch(b)
+pub fn is_log(b: Block) -> bool {
+    def(b).model == Model::Log
 }
 #[inline]
-pub const fn is_branch(b: u8) -> bool {
-    matches!(b, OAK_BRANCH | OAK_BRANCH_X | OAK_BRANCH_Z) || (b >= BIRCH_BRANCH && b <= SPRUCE_BRANCH_Z)
+pub fn is_branch(b: Block) -> bool {
+    matches!(
+        b,
+        OAK_BRANCH | OAK_BRANCH_X | OAK_BRANCH_Z | BIRCH_BRANCH | BIRCH_BRANCH_X | BIRCH_BRANCH_Z | SPRUCE_BRANCH_X | SPRUCE_BRANCH_Z
+    )
 }
 /// The upright log of a log block (of a branch: of its tree).
-pub fn log_base(b: u8) -> u8 {
+pub fn log_base(b: Block) -> Block {
     match b {
         OAK_LOG_X | OAK_LOG_Z | OAK_BRANCH | OAK_BRANCH_X | OAK_BRANCH_Z => OAK_LOG,
         SPRUCE_LOG_X | SPRUCE_LOG_Z | SPRUCE_BRANCH_X | SPRUCE_BRANCH_Z => SPRUCE_LOG,
@@ -279,7 +282,7 @@ pub fn log_base(b: u8) -> u8 {
     }
 }
 /// A branch of the tree of `log` along `axis` (0 x, 1 y, 2 z; spruce ones only lie).
-pub fn branch_with_axis(log: u8, axis: usize) -> u8 {
+pub fn branch_with_axis(log: Block, axis: usize) -> Block {
     match (log, axis) {
         (SPRUCE_LOG, 2) => SPRUCE_BRANCH_Z,
         (SPRUCE_LOG, _) => SPRUCE_BRANCH_X,
@@ -292,7 +295,7 @@ pub fn branch_with_axis(log: u8, axis: usize) -> u8 {
     }
 }
 /// How thick a round log is: its radius (blocks).
-pub fn log_radius(b: u8) -> f32 {
+pub fn log_radius(b: Block) -> f32 {
     if is_branch(b) {
         0.19
     } else {
@@ -300,7 +303,7 @@ pub fn log_radius(b: u8) -> f32 {
     }
 }
 /// Log lying along `axis` (0 x, 1 y, 2 z).
-pub fn log_with_axis(base: u8, axis: usize) -> u8 {
+pub fn log_with_axis(base: Block, axis: usize) -> Block {
     let (x, z) = match base {
         SPRUCE_LOG => (SPRUCE_LOG_X, SPRUCE_LOG_Z),
         BIRCH_LOG => (BIRCH_LOG_X, BIRCH_LOG_Z),
@@ -313,7 +316,7 @@ pub fn log_with_axis(base: u8, axis: usize) -> u8 {
     }
 }
 /// Axis a log runs along (0 x, 1 y, 2 z).
-pub fn log_axis(b: u8) -> usize {
+pub fn log_axis(b: Block) -> usize {
     match b {
         OAK_LOG_X | SPRUCE_LOG_X | BIRCH_LOG_X | OAK_BRANCH_X | BIRCH_BRANCH_X | SPRUCE_BRANCH_X => 0,
         OAK_LOG_Z | SPRUCE_LOG_Z | BIRCH_LOG_Z | OAK_BRANCH_Z | BIRCH_BRANCH_Z | SPRUCE_BRANCH_Z => 2,
@@ -321,7 +324,7 @@ pub fn log_axis(b: u8) -> usize {
     }
 }
 /// The face's texture is turned a quarter (the bark of a log lying on its side).
-pub fn face_rotated(b: u8, face: usize) -> bool {
+pub fn face_rotated(b: Block, face: usize) -> bool {
     match log_axis(b) {
         0 => face >= 2,
         2 => face < 2,
@@ -375,13 +378,13 @@ pub fn door_panel(s: IVec3) -> ([f32; 3], [f32; 3]) {
 }
 
 /// The side a door panel closes on (unit vector from the block center).
-pub fn door_closed_side(b: u8) -> IVec3 {
+pub fn door_closed_side(b: Block) -> IVec3 {
     facing_dir(door_side_facing(door_facing(b), false, door_hinge_right(b)))
 }
 
 /// The shape of a solid block (a full cube for most). `get` reads a block at an offset.
 /// A door swung out reaches into the next block.
-pub fn block_boxes(b: u8, get: impl Fn(IVec3) -> u8) -> Boxes {
+pub fn block_boxes(b: Block, get: impl Fn(IVec3) -> Block) -> Boxes {
     if is_door(b) {
         let (mut lo, mut hi) = door_panel(door_side(b));
         if door_open(b) && door_out(b) {
@@ -436,7 +439,7 @@ pub fn block_boxes(b: u8, get: impl Fn(IVec3) -> u8) -> Boxes {
 }
 
 /// Offset from a torch block to the block holding it up.
-pub fn torch_support_offset(b: u8) -> Option<IVec3> {
+pub fn torch_support_offset(b: Block) -> Option<IVec3> {
     match b {
         TORCH | LANTERN => Some(IVec3::NEG_Y),
         LANTERN_HANGING => Some(IVec3::Y),
@@ -448,7 +451,7 @@ pub fn torch_support_offset(b: u8) -> Option<IVec3> {
     }
 }
 
-pub fn wall_torch_for_support(offset: IVec3) -> Option<u8> {
+pub fn wall_torch_for_support(offset: IVec3) -> Option<Block> {
     match offset {
         IVec3::NEG_Z => Some(WALL_TORCH),
         IVec3::X => Some(WALL_TORCH + 1),
@@ -459,19 +462,19 @@ pub fn wall_torch_for_support(offset: IVec3) -> Option<u8> {
 }
 
 /// A furnace of kind `base` facing `facing`, burning or not.
-pub fn furnace_id(base: u8, facing: u8, lit: bool) -> u8 {
-    base + if lit { 4 } else { 0 } + (facing & 3)
+pub fn furnace_id(base: Block, facing: u8, lit: bool) -> Block {
+    base + if lit { 4 } else { 0 } + (facing & 3) as Block
 }
 /// Which part of an advanced furnace a block is (1 lower right, 2 upper left, 3 upper
 /// right) and whether it glows.
-pub fn adv_part(b: u8) -> Option<(u8, bool)> {
+pub fn adv_part(b: Block) -> Option<(u8, bool)> {
     is_adv_part(b).then(|| {
         let i = b - ADV_PART;
-        ((i % 12) / 4 + 1, i >= 12)
+        ((i % 12) as u8 / 4 + 1, i >= 12)
     })
 }
-pub fn adv_part_id(part: u8, facing: u8, lit: bool) -> u8 {
-    (if lit { ADV_PART_LIT } else { ADV_PART }) + (part - 1) * 4 + (facing & 3)
+pub fn adv_part_id(part: u8, facing: u8, lit: bool) -> Block {
+    (if lit { ADV_PART_LIT } else { ADV_PART }) + ((part - 1) * 4 + (facing & 3)) as Block
 }
 /// To the right of a furnace facing `facing`, as seen from in front of it.
 pub fn furnace_right(facing: u8) -> IVec3 {
@@ -481,10 +484,10 @@ pub fn furnace_right(facing: u8) -> IVec3 {
 /// The blocks of a furnace of kind `base` with its furnace block at the origin: (offset,
 /// block). A blast furnace has its chimney on top; an advanced furnace is two wide (to its
 /// right) and two tall.
-pub fn furnace_cells(base: u8, facing: u8, lit: bool) -> Vec<(IVec3, u8)> {
+pub fn furnace_cells(base: Block, facing: u8, lit: bool) -> Vec<(IVec3, Block)> {
     let f = furnace_id(base, facing, lit);
     match base {
-        BLAST_FURNACE => vec![(IVec3::ZERO, f), (IVec3::Y, CHIMNEY + (facing & 3))],
+        BLAST_FURNACE => vec![(IVec3::ZERO, f), (IVec3::Y, CHIMNEY + (facing & 3) as Block)],
         ADV_FURNACE => {
             let r = furnace_right(facing);
             vec![
@@ -498,7 +501,7 @@ pub fn furnace_cells(base: u8, facing: u8, lit: bool) -> Vec<(IVec3, u8)> {
     }
 }
 /// Where the furnace block of the big furnace that the block `b` at `p` is part of is.
-pub fn furnace_origin(p: IVec3, b: u8) -> IVec3 {
+pub fn furnace_origin(p: IVec3, b: Block) -> IVec3 {
     if is_chimney(b) {
         return p - IVec3::Y;
     }
@@ -514,15 +517,13 @@ pub fn furnace_origin(p: IVec3, b: u8) -> IVec3 {
 }
 
 /// Facing of a directional block.
-pub fn facing(b: u8) -> Option<u8> {
-    match b {
-        _ if is_furnace(b) => furnace_base(b).map(|base| (b - base) & 3),
-        _ if is_chimney(b) => Some(b - CHIMNEY),
-        _ if is_adv_part(b) => Some((b - ADV_PART) & 3),
-        _ if (CHEST..CHEST + 4).contains(&b) => Some(b - CHEST),
-        _ if (CHEST_LEFT..CHEST_RIGHT + 4).contains(&b) => Some((b - CHEST_LEFT) & 3),
-        _ if is_rifle_bench(b) => (b != RIFLE_BENCH_PART).then_some((b - RIFLE_BENCH) & 3),
-        _ if is_gun_bench(b) => Some((b - GUN_BENCH) & 3),
+pub fn facing(b: Block) -> Option<u8> {
+    let state = || ((b - base(b)) & 3) as u8;
+    match base(b) {
+        FURNACE | FURNACE_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | ADV_FURNACE | ADV_FURNACE_LIT => Some(state()),
+        CHIMNEY | ADV_PART | ADV_PART_LIT => Some(state()),
+        CHEST | CHEST_LEFT | CHEST_RIGHT => Some(state()),
+        RIFLE_BENCH | GUN_BENCH => Some(state()),
         _ => None,
     }
 }
@@ -531,27 +532,27 @@ pub fn chest_right(facing: u8) -> IVec3 {
     [IVec3::NEG_X, IVec3::NEG_Z, IVec3::X, IVec3::Z][facing as usize & 3]
 }
 /// Offset from a double chest half to its other half.
-pub fn chest_partner_offset(b: u8) -> Option<IVec3> {
+pub fn chest_partner_offset(b: Block) -> Option<IVec3> {
     let f = facing(b)?;
-    match b {
-        _ if (CHEST_LEFT..CHEST_LEFT + 4).contains(&b) => Some(chest_right(f)),
-        _ if (CHEST_RIGHT..CHEST_RIGHT + 4).contains(&b) => Some(-chest_right(f)),
+    match base(b) {
+        CHEST_LEFT => Some(chest_right(f)),
+        CHEST_RIGHT => Some(-chest_right(f)),
         _ => None,
     }
 }
 /// The id of a double chest half's other half.
-pub fn chest_other_half(b: u8) -> Option<u8> {
+pub fn chest_other_half(b: Block) -> Option<Block> {
     let f = facing(b)?;
-    match b {
-        _ if (CHEST_LEFT..CHEST_LEFT + 4).contains(&b) => Some(CHEST_RIGHT + f),
-        _ if (CHEST_RIGHT..CHEST_RIGHT + 4).contains(&b) => Some(CHEST_LEFT + f),
+    match base(b) {
+        CHEST_LEFT => Some(CHEST_RIGHT + f as Block),
+        CHEST_RIGHT => Some(CHEST_LEFT + f as Block),
         _ => None,
     }
 }
 /// Chest id for a facing: single (`side` 0), or the half whose partner is at
 /// `side * chest_right(facing)`.
-pub fn chest_id(facing: u8, side: i32) -> u8 {
-    let f = facing & 3;
+pub fn chest_id(facing: u8, side: i32) -> Block {
+    let f = (facing & 3) as Block;
     match side.signum() {
         1 => CHEST_LEFT + f,
         -1 => CHEST_RIGHT + f,
@@ -565,12 +566,12 @@ pub fn front_face(facing: u8) -> usize {
 
 /// The right button opens it (or uses it: a door, a bed) instead of what is in the hand
 /// being used on it.
-pub fn opens_on_use(b: u8) -> bool {
+pub fn opens_on_use(b: Block) -> bool {
     b == CRAFTING_TABLE || is_gun_bench(b) || b == GUN_STATION || is_furnace(b) || is_door(b) || is_bed(b) || is_chest(b)
 }
 
 /// The leaves of the tree of an upright log (oak for anything else).
-pub fn leaves_of(log: u8) -> u8 {
+pub fn leaves_of(log: Block) -> Block {
     match log {
         BIRCH_LOG => BIRCH_LEAVES,
         SPRUCE_LOG => SPRUCE_LEAVES,
@@ -579,7 +580,7 @@ pub fn leaves_of(log: u8) -> u8 {
 }
 
 /// The sapling of the tree of an upright log (oak for anything else).
-pub fn sapling_of(log: u8) -> u8 {
+pub fn sapling_of(log: Block) -> Block {
     match log {
         BIRCH_LOG => BIRCH_SAPLING,
         SPRUCE_LOG => SPRUCE_SAPLING,
@@ -588,7 +589,7 @@ pub fn sapling_of(log: u8) -> u8 {
 }
 
 /// The upright log of the tree a sapling grows into (oak for anything else).
-pub fn log_of_sapling(sapling: u8) -> u8 {
+pub fn log_of_sapling(sapling: Block) -> Block {
     match sapling {
         BIRCH_SAPLING => BIRCH_LOG,
         SPRUCE_SAPLING => SPRUCE_LOG,

@@ -111,7 +111,7 @@ impl Game {
     }
 
     /// Blocks overlapping the player's bounding box (optionally grown a bit).
-    pub(in crate::game) fn touching(&self, grow: f32, pred: impl Fn(u8) -> bool) -> bool {
+    pub(in crate::game) fn touching(&self, grow: f32, pred: impl Fn(Block) -> bool) -> bool {
         let p = self.player.pos;
         let min = p - Vec3::new(0.3 + grow, 0.0, 0.3 + grow);
         let max = p + Vec3::new(0.3 + grow, 1.8, 0.3 + grow);

@@ -251,7 +251,7 @@ impl Game {
                         age: it.age,
                     })
                     .collect();
-                let falling: Vec<(Vec3, u8)> = self
+                let falling: Vec<(Vec3, Block)> = self
                     .level.falling
                     .iter()
                     .filter(|f| f.pos.distance(at) < ITEM_RANGE)
@@ -453,7 +453,7 @@ impl Game {
     /// Host: block changes to every player who has (or nearly has) their chunk loaded; for
     /// the others the chunk is marked, and goes whole when they come near
     /// (`resend_near_chunks`). A player whose pose is not known yet gets them all.
-    pub(super) fn send_blocks(&mut self, changes: &[(IVec3, u8)]) {
+    pub(super) fn send_blocks(&mut self, changes: &[(IVec3, Block)]) {
         let Some(Net::Host(h)) = &mut self.net else { return };
         let mut all: Option<Frame> = None;
         for peer in h.peers.iter_mut().filter(|p| p.joined) {
@@ -499,7 +499,7 @@ impl Game {
                 if let Some(data) = world.chunks.get(&c).or_else(|| world.saved.get(&c)) {
                     peer.conn.send(&Msg::Chunk {
                         pos: c,
-                        rle: rle(data.raw()),
+                        rle: rle(&data.to_vec()),
                     });
                 }
             }
@@ -907,7 +907,7 @@ impl Game {
                     for (pos, c) in chunks {
                         let chunk = Msg::Chunk {
                             pos,
-                            rle: rle(c.raw()),
+                            rle: rle(&c.to_vec()),
                         };
                         if stream.send(Frame::new(&chunk)).is_err() {
                             return;

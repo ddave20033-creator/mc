@@ -118,7 +118,7 @@ struct Hole {
     pos: Vec3,
     normal: Vec3,
     block: IVec3,
-    id: u8,
+    id: Block,
     turn: f32,
     mirrored: bool,
     size: f32,
