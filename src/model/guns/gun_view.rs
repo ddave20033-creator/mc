@@ -1,13 +1,15 @@
-//! The held guns' Blockbench models by kind: the magazine-fed pistol and AK-47 (`pistol_view`,
-//! each with its own `Rig`) or the revolver (`revolver_view`). What the hand, the player model,
-//! the item and the game need of any of them.
+//! The held guns' Blockbench models by kind: a magazine-fed gun's (`pistol_view`, each with
+//! its own `Rig`, named in its row of `item::WEAPONS`) or the revolver's (`revolver_view`).
+//! What the hand, the player model, the item and the game need of any of them, and the helpers
+//! both kinds of model share.
 
-use crate::model::pistol_view::{self as pistol, GunAnim};
+use crate::model::pistol_view::{self as pistol, GunAnim, Rig};
 use crate::model::revolver_view as revolver;
-use crate::model::viewmodel::{Anim, Bone, BonePose, Cube};
-use crate::model::{ak_vm, pistol_vm, revolver_vm};
-use crate::item::GunKind;
+use crate::model::revolver_vm;
+use crate::model::viewmodel::{find_bone, Anim, Bone, BonePose, Cube};
+use crate::item::{GunKind, GUN_KINDS};
 use crate::world::mesh::Vertex;
+use crate::world::textures::tex;
 use glam::{Mat4, Vec3};
 
 /// How much bigger a gun is held than it is modelled (the models are to scale with each
@@ -18,39 +20,38 @@ use glam::{Mat4, Vec3};
 pub const HELD_SCALE: f32 = 1.3;
 pub const MODEL_SCALE: f32 = 1.15;
 
+/// A magazine-fed gun's model (`pistol_view`), or None for the revolver (`revolver_view`):
+/// what each function here goes by.
+fn rig(kind: GunKind) -> Option<&'static Rig> {
+    kind.magazine().map(|m| m.rig)
+}
+
 /// The rear sight's notch (or the scope's eyepiece, with one), model space: aiming brings it
 /// to the middle of the view.
 pub fn sight_point(kind: GunKind, mods: u8) -> Vec3 {
-    match kind {
-        GunKind::Pistol if mods & crate::item::gun_mod::SCOPE != 0 => Vec3::new(7.0, 15.5 - 24.0, 5.2 - 34.0),
-        GunKind::Pistol => Vec3::new(7.0, 14.3 - 24.0, 6.5 - 34.0),
-        GunKind::Revolver => revolver::sight_point(),
-        // The rear sight's notch, far forward on the receiver.
-        GunKind::Ak => Vec3::new(7.0, 15.1 - 24.0, -18.25 - 34.0),
+    match rig(kind) {
+        Some(r) => pistol::sight_point(r, mods),
+        None => revolver::sight_point(),
     }
 }
 
 pub fn bones(kind: GunKind) -> &'static [Bone] {
-    match kind {
-        GunKind::Pistol => pistol_vm::BONES,
-        GunKind::Revolver => revolver_vm::BONES,
-        GunKind::Ak => ak_vm::BONES,
-    }
+    rig(kind).map_or(revolver_vm::BONES, |r| r.bones)
 }
 
 pub fn cubes(kind: GunKind) -> &'static [Cube] {
-    match kind {
-        GunKind::Pistol => pistol_vm::CUBES,
-        GunKind::Revolver => revolver_vm::CUBES,
-        GunKind::Ak => ak_vm::CUBES,
-    }
+    rig(kind).map_or(revolver_vm::CUBES, |r| r.cubes)
+}
+
+pub fn anims(kind: GunKind) -> &'static [Anim] {
+    rig(kind).map_or(revolver_vm::ANIMS, |r| r.anims)
 }
 
 /// The first texture layer of the gun's pages as dirty as `dirt`.
 pub fn layers(kind: GunKind, dirt: u8) -> u32 {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::layers(pistol::rig(kind), dirt),
-        GunKind::Revolver => revolver::layers(dirt),
+    match rig(kind) {
+        Some(r) => pistol::layers(r, dirt),
+        None => revolver::layers(dirt),
     }
 }
 
@@ -61,7 +62,7 @@ pub fn layers(kind: GunKind, dirt: u8) -> u32 {
 /// toward +Z.
 pub fn item_rig(st: &crate::item::Stack) -> Option<(GunKind, u64, Vec<BonePose>, Option<(u8, u8)>, Mat4)> {
     use crate::item::*;
-    for r in [&pistol::PISTOL, &pistol::AK] {
+    for r in GUN_KINDS.into_iter().filter_map(rig) {
         if let Some((bones, pose, mag, upright)) = pistol::bench::item_rig(r, st) {
             return Some((r.kind, bones, pose, mag, upright));
         }
@@ -81,38 +82,29 @@ pub fn item_rig(st: &crate::item::Stack) -> Option<(GunKind, u64, Vec<BonePose>,
     None
 }
 
-pub fn anims(kind: GunKind) -> &'static [Anim] {
-    match kind {
-        GunKind::Pistol => pistol_vm::ANIMS,
-        GunKind::Revolver => revolver_vm::ANIMS,
-        GunKind::Ak => ak_vm::ANIMS,
-    }
-}
-
 /// The gun's own bone (the whole gun, without the arms).
 pub fn gun_bone(kind: GunKind) -> usize {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => crate::model::viewmodel::find_bone(bones(kind), pistol::rig(kind).gun_bone).unwrap_or(0),
-        GunKind::Revolver => revolver::gun_bone(),
+    match rig(kind) {
+        Some(r) => find_bone(r.bones, r.gun_bone).unwrap_or(0),
+        None => revolver::gun_bone(),
     }
 }
 
 pub fn rest_pose(kind: GunKind) -> Vec<BonePose> {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::rest_pose(pistol::rig(kind)),
-        GunKind::Revolver => revolver::rest_pose(),
+    match rig(kind) {
+        Some(r) => pistol::rest_pose(r),
+        None => revolver::rest_pose(),
     }
 }
 
 /// The gun's moving parts from what it is doing, and its attachments shown or not.
 pub fn add_gun_anims(kind: GunKind, pose: &mut [BonePose], g: &GunAnim, mods: u8, parts_only: bool) {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => {
-            let r = pistol::rig(kind);
+    match rig(kind) {
+        Some(r) => {
             pistol::add_gun_anims(r, pose, g, parts_only);
             pistol::apply_mods(r, pose, mods);
         }
-        GunKind::Revolver => revolver::add_gun_anims(pose, g, parts_only),
+        None => revolver::add_gun_anims(pose, g, parts_only),
     }
 }
 
@@ -138,62 +130,109 @@ pub fn emit(
     light: [u8; 4],
     fl: u8,
 ) {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::emit_pistol(pistol::rig(kind), out, glass, mats, shown, eyepiece_view, dirt, lamp, pistol::shown_mag(g), light, fl),
-        GunKind::Revolver => revolver::emit(out, mats, shown, dirt, light, fl),
+    match rig(kind) {
+        Some(r) => pistol::emit_pistol(r, out, glass, mats, shown, eyepiece_view, dirt, lamp, pistol::shown_mag(g), light, fl),
+        None => revolver::emit(out, mats, shown, dirt, light, fl),
     }
 }
 
 /// Where the bullet leaves: bone and model point.
 pub fn muzzle(kind: GunKind, mods: u8) -> (usize, Vec3) {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::muzzle(pistol::rig(kind), mods),
-        GunKind::Revolver => revolver::muzzle(),
-    }
+    rig(kind).map_or_else(revolver::muzzle, |r| pistol::muzzle(r, mods))
 }
 
 /// Where the spent cases come out (a revolver's: its cylinder, when reloading).
 pub fn eject(kind: GunKind) -> (usize, Vec3) {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::eject(pistol::rig(kind)),
-        GunKind::Revolver => revolver::eject(),
-    }
+    rig(kind).map_or_else(revolver::eject, pistol::eject)
 }
 
 /// The laser sight's lens and the weapon light's (the muzzle on a gun without a rail).
 pub fn laser(kind: GunKind) -> (usize, Vec3) {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::laser(pistol::rig(kind)),
-        GunKind::Revolver => revolver::muzzle(),
-    }
+    rig(kind).map_or_else(revolver::muzzle, pistol::laser)
 }
 
 pub fn light(kind: GunKind) -> (usize, Vec3) {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::light(pistol::rig(kind)),
-        GunKind::Revolver => revolver::muzzle(),
-    }
+    rig(kind).map_or_else(revolver::muzzle, pistol::light)
 }
 
 pub fn eyepiece(kind: GunKind, mats: &[Mat4], shown: &[bool]) -> Option<(Vec3, Vec3, Vec3, f32)> {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::eyepiece(pistol::rig(kind), mats, shown),
-        GunKind::Revolver => None,
-    }
+    rig(kind).and_then(|r| pistol::eyepiece(r, mats, shown))
 }
 
 pub fn to_gun_space(kind: GunKind) -> Mat4 {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::to_gun_space(pistol::rig(kind)),
-        GunKind::Revolver => revolver::to_gun_space(),
-    }
+    model_to_gun_space(kind, bones(kind))
 }
 
 pub fn rest_point_in_gun_space(kind: GunKind, point: (usize, Vec3)) -> Vec3 {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => pistol::rest_point_in_gun_space(pistol::rig(kind), point),
-        GunKind::Revolver => revolver::rest_point_in_gun_space(point),
+    rest_point(bones(kind), || rest_pose(kind), || to_gun_space(kind), point)
+}
+
+/// The bones that are the arms and what holds a gun, not the gun's own parts: with
+/// `parts_only` (the player model holds it with its own arms) those of `bones` that are left
+/// still, otherwise none.
+pub(crate) fn holding(bones: &[Bone], parts_only: bool) -> Vec<usize> {
+    const HOLDING: [&str; 5] = ["viewmodel", "right_arm", "right_arm_mesh", "left_arm", "left_arm_mesh"];
+    if parts_only {
+        HOLDING.iter().filter_map(|n| find_bone(bones, n)).collect()
+    } else {
+        Vec::new()
     }
+}
+
+/// A bone and everything under it (bit i: bone i).
+pub(crate) fn subtree(bones: &[Bone], name: &str) -> u64 {
+    let Some(root) = find_bone(bones, name) else { return 0 };
+    let mut set: u64 = 1 << root;
+    // Parents come before their children.
+    for (i, b) in bones.iter().enumerate() {
+        if b.parent >= 0 && set & (1 << b.parent) != 0 {
+            set |= 1 << i;
+        }
+    }
+    set
+}
+
+/// The first texture layer of a model's pages (the clean ones at `view`, `pages` of them a
+/// set) as dirty as `dirt` (`pistol_view::dirt_level`).
+pub(crate) fn dirty_layer(view: u32, pages: u32, dirt: u8) -> u32 {
+    view + (dirt as u32).min(tex::PISTOL_DIRT_LEVELS - 1) * pages
+}
+
+/// From a Blockbench gun's model space to the old gun space (`gun::Spec`: the muzzle +X, the
+/// right side +Z, about a centimetre a unit), so it sits where the old pistol did: the right
+/// fist's middle on the grip at the spec's `hand`, all the guns at the same scale.
+fn model_to_gun_space(kind: GunKind, bones: &[Bone]) -> Mat4 {
+    let spec = crate::model::gun::spec(kind);
+    let fist = find_bone(bones, "right_arm_mesh").map_or(Vec3::ZERO, |b| Vec3::from(bones[b].origin));
+    // The old pistol is 18.2 gun units long, the Blockbench one 21.8 pixels.
+    let scale = 18.2 / 21.8;
+    Mat4::from_translation(spec.hand)
+        * Mat4::from_rotation_y((-90.0f32).to_radians())
+        * Mat4::from_scale(Vec3::splat(scale))
+        * Mat4::from_translation(-fist)
+}
+
+/// A model point of a gun at rest, in the old gun space (for the third-person muzzle,
+/// ejection port and laser, see `player::gun_point`). The rest pose's bone matrices are made
+/// once for each model (asked for every frame for the muzzle, the ejection port and the
+/// light).
+fn rest_point(bones: &'static [Bone], rest: impl FnOnce() -> Vec<BonePose>, root: impl FnOnce() -> Mat4, (b, p): (usize, Vec3)) -> Vec3 {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    thread_local! {
+        static REST: RefCell<Vec<(usize, Rc<Vec<Mat4>>)>> = const { RefCell::new(Vec::new()) };
+    }
+    let id = bones.as_ptr() as usize;
+    let mats = REST.with_borrow_mut(|cache| match cache.iter().find(|(k, _)| *k == id) {
+        Some((_, m)) => m.clone(),
+        None => {
+            let (mats, _) = crate::model::viewmodel::bone_matrices(bones, &rest(), root());
+            let m = Rc::new(mats);
+            cache.push((id, m.clone()));
+            m
+        }
+    });
+    mats[b].transform_point3(p)
 }
 
 /// One cube of a round (see `round_parts`): the cube, where it is in the round's own frame,
@@ -210,12 +249,13 @@ pub struct RoundPart {
 /// model units.
 pub fn round_parts(ammo: crate::item::ItemId, spent: bool) -> &'static [RoundPart] {
     use std::sync::OnceLock;
-    static CACHE: OnceLock<[Vec<RoundPart>; 6]> = OnceLock::new();
+    // Each gun's round and its case, in the order of `GUN_KINDS`.
+    static CACHE: OnceLock<Vec<[Vec<RoundPart>; 2]>> = OnceLock::new();
     let all = CACHE.get_or_init(|| {
         let build = |kind: GunKind, spent: bool| {
-            let (set, pose) = match kind {
-                GunKind::Pistol | GunKind::Ak => (pistol::bench::round(pistol::rig(kind)), pistol::rest_pose(pistol::rig(kind))),
-                GunKind::Revolver => (revolver::bench::round(), revolver::bench::round_pose()),
+            let (set, pose) = match rig(kind) {
+                Some(r) => (pistol::bench::round(r), pistol::rest_pose(r)),
+                None => (revolver::bench::round(), revolver::bench::round_pose()),
             };
             let (mats, _) = crate::model::viewmodel::bone_matrices(bones(kind), &pose, Mat4::IDENTITY);
             let is_bullet = |c: &Cube| c.name.contains("bullet") || c.name.contains("nose");
@@ -240,22 +280,11 @@ pub fn round_parts(ammo: crate::item::ItemId, spent: bool) -> &'static [RoundPar
                 .map(|c| RoundPart { cube: c, m: frame * mats[c.bone] * crate::model::viewmodel::cube_matrix(c), layer: layers(kind, 0) })
                 .collect::<Vec<_>>()
         };
-        [
-            build(GunKind::Pistol, false),
-            build(GunKind::Pistol, true),
-            build(GunKind::Revolver, false),
-            build(GunKind::Revolver, true),
-            build(GunKind::Ak, false),
-            build(GunKind::Ak, true),
-        ]
+        GUN_KINDS.map(|k| [build(k, false), build(k, true)]).into()
     });
-    let kind = match ammo {
-        crate::item::MAGNUM_ROUND => 1,
-        crate::item::RIFLE_ROUND => 2,
-        _ => 0,
-    };
-    let i = kind * 2 + spent as usize;
-    &all[i]
+    // (the pistol's for anything else)
+    let kind = GUN_KINDS.iter().position(|k| k.ammo() == ammo).unwrap_or(0);
+    &all[kind][spent as usize]
 }
 
 /// How long a round is (or its case, `spent`) and how wide at its widest (the rim), in the

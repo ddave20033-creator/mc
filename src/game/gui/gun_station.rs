@@ -203,39 +203,39 @@ enum Look {
 }
 
 fn look(item: ItemId) -> Look {
-    if let Some(k) = GunKind::of(item) {
-        return Look::Gun(k);
-    }
-    if let Some(p) = REVOLVER_PARTS.iter().position(|&i| i == item) {
-        return Look::Part(GunKind::Revolver, p);
-    }
-    if let Some(p) = AK_PARTS.iter().position(|&i| i == item) {
-        return Look::Part(GunKind::Ak, p);
+    for w in &WEAPONS {
+        if w.item == item {
+            return Look::Gun(w.kind);
+        }
+        if let Some(p) = w.parts.iter().position(|&i| i == item) {
+            return Look::Part(w.kind, p);
+        }
+        // (an extended magazine is its gun's magazine)
+        if magazine_gun(item) == Some(w.kind) {
+            return Look::Part(w.kind, MAGAZINE);
+        }
+        if w.ammo == item {
+            return if w.kind.uses_magazine() { Look::Round(w.kind) } else { Look::Magnum };
+        }
     }
     match item {
-        PISTOL_FRAME => Look::Part(GunKind::Pistol, FRAME),
-        PISTOL_BARREL => Look::Part(GunKind::Pistol, BARREL),
-        PISTOL_SPRING => Look::Part(GunKind::Pistol, SPRING),
-        PISTOL_SLIDE => Look::Part(GunKind::Pistol, SLIDE),
-        PISTOL_MAGAZINE | EXTENDED_MAGAZINE => Look::Part(GunKind::Pistol, MAGAZINE),
-        SCOPE => Look::Attachment(gun_mod::SCOPE),
-        SILENCER => Look::Attachment(gun_mod::SILENCER),
-        LASER_SIGHT => Look::Attachment(gun_mod::LASER),
-        FLASHLIGHT => Look::Attachment(gun_mod::LIGHT),
-        BULLET => Look::Round(GunKind::Pistol),
-        RIFLE_ROUND => Look::Round(GunKind::Ak),
-        MAGNUM_ROUND => Look::Magnum,
         SPEEDLOADER => Look::Speedloader,
-        _ => Look::Flat,
+        _ => attachment_bit(item).map_or(Look::Flat, Look::Attachment),
     }
+}
+
+/// The model of a magazine-fed gun (None: the revolver's, `rrig`).
+fn mag_rig(kind: GunKind) -> Option<&'static pv::Rig> {
+    kind.magazine().map(|m| m.rig)
 }
 
 /// The parts a gun lies in taken apart on the table (a magazine is not one of them: it is
 /// laid beside them on its own), and a part's item.
 fn table_parts(kind: GunKind) -> &'static [usize] {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => &[FRAME, BARREL, SPRING, SLIDE],
-        GunKind::Revolver => &[0, 1, 2, 3, 4],
+    if kind.uses_magazine() {
+        &[FRAME, BARREL, SPRING, SLIDE]
+    } else {
+        &[0, 1, 2, 3, 4]
     }
 }
 
@@ -246,25 +246,23 @@ fn part_item(kind: GunKind, part: usize) -> ItemId {
 /// The bones of a gun's part (with the attachments in `mods` on it, the pistol's), and how
 /// long its strip animation is.
 fn part_bones(kind: GunKind, part: usize, mods: u8) -> Bones {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => rig::part(pv::rig(kind), part, mods),
-        GunKind::Revolver => rrig::part(part),
+    match mag_rig(kind) {
+        Some(r) => rig::part(r, part, mods),
+        None => rrig::part(part),
     }
 }
 
 fn strip_length(kind: GunKind) -> f32 {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => rig::strip_length(pv::rig(kind)),
-        GunKind::Revolver => rrig::strip_length(),
-    }
+    mag_rig(kind).map_or_else(rrig::strip_length, rig::strip_length)
 }
 
 /// Where putting a gun together starts in its strip animation (played backwards): the
 /// magazine goes in on its own, afterwards.
 fn assemble_from(kind: GunKind) -> f32 {
-    match kind {
-        GunKind::Pistol | GunKind::Ak => MAG_OUT,
-        GunKind::Revolver => 0.0,
+    if kind.uses_magazine() {
+        MAG_OUT
+    } else {
+        0.0
     }
 }
 
@@ -327,7 +325,7 @@ fn rig_of(st: &Stack, at: f32) -> Option<(GunKind, Bones, Vec<BonePose>)> {
         }
     };
     match look(st.item) {
-        Look::Gun(GunKind::Revolver) => Some((GunKind::Revolver, rrig::gun(), rrig::pose([at; PARTS], st.data))),
+        Look::Gun(kind) if !kind.uses_magazine() => Some((kind, rrig::gun(), rrig::pose([at; PARTS], st.data))),
         Look::Gun(kind) => {
             let r = pv::rig(kind);
             let mods = gun_mods(st);
@@ -337,7 +335,7 @@ fn rig_of(st: &Stack, at: f32) -> Option<(GunKind, Bones, Vec<BonePose>)> {
             Some((kind, rig::gun(r, mods), pose))
         }
         // A cylinder on its own is empty.
-        Look::Part(GunKind::Revolver, p) => Some((GunKind::Revolver, rrig::part(p), rrig::pose([0.0; PARTS], 0))),
+        Look::Part(kind, p) if !kind.uses_magazine() => Some((kind, rrig::part(p), rrig::pose([0.0; PARTS], 0))),
         Look::Part(kind, p) => {
             let r = pv::rig(kind);
             let (ext, mods) = if p == MAGAZINE {
@@ -784,9 +782,9 @@ fn strip_targets(table: &Table, gun: &BenchItem) -> (Vec3, Vec<(Stack, f32, f32,
             let mut stack = Stack { damage: st.damage, ..Stack::one(part_item(kind, p)) };
             // The attachments stay on their parts (kept in the parts' data, like a gun's).
             set_gun_mods(&mut stack, mods & attachment_of(p));
-            let own = match kind {
-                GunKind::Pistol | GunKind::Ak => rig::part(pv::rig(kind), p, mods) & !rig::round(pv::rig(kind)),
-                GunKind::Revolver => rrig::part(p),
+            let own = match mag_rig(kind) {
+                Some(r) => rig::part(r, p, mods) & !rig::round(r),
+                None => rrig::part(p),
             };
             (stack, Piece::new(kind, own, &end, root, 0, None))
         })
@@ -2371,7 +2369,7 @@ mod tests {
         bench.add(g, 0.0, 0.0, 0.0);
         // Another gun laid right on it goes beside it instead, on the table.
         let (x, z) = free_spot(&t, &bench, g, 0.05, 0.02, 0.0);
-        let id = bench.add(g, x, z, 0.0);
+        bench.add(g, x, z, 0.0);
         let boxes = occupied(&t, &bench);
         let (a, b) = (boxes[0], boxes[1]);
         let apart = a.1.x <= b.0.x || b.1.x <= a.0.x || a.1.y <= b.0.y || b.1.y <= a.0.y;
@@ -2384,7 +2382,6 @@ mod tests {
         for (c, d) in occupied(&t, &bench) {
             assert!(r.1.x <= c.x || d.x <= r.0.x || r.1.y <= c.y || d.y <= r.0.y, "{r:?} in {c:?} {d:?}");
         }
-        let _ = id;
     }
 
     #[test]

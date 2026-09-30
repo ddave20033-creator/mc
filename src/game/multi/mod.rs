@@ -555,7 +555,7 @@ fn remote_gun(p: &Pose, time: f32, shot_at: Option<f32>) -> crate::model::pistol
     g.unpack_extra(p.gun_extra);
     let gun = crate::item::Stack { data: p.held_data, ..crate::item::Stack::one(p.held) };
     match GunKind::of(p.held) {
-        Some(GunKind::Revolver) => g.cyl = p.held_data,
+        Some(kind) if !kind.uses_magazine() => g.cyl = p.held_data,
         Some(kind) => {
             g.mag = crate::item::gun_has_mag(&gun)
                 .then(|| (crate::item::gun_rounds(&gun), kind.magazine_size(crate::item::gun_mods(&gun))));

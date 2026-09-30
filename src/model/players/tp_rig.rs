@@ -8,15 +8,15 @@
 //! Model space: the player model's pixels, standing on the origin, facing -Z.
 
 #[allow(unused_imports, dead_code)]
-mod pistol {
+pub(crate) mod pistol {
     include!("tp_pistol_data.rs");
 }
 #[allow(unused_imports, dead_code)]
-mod revolver {
+pub(crate) mod revolver {
     include!("tp_revolver_data.rs");
 }
 #[allow(unused_imports, dead_code)]
-mod ak {
+pub(crate) mod ak {
     include!("tp_ak_data.rs");
 }
 
@@ -25,12 +25,9 @@ use crate::model::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, Ani
 use crate::item::GunKind;
 use glam::{Mat4, Vec3};
 
+/// A gun's rig (its row of `item::WEAPONS`).
 fn rig(kind: GunKind) -> (&'static [Bone], &'static [Anim]) {
-    match kind {
-        GunKind::Pistol => (pistol::BONES, pistol::ANIMS),
-        GunKind::Revolver => (revolver::BONES, revolver::ANIMS),
-        GunKind::Ak => (ak::BONES, ak::ANIMS),
-    }
+    (kind.def().tp_bones, kind.def().tp_anims)
 }
 
 /// Where the gun is held (a frame at the right fist on its grip, the muzzle toward -Z) and
@@ -121,12 +118,9 @@ fn pose_held(kind: GunKind, p: &PlayerPose) -> Held {
         }
     }
     if let Some(an) = find_anim(anims, "reload") {
-        // The revolver's reload goes as its own (how far, of its length); the others' as the
-        // pistol's.
-        let t = match kind {
-            GunKind::Revolver => p.gun.reload.map(|f| f * an.length),
-            _ => p.gun.reload_time(),
-        };
+        // A magazine-fed gun's reload goes as the pistol's; the revolver's as its own (how
+        // far, of its length).
+        let t = if kind.uses_magazine() { p.gun.reload_time() } else { p.gun.reload.map(|f| f * an.length) };
         if let Some(t) = t {
             play("reload", t.min(an.length), 1.0);
         }

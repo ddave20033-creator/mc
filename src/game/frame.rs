@@ -878,7 +878,9 @@ impl Game {
                 }
                 let across = self.hand.scope_across;
                 let half = (across * (self.fov_current.to_radians() * 0.5).tan()).atan();
-                let magnify = 1.0 / crate::item::GunKind::Pistol.stats().scope_zoom;
+                // (only a gun a scope fits has one)
+                let zoom = crate::item::GunKind::of(self.hand.held).and_then(|k| k.def().scope_zoom);
+                let magnify = 1.0 / zoom.unwrap_or(1.0);
                 // Seen from the scope itself, not from the eye: but never from beyond a wall
                 // the eye is up against (the gun would be in it), and with its near plane
                 // before whatever is right in front of it. Otherwise the near plane is further
