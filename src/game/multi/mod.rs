@@ -6,9 +6,11 @@
 //! with the world's rules and sends the result to everyone. A player's inventory, position,
 //! health and hunger are kept by the host between visits (`saves/<world>/players/`).
 
+mod checks;
 mod client;
 mod host;
 mod lan_ui;
+mod testbed;
 
 use super::*;
 
@@ -16,8 +18,8 @@ use crate::item::{armor_code, GunKind};
 use crate::lang::tf;
 use crate::model::player::{hand_pivot, limb_targets};
 use crate::net::{
-    container, pose_flags, Conn, Finder, ItemNet, Msg, PlayerState, Pose, Server, NO_BLOCK,
-    PROTOCOL,
+    container, pose_flags, Conn, EntitySync, Finder, Frame, ItemNet, Msg, PlayerState, Pose,
+    Server, NO_BLOCK, PROTOCOL,
 };
 use crate::save::{rle, unrle};
 use crate::util::lerp_angle;
@@ -89,6 +91,18 @@ struct Peer {
     /// Seconds since it connected: one that never says hello is let go (it would hold a
     /// player slot for ever).
     age: f32,
+    /// The player's render distance (chunks): block changes farther away wait in
+    /// `far_chunks` and the chunk goes whole when the player gets near.
+    view: i32,
+    far_chunks: FastSet<ChunkPos>,
+    /// The mobs, items and falling blocks near the player as they last got them.
+    entities: EntitySync,
+    /// Bytes of entity updates sent to this player, and what whole lists would have taken
+    /// (the testbed's report).
+    entity_bytes: [u64; 2],
+    /// The most a bullet of this player's may do, and until when (host time): set by their
+    /// shots (a bullet still flying after they put the gun away).
+    shot_damage: (f32, f32),
 }
 
 pub(super) struct Host {
@@ -144,6 +158,22 @@ impl Game {
     /// LAN player: sends a message to the host.
     pub(super) fn send(&self, m: Msg) {
         if let Some(Net::Client(c)) = &self.net {
+            // The host checks what a player does against where they stand and what they
+            // hold: it gets the pose as it is right now first.
+            let checked = matches!(
+                m,
+                Msg::Place { .. }
+                    | Msg::Break { .. }
+                    | Msg::AttackMob { .. }
+                    | Msg::AttackPlayer { .. }
+                    | Msg::Shot { .. }
+                    | Msg::Grenade { .. }
+                    | Msg::DropItem { .. }
+                    | Msg::SpawnMob { .. }
+            );
+            if checked && self.player.spawned {
+                c.conn.send(&Msg::Pose(self.my_pose()));
+            }
             c.conn.send(&m);
         }
     }
@@ -157,11 +187,30 @@ impl Game {
         }
     }
 
-    /// Host: sends a message to every player (but `except`).
+    /// Host: sends an encoded message to one player.
+    pub(super) fn send_frame_to(&self, id: u8, f: &Frame) {
+        if let Some(Net::Host(h)) = &self.net {
+            if let Some(p) = h.peers.iter().find(|p| p.id == id && p.joined) {
+                p.conn.send_frame(f);
+            }
+        }
+    }
+
+    /// Host: sends a message to every player (but `except`), encoded once.
     pub(super) fn broadcast(&self, m: &Msg, except: Option<u8>) {
+        let anyone = self
+            .host_ref()
+            .is_some_and(|h| h.peers.iter().any(|p| p.joined && Some(p.id) != except));
+        if anyone {
+            self.broadcast_frame(&Frame::new(m), except);
+        }
+    }
+
+    /// Host: sends an encoded message to every player (but `except`).
+    pub(super) fn broadcast_frame(&self, f: &Frame, except: Option<u8>) {
         if let Some(Net::Host(h)) = &self.net {
             for p in h.peers.iter().filter(|p| p.joined && Some(p.id) != except) {
-                p.conn.send(m);
+                p.conn.send_frame(f);
             }
         }
     }

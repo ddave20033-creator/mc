@@ -85,6 +85,10 @@ start after `lane`) unless `abs` follows the command.
   `name_diff.png` shows pixels that changed with no neighbour matching (red). Over 0.2 % of
   the pixels is reported as flicker.
 - `pickmap <name>`: with a gun station open, its click map.
+- `lan open` (this window hosts) · `lan join <addr> <name>` (joins, e.g. `127.0.0.1:25565`;
+  a name of its own) · `lan report` (players, entities, bytes sent, chunks waiting) ·
+  `lan block <x> <y> <z>` (the block there, world coordinates). Two windows, each with its
+  script, started together.
 - `echo <text>`: a note in the steps. · `quit`: stop here.
 
 ## Known findings (as of writing)

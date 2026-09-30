@@ -121,6 +121,9 @@ pub enum Msg {
     Hello {
         proto: u16,
         name: String,
+        /// The player's render distance in chunks: block changes farther away than that
+        /// are not sent one by one (the chunk comes whole when they get near).
+        view: u8,
     },
     Pose(Pose),
     /// A block the player placed or removed with an item (buckets): the host applies it
@@ -239,9 +242,15 @@ pub enum Msg {
         id: u8,
     },
     Poses(Vec<(u8, Pose)>),
+    /// Mobs, dropped items and falling blocks near the player, as changes (`net::delta`):
+    /// the mobs and items that are new or changed, the ids of those gone (or out of range),
+    /// and all the falling blocks. `full`: everything near is listed, the rest goes.
     Entities {
+        full: bool,
         mobs: Vec<MobNet>,
         items: Vec<ItemNet>,
+        gone_mobs: Vec<u32>,
+        gone_items: Vec<u32>,
         falling: Vec<(Vec3, u8)>,
     },
     Give(Stack),

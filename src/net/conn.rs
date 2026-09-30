@@ -19,11 +19,44 @@ const AD_PREFIX: &str = "RUSTCRAFT_LAN";
 /// before it counts as lost.
 const SILENT_LIMIT: Duration = Duration::from_secs(60);
 
+/// A message encoded once and framed (its length first), ready to go to any number of
+/// connections: a message to every player is encoded once, not once per player.
+#[derive(Clone, Debug)]
+pub struct Frame(Arc<[u8]>);
+
+impl Frame {
+    pub fn new(m: &Msg) -> Frame {
+        Frame::from_body(&m.encode())
+    }
+
+    /// The frame of a message encoded already (`Msg::encode`).
+    pub fn from_body(body: &[u8]) -> Frame {
+        let mut frame = Vec::with_capacity(body.len() + 4);
+        frame.extend((body.len() as u32).to_le_bytes());
+        frame.extend_from_slice(body);
+        Frame(frame.into())
+    }
+
+    /// Bytes on the wire (with the length).
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// What the writer thread is handed: a frame, or a stream of frames (made on another thread)
+/// that goes out in full before anything queued after it.
+enum Out {
+    Frame(Frame),
+    Stream(Receiver<Frame>),
+}
+
 /// One TCP connection with a reader and a writer thread, so the game never blocks on it.
 pub struct Conn {
-    out: Option<Sender<Vec<u8>>>,
+    out: Option<Sender<Out>>,
     rx: Receiver<Msg>,
     closed: Arc<AtomicBool>,
+    /// Bytes sent so far (with `send` and `send_frame`), for the numbers.
+    sent: std::cell::Cell<u64>,
 }
 
 fn read_frame(s: &mut TcpStream) -> io::Result<Vec<u8>> {
@@ -48,7 +81,7 @@ impl Conn {
         // instead of waiting forever, and the game sees the connection closed).
         stream.set_write_timeout(Some(SILENT_LIMIT))?;
         let closed = Arc::new(AtomicBool::new(false));
-        let (out_tx, out_rx) = channel::<Vec<u8>>();
+        let (out_tx, out_rx) = channel::<Out>();
         let (in_tx, in_rx) = channel::<Msg>();
 
         let mut reader = stream.try_clone()?;
@@ -74,14 +107,37 @@ impl Conn {
         std::thread::Builder::new()
             .name("net-write".into())
             .spawn(move || {
-                // Batch whatever is queued into one write.
-                while let Ok(first) = out_rx.recv() {
-                    let mut buf = first;
-                    while let Ok(more) = out_rx.try_recv() {
-                        buf.extend(more);
-                    }
-                    if writer.write_all(&buf).is_err() {
+                let mut next = None;
+                let mut buf = Vec::new();
+                loop {
+                    let Some(out) = next.take().or_else(|| out_rx.recv().ok()) else {
                         break;
+                    };
+                    match out {
+                        // Streamed frames go out as they come, until the stream ends (what
+                        // was queued meanwhile waits).
+                        Out::Stream(frames) => {
+                            if frames.iter().any(|f| writer.write_all(&f.0).is_err()) {
+                                break;
+                            }
+                        }
+                        // Batch whatever is queued into one write.
+                        Out::Frame(first) => {
+                            buf.clear();
+                            buf.extend_from_slice(&first.0);
+                            while let Ok(more) = out_rx.try_recv() {
+                                match more {
+                                    Out::Frame(f) => buf.extend_from_slice(&f.0),
+                                    stream => {
+                                        next = Some(stream);
+                                        break;
+                                    }
+                                }
+                            }
+                            if writer.write_all(&buf).is_err() {
+                                break;
+                            }
+                        }
                     }
                 }
                 // Everything was sent (or the peer is gone): close both directions, which
@@ -95,6 +151,7 @@ impl Conn {
             out: Some(out_tx),
             rx: in_rx,
             closed,
+            sent: Default::default(),
         })
     }
 
@@ -112,13 +169,32 @@ impl Conn {
     }
 
     pub fn send(&self, m: &Msg) {
-        if let Some(out) = &self.out {
-            let body = m.encode();
-            let mut frame = Vec::with_capacity(body.len() + 4);
-            frame.extend((body.len() as u32).to_le_bytes());
-            frame.extend(body);
-            let _ = out.send(frame);
+        if self.out.is_some() {
+            self.send_frame(&Frame::new(m));
         }
+    }
+
+    /// Sends a message encoded already (the same frame can go to several connections).
+    pub fn send_frame(&self, f: &Frame) {
+        if let Some(out) = &self.out {
+            self.sent.set(self.sent.get() + f.len() as u64);
+            let _ = out.send(Out::Frame(f.clone()));
+        }
+    }
+
+    /// Bytes sent so far with `send` and `send_frame` (not streamed ones).
+    pub fn bytes_sent(&self) -> u64 {
+        self.sent.get()
+    }
+
+    /// Frames sent into the returned sender (from any thread) go out here, in the order of
+    /// this call: whatever is sent to the connection afterwards waits until the sender is
+    /// dropped. (The host encodes a joining player's chunks on a worker thread this way.)
+    pub fn stream(&self) -> Option<Sender<Frame>> {
+        let out = self.out.as_ref()?;
+        let (tx, rx) = channel();
+        out.send(Out::Stream(rx)).ok()?;
+        Some(tx)
     }
 
     /// Messages received so far, and whether the connection is still open.
@@ -362,6 +438,7 @@ mod tests {
         client.send(&Msg::Hello {
             proto: PROTOCOL,
             name: "a".into(),
+            view: 12,
         });
         client.send(&Msg::Ready);
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -379,6 +456,38 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(!server.poll().1);
+    }
+
+    /// Frames streamed from another thread go out where the stream was opened: what is sent
+    /// after it waits for them.
+    #[test]
+    fn streamed_frames_keep_their_place() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = Conn::connect(&addr.to_string()).unwrap();
+        let (server_side, _) = listener.accept().unwrap();
+        let server = Conn::new(server_side).unwrap();
+        server.send(&Msg::Time(1.0));
+        let stream = server.stream().unwrap();
+        server.send(&Msg::Ready);
+        server.send_frame(&Frame::new(&Msg::Time(4.0)));
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            for t in [2.0, 3.0] {
+                stream.send(Frame::new(&Msg::Time(t))).unwrap();
+            }
+        });
+        worker.join().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut got = Vec::new();
+        while got.len() < 5 && Instant::now() < deadline {
+            got.extend(client.poll().0);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            got,
+            vec![Msg::Time(1.0), Msg::Time(2.0), Msg::Time(3.0), Msg::Ready, Msg::Time(4.0)]
+        );
     }
 
     #[test]
