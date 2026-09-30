@@ -4,10 +4,7 @@
 use crate::game::*;
 use crate::lang::tf;
 
-/// Night, when beds can be slept in (Minecraft: ticks 12542..23459 of 24000).
-pub fn is_night(time_of_day: f32) -> bool {
-    (12542.0 / 24000.0..23459.0 / 24000.0).contains(&time_of_day)
-}
+pub use crate::sim::is_night;
 
 /// Seconds everyone has to be asleep before the morning comes (Minecraft: 100 ticks).
 const SKIP_AFTER: f32 = 5.0;

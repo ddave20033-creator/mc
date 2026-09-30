@@ -155,6 +155,51 @@ impl Conn {
         })
     }
 
+    /// Two connections joined to each other in memory, without a socket (a game and the
+    /// server it runs itself): what one sends, the other receives, as over the network (the
+    /// same frames, decoded on the way).
+    pub fn pair() -> (Conn, Conn) {
+        let a_closed = Arc::new(AtomicBool::new(false));
+        let b_closed = Arc::new(AtomicBool::new(false));
+        let (a_out, a_out_rx) = channel::<Out>();
+        let (b_out, b_out_rx) = channel::<Out>();
+        let (a_in, a_in_rx) = channel::<Msg>();
+        let (b_in, b_in_rx) = channel::<Msg>();
+        // What one end sends goes to the other's inbox; once it stops sending (closed or
+        // dropped), both ends count the connection as closed.
+        let forward = |from: Receiver<Out>, to: Sender<Msg>, closed: [Arc<AtomicBool>; 2]| {
+            move || {
+                let deliver = |f: &Frame| Msg::decode(&f.0[4..]).is_some_and(|m| to.send(m).is_ok());
+                'outer: for out in from.iter() {
+                    match out {
+                        Out::Frame(f) => {
+                            if !deliver(&f) {
+                                break;
+                            }
+                        }
+                        Out::Stream(frames) => {
+                            for f in frames.iter() {
+                                if !deliver(&f) {
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+                }
+                for c in &closed {
+                    c.store(true, Ordering::Release);
+                }
+            }
+        };
+        let spawn = |name: &str, f| {
+            std::thread::Builder::new().name(name.into()).spawn(f).expect("start the link's thread");
+        };
+        spawn("link-a", forward(a_out_rx, b_in, [a_closed.clone(), b_closed.clone()]));
+        spawn("link-b", forward(b_out_rx, a_in, [a_closed.clone(), b_closed.clone()]));
+        let conn = |out, rx, closed| Conn { out: Some(out), rx, closed, sent: Default::default() };
+        (conn(a_out, a_in_rx, a_closed), conn(b_out, b_in_rx, b_closed))
+    }
+
     pub fn connect(addr: &str) -> io::Result<Conn> {
         use std::net::ToSocketAddrs;
         let target = addr
@@ -499,5 +544,52 @@ mod tests {
         assert_eq!(g.world, "Új világ");
         assert!(g.compatible);
         assert!(parse_ad("MOTD whatever", from).is_none());
+    }
+}
+
+#[cfg(test)]
+mod pair_tests {
+    use super::*;
+
+    fn wait_for(c: &Conn) -> (Vec<Msg>, bool) {
+        for _ in 0..200 {
+            let (v, open) = c.poll();
+            if !v.is_empty() || !open {
+                return (v, open);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        (Vec::new(), true)
+    }
+
+    #[test]
+    fn a_pair_carries_messages_both_ways_and_closes_together() {
+        let (mut a, b) = Conn::pair();
+        a.send(&Msg::Ready);
+        let (got, open) = wait_for(&b);
+        assert!(open && matches!(got.as_slice(), [Msg::Ready]));
+        b.send(&Msg::Chat { text: "szia".into(), color: [1, 2, 3, 4] });
+        let (got, _) = wait_for(&a);
+        assert!(matches!(got.as_slice(), [Msg::Chat { text, .. }] if text == "szia"));
+        // A stream goes out whole, in order.
+        let s = a.stream().unwrap();
+        for _ in 0..3 {
+            s.send(Frame::new(&Msg::Ready)).unwrap();
+        }
+        drop(s);
+        let mut n = 0;
+        while n < 3 {
+            n += wait_for(&b).0.len();
+        }
+        a.close();
+        let mut open = true;
+        for _ in 0..200 {
+            open = b.poll().1;
+            if !open {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!open, "the other end sees it closed");
     }
 }

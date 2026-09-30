@@ -128,7 +128,7 @@ impl Game {
         }
         if let Some(i) = play {
             let meta = self.menus.worlds[i].clone();
-            self.load_world(meta);
+            self.play_world(meta);
         }
         Action::None
     }
@@ -211,7 +211,7 @@ impl Game {
             self.menus.create_creative,
             self.menus.create_cheats,
         );
-        self.load_world(meta);
+        self.play_world(meta);
     }
 
     /// Asks before deleting a world: a card with the warning and a red button.
@@ -290,7 +290,7 @@ impl Game {
             self.level.items[i].id = self.entity_id();
         }
         // The cuts in its trunks; nothing of the last world's felling.
-        felling::load_notches(&mut self.terrain.world, &save::load_notches(&meta.folder));
+        save::apply_notches(&mut self.terrain.world, &save::load_notches(&meta.folder));
         self.chop = None;
         self.struck = None;
         self.level.lying_logs = logs::parse_logs(&save::load_logs(&meta.folder));
@@ -517,7 +517,7 @@ impl Game {
         meta.save();
         let folder = meta.folder.clone();
         save::save_inventory(&folder, &slots);
-        save::save_notches(&folder, &felling::notches_text(&self.terrain.world));
+        save::save_notches(&folder, &save::notches_text(&self.terrain.world));
         save::save_logs(&folder, &logs::logs_text(&self.level.lying_logs));
         save::save_entities(
             &folder,

@@ -57,7 +57,7 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Fullscreen, Window};
 
-const DAY_LENGTH: f32 = 1200.0;
+use crate::sim::DAY_LENGTH;
 const MENU_TIME_OF_DAY: f32 = 0.085;
 const SHADOW_DISTANCE: f32 = 96.0;
 const MAX_HEALTH: f32 = 20.0;
@@ -297,6 +297,10 @@ pub struct Game {
     hide_hud: bool,
     /// LAN game: hosting or joined, the other players, and the multiplayer screen state.
     net: Option<multi::Net>,
+    /// The server this game runs for the world it plays (joined through `net`), and its LAN
+    /// address once it is open to the LAN.
+    local: Option<crate::sim::server::Local>,
+    lan_address: Option<String>,
     remotes: Vec<multi::RemotePlayer>,
     next_entity_id: u32,
     /// The other player the crosshair is on.
@@ -461,6 +465,8 @@ impl Game {
             test_no_blur: false,
             hide_hud: false,
             net: None,
+            local: None,
+            lan_address: None,
             remotes: Vec::new(),
             next_entity_id: 0,
             player_target: None,
@@ -973,11 +979,17 @@ impl Game {
     fn pause(&mut self) {
         self.screen = Screen::Paused;
         self.set_grab(false);
+        if self.local.is_some() {
+            self.send(crate::net::Msg::Pause(true));
+        }
     }
 
     fn resume(&mut self) {
         self.screen = Screen::Playing;
         self.set_grab(true);
+        if self.local.is_some() {
+            self.send(crate::net::Msg::Pause(false));
+        }
     }
 
     fn go_back(&mut self) {

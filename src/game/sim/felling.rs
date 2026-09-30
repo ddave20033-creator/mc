@@ -158,30 +158,6 @@ fn stump_of(w: &World, p: IVec3) -> Option<Vec<IVec3>> {
     Some(column)
 }
 
-/// All the cuts in trunks, for saving (`x,y,z,angle,height,depth,felled` a line).
-pub fn notches_text(w: &World) -> String {
-    w.notches
-        .iter()
-        .map(|(p, n)| format!("{},{},{},{},{},{},{}\n", p.x, p.y, p.z, n.angle, n.height, n.depth, n.felled as u8))
-        .collect()
-}
-
-/// The cuts saved with a world (any there were before are gone).
-pub fn load_notches(w: &mut World, text: &str) {
-    w.notches.clear();
-    for line in text.lines() {
-        let v: Vec<&str> = line.trim().split(',').collect();
-        if v.len() != 7 {
-            continue;
-        }
-        let i = |k: usize| v[k].parse::<i32>().ok();
-        let f = |k: usize| v[k].parse::<f32>().ok();
-        if let (Some(x), Some(y), Some(z), Some(angle), Some(height), Some(depth)) = (i(0), i(1), i(2), f(3), f(4), f(5)) {
-            w.set_notch(IVec3::new(x, y, z), Some(Notch { angle, height, depth, felled: v[6] == "1" }));
-        }
-    }
-}
-
 impl Game {
     /// A stroke of the axe (survival): it tires the player (`exhaust`) and wears the axe in
     /// hand; one that breaks bursts apart at `at`.

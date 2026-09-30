@@ -672,6 +672,10 @@ impl Msg {
                 w.u32(*seed);
                 w.f32(*fuse);
             }
+            Msg::Pause(on) => {
+                w.u8(50);
+                w.u8(*on as u8);
+            }
             Msg::Blast { pos, seed } => {
                 w.u8(46);
                 w.vec3(*pos);
@@ -866,6 +870,7 @@ impl Msg {
                 seed: r.u32()?,
                 fuse: r.f32()?,
             },
+            50 => Msg::Pause(r.u8()? != 0),
             46 => Msg::Blast {
                 pos: r.vec3()?,
                 seed: r.u32()?,

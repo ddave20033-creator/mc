@@ -184,8 +184,8 @@ impl Game {
                         self.screen = Screen::MainMenu;
                         return false;
                     }
-                    WorldKind::Bench => self.load_world(test_world(None)),
-                    WorldKind::New(seed) => self.load_world(test_world(Some(seed))),
+                    WorldKind::Bench => self.play_world(test_world(None)),
+                    WorldKind::New(seed) => self.play_world(test_world(Some(seed))),
                 }
                 self.testbed.as_mut().unwrap().loading = Some(self.testbed.as_ref().unwrap().clock);
                 return true;
@@ -422,7 +422,8 @@ impl Game {
                 let light: usize = w.light.values().map(|l| l.data.len()).sum();
                 tb.log(format!("memory: blocks {} MB, light {} MB", mb(blocks as u64), mb(light as u64)));
                 tb.log(format!(
-                    "stats: at {:.1} {:.1} {:.1}; {:.0} fps, {:.1} ms; chunks {} loaded, {} meshed, {} waiting; mesh memory {} pages {} MB ({} MB used), {} to free; VRAM {vram}; RAM {} MB",
+                    "stats: {:?} at {:.1} {:.1} {:.1}; {:.0} fps, {:.1} ms; chunks {} loaded, {} meshed, {} waiting; mesh memory {} pages {} MB ({} MB used), {} to free; VRAM {vram}; RAM {} MB",
+                    self.screen,
                     self.player.pos.x,
                     self.player.pos.y,
                     self.player.pos.z,

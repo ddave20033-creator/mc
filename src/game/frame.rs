@@ -375,12 +375,13 @@ impl Game {
             Screen::Playing => (Some(true), true),
             Screen::Chat | Screen::Container(_) | Screen::Spectate => (Some(false), true),
             Screen::Dead => (None, true),
-            // A LAN game keeps running behind the pause menu.
+            // A LAN game keeps running behind the pause menu (not the game's own world with
+            // nobody else in it: its server stands still too).
             Screen::Paused
             | Screen::Options { in_game: true }
             | Screen::ResourcePacks { in_game: true }
             | Screen::KeyBinds { in_game: true }
-                if self.net.is_some() =>
+                if self.net.is_some() && !(self.local.is_some() && self.remotes.is_empty()) =>
             {
                 (Some(false), true)
             }
@@ -1343,10 +1344,12 @@ impl Game {
                 Action::None
             }
             Screen::Paused => {
-                let lan = match &self.net {
-                    Some(multi::Net::Host(h)) => screens::PauseLan::Open(&h.address),
-                    Some(multi::Net::Client(_)) => screens::PauseLan::Joined,
-                    None => screens::PauseLan::Available,
+                let lan = match (&self.net, &self.lan_address) {
+                    (_, Some(address)) => screens::PauseLan::Open(address),
+                    (Some(multi::Net::Host(h)), _) => screens::PauseLan::Open(&h.address),
+                    (Some(multi::Net::Client(_)), None) if self.local.is_some() => screens::PauseLan::Available,
+                    (Some(multi::Net::Client(_)), None) => screens::PauseLan::Joined,
+                    (None, None) => screens::PauseLan::Available,
                 };
                 screens::pause(&mut self.ui, lan)
             }

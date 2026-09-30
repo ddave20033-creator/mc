@@ -38,24 +38,43 @@ impl Game {
         };
         self.menus.joining = None;
         match result {
-            Ok(conn) => {
-                conn.send(&Msg::Hello {
-                    proto: PROTOCOL,
-                    name: self.settings.name.clone(),
-                    view: self.settings.render_distance.round().clamp(0.0, 255.0) as u8,
-                });
-                self.net = Some(Net::Client(Client {
-                    conn,
-                    id: 0,
-                    tick: 0.0,
-                    item_targets: FastMap::default(),
-                    container_known: None,
-                }));
-            }
+            Ok(conn) => self.join_with(conn),
             Err(e) => {
                 self.menus.net_message = tf("mp.connect_failed", &[&e]);
                 self.screen = Screen::Disconnected;
             }
+        }
+    }
+
+    /// Says hello through `conn` to the server at its other end (a LAN host's, or the one this
+    /// game runs itself): it answers with its world.
+    pub(in crate::game) fn join_with(&mut self, conn: Conn) {
+        conn.send(&Msg::Hello {
+            proto: PROTOCOL,
+            name: self.settings.name.clone(),
+            view: self.settings.render_distance.round().clamp(0.0, 255.0) as u8,
+        });
+        self.net = Some(Net::Client(Client {
+            conn,
+            id: 0,
+            tick: 0.0,
+            item_targets: FastMap::default(),
+            container_known: None,
+        }));
+        self.screen = Screen::Connecting;
+    }
+
+    /// Plays the world `meta`: a server for it runs on a thread of its own, and this game joins
+    /// it like any player. (Without `RUSTCRAFT_SERVER=1`, for now, the game runs the world
+    /// itself, as it used to.)
+    pub(in crate::game) fn play_world(&mut self, meta: WorldMeta) {
+        if std::env::var("RUSTCRAFT_SERVER").is_ok_and(|v| v == "1") {
+            let (local, conn) = crate::sim::server::start(meta);
+            self.local = Some(local);
+            self.menus.net_message = t("mp.connecting").to_string();
+            self.join_with(conn);
+        } else {
+            self.load_world(meta);
         }
     }
 
@@ -73,6 +92,9 @@ impl Game {
             }
         }
         self.net = None;
+        // (the game's own server saves and stops)
+        self.local = None;
+        self.lan_address = None;
         self.remotes.clear();
         self.world_meta = None;
         self.custom_skins.retain(|&id, _| id == 0);
@@ -452,9 +474,6 @@ impl Game {
                 }
                 it.age += dt;
             }
-        }
-        if self.torch_particles {
-            self.torch_fire(dt);
         }
         self.time_of_day = (self.time_of_day + dt / DAY_LENGTH).fract();
         self.autosave -= dt;

@@ -47,14 +47,19 @@ pub struct Workers {
 
 impl Workers {
     pub fn new(gen: Arc<Generator>) -> Self {
-        let (tx, job_rx) = mpsc::channel::<Job>();
-        let job_rx = Arc::new(Mutex::new(job_rx));
-        let (done_tx, rx) = mpsc::channel();
         let threads = thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4)
             .saturating_sub(1)
             .clamp(1, 10);
+        Self::with_threads(gen, threads)
+    }
+
+    /// A pool of `threads` threads.
+    pub fn with_threads(gen: Arc<Generator>, threads: usize) -> Self {
+        let (tx, job_rx) = mpsc::channel::<Job>();
+        let job_rx = Arc::new(Mutex::new(job_rx));
+        let (done_tx, rx) = mpsc::channel();
         for i in 0..threads {
             let job_rx = job_rx.clone();
             let done_tx = done_tx.clone();

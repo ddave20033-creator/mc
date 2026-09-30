@@ -205,6 +205,8 @@ pub enum Msg {
     },
     Command(String),
     Save(PlayerState),
+    /// The world's owner paused the game (or goes on): alone in it, the world stands still.
+    Pause(bool),
     /// Used a part of a furnace (`block_entity::part`): a left click (`take`) takes out
     /// what is there, a right click puts in or turns meat over. The player already took
     /// `offered` from their hand; the host gives back what did not go in, and what came out.

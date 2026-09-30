@@ -11,9 +11,10 @@ impl Game {
         match w.as_slice() {
             ["open"] => {
                 self.open_to_lan();
-                match self.host_ref() {
-                    Some(h) => vec![format!("LAN open at {}", h.address)],
-                    None => vec!["LAN could not open".into()],
+                match (self.host_ref(), &self.lan_address) {
+                    (Some(h), _) => vec![format!("LAN open at {}", h.address)],
+                    (None, Some(address)) => vec![format!("LAN open at {address}")],
+                    _ => vec!["LAN could not open".into()],
                 }
             }
             ["join", addr, name] => {
@@ -38,6 +39,20 @@ impl Game {
                 vec![format!("block {} {} {}: {block}", p.x, p.y, p.z)]
             }
             ["report"] => self.lan_report(),
+            // The block this player aims at (and the one in front of it, where one goes).
+            ["target"] => match self.target {
+                Some((hit, prev)) => vec![format!(
+                    "target {} {} {}: {}, before it {} {} {}",
+                    hit.x,
+                    hit.y,
+                    hit.z,
+                    def(self.terrain.world.geti(hit)).key,
+                    prev.x,
+                    prev.y,
+                    prev.z
+                )],
+                None => vec!["target: none".into()],
+            },
             _ => vec![format!("unknown lan command `{args}`")],
         }
     }

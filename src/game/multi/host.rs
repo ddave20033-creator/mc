@@ -80,6 +80,20 @@ impl Game {
 
     /// Pause menu: opens this world to the LAN.
     pub(in crate::game) fn open_to_lan(&mut self) {
+        // The game's own server takes the LAN players.
+        if let Some(local) = &self.local {
+            if self.lan_address.is_none() {
+                match local.open_lan(&self.settings.name) {
+                    Ok(address) => {
+                        self.say(tf("lan.opened", &[&address]), chat::YELLOW);
+                        self.lan_address = Some(address);
+                        self.resume();
+                    }
+                    Err(e) => self.say(tf("lan.failed", &[&e]), chat::RED),
+                }
+            }
+            return;
+        }
         if self.net.is_some() || self.world_meta.is_none() {
             return;
         }
