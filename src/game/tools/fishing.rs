@@ -469,11 +469,10 @@ impl Game {
         false
     }
 
-    /// Something the right button opens is under the crosshair (it does not cast then).
-    fn opens_target(&self) -> bool {
-        let Some((hit, _)) = self.target else { return false };
-        let b = self.terrain.world.geti(hit);
-        b == CRAFTING_TABLE || is_gun_bench(b) || b == GUN_STATION || is_furnace(b) || is_door(b) || is_bed(b) || is_chest(b)
+    /// Something the right button opens is under the crosshair (a rod does not cast then, and
+    /// nothing is eaten or drunk).
+    pub(in crate::game) fn opens_target(&self) -> bool {
+        self.target.is_some_and(|(hit, _)| opens_on_use(self.terrain.world.geti(hit)))
     }
 
     /// The rod in hand: casting, the bobber, bites and the fight. Putting it away cuts the

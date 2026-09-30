@@ -562,3 +562,36 @@ pub fn chest_id(facing: u8, side: i32) -> u8 {
 pub fn front_face(facing: u8) -> usize {
     [5, 0, 4, 1][facing as usize & 3]
 }
+
+/// The right button opens it (or uses it: a door, a bed) instead of what is in the hand
+/// being used on it.
+pub fn opens_on_use(b: u8) -> bool {
+    b == CRAFTING_TABLE || is_gun_bench(b) || b == GUN_STATION || is_furnace(b) || is_door(b) || is_bed(b) || is_chest(b)
+}
+
+/// The leaves of the tree of an upright log (oak for anything else).
+pub fn leaves_of(log: u8) -> u8 {
+    match log {
+        BIRCH_LOG => BIRCH_LEAVES,
+        SPRUCE_LOG => SPRUCE_LEAVES,
+        _ => OAK_LEAVES,
+    }
+}
+
+/// The sapling of the tree of an upright log (oak for anything else).
+pub fn sapling_of(log: u8) -> u8 {
+    match log {
+        BIRCH_LOG => BIRCH_SAPLING,
+        SPRUCE_LOG => SPRUCE_SAPLING,
+        _ => OAK_SAPLING,
+    }
+}
+
+/// The upright log of the tree a sapling grows into (oak for anything else).
+pub fn log_of_sapling(sapling: u8) -> u8 {
+    match sapling {
+        BIRCH_SAPLING => BIRCH_LOG,
+        SPRUCE_SAPLING => SPRUCE_LOG,
+        _ => OAK_LOG,
+    }
+}

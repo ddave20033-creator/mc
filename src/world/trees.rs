@@ -197,11 +197,7 @@ pub fn tree_shape(log: u8, seed: u32) -> Vec<(IVec3, u8, bool)> {
     for _ in 0..3 {
         rng.next();
     }
-    let leaves = match log {
-        BIRCH_LOG => BIRCH_LEAVES,
-        SPRUCE_LOG => SPRUCE_LEAVES,
-        _ => OAK_LEAVES,
-    };
+    let leaves = leaves_of(log);
     let mut t = Tree {
         log,
         wood: HashMap::new(),

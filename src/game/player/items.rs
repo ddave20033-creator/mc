@@ -81,11 +81,7 @@ impl Game {
         // A fishing rod casts by holding the button (`update_fishing`), unless there is
         // something to open.
         if held == FISHING_ROD {
-            let opens = self.target.is_some_and(|(hit, _)| {
-                let b = self.terrain.world.geti(hit);
-                b == CRAFTING_TABLE || is_gun_bench(b) || b == GUN_STATION || is_furnace(b) || is_door(b) || is_bed(b) || is_chest(b)
-            });
-            if !opens || self.fishing.line.is_some() {
+            if !self.opens_target() || self.fishing.line.is_some() {
                 return;
             }
         }
@@ -117,14 +113,7 @@ impl Game {
             let hb = self.terrain.world.geti(hit);
             // Opening things (tables, chests, doors, beds...) takes a fresh click: holding the
             // button (blocking with a sword, placing blocks) and looking at one does nothing.
-            let opens = hb == CRAFTING_TABLE
-                || is_gun_bench(hb)
-                || hb == GUN_STATION
-                || is_furnace(hb)
-                || is_door(hb)
-                || is_bed(hb)
-                || is_chest(hb);
-            if !sneaking && opens && !self.input.right_pressed {
+            if !sneaking && opens_on_use(hb) && !self.input.right_pressed {
                 return;
             }
             // Furnaces have no screen: meat goes on top, the rest into the front.
@@ -230,16 +219,7 @@ impl Game {
         let held = self.held();
         let c = consumable(held);
         let sneaking = self.sneaking();
-        let at_container = !sneaking
-            && self.target.is_some_and(|(hit, _)| {
-                let b = self.terrain.world.geti(hit);
-                b == CRAFTING_TABLE
-                    || is_gun_bench(b)
-                    || is_furnace(b)
-                    || is_chest(b)
-                    || is_door(b)
-                    || is_bed(b)
-            });
+        let at_container = !sneaking && self.opens_target();
         let ok = control
             && self.input.right_down
             && !self.creative()

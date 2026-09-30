@@ -7,7 +7,7 @@
 
 use crate::game::*;
 use crate::game::felling::Struck;
-use crate::item::{inventory, tool_of, ToolKind};
+use crate::item::{tool_of, ToolKind};
 
 /// How far from the eye a lying trunk can be aimed at.
 const AIM_REACH: f32 = 5.0;
@@ -261,11 +261,7 @@ impl Game {
             }
         }
         if !creative {
-            self.needs.exhaust(crate::entity::survival::cost::MINE);
-            let slot = self.hotbar_slot;
-            if tool_of(held).is_some() && inventory::damage(&mut self.inventory.slots[slot], 1) {
-                self.particles.burst(&self.terrain.world, at[0].floor().as_ivec3(), STONE, 12, [255; 3]);
-            }
+            self.wear_axe(crate::entity::survival::cost::MINE, at[0].floor().as_ivec3());
         }
     }
 

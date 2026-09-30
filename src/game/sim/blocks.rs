@@ -371,11 +371,7 @@ impl Game {
     /// Grows a sapling into a tree (the generator's shapes). Returns false if there is not
     /// enough room for its wood.
     pub(in crate::game) fn grow_tree(&mut self, p: IVec3, sapling: u8) -> bool {
-        let log = match sapling {
-            BIRCH_SAPLING => BIRCH_LOG,
-            SPRUCE_SAPLING => SPRUCE_LOG,
-            _ => OAK_LOG,
-        };
+        let log = log_of_sapling(sapling);
         let seed = (self.random() * u32::MAX as f32) as u32;
         let shape = crate::world::trees::tree_shape(log, seed);
         let w = &self.terrain.world;

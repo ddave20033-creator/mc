@@ -177,6 +177,16 @@ pub fn load_notches(w: &mut World, text: &str) {
 }
 
 impl Game {
+    /// A stroke of the axe (survival): it tires the player (`exhaust`) and wears the axe in
+    /// hand; one that breaks bursts apart at `at`.
+    pub(in crate::game) fn wear_axe(&mut self, exhaust: f32, at: IVec3) {
+        self.needs.exhaust(exhaust);
+        let slot = self.hotbar_slot;
+        if tool_of(self.held()).is_some() && inventory::damage(&mut self.inventory.slots[slot], 1) {
+            self.particles.burst(&self.terrain.world, at, STONE, 12, [255; 3]);
+        }
+    }
+
     /// Where the chop's rig is in the world (as the player model draws it).
     pub(in crate::game) fn chop_world(&self) -> Mat4 {
         chop_rig::to_world(self.player.pos, self.visual_head_yaw(), self.pitch)
@@ -329,11 +339,7 @@ impl Game {
             self.break_fx(q, b, false, None);
         }
         if !creative {
-            self.needs.exhaust(crate::entity::survival::cost::MINE);
-            let slot = self.hotbar_slot;
-            if tool_of(held).is_some() && inventory::damage(&mut self.inventory.slots[slot], 1) {
-                self.particles.burst(&self.terrain.world, p, STONE, 12, [255; 3]);
-            }
+            self.wear_axe(crate::entity::survival::cost::MINE, p);
         }
     }
 
@@ -384,11 +390,7 @@ impl Game {
         let at = middle + out * r + Vec3::Y * notch.height;
         self.chips(p, b, at, out);
         if !creative {
-            self.needs.exhaust(crate::entity::survival::cost::MINE * 0.5);
-            let slot = self.hotbar_slot;
-            if inventory::damage(&mut self.inventory.slots[slot], 1) {
-                self.particles.burst(&self.terrain.world, p, STONE, 12, [255; 3]);
-            }
+            self.wear_axe(crate::entity::survival::cost::MINE * 0.5, p);
         }
         let notch = Notch { depth, ..notch };
         if depth >= FELL_DEPTH - 1e-3 {
@@ -406,11 +408,7 @@ impl Game {
         let w = &self.terrain.world;
         let b0 = w.geti(p);
         let kind = log_base(b0);
-        let leaves = match kind {
-            BIRCH_LOG => BIRCH_LEAVES,
-            SPRUCE_LOG => SPRUCE_LEAVES,
-            _ => OAK_LEAVES,
-        };
+        let leaves = leaves_of(kind);
         const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
         let mut wood = vec![p];
         let mut seen: HashSet<IVec3> = HashSet::from([p]);
@@ -573,11 +571,7 @@ impl Game {
         if t.creative {
             return;
         }
-        let sapling = match log_base(t.stub.1) {
-            BIRCH_LOG => BIRCH_SAPLING,
-            SPRUCE_LOG => SPRUCE_SAPLING,
-            _ => OAK_SAPLING,
-        } as ItemId;
+        let sapling = sapling_of(log_base(t.stub.1)) as ItemId;
         let r = self.random();
         let saplings = if leaves.is_empty() { 0 } else if r < 0.4 { 0 } else if r < 0.85 { 1 } else { 2 };
         let r = self.random();
