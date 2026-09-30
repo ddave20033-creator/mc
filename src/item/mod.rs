@@ -9,6 +9,8 @@ pub mod firearm;
 pub mod inventory;
 pub mod mining;
 pub mod weapons;
+#[cfg(test)]
+mod snapshot_tests;
 
 pub use armor::*;
 pub use crafting::*;
@@ -17,6 +19,9 @@ pub use mining::*;
 pub use weapons::*;
 
 use crate::lang::is_hungarian;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use crate::world::textures::tex;
 use crate::world::*;
 
@@ -551,19 +556,9 @@ impl Stack {
 
 pub type Slot = Option<Stack>;
 
+/// How many go in a slot (see `ItemDef::max_stack`).
 pub fn max_stack(id: ItemId) -> u8 {
-    match id {
-        _ if tool_of(id).is_some() => 1,
-        WATER_BUCKET | LAVA_BUCKET | SHEARS | GUIDE_BOOK | FISHING_ROD => 1,
-        FRAG_GRENADE | SMOKE_GRENADE | TARGET_DUMMY => 16,
-        MAG_LOADER => 1,
-        AMMO_BOX => 1,
-        _ if armor_of(id).is_some() => 1,
-        _ if GunKind::of(id).is_some() || magazine_capacity(id).is_some() => 1,
-        _ if id == BED as ItemId => 1,
-        BUCKET | WATER_BOTTLE | PURIFIED_WATER => 16,
-        _ => 64,
-    }
+    def(id).max_stack
 }
 
 /// Food and drink: what eating or drinking this restores (Minecraft's food values), and
@@ -683,9 +678,17 @@ fn meat_food(id: ItemId) -> Option<crate::entity::survival::Consumable> {
 
 /// Damage dealt when hitting a mob with this item (Minecraft 1.8 values; 1 = bare hand).
 pub fn attack_damage(id: ItemId) -> f32 {
-    let Some((kind, tier)) = tool_of(id) else {
-        return 1.0;
-    };
+    def(id).attack_damage
+}
+
+/// How long it lasts (tools, shears, the fishing rod, armor), or how dirty a gun, its parts
+/// and magazines can get; 0: it does not wear.
+pub fn max_damage(id: ItemId) -> u16 {
+    def(id).max_damage
+}
+
+/// A tool's damage: its kind's, and its tier's bonus.
+fn tool_attack(kind: ToolKind, tier: Tier) -> f32 {
     let base = match kind {
         ToolKind::Sword => 5.0,
         ToolKind::Axe => 4.0,
@@ -702,536 +705,325 @@ pub fn attack_damage(id: ItemId) -> f32 {
     base + bonus
 }
 
-pub fn max_damage(id: ItemId) -> u16 {
-    if id == SHEARS {
-        return SHEARS_DURABILITY;
+/// A hand-written line of `BLOCK_ITEMS` or `ITEMS`: the item, its key (for /give and save
+/// files), its English and Hungarian names, its icon's texture layer (a block's comes from the
+/// block), and how many stack and how long it lasts where that is its own (the families, the
+/// tools, armor and guns, are filled in by `build_table`).
+#[derive(Clone, Copy)]
+struct Row {
+    id: ItemId,
+    key: &'static str,
+    en: &'static str,
+    hu: &'static str,
+    icon: Option<u32>,
+    stack: u8,
+    lasts: u16,
+}
+
+const fn blk(b: u8, key: &'static str, en: &'static str, hu: &'static str) -> Row {
+    Row { id: b as ItemId, key, en, hu, icon: None, stack: 64, lasts: 0 }
+}
+
+const fn it(id: ItemId, key: &'static str, en: &'static str, hu: &'static str, icon: u32) -> Row {
+    Row { id, key, en, hu, icon: Some(icon), stack: 64, lasts: 0 }
+}
+
+impl Row {
+    const fn stack(mut self, n: u8) -> Row {
+        self.stack = n;
+        self
     }
-    if id == FISHING_ROD {
-        return FISHING_ROD_DURABILITY;
+    const fn lasts(mut self, n: u16) -> Row {
+        self.lasts = n;
+        self
     }
-    if let Some(k) = GunKind::of(id) {
-        return k.stats().dirt_max;
+}
+
+/// Everything about one item id that `max_stack`, `max_damage`, `attack_damage`, `key`,
+/// `name`, `icon` and `block_of` read (see `def`).
+struct ItemDef {
+    key: Cow<'static, str>,
+    en: Cow<'static, str>,
+    hu: Cow<'static, str>,
+    icon: Icon,
+    max_stack: u8,
+    max_damage: u16,
+    attack_damage: f32,
+    /// The block it places.
+    block: Option<u8>,
+}
+
+/// An id that is no item.
+const NO_ITEM: ItemDef = ItemDef {
+    key: Cow::Borrowed("unknown"),
+    en: Cow::Borrowed("Unknown"),
+    hu: Cow::Borrowed("Ismeretlen"),
+    icon: Icon::Flat(tex::STONE),
+    max_stack: 64,
+    max_damage: 0,
+    attack_damage: 1.0,
+    block: None,
+};
+
+struct ItemTable {
+    /// Indexed by item id (the ids after the last item's are `NO_ITEM`).
+    defs: Vec<ItemDef>,
+    by_key: HashMap<Cow<'static, str>, ItemId>,
+}
+
+fn table() -> &'static ItemTable {
+    static T: OnceLock<ItemTable> = OnceLock::new();
+    T.get_or_init(build_table)
+}
+
+fn def(id: ItemId) -> &'static ItemDef {
+    table().defs.get(id as usize).unwrap_or(&NO_ITEM)
+}
+
+/// The icon of a block's item: a cube, or a flat sprite for the ones that are not cubes.
+fn block_icon(b: u8) -> Icon {
+    match b {
+        LANTERN => Icon::Flat(tex::LANTERN_ITEM),
+        OAK_DOOR => Icon::Flat(tex::DOOR_ITEM),
+        BED => Icon::Flat(tex::BED_ITEM),
+        _ if is_plant(b) || b == TORCH => Icon::Flat(face_texture(b, 0)),
+        _ => Icon::Block(b),
     }
-    // A gun's parts and magazines get dirty with it (taken apart, each is cleaned on its own).
-    if let Some(k) = GUN_KINDS.into_iter().find(|k| k.parts().contains(&id)).or_else(|| magazine_gun(id)) {
-        return k.stats().dirt_max;
+}
+
+fn build_table() -> ItemTable {
+    let mut defs: Vec<ItemDef> = Vec::new();
+    let mut put = |id: ItemId, d: ItemDef| {
+        if defs.len() <= id as usize {
+            defs.resize_with(id as usize + 1, || NO_ITEM);
+        }
+        defs[id as usize] = d;
+    };
+    for r in BLOCK_ITEMS.iter().chain(ITEMS) {
+        put(
+            r.id,
+            ItemDef {
+                key: r.key.into(),
+                en: r.en.into(),
+                hu: r.hu.into(),
+                icon: r.icon.map_or_else(|| block_icon(r.id as u8), Icon::Flat),
+                max_stack: r.stack,
+                max_damage: r.lasts,
+                attack_damage: 1.0,
+                block: r.icon.is_none().then_some(r.id as u8),
+            },
+        );
     }
-    if armor_of(id).is_some() {
-        return armor_durability(id);
+    for tier in TIERS {
+        for kind in KINDS {
+            let (t, k) = (tier as usize, kind as usize);
+            let key = ["wooden", "stone", "iron", "golden", "diamond", "copper"][t];
+            let kind_key = ["pickaxe", "axe", "shovel", "sword"][k];
+            let en = ["Wooden", "Stone", "Iron", "Golden", "Diamond", "Copper"][t];
+            let kind_en = ["Pickaxe", "Axe", "Shovel", "Sword"][k];
+            let hu = ["Fa", "Kő", "Vas", "Arany", "Gyémánt", "Réz"][t];
+            let kind_hu = ["csákány", "balta", "ásó", "kard"][k];
+            put(
+                tool_id(kind, tier),
+                ItemDef {
+                    key: format!("{key}_{kind_key}").into(),
+                    en: format!("{en} {kind_en}").into(),
+                    hu: format!("{hu}{kind_hu}").into(),
+                    icon: Icon::Flat(crate::world::textures::tool_layer(t, k)),
+                    max_stack: 1,
+                    max_damage: tier.durability(),
+                    attack_damage: tool_attack(kind, tier),
+                    block: None,
+                },
+            );
+        }
     }
-    tool_of(id).map(|(_, t)| t.durability()).unwrap_or(0)
+    // The families: armor; guns, magazines and speedloaders do not stack; a gun's parts and
+    // magazines get as dirty as the gun (taken apart, each is cleaned on its own).
+    for (id, d) in defs.iter_mut().enumerate() {
+        let id = id as ItemId;
+        if armor_of(id).is_some() {
+            d.max_stack = 1;
+            d.max_damage = armor_durability(id);
+        }
+        if GunKind::of(id).is_some() || magazine_capacity(id).is_some() {
+            d.max_stack = 1;
+        }
+        let gun = GunKind::of(id)
+            .or_else(|| GUN_KINDS.into_iter().find(|k| k.parts().contains(&id)))
+            .or_else(|| magazine_gun(id));
+        if let Some(k) = gun {
+            d.max_damage = k.stats().dirt_max;
+        }
+    }
+    // By key, as `all_items` lists them (the first with a key), and the box of rounds: it is
+    // not listed, but lies on gun stations in save files.
+    let mut by_key = HashMap::new();
+    for id in all_items().into_iter().chain([AMMO_BOX]) {
+        if let Some(d) = defs.get(id as usize) {
+            by_key.entry(d.key.clone()).or_insert(id);
+        }
+    }
+    ItemTable { defs, by_key }
 }
 
 /// Every block that exists as an item, in creative inventory order: the block, its key (for
 /// /give and save files), and its English and Hungarian names.
-const BLOCK_ITEMS: &[(u8, &str, &str, &str)] = &[
-    (GRASS, "grass_block", "Grass Block", "Füves blokk"),
-    (DIRT, "dirt", "Dirt", "Föld"),
-    (STONE, "stone", "Stone", "Kő"),
-    (COBBLE, "cobblestone", "Cobblestone", "Zúzottkő"),
-    (STONE_BRICKS, "stone_bricks", "Stone Bricks", "Kőtégla"),
-    (SAND, "sand", "Sand", "Homok"),
-    (GRAVEL, "gravel", "Gravel", "Kavics"),
-    (CLAY, "clay", "Clay", "Agyag"),
-    (SANDSTONE, "sandstone", "Sandstone", "Homokkő"),
-    (SNOW, "snow_block", "Snow Block", "Hóblokk"),
-    (
-        SNOWY_GRASS,
-        "snowy_grass_block",
-        "Snowy Grass Block",
-        "Havas füves blokk",
-    ),
-    (ICE, "ice", "Ice", "Jég"),
-    (OAK_LOG, "oak_log", "Oak Log", "Tölgyfarönk"),
-    (BIRCH_LOG, "birch_log", "Birch Log", "Nyírfarönk"),
-    (SPRUCE_LOG, "spruce_log", "Spruce Log", "Lucfenyőrönk"),
-    (PLANKS, "oak_planks", "Oak Planks", "Tölgyfa deszka"),
-    (OAK_STAIRS, "oak_stairs", "Oak Stairs", "Tölgyfa lépcső"),
-    (OAK_DOOR, "oak_door", "Oak Door", "Tölgyfa ajtó"),
-    (BRICKS, "bricks", "Bricks", "Téglák"),
-    (GLASS, "glass", "Glass", "Üveg"),
-    (GLOWSTONE, "glowstone", "Glowstone", "Izzókő"),
-    (OAK_LEAVES, "oak_leaves", "Oak Leaves", "Tölgylevelek"),
-    (
-        BIRCH_LEAVES,
-        "birch_leaves",
-        "Birch Leaves",
-        "Nyírfalevelek",
-    ),
-    (
-        SPRUCE_LEAVES,
-        "spruce_leaves",
-        "Spruce Leaves",
-        "Lucfenyőlevelek",
-    ),
-    (OAK_SAPLING, "oak_sapling", "Oak Sapling", "Tölgycsemete"),
-    (
-        BIRCH_SAPLING,
-        "birch_sapling",
-        "Birch Sapling",
-        "Nyírfacsemete",
-    ),
-    (
-        SPRUCE_SAPLING,
-        "spruce_sapling",
-        "Spruce Sapling",
-        "Lucfenyőcsemete",
-    ),
-    (CACTUS, "cactus", "Cactus", "Kaktusz"),
-    (TALL_GRASS, "grass", "Grass", "Fű"),
-    (POPPY, "poppy", "Poppy", "Pipacs"),
-    (DANDELION, "dandelion", "Dandelion", "Pitypang"),
-    (DEAD_BUSH, "dead_bush", "Dead Bush", "Elszáradt bokor"),
-    (COAL_ORE, "coal_ore", "Coal Ore", "Szénérc"),
-    (COPPER_ORE, "copper_ore", "Copper Ore", "Rézérc"),
-    (IRON_ORE, "iron_ore", "Iron Ore", "Vasérc"),
-    (GOLD_ORE, "gold_ore", "Gold Ore", "Aranyérc"),
-    (DIAMOND_ORE, "diamond_ore", "Diamond Ore", "Gyémántérc"),
-    (COAL_BLOCK, "coal_block", "Block of Coal", "Szénblokk"),
-    (COPPER_BLOCK, "copper_block", "Block of Copper", "Rézblokk"),
-    (IRON_BLOCK, "iron_block", "Block of Iron", "Vasblokk"),
-    (GOLD_BLOCK, "gold_block", "Block of Gold", "Aranyblokk"),
-    (
-        DIAMOND_BLOCK,
-        "diamond_block",
-        "Block of Diamond",
-        "Gyémántblokk",
-    ),
-    (OBSIDIAN, "obsidian", "Obsidian", "Obszidián"),
-    (BEDROCK, "bedrock", "Bedrock", "Alapkő"),
-    (
-        CRAFTING_TABLE,
-        "crafting_table",
-        "Crafting Table",
-        "Barkácsasztal",
-    ),
-    (FURNACE, "furnace", "Furnace", "Kemence"),
-    (BLAST_FURNACE, "blast_furnace", "Blast Furnace", "Kohó"),
-    (ADV_FURNACE, "advanced_furnace", "Advanced Furnace", "Fejlett kohó"),
-    (CHEST, "chest", "Chest", "Láda"),
-    (TORCH, "torch", "Torch", "Fáklya"),
-    (LANTERN, "lantern", "Lantern", "Lámpás"),
-    (WOOL, "white_wool", "White Wool", "Fehér gyapjú"),
-    (BED, "red_bed", "Red Bed", "Piros ágy"),
-    (GUN_STATION, "gun_station", "Gun Station", "Fegyverasztal"),
-    (RIFLE_BENCH, "rifle_station", "Rifle Station", "Puskaasztal"),
+const BLOCK_ITEMS: &[Row] = &[
+    blk(GRASS, "grass_block", "Grass Block", "Füves blokk"),
+    blk(DIRT, "dirt", "Dirt", "Föld"),
+    blk(STONE, "stone", "Stone", "Kő"),
+    blk(COBBLE, "cobblestone", "Cobblestone", "Zúzottkő"),
+    blk(STONE_BRICKS, "stone_bricks", "Stone Bricks", "Kőtégla"),
+    blk(SAND, "sand", "Sand", "Homok"),
+    blk(GRAVEL, "gravel", "Gravel", "Kavics"),
+    blk(CLAY, "clay", "Clay", "Agyag"),
+    blk(SANDSTONE, "sandstone", "Sandstone", "Homokkő"),
+    blk(SNOW, "snow_block", "Snow Block", "Hóblokk"),
+    blk(SNOWY_GRASS, "snowy_grass_block", "Snowy Grass Block", "Havas füves blokk"),
+    blk(ICE, "ice", "Ice", "Jég"),
+    blk(OAK_LOG, "oak_log", "Oak Log", "Tölgyfarönk"),
+    blk(BIRCH_LOG, "birch_log", "Birch Log", "Nyírfarönk"),
+    blk(SPRUCE_LOG, "spruce_log", "Spruce Log", "Lucfenyőrönk"),
+    blk(PLANKS, "oak_planks", "Oak Planks", "Tölgyfa deszka"),
+    blk(OAK_STAIRS, "oak_stairs", "Oak Stairs", "Tölgyfa lépcső"),
+    blk(OAK_DOOR, "oak_door", "Oak Door", "Tölgyfa ajtó"),
+    blk(BRICKS, "bricks", "Bricks", "Téglák"),
+    blk(GLASS, "glass", "Glass", "Üveg"),
+    blk(GLOWSTONE, "glowstone", "Glowstone", "Izzókő"),
+    blk(OAK_LEAVES, "oak_leaves", "Oak Leaves", "Tölgylevelek"),
+    blk(BIRCH_LEAVES, "birch_leaves", "Birch Leaves", "Nyírfalevelek"),
+    blk(SPRUCE_LEAVES, "spruce_leaves", "Spruce Leaves", "Lucfenyőlevelek"),
+    blk(OAK_SAPLING, "oak_sapling", "Oak Sapling", "Tölgycsemete"),
+    blk(BIRCH_SAPLING, "birch_sapling", "Birch Sapling", "Nyírfacsemete"),
+    blk(SPRUCE_SAPLING, "spruce_sapling", "Spruce Sapling", "Lucfenyőcsemete"),
+    blk(CACTUS, "cactus", "Cactus", "Kaktusz"),
+    blk(TALL_GRASS, "grass", "Grass", "Fű"),
+    blk(POPPY, "poppy", "Poppy", "Pipacs"),
+    blk(DANDELION, "dandelion", "Dandelion", "Pitypang"),
+    blk(DEAD_BUSH, "dead_bush", "Dead Bush", "Elszáradt bokor"),
+    blk(COAL_ORE, "coal_ore", "Coal Ore", "Szénérc"),
+    blk(COPPER_ORE, "copper_ore", "Copper Ore", "Rézérc"),
+    blk(IRON_ORE, "iron_ore", "Iron Ore", "Vasérc"),
+    blk(GOLD_ORE, "gold_ore", "Gold Ore", "Aranyérc"),
+    blk(DIAMOND_ORE, "diamond_ore", "Diamond Ore", "Gyémántérc"),
+    blk(COAL_BLOCK, "coal_block", "Block of Coal", "Szénblokk"),
+    blk(COPPER_BLOCK, "copper_block", "Block of Copper", "Rézblokk"),
+    blk(IRON_BLOCK, "iron_block", "Block of Iron", "Vasblokk"),
+    blk(GOLD_BLOCK, "gold_block", "Block of Gold", "Aranyblokk"),
+    blk(DIAMOND_BLOCK, "diamond_block", "Block of Diamond", "Gyémántblokk"),
+    blk(OBSIDIAN, "obsidian", "Obsidian", "Obszidián"),
+    blk(BEDROCK, "bedrock", "Bedrock", "Alapkő"),
+    blk(CRAFTING_TABLE, "crafting_table", "Crafting Table", "Barkácsasztal"),
+    blk(FURNACE, "furnace", "Furnace", "Kemence"),
+    blk(BLAST_FURNACE, "blast_furnace", "Blast Furnace", "Kohó"),
+    blk(ADV_FURNACE, "advanced_furnace", "Advanced Furnace", "Fejlett kohó"),
+    blk(CHEST, "chest", "Chest", "Láda"),
+    blk(TORCH, "torch", "Torch", "Fáklya"),
+    blk(LANTERN, "lantern", "Lantern", "Lámpás"),
+    blk(WOOL, "white_wool", "White Wool", "Fehér gyapjú"),
+    blk(BED, "red_bed", "Red Bed", "Piros ágy").stack(1),
+    blk(GUN_STATION, "gun_station", "Gun Station", "Fegyverasztal"),
+    blk(RIFLE_BENCH, "rifle_station", "Rifle Station", "Puskaasztal"),
 ];
 
 /// The other items (ids from 256, tools aside), in creative inventory order: the id, key,
 /// English and Hungarian names, and the icon's texture layer.
-const ITEMS: &[(ItemId, &str, &str, &str, u32)] = &[
-    (STICK, "stick", "Stick", "Bot", tex::STICK),
-    (
-        GUIDE_BOOK,
-        "guide_book",
-        "Guide Book",
-        "Kézikönyv",
-        tex::BOOK,
-    ),
-    (COAL, "coal", "Coal", "Szén", tex::COAL),
-    (CHARCOAL, "charcoal", "Charcoal", "Faszén", tex::CHARCOAL),
-    (
-        IRON_INGOT,
-        "iron_ingot",
-        "Iron Ingot",
-        "Vasrúd",
-        tex::IRON_INGOT,
-    ),
-    (
-        IRON_NUGGET,
-        "iron_nugget",
-        "Iron Nugget",
-        "Vasrög",
-        tex::IRON_NUGGET,
-    ),
-    (
-        COPPER_INGOT,
-        "copper_ingot",
-        "Copper Ingot",
-        "Rézrúd",
-        tex::COPPER_INGOT,
-    ),
-    (
-        STEEL_INGOT,
-        "steel_ingot",
-        "Steel Ingot",
-        "Acélrúd",
-        tex::STEEL_INGOT,
-    ),
-    (
-        CERAMIC_PLATE,
-        "ceramic_plate",
-        "Ceramic Plate",
-        "Kerámialap",
-        tex::CERAMIC_PLATE,
-    ),
-    (
-        FRAG_GRENADE,
-        "frag_grenade",
-        "Frag Grenade",
-        "Repeszgránát",
-        tex::FRAG_GRENADE,
-    ),
-    (
-        SMOKE_GRENADE,
-        "smoke_grenade",
-        "Smoke Grenade",
-        "Füstgránát",
-        tex::SMOKE_GRENADE,
-    ),
-    (
-        ARMOR_BASE + 0,
-        "wool_helmet",
-        "Wool Helmet",
-        "Posztó sisak",
-        tex::ARMOR_ICONS + 0,
-    ),
-    (
-        ARMOR_BASE + 1,
-        "wool_chestplate",
-        "Wool Chestplate",
-        "Posztó mellvért",
-        tex::ARMOR_ICONS + 1,
-    ),
-    (
-        ARMOR_BASE + 2,
-        "wool_leggings",
-        "Wool Leggings",
-        "Posztó lábvért",
-        tex::ARMOR_ICONS + 2,
-    ),
-    (
-        ARMOR_BASE + 3,
-        "wool_boots",
-        "Wool Boots",
-        "Posztó csizma",
-        tex::ARMOR_ICONS + 3,
-    ),
-    (
-        ARMOR_BASE + 4,
-        "copper_helmet",
-        "Copper Helmet",
-        "Réz sisak",
-        tex::ARMOR_ICONS + 4,
-    ),
-    (
-        ARMOR_BASE + 5,
-        "copper_chestplate",
-        "Copper Chestplate",
-        "Réz mellvért",
-        tex::ARMOR_ICONS + 5,
-    ),
-    (
-        ARMOR_BASE + 6,
-        "copper_leggings",
-        "Copper Leggings",
-        "Réz lábvért",
-        tex::ARMOR_ICONS + 6,
-    ),
-    (
-        ARMOR_BASE + 7,
-        "copper_boots",
-        "Copper Boots",
-        "Réz csizma",
-        tex::ARMOR_ICONS + 7,
-    ),
-    (
-        ARMOR_BASE + 8,
-        "steel_helmet",
-        "Steel Helmet",
-        "Acél sisak",
-        tex::ARMOR_ICONS + 8,
-    ),
-    (
-        ARMOR_BASE + 9,
-        "steel_chestplate",
-        "Steel Chestplate",
-        "Acél mellvért",
-        tex::ARMOR_ICONS + 9,
-    ),
-    (
-        ARMOR_BASE + 10,
-        "steel_leggings",
-        "Steel Leggings",
-        "Acél lábvért",
-        tex::ARMOR_ICONS + 10,
-    ),
-    (
-        ARMOR_BASE + 11,
-        "steel_boots",
-        "Steel Boots",
-        "Acél csizma",
-        tex::ARMOR_ICONS + 11,
-    ),
-    (
-        ARMOR_BASE + 12,
-        "diamond_helmet",
-        "Diamond Helmet",
-        "Gyémánt sisak",
-        tex::ARMOR_ICONS + 12,
-    ),
-    (
-        ARMOR_BASE + 13,
-        "diamond_chestplate",
-        "Diamond Chestplate",
-        "Gyémánt mellvért",
-        tex::ARMOR_ICONS + 13,
-    ),
-    (
-        ARMOR_BASE + 14,
-        "diamond_leggings",
-        "Diamond Leggings",
-        "Gyémánt lábvért",
-        tex::ARMOR_ICONS + 14,
-    ),
-    (
-        ARMOR_BASE + 15,
-        "diamond_boots",
-        "Diamond Boots",
-        "Gyémánt csizma",
-        tex::ARMOR_ICONS + 15,
-    ),
-    (
-        BULLETPROOF_VEST,
-        "bulletproof_vest",
-        "Bulletproof Vest",
-        "Golyóálló mellény",
-        tex::ARMOR_ICONS + 16,
-    ),
-    (
-        GOLD_INGOT,
-        "gold_ingot",
-        "Gold Ingot",
-        "Aranyrúd",
-        tex::GOLD_INGOT,
-    ),
-    (DIAMOND, "diamond", "Diamond", "Gyémánt", tex::DIAMOND),
-    (
-        CLAY_BALL,
-        "clay_ball",
-        "Clay Ball",
-        "Agyaggolyó",
-        tex::CLAY_BALL,
-    ),
-    (BRICK, "brick", "Brick", "Tégla", tex::BRICK),
-    (BUCKET, "bucket", "Bucket", "Vödör", tex::BUCKET),
-    (
-        WATER_BUCKET,
-        "water_bucket",
-        "Water Bucket",
-        "Vizesvödör",
-        tex::WATER_BUCKET,
-    ),
-    (
-        LAVA_BUCKET,
-        "lava_bucket",
-        "Lava Bucket",
-        "Lávás vödör",
-        tex::LAVA_BUCKET,
-    ),
-    (
-        PORKCHOP,
-        "porkchop",
-        "Raw Porkchop",
-        "Nyers disznóhús",
-        tex::PORKCHOP,
-    ),
-    (
-        COOKED_PORKCHOP,
-        "cooked_porkchop",
-        "Cooked Porkchop",
-        "Sült disznóhús",
-        tex::COOKED_PORKCHOP,
-    ),
-    (MUTTON, "mutton", "Raw Mutton", "Nyers birkahús", tex::MUTTON),
-    (
-        COOKED_MUTTON,
-        "cooked_mutton",
-        "Cooked Mutton",
-        "Sült birkahús",
-        tex::COOKED_MUTTON,
-    ),
-    (
-        HALF_COOKED_PORKCHOP,
-        "half_cooked_porkchop",
-        "Half-Cooked Porkchop",
-        "Félig sült disznóhús",
-        tex::HALF_COOKED_PORKCHOP,
-    ),
-    (
-        HALF_COOKED_MUTTON,
-        "half_cooked_mutton",
-        "Half-Cooked Mutton",
-        "Félig sült birkahús",
-        tex::HALF_COOKED_MUTTON,
-    ),
-    (
-        BURNT_PORKCHOP,
-        "burnt_porkchop",
-        "Burnt Porkchop",
-        "Szenes disznóhús",
-        tex::BURNT_PORKCHOP,
-    ),
-    (
-        BURNT_MUTTON,
-        "burnt_mutton",
-        "Burnt Mutton",
-        "Szenes birkahús",
-        tex::BURNT_MUTTON,
-    ),
-    (
-        HALF_BURNT_PORKCHOP,
-        "half_burnt_porkchop",
-        "Half-Burnt Porkchop",
-        "Félig szenes disznóhús",
-        tex::HALF_BURNT_PORKCHOP,
-    ),
-    (
-        HALF_BURNT_MUTTON,
-        "half_burnt_mutton",
-        "Half-Burnt Mutton",
-        "Félig szenes birkahús",
-        tex::HALF_BURNT_MUTTON,
-    ),
-    (
-        RAW_BURNT_PORKCHOP,
-        "raw_burnt_porkchop",
-        "Burnt-Raw Porkchop",
-        "Szenes-nyers disznóhús",
-        tex::RAW_BURNT_PORKCHOP,
-    ),
-    (
-        RAW_BURNT_MUTTON,
-        "raw_burnt_mutton",
-        "Burnt-Raw Mutton",
-        "Szenes-nyers birkahús",
-        tex::RAW_BURNT_MUTTON,
-    ),
-    (SHEARS, "shears", "Shears", "Olló", tex::SHEARS),
-    (
-        GLASS_BOTTLE,
-        "glass_bottle",
-        "Glass Bottle",
-        "Üvegpalack",
-        tex::GLASS_BOTTLE,
-    ),
-    (
-        WATER_BOTTLE,
-        "water_bottle",
-        "Water Bottle",
-        "Vizes üveg",
-        tex::WATER_BOTTLE,
-    ),
-    (
-        PURIFIED_WATER,
-        "purified_water",
-        "Boiled Water",
-        "Forralt víz",
-        tex::PURIFIED_WATER,
-    ),
-    (
-        PIG_SPAWN_EGG,
-        "pig_spawn_egg",
-        "Pig Spawn Egg",
-        "Disznó idéző tojás",
-        tex::PIG_SPAWN_EGG,
-    ),
-    (
-        SHEEP_SPAWN_EGG,
-        "sheep_spawn_egg",
-        "Sheep Spawn Egg",
-        "Birka idéző tojás",
-        tex::SHEEP_SPAWN_EGG,
-    ),
-    (WOLF_SPAWN_EGG, "wolf_spawn_egg", "Wolf Spawn Egg", "Farkas idéző tojás", tex::WOLF_SPAWN_EGG),
-    (BONE, "bone", "Bone", "Csont", tex::BONE),
-    (FISHING_ROD, "fishing_rod", "Fishing Rod", "Horgászbot", tex::FISHING_ROD),
-    (RAW_FISH, "raw_fish", "Raw Fish", "Nyers hal", tex::RAW_FISH),
-    (COOKED_FISH, "cooked_fish", "Cooked Fish", "Sült hal", tex::COOKED_FISH),
-    (PISTOL, "pistol", "Pistol", "Pisztoly", tex::PISTOL),
-    (REVOLVER, "revolver", "Revolver", "Revolver", tex::REVOLVER),
-    (SPEEDLOADER, "speedloader", "Speedloader", "Gyorstöltő", tex::SPEEDLOADER),
-    (MAGNUM_ROUND, "magnum_round", "Magnum Round", "Magnum töltény", tex::MAGNUM_ROUND),
-    (TARGET_DUMMY, "target_dummy", "Target Dummy", "Gyakorlóbábu", tex::TARGET_DUMMY),
-    (AK47, "ak47", "AK-47", "AK-47", tex::AK47),
-    (RIFLE_ROUND, "rifle_round", "7.62 Round", "7,62-es töltény", tex::RIFLE_ROUND),
-    (MAG_LOADER, "magazine_loader", "Magazine Loader", "Tárazógép", tex::MAG_LOADER),
-    (AK_MAGAZINE, "ak_magazine", "AK Magazine", "AK-tár", tex::AK_PARTS + 4),
-    (AK_RECEIVER, "ak_receiver", "AK Receiver", "AK-tok", tex::AK_PARTS),
-    (AK_GAS_TUBE, "ak_gas_tube", "AK Gas Tube", "AK-gázcső", tex::AK_PARTS + 1),
-    (AK_BOLT, "ak_bolt_carrier", "AK Bolt Carrier", "AK-zárkeret", tex::AK_PARTS + 2),
-    (AK_COVER, "ak_dust_cover", "AK Dust Cover", "AK-tokfedél", tex::AK_PARTS + 3),
-    (REVOLVER_FRAME, "revolver_frame", "Revolver Frame", "Revolverváz", tex::REVOLVER_PARTS),
-    (REVOLVER_BARREL, "revolver_barrel", "Revolver Barrel", "Revolvercső", tex::REVOLVER_PARTS + 1),
-    (REVOLVER_SPRING, "revolver_mainspring", "Mainspring", "Kakasrugó", tex::REVOLVER_PARTS + 2),
-    (REVOLVER_CYLINDER, "revolver_cylinder", "Revolver Cylinder", "Forgótár", tex::REVOLVER_PARTS + 3),
-    (REVOLVER_HAMMER, "revolver_hammer", "Hammer", "Kakas", tex::REVOLVER_PARTS + 4),
-    (BULLET, "bullet", "Bullet", "Töltény", tex::BULLET),
-    (
-        PISTOL_FRAME,
-        "pistol_frame",
-        "Pistol Frame",
-        "Pisztolyváz",
-        tex::PISTOL_PARTS,
-    ),
-    (
-        PISTOL_BARREL,
-        "pistol_barrel",
-        "Pistol Barrel",
-        "Pisztolycső",
-        tex::PISTOL_PARTS + 1,
-    ),
-    (
-        PISTOL_SPRING,
-        "pistol_spring",
-        "Recoil Spring",
-        "Visszatérítő rugó",
-        tex::PISTOL_PARTS + 2,
-    ),
-    (
-        PISTOL_SLIDE,
-        "pistol_slide",
-        "Pistol Slide",
-        "Pisztolyszán",
-        tex::PISTOL_PARTS + 3,
-    ),
-    (
-        PISTOL_MAGAZINE,
-        "pistol_magazine",
-        "Pistol Magazine",
-        "Pisztolytár",
-        tex::PISTOL_PARTS + 4,
-    ),
-    (SCOPE, "scope", "Scope", "Távcső", tex::GUN_ATTACHMENTS),
-    (
-        SILENCER,
-        "silencer",
-        "Silencer",
-        "Hangtompító",
-        tex::GUN_ATTACHMENTS + 1,
-    ),
-    (
-        EXTENDED_MAGAZINE,
-        "extended_magazine",
-        "Extended Magazine",
-        "Bővített tár",
-        tex::GUN_ATTACHMENTS + 2,
-    ),
-    (
-        LASER_SIGHT,
-        "laser_sight",
-        "Laser Sight",
-        "Lézeres célzó",
-        tex::GUN_ATTACHMENTS + 3,
-    ),
-    (AMMO_BOX, "ammo_box", "Ammo Box", "Töltényes doboz", tex::AMMO_BOX),
-    (FLASHLIGHT, "weapon_light", "Weapon Light", "Fegyverlámpa", tex::FLASHLIGHT),
+const ITEMS: &[Row] = &[
+    it(STICK, "stick", "Stick", "Bot", tex::STICK),
+    it(GUIDE_BOOK, "guide_book", "Guide Book", "Kézikönyv", tex::BOOK).stack(1),
+    it(COAL, "coal", "Coal", "Szén", tex::COAL),
+    it(CHARCOAL, "charcoal", "Charcoal", "Faszén", tex::CHARCOAL),
+    it(IRON_INGOT, "iron_ingot", "Iron Ingot", "Vasrúd", tex::IRON_INGOT),
+    it(IRON_NUGGET, "iron_nugget", "Iron Nugget", "Vasrög", tex::IRON_NUGGET),
+    it(COPPER_INGOT, "copper_ingot", "Copper Ingot", "Rézrúd", tex::COPPER_INGOT),
+    it(STEEL_INGOT, "steel_ingot", "Steel Ingot", "Acélrúd", tex::STEEL_INGOT),
+    it(CERAMIC_PLATE, "ceramic_plate", "Ceramic Plate", "Kerámialap", tex::CERAMIC_PLATE),
+    it(FRAG_GRENADE, "frag_grenade", "Frag Grenade", "Repeszgránát", tex::FRAG_GRENADE).stack(16),
+    it(SMOKE_GRENADE, "smoke_grenade", "Smoke Grenade", "Füstgránát", tex::SMOKE_GRENADE).stack(16),
+    it(ARMOR_BASE + 0, "wool_helmet", "Wool Helmet", "Posztó sisak", tex::ARMOR_ICONS + 0),
+    it(ARMOR_BASE + 1, "wool_chestplate", "Wool Chestplate", "Posztó mellvért", tex::ARMOR_ICONS + 1),
+    it(ARMOR_BASE + 2, "wool_leggings", "Wool Leggings", "Posztó lábvért", tex::ARMOR_ICONS + 2),
+    it(ARMOR_BASE + 3, "wool_boots", "Wool Boots", "Posztó csizma", tex::ARMOR_ICONS + 3),
+    it(ARMOR_BASE + 4, "copper_helmet", "Copper Helmet", "Réz sisak", tex::ARMOR_ICONS + 4),
+    it(ARMOR_BASE + 5, "copper_chestplate", "Copper Chestplate", "Réz mellvért", tex::ARMOR_ICONS + 5),
+    it(ARMOR_BASE + 6, "copper_leggings", "Copper Leggings", "Réz lábvért", tex::ARMOR_ICONS + 6),
+    it(ARMOR_BASE + 7, "copper_boots", "Copper Boots", "Réz csizma", tex::ARMOR_ICONS + 7),
+    it(ARMOR_BASE + 8, "steel_helmet", "Steel Helmet", "Acél sisak", tex::ARMOR_ICONS + 8),
+    it(ARMOR_BASE + 9, "steel_chestplate", "Steel Chestplate", "Acél mellvért", tex::ARMOR_ICONS + 9),
+    it(ARMOR_BASE + 10, "steel_leggings", "Steel Leggings", "Acél lábvért", tex::ARMOR_ICONS + 10),
+    it(ARMOR_BASE + 11, "steel_boots", "Steel Boots", "Acél csizma", tex::ARMOR_ICONS + 11),
+    it(ARMOR_BASE + 12, "diamond_helmet", "Diamond Helmet", "Gyémánt sisak", tex::ARMOR_ICONS + 12),
+    it(ARMOR_BASE + 13, "diamond_chestplate", "Diamond Chestplate", "Gyémánt mellvért", tex::ARMOR_ICONS + 13),
+    it(ARMOR_BASE + 14, "diamond_leggings", "Diamond Leggings", "Gyémánt lábvért", tex::ARMOR_ICONS + 14),
+    it(ARMOR_BASE + 15, "diamond_boots", "Diamond Boots", "Gyémánt csizma", tex::ARMOR_ICONS + 15),
+    it(BULLETPROOF_VEST, "bulletproof_vest", "Bulletproof Vest", "Golyóálló mellény", tex::ARMOR_ICONS + 16),
+    it(GOLD_INGOT, "gold_ingot", "Gold Ingot", "Aranyrúd", tex::GOLD_INGOT),
+    it(DIAMOND, "diamond", "Diamond", "Gyémánt", tex::DIAMOND),
+    it(CLAY_BALL, "clay_ball", "Clay Ball", "Agyaggolyó", tex::CLAY_BALL),
+    it(BRICK, "brick", "Brick", "Tégla", tex::BRICK),
+    it(BUCKET, "bucket", "Bucket", "Vödör", tex::BUCKET).stack(16),
+    it(WATER_BUCKET, "water_bucket", "Water Bucket", "Vizesvödör", tex::WATER_BUCKET).stack(1),
+    it(LAVA_BUCKET, "lava_bucket", "Lava Bucket", "Lávás vödör", tex::LAVA_BUCKET).stack(1),
+    it(PORKCHOP, "porkchop", "Raw Porkchop", "Nyers disznóhús", tex::PORKCHOP),
+    it(COOKED_PORKCHOP, "cooked_porkchop", "Cooked Porkchop", "Sült disznóhús", tex::COOKED_PORKCHOP),
+    it(MUTTON, "mutton", "Raw Mutton", "Nyers birkahús", tex::MUTTON),
+    it(COOKED_MUTTON, "cooked_mutton", "Cooked Mutton", "Sült birkahús", tex::COOKED_MUTTON),
+    it(HALF_COOKED_PORKCHOP, "half_cooked_porkchop", "Half-Cooked Porkchop", "Félig sült disznóhús", tex::HALF_COOKED_PORKCHOP),
+    it(HALF_COOKED_MUTTON, "half_cooked_mutton", "Half-Cooked Mutton", "Félig sült birkahús", tex::HALF_COOKED_MUTTON),
+    it(BURNT_PORKCHOP, "burnt_porkchop", "Burnt Porkchop", "Szenes disznóhús", tex::BURNT_PORKCHOP),
+    it(BURNT_MUTTON, "burnt_mutton", "Burnt Mutton", "Szenes birkahús", tex::BURNT_MUTTON),
+    it(HALF_BURNT_PORKCHOP, "half_burnt_porkchop", "Half-Burnt Porkchop", "Félig szenes disznóhús", tex::HALF_BURNT_PORKCHOP),
+    it(HALF_BURNT_MUTTON, "half_burnt_mutton", "Half-Burnt Mutton", "Félig szenes birkahús", tex::HALF_BURNT_MUTTON),
+    it(RAW_BURNT_PORKCHOP, "raw_burnt_porkchop", "Burnt-Raw Porkchop", "Szenes-nyers disznóhús", tex::RAW_BURNT_PORKCHOP),
+    it(RAW_BURNT_MUTTON, "raw_burnt_mutton", "Burnt-Raw Mutton", "Szenes-nyers birkahús", tex::RAW_BURNT_MUTTON),
+    it(SHEARS, "shears", "Shears", "Olló", tex::SHEARS).stack(1).lasts(SHEARS_DURABILITY),
+    it(GLASS_BOTTLE, "glass_bottle", "Glass Bottle", "Üvegpalack", tex::GLASS_BOTTLE),
+    it(WATER_BOTTLE, "water_bottle", "Water Bottle", "Vizes üveg", tex::WATER_BOTTLE).stack(16),
+    it(PURIFIED_WATER, "purified_water", "Boiled Water", "Forralt víz", tex::PURIFIED_WATER).stack(16),
+    it(PIG_SPAWN_EGG, "pig_spawn_egg", "Pig Spawn Egg", "Disznó idéző tojás", tex::PIG_SPAWN_EGG),
+    it(SHEEP_SPAWN_EGG, "sheep_spawn_egg", "Sheep Spawn Egg", "Birka idéző tojás", tex::SHEEP_SPAWN_EGG),
+    it(WOLF_SPAWN_EGG, "wolf_spawn_egg", "Wolf Spawn Egg", "Farkas idéző tojás", tex::WOLF_SPAWN_EGG),
+    it(BONE, "bone", "Bone", "Csont", tex::BONE),
+    it(FISHING_ROD, "fishing_rod", "Fishing Rod", "Horgászbot", tex::FISHING_ROD).stack(1).lasts(FISHING_ROD_DURABILITY),
+    it(RAW_FISH, "raw_fish", "Raw Fish", "Nyers hal", tex::RAW_FISH),
+    it(COOKED_FISH, "cooked_fish", "Cooked Fish", "Sült hal", tex::COOKED_FISH),
+    it(PISTOL, "pistol", "Pistol", "Pisztoly", tex::PISTOL),
+    it(REVOLVER, "revolver", "Revolver", "Revolver", tex::REVOLVER),
+    it(SPEEDLOADER, "speedloader", "Speedloader", "Gyorstöltő", tex::SPEEDLOADER),
+    it(MAGNUM_ROUND, "magnum_round", "Magnum Round", "Magnum töltény", tex::MAGNUM_ROUND),
+    it(TARGET_DUMMY, "target_dummy", "Target Dummy", "Gyakorlóbábu", tex::TARGET_DUMMY).stack(16),
+    it(AK47, "ak47", "AK-47", "AK-47", tex::AK47),
+    it(RIFLE_ROUND, "rifle_round", "7.62 Round", "7,62-es töltény", tex::RIFLE_ROUND),
+    it(MAG_LOADER, "magazine_loader", "Magazine Loader", "Tárazógép", tex::MAG_LOADER).stack(1),
+    it(AK_MAGAZINE, "ak_magazine", "AK Magazine", "AK-tár", tex::AK_PARTS + 4),
+    it(AK_RECEIVER, "ak_receiver", "AK Receiver", "AK-tok", tex::AK_PARTS),
+    it(AK_GAS_TUBE, "ak_gas_tube", "AK Gas Tube", "AK-gázcső", tex::AK_PARTS + 1),
+    it(AK_BOLT, "ak_bolt_carrier", "AK Bolt Carrier", "AK-zárkeret", tex::AK_PARTS + 2),
+    it(AK_COVER, "ak_dust_cover", "AK Dust Cover", "AK-tokfedél", tex::AK_PARTS + 3),
+    it(REVOLVER_FRAME, "revolver_frame", "Revolver Frame", "Revolverváz", tex::REVOLVER_PARTS),
+    it(REVOLVER_BARREL, "revolver_barrel", "Revolver Barrel", "Revolvercső", tex::REVOLVER_PARTS + 1),
+    it(REVOLVER_SPRING, "revolver_mainspring", "Mainspring", "Kakasrugó", tex::REVOLVER_PARTS + 2),
+    it(REVOLVER_CYLINDER, "revolver_cylinder", "Revolver Cylinder", "Forgótár", tex::REVOLVER_PARTS + 3),
+    it(REVOLVER_HAMMER, "revolver_hammer", "Hammer", "Kakas", tex::REVOLVER_PARTS + 4),
+    it(BULLET, "bullet", "Bullet", "Töltény", tex::BULLET),
+    it(PISTOL_FRAME, "pistol_frame", "Pistol Frame", "Pisztolyváz", tex::PISTOL_PARTS),
+    it(PISTOL_BARREL, "pistol_barrel", "Pistol Barrel", "Pisztolycső", tex::PISTOL_PARTS + 1),
+    it(PISTOL_SPRING, "pistol_spring", "Recoil Spring", "Visszatérítő rugó", tex::PISTOL_PARTS + 2),
+    it(PISTOL_SLIDE, "pistol_slide", "Pistol Slide", "Pisztolyszán", tex::PISTOL_PARTS + 3),
+    it(PISTOL_MAGAZINE, "pistol_magazine", "Pistol Magazine", "Pisztolytár", tex::PISTOL_PARTS + 4),
+    it(SCOPE, "scope", "Scope", "Távcső", tex::GUN_ATTACHMENTS),
+    it(SILENCER, "silencer", "Silencer", "Hangtompító", tex::GUN_ATTACHMENTS + 1),
+    it(EXTENDED_MAGAZINE, "extended_magazine", "Extended Magazine", "Bővített tár", tex::GUN_ATTACHMENTS + 2),
+    it(LASER_SIGHT, "laser_sight", "Laser Sight", "Lézeres célzó", tex::GUN_ATTACHMENTS + 3),
+    it(AMMO_BOX, "ammo_box", "Ammo Box", "Töltényes doboz", tex::AMMO_BOX).stack(1),
+    it(FLASHLIGHT, "weapon_light", "Weapon Light", "Fegyverlámpa", tex::FLASHLIGHT),
 ];
 
 /// Creative inventory order: blocks, other items, then the tools.
 pub fn all_items() -> Vec<ItemId> {
-    let mut v: Vec<ItemId> = BLOCK_ITEMS.iter().map(|e| e.0 as ItemId).collect();
-    v.extend(ITEMS.iter().map(|e| e.0).filter(|&id| id != AMMO_BOX));
+    let mut v: Vec<ItemId> = BLOCK_ITEMS.iter().map(|r| r.id).collect();
+    v.extend(ITEMS.iter().map(|r| r.id).filter(|&id| id != AMMO_BOX));
     for tier in TIER_ORDER {
         for kind in KINDS {
             v.push(tool_id(kind, tier));
@@ -1240,19 +1032,9 @@ pub fn all_items() -> Vec<ItemId> {
     v
 }
 
-fn block_entry(id: ItemId) -> Option<&'static (u8, &'static str, &'static str, &'static str)> {
-    BLOCK_ITEMS.iter().find(|e| id < 256 && e.0 as ItemId == id)
-}
-
-fn item_entry(
-    id: ItemId,
-) -> Option<&'static (ItemId, &'static str, &'static str, &'static str, u32)> {
-    ITEMS.iter().find(|e| e.0 == id)
-}
-
 /// The block this item places (base variant for directional blocks).
 pub fn block_of(id: ItemId) -> Option<u8> {
-    block_entry(id).map(|e| e.0)
+    def(id).block
 }
 
 /// The item a placed block counts as (pick block / creative).
@@ -1276,6 +1058,7 @@ pub fn item_of_block(b: u8) -> Option<ItemId> {
     block_of(base as ItemId).map(|_| base as ItemId)
 }
 
+#[derive(Clone, Copy)]
 pub enum Icon {
     /// Drawn as an isometric cube.
     Block(u8),
@@ -1284,68 +1067,23 @@ pub enum Icon {
 }
 
 pub fn icon(id: ItemId) -> Icon {
-    if let Some(b) = block_of(id) {
-        if b == LANTERN {
-            return Icon::Flat(tex::LANTERN_ITEM);
-        }
-        if b == OAK_DOOR {
-            return Icon::Flat(tex::DOOR_ITEM);
-        }
-        if b == BED {
-            return Icon::Flat(tex::BED_ITEM);
-        }
-        if is_plant(b) || b == TORCH {
-            return Icon::Flat(face_texture(b, 0));
-        }
-        return Icon::Block(b);
-    }
-    Icon::Flat(match (item_entry(id), tool_of(id)) {
-        (Some(e), _) => e.4,
-        (None, Some((k, t))) => crate::world::textures::tool_layer(t as usize, k as usize),
-        (None, None) => tex::STONE,
-    })
+    def(id).icon
 }
 
 /// Stable identifier used by /give and save files.
 pub fn key(id: ItemId) -> String {
-    if let Some((k, t)) = tool_of(id) {
-        let tier = ["wooden", "stone", "iron", "golden", "diamond", "copper"][t as usize];
-        let kind = ["pickaxe", "axe", "shovel", "sword"][k as usize];
-        return format!("{tier}_{kind}");
-    }
-    let key = match (block_entry(id), item_entry(id)) {
-        (Some(e), _) => e.1,
-        (None, Some(e)) => e.1,
-        (None, None) => "unknown",
-    };
-    key.to_string()
+    def(id).key.to_string()
 }
 
 pub fn from_key(k: &str) -> Option<ItemId> {
     let k = k.strip_prefix("minecraft:").unwrap_or(k);
-    // (the box of rounds too: it is not listed, but lies on gun stations in save files)
-    all_items().into_iter().chain([AMMO_BOX]).find(|&id| key(id) == k)
+    table().by_key.get(k).copied()
 }
 
 /// Display name in the current language.
 pub fn name(id: ItemId) -> String {
-    let hu = is_hungarian();
-    if let Some((k, t)) = tool_of(id) {
-        if hu {
-            let tier = ["Fa", "Kő", "Vas", "Arany", "Gyémánt", "Réz"][t as usize];
-            let kind = ["csákány", "balta", "ásó", "kard"][k as usize];
-            return format!("{tier}{kind}");
-        }
-        let tier = ["Wooden", "Stone", "Iron", "Golden", "Diamond", "Copper"][t as usize];
-        let kind = ["Pickaxe", "Axe", "Shovel", "Sword"][k as usize];
-        return format!("{tier} {kind}");
-    }
-    let (en, hun) = match (block_entry(id), item_entry(id)) {
-        (Some(e), _) => (e.2, e.3),
-        (None, Some(e)) => (e.2, e.3),
-        (None, None) => ("Unknown", "Ismeretlen"),
-    };
-    (if hu { hun } else { en }).to_string()
+    let d = def(id);
+    (if is_hungarian() { &d.hu } else { &d.en }).to_string()
 }
 
 /// Display name of a block in the world (for debug info).

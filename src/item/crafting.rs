@@ -502,7 +502,6 @@ pub fn recipe_results() -> Vec<ItemId> {
     out
 }
 
-/// Result of the items in a crafting grid (`size` x `size`, row-major).
 /// The ways `item` is crafted: each recipe's 3x3 grid (the items a cell takes, empty for
 /// none) and how many it makes.
 pub fn recipes_for(item: ItemId) -> Vec<([Vec<ItemId>; 9], u8)> {
@@ -532,52 +531,89 @@ pub fn smelted_from(item: ItemId) -> Vec<(ItemId, u8)> {
         .collect()
 }
 
-pub fn craft(grid: &[Slot], size: usize) -> Option<Stack> {
-    // Bounding box of the non-empty cells.
-    let filled: Vec<(usize, usize)> = (0..size * size)
-        .filter(|&i| grid[i].is_some())
-        .map(|i| (i % size, i / size))
-        .collect();
-    if filled.is_empty() {
-        return None;
-    }
-    let (x0, x1) = (
-        filled.iter().map(|c| c.0).min()?,
-        filled.iter().map(|c| c.0).max()?,
-    );
-    let (y0, y1) = (
-        filled.iter().map(|c| c.1).min()?,
-        filled.iter().map(|c| c.1).max()?,
-    );
-    let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
-    let cell = |x: usize, y: usize| grid[(y0 + y) * size + x0 + x].map(|s| s.item);
-    'recipes: for r in recipes() {
-        let rh = r.pattern.len();
-        let rw = r.pattern[0].len();
-        if rw != w || rh != h {
-            continue;
+/// The filled part of a crafting grid: the bounding box of its non-empty cells, and their
+/// items row by row (`w` to a row).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Filled {
+    w: usize,
+    h: usize,
+    cells: [Option<ItemId>; 9],
+}
+
+impl Filled {
+    fn of(grid: &[Slot], size: usize) -> Option<Filled> {
+        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
+        for i in (0..size * size).filter(|&i| grid[i].is_some()) {
+            let (x, y) = (i % size, i / size);
+            (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
         }
-        // Try the pattern as written and mirrored horizontally.
-        for mirror in [false, true] {
-            let ok = (0..h).all(|y| {
+        if x0 == usize::MAX {
+            return None;
+        }
+        let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
+        // (no recipe is bigger than 3x3)
+        if w > 3 || h > 3 {
+            return Some(Filled { w, h, cells: [None; 9] });
+        }
+        let mut cells = [None; 9];
+        for y in 0..h {
+            for x in 0..w {
+                cells[y * w + x] = grid[(y0 + y) * size + x0 + x].map(|s| s.item);
+            }
+        }
+        Some(Filled { w, h, cells })
+    }
+
+    /// Whether `r` makes this, as written or mirrored horizontally.
+    fn matches(&self, r: &Recipe) -> bool {
+        let (w, h) = (self.w, self.h);
+        [false, true].into_iter().any(|mirror| {
+            (0..h).all(|y| {
                 (0..w).all(|x| {
                     let px = if mirror { w - 1 - x } else { x };
                     let ch = r.pattern[y].as_bytes()[px] as char;
-                    match (ch, cell(x, y)) {
+                    match (ch, self.cells[y * w + x]) {
                         (' ', None) => true,
                         (' ', Some(_)) | (_, None) => false,
-                        (c, Some(item)) => r
-                            .keys
-                            .iter()
-                            .any(|(k, items)| *k == c && items.contains(&item)),
+                        (c, Some(item)) => r.keys.iter().any(|(k, items)| *k == c && items.contains(&item)),
                     }
                 })
-            });
-            if ok {
-                return Some(r.result);
-            }
-        }
-        continue 'recipes;
+            })
+        })
     }
-    None
+}
+
+/// The recipes by their size: `[h - 1][w - 1]`, each list in the order of `recipes`.
+fn recipes_by_size() -> &'static [[Vec<&'static Recipe>; 3]; 3] {
+    static R: std::sync::OnceLock<[[Vec<&'static Recipe>; 3]; 3]> = std::sync::OnceLock::new();
+    R.get_or_init(|| {
+        let mut by: [[Vec<&'static Recipe>; 3]; 3] = Default::default();
+        for r in recipes() {
+            by[r.pattern.len() - 1][r.pattern[0].len() - 1].push(r);
+        }
+        by
+    })
+}
+
+/// Result of the items in a crafting grid (`size` x `size`, row-major): only the items count,
+/// where they are against each other (anywhere in the grid), a recipe's pattern as written or
+/// mirrored. The grid shown is asked about every frame: the last one asked about is kept with
+/// what it makes.
+pub fn craft(grid: &[Slot], size: usize) -> Option<Stack> {
+    thread_local! {
+        static LAST: std::cell::Cell<Option<(Filled, Option<Stack>)>> = const { std::cell::Cell::new(None) };
+    }
+    let f = Filled::of(grid, size)?;
+    if let Some((last, out)) = LAST.get() {
+        if last == f {
+            return out;
+        }
+    }
+    let out = if f.w > 3 || f.h > 3 {
+        None
+    } else {
+        recipes_by_size()[f.h - 1][f.w - 1].iter().find(|r| f.matches(r)).map(|r| r.result)
+    };
+    LAST.set(Some((f, out)));
+    out
 }
