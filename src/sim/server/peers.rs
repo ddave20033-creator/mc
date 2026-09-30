@@ -55,6 +55,8 @@ pub(super) struct Peer {
     pub shot_damage: (f32, f32),
     /// The owner has the game paused.
     pub paused: bool,
+    /// When they last chopped into a trunk (server time; a swing takes its time).
+    pub last_chop: f64,
 }
 
 impl Peer {
@@ -77,6 +79,7 @@ impl Peer {
             entities: EntitySync::default(),
             shot_damage: (0.0, 0.0),
             paused: false,
+            last_chop: f64::MIN,
         }
     }
 
@@ -367,6 +370,17 @@ impl Server {
 
     // ------------------------------------------------------------------ every tick
 
+    /// The blocks changed since they were last sent, to everyone near them (now: before
+    /// something that must find them changed, like a tree falling out of them).
+    pub(super) fn send_block_log(&mut self) {
+        if let Some(log) = self.world.log.as_mut() {
+            if !log.is_empty() {
+                let changes = std::mem::take(log);
+                self.send_blocks(&changes);
+            }
+        }
+    }
+
     /// What the players are told every tick.
     pub(super) fn sync(&mut self) {
         for p in self.peers.iter_mut() {
@@ -374,12 +388,7 @@ impl Server {
         }
         // Block changes since the last tick, to everyone near them.
         self.resend_near_chunks();
-        if let Some(log) = self.world.log.as_mut() {
-            if !log.is_empty() {
-                let changes = std::mem::take(log);
-                self.send_blocks(&changes);
-            }
-        }
+        self.send_block_log();
         // The time, once a second.
         self.synced += 1;
         if self.synced % 20 == 0 {

@@ -6,6 +6,10 @@
 //! are in the world (first person: the very same arms and axe, seen from the eye), and the
 //! game follows the axe's edge through it to find where it bites into a trunk (`Swing`).
 //!
+//! A swing comes out of the axe held at rest (`hold_axe`, as the player model holds it) and
+//! settles back into it; it is aimed up or down by the upper body bending at the hips (the
+//! legs stay planted, turned the way the body faces: `Aim`).
+//!
 //! Model space: the player model's pixels, standing on the origin, facing -Z.
 
 #[allow(unused_imports, dead_code)]
@@ -52,8 +56,14 @@ impl Kind {
 }
 /// Seconds the axe stays stuck in the wood, and how long it takes to come back into the
 /// animation's pull after it.
-const STUCK: f32 = 0.14;
+const STUCK: f32 = 0.12;
 const REJOIN: f32 = 0.12;
+/// Seconds a swing takes to come out of the axe held at rest, and to settle back into it
+/// after its animation's end.
+const FADE_IN: f32 = 0.1;
+const SETTLE: f32 = 0.18;
+/// How much of the look's pitch the upper body bends (the head looks the rest of the way).
+const BEND: f32 = 0.4;
 
 /// Where the axe is held at rest (the right fist's middle, on the handle's end): the axe's
 /// handle goes up (+Y) from it, its edge toward -Z.
@@ -102,7 +112,13 @@ impl Swing {
         self.times().0
     }
 
+    /// Settled back into holding the axe: the swing is gone.
     pub fn done(&self) -> bool {
+        self.anim_time() >= self.kind.times().length + SETTLE
+    }
+
+    /// Past the animation's end (only settling back): the next swing may begin.
+    pub fn over(&self) -> bool {
         self.anim_time() >= self.kind.times().length
     }
 
@@ -115,10 +131,43 @@ impl Swing {
     pub fn pose(&self) -> ChopPose {
         let (t, from) = self.times();
         let now = ChopPose::at(self.kind, t);
-        match from {
+        let now = match from {
             Some((h, k)) => ChopPose::at(self.kind, h).blend(&now, k),
             None => now,
+        };
+        let length = self.kind.times().length;
+        if t < FADE_IN {
+            HOLD.blend(&now, smooth(t / FADE_IN))
+        } else if t > length {
+            now.blend(&HOLD, smooth((t - length) / SETTLE))
+        } else {
+            now
         }
+    }
+}
+
+fn smooth(k: f32) -> f32 {
+    let k = k.clamp(0.0, 1.0);
+    k * k * (3.0 - 2.0 * k)
+}
+
+/// The axe held at rest, as the player model holds it (where a swing begins and ends).
+static HOLD: std::sync::LazyLock<ChopPose> = std::sync::LazyLock::new(|| ChopPose::of_anim("hold_axe", 0.0, 1.0));
+
+/// Where the player aims the swing (from where they look): `pitch` (the look's, radians, up
+/// positive) is taken by the upper body bending at the hips, and the head looks on along it;
+/// the legs stay turned `twist` (radians) from the way the upper body faces, the way the body
+/// faces (the head's turn from the body's: `head_yaw - body_yaw`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Aim {
+    pub pitch: f32,
+    pub twist: f32,
+}
+
+impl Aim {
+    pub fn new(pitch: f32, head_yaw: f32, body_yaw: f32) -> Aim {
+        use std::f32::consts::{PI, TAU};
+        Aim { pitch, twist: (head_yaw - body_yaw + PI).rem_euclid(TAU) - PI }
     }
 }
 
@@ -130,12 +179,43 @@ pub struct ChopPose {
 
 impl ChopPose {
     pub fn at(kind: Kind, t: f32) -> ChopPose {
+        ChopPose::of_anim(kind.anim(), t, kind.times().length)
+    }
+
+    fn of_anim(name: &str, t: f32, length: f32) -> ChopPose {
         let bones = data::BONES;
         let mut p = vec![BonePose::default(); bones.len()];
-        if let Some(anim) = find_anim(data::ANIMS, kind.anim()) {
-            add_anim(&mut p, anim, t.clamp(0.0, kind.times().length - 1e-4), 1.0, |_| false);
+        if let Some(anim) = find_anim(data::ANIMS, name) {
+            add_anim(&mut p, anim, t.clamp(0.0, length - 1e-4), 1.0, |_| false);
         }
         ChopPose { mats: bone_matrices(bones, &p, Mat4::IDENTITY).0 }
+    }
+
+    /// Aimed (`Aim`): the upper body (and the axe) bent at the hips, the head looking on, the
+    /// legs turned back the way the body faces.
+    pub fn aimed(mut self, aim: Aim) -> ChopPose {
+        use bone::*;
+        let pitch = aim.pitch.clamp(-1.2, 1.2);
+        let hip = Vec3::new(0.0, 12.0, 0.0);
+        let bend = Mat4::from_translation(hip) * Mat4::from_rotation_x(pitch * BEND) * Mat4::from_translation(-hip);
+        let legs = Mat4::from_rotation_y(aim.twist.clamp(-1.0, 1.0));
+        for b in [TORSO, bone::HEAD, RIGHT_ARM, RIGHT_HAND, LEFT_ARM, LEFT_HAND, AXE] {
+            if let Some(i) = BONE_IDS[b] {
+                self.mats[i] = bend * self.mats[i];
+            }
+        }
+        // (the head about its neck, as it now is)
+        if let Some(i) = BONE_IDS[bone::HEAD] {
+            let neck = self.mats[i].transform_point3(Vec3::new(0.0, 24.0, 0.0));
+            let look = Mat4::from_translation(neck) * Mat4::from_rotation_x(pitch * (1.0 - BEND) * 0.8) * Mat4::from_translation(-neck);
+            self.mats[i] = look * self.mats[i];
+        }
+        for b in [RIGHT_LEG, RIGHT_FOOT, LEFT_LEG, LEFT_FOOT] {
+            if let Some(i) = BONE_IDS[b] {
+                self.mats[i] = legs * self.mats[i];
+            }
+        }
+        self
     }
 
     fn blend(&self, other: &ChopPose, k: f32) -> ChopPose {
@@ -191,16 +271,11 @@ static BONE_IDS: std::sync::LazyLock<[Option<usize>; 11]> =
     std::sync::LazyLock::new(|| BONE_NAMES.map(|name| find_bone(data::BONES, name)));
 
 /// The rig in the world: standing at `feet`, turned the way the head looks (`yaw`, as the
-/// player model's), the swing tipped a little up or down with where it looks (`pitch`) about
-/// the shoulders, so it can be aimed higher or lower on the trunk.
-pub fn to_world(feet: Vec3, yaw: f32, pitch: f32) -> Mat4 {
-    let pivot = Vec3::new(0.0, 22.0, 0.0);
+/// player model's; the legs are turned back by `Aim`).
+pub fn to_world(feet: Vec3, yaw: f32) -> Mat4 {
     Mat4::from_translation(feet)
         * Mat4::from_rotation_y(-yaw - std::f32::consts::FRAC_PI_2)
         * Mat4::from_scale(Vec3::splat(PX))
-        * Mat4::from_translation(pivot)
-        * Mat4::from_rotation_x(pitch.clamp(-1.0, 1.0) * 0.5)
-        * Mat4::from_translation(-pivot)
 }
 
 /// The held axe item (`emit_held`'s flat sprite, one block across, its handle corner to

@@ -96,7 +96,7 @@ impl Game {
         matches!(self.net, Some(Net::Client(_)))
     }
 
-    /// LAN player: sends a message to the host.
+    /// Sends a message to the server.
     pub(super) fn send(&self, m: Msg) {
         if let Some(Net::Client(c)) = &self.net {
             // The host checks what a player does against where they stand and what they
@@ -111,6 +111,9 @@ impl Game {
                     | Msg::Grenade { .. }
                     | Msg::DropItem { .. }
                     | Msg::SpawnMob { .. }
+                    | Msg::Notch { .. }
+                    | Msg::Stump { .. }
+                    | Msg::CutLog { .. }
             );
             if checked && self.player.spawned {
                 c.conn.send(&Msg::Pose(self.my_pose()));
@@ -220,6 +223,7 @@ impl Game {
             gun_extra: if self.holding_gun() { self.hand.gun_anim().pack_extra() } else { 0 },
             grenade: self.grenades.hold.map_or(0, |h| (h.t * 100.0).round().min(65000.0) as u16 + 1),
             rod: self.rod_anim(),
+            chop: self.chop,
             bench_hold: match (self.screen, self.cursor, self.bench_ui.hold_at) {
                 (Screen::Container(Container::GunStation(_)), Some(st), Some(at)) => Some((st, at)),
                 _ => None,
@@ -362,8 +366,14 @@ impl Game {
         }
         // Other players glide toward their latest pose.
         let k = crate::util::damp(15.0, dt);
+        let mut chops = Vec::new();
         for r in &mut self.remotes {
             let (p, t) = (&mut r.pose, r.target);
+            // (their axe biting in: heard where it is, about an arm ahead of them)
+            if let (Some(None), Some(Some(_))) = (p.chop.map(|s| s.hit), t.chop.map(|s| s.hit)) {
+                let ahead = Vec3::new(p.yaw.cos(), 0.0, p.yaw.sin());
+                chops.push(p.pos + Vec3::Y + ahead);
+            }
             p.pos = if p.pos.distance_squared(t.pos) > 64.0 {
                 t.pos
             } else {
@@ -396,6 +406,15 @@ impl Game {
                 (0, g) => g,
                 (g, n) => g.saturating_add((dt * 100.0).round() as u16).clamp(n.saturating_sub(10), n.saturating_add(10)),
             };
+            // (an axe's swing goes on smoothly between the poses; a new one starts over)
+            p.chop = match (p.chop, t.chop) {
+                (Some(mut s), Some(n)) if s.kind == n.kind && n.clock + 0.2 >= s.clock => {
+                    s.clock = (s.clock + dt).clamp(n.clock - 0.1, n.clock + 0.1);
+                    s.hit = n.hit;
+                    Some(s)
+                }
+                (_, n) => n,
+            };
             // (a fishing rod's swings go on smoothly between the poses, its bobber glides)
             p.rod = match (p.rod, t.rod) {
                 (Some(mut r), Some(n)) => {
@@ -418,6 +437,9 @@ impl Game {
                 }
                 (_, n) => n,
             };
+        }
+        for at in chops {
+            self.audio.play(crate::audio::Sound::AxeChop, Some(at), 1.0);
         }
     }
 
@@ -516,7 +538,7 @@ fn standing_pose(p: &Pose, time: f32, shot_at: Option<f32>) -> PlayerPose {
         book: None,
         grenade: (p.grenade > 0).then(|| (p.grenade - 1) as f32 / 100.0),
         rod: p.rod,
-        chop: None,
+        chop: p.chop,
     }
 }
 

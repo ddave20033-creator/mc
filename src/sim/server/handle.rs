@@ -160,13 +160,16 @@ impl Server {
             }
             Msg::Notch { p, notch: Some(n) } => {
                 let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
-                if near_block(p) && known_item(held) {
-                    self.player_notch(id, p, n, held, creative);
+                if near_block(p) && known_item(held) && self.world.is_loaded(p.x, p.z) {
+                    self.player_notch(id, p, n.angle, n.height, held, creative);
+                } else {
+                    // (their game made the cut already: as it really is)
+                    self.send_to(id, &Msg::Notch { p, notch: self.world.notch(p) });
                 }
             }
             Msg::Stump { p } => {
                 let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
-                if near_block(p) && known_item(held) {
+                if near_block(p) && known_item(held) && self.world.is_loaded(p.x, p.z) {
                     self.break_stump(id, p, held, creative);
                 }
             }

@@ -778,6 +778,43 @@ fn make(sound: Sound) -> Vec<f32> {
         }
         // The gear lever: a firm double click.
         Sound::GearClick => sequence(&[(clack(200, 2400.0, 0.02), 0.0, 1.0), (clack(201, 3000.0, 0.015), 0.035, 0.7)], 0.4),
+        // The blade biting in: a dull knock of the wood, the chip splitting off, a short hollow
+        // ring of the trunk.
+        Sound::AxeChop => {
+            let mut chip = noise(samples(0.04), 210);
+            for (i, x) in chip.iter_mut().enumerate() {
+                *x *= (-(i as f32) / FS / 0.008).exp();
+            }
+            bandpass(&mut chip, 1300.0, 0.8);
+            sequence(
+                &[
+                    (thud(211, 240.0, 0.09), 0.0, 1.3),
+                    (chip, 0.0, 0.9),
+                    (ring_of(&[(420.0, 0.5), (880.0, 0.25), (1370.0, 0.12)], 0.03), 0.0, 0.5),
+                ],
+                0.6,
+            )
+        }
+        // The fibres left in the cut giving way, faster and faster.
+        Sound::TreeCreak => {
+            let parts: Vec<(Vec<f32>, f32, f32)> = (0..16u32)
+                .map(|k| {
+                    let t = k as f32 * 0.05 - (k * k) as f32 * 0.0012;
+                    (clack(250 + k, 480.0 + k as f32 * 18.0, 0.035), t, 0.45 + 0.035 * k as f32)
+                })
+                .collect();
+            sequence(&parts, 0.4)
+        }
+        // The trunk hitting the ground (and bouncing once), its crown's leaves and twigs
+        // rustling down after.
+        Sound::TreeCrash => {
+            let mut rustle = noise(samples(0.8), 240);
+            for (i, x) in rustle.iter_mut().enumerate() {
+                *x *= (-(i as f32) / FS / 0.2).exp();
+            }
+            bandpass(&mut rustle, 2600.0, 0.7);
+            sequence(&[(thud(241, 110.0, 0.45), 0.0, 1.6), (thud(242, 180.0, 0.25), 0.08, 0.9), (rustle, 0.0, 0.7)], 0.8)
+        }
         Sound::Throw => {
             let n = samples(0.28);
             let mut w = noise(n, 45);

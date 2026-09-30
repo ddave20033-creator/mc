@@ -245,6 +245,30 @@ pub fn is_trunk(b: Block) -> bool {
     is_log(b) && !is_branch(b) && log_axis(b) == 1
 }
 
+/// A chop into a trunk: the cut `prev` (none yet: a new one) made `step` deeper where the axe
+/// bit in (`angle` round the trunk from its middle, `height` up the block): a chop a little
+/// off the cut moves it that way, weighed by how much is cut already.
+pub fn deepen(prev: Option<Notch>, angle: f32, height: f32, step: f32) -> Notch {
+    use std::f32::consts::{PI, TAU};
+    let height = height.clamp(0.25, 0.75);
+    let n = match prev {
+        Some(n) => {
+            let k = step / (n.depth + step);
+            let turn = (angle - n.angle + PI).rem_euclid(TAU) - PI;
+            Notch { angle: n.angle + turn * k, height: n.height + (height - n.height) * k, ..n }
+        }
+        None => Notch { angle, height, depth: 0.0, felled: false },
+    };
+    Notch { depth: (n.depth + step).min(FELL_DEPTH), ..n }
+}
+
+/// How much deeper a chop with `held` cuts (in creative a few chops fell any tree; not an
+/// axe: none).
+pub fn chop_step(held: ItemId, creative: bool) -> f32 {
+    let chops = if creative { 4.0 } else { chops_needed(held).unwrap_or(f32::INFINITY) };
+    FELL_DEPTH / chops
+}
+
 /// Chops it takes an axe to fell a tree (None: not an axe): each chop cuts this much of the
 /// way through, a weak axe little, a strong one more.
 pub fn chops_needed(held: ItemId) -> Option<f32> {
@@ -406,6 +430,18 @@ impl LyingLog {
         } else {
             n - k..n
         }
+    }
+
+    /// A stroke from that end: the pieces it takes off go (the trunk now starts past them,
+    /// cut from its base); they and where they lay are returned.
+    pub fn cut(&mut self, from_base: bool) -> Vec<(Block, Vec3)> {
+        let taken = self.taken(from_base);
+        let at: Vec<Vec3> = taken.clone().map(|j| self.piece_middle(j)).collect();
+        let off: Vec<Block> = self.pieces.drain(taken.clone()).collect();
+        if taken.start == 0 {
+            self.base += self.dir * taken.end as f32;
+        }
+        off.into_iter().zip(at).collect()
     }
 }
 

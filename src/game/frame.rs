@@ -399,6 +399,10 @@ impl Game {
             if let Some(control) = player {
                 self.tick_player(control);
             }
+            if world {
+                // (in step with the server's ticks)
+                self.fall_trees_here(crate::sim::clock::TICK_SECS);
+            }
         }
         self.between = self.ticks.between(now);
         if let Some(control) = player {
@@ -836,7 +840,7 @@ impl Game {
             use crate::model::chop_rig::{emit, Parts};
             let light = crate::util::vertex_light(player_sky, player_blk);
             let fl = crate::world::mesh::flags::ENTITY;
-            emit(&mut scene.particles, self.chop_world(), &swing.pose(), Parts::Arms, self.held(), self.effective_skin(), [255; 3], 0, 0.0, light, fl);
+            emit(&mut scene.particles, self.chop_world(), &swing.pose().aimed(self.chop_aim()), Parts::Arms, self.held(), self.effective_skin(), [255; 3], 0, 0.0, light, fl);
         }
         if own_view && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol && !book))) {
             let f = look_dir(self.yaw, self.pitch);

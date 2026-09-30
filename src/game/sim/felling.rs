@@ -14,9 +14,8 @@
 
 use crate::game::*;
 use crate::item::{inventory, tool_of};
-use crate::model::chop_rig::{self, ChopPose, Kind, Swing, EDGE};
+use crate::model::chop_rig::{self, Aim, ChopPose, Kind, Swing, EDGE};
 use crate::sim::felling::*;
-use crate::world::mesh::Notch;
 
 /// What the axe is stuck in, to come apart when it is pulled out: a stump, or a lying trunk
 /// (which, and where it is cut).
@@ -44,14 +43,19 @@ impl Game {
         }
     }
 
-    /// Where the chop's rig is in the world (as the player model draws it).
+    /// Where the chop's rig is in the world (as the player model draws it, where the camera
+    /// is).
     pub(in crate::game) fn chop_world(&self) -> Mat4 {
-        chop_rig::to_world(self.player.pos, self.visual_head_yaw(), self.pitch)
+        chop_rig::to_world(self.player.drawn_pos(self.between), self.visual_head_yaw())
+    }
+
+    /// How the swing is aimed (as the player model draws it).
+    pub(in crate::game) fn chop_aim(&self) -> Aim {
+        Aim::new(self.pitch, self.visual_head_yaw(), self.body_yaw)
     }
 
     /// The trunk the player is aiming an axe at, if any, and the swing it takes: a standing
-    /// trunk is chopped level, a stump struck from above (felling is the host's; a LAN
-    /// client mines trunks like any block).
+    /// trunk is chopped level, a stump struck from above.
     fn chop_target(&self) -> Option<Kind> {
         chops_needed(self.held())?;
         // (a lying trunk is cut up struck from above too)
@@ -70,12 +74,12 @@ impl Game {
     /// animation's times `t0` and `t1`: the time, what it came into and the point. Struck
     /// down, the ground stops it too.
     fn edge_contact(&self, kind: Kind, t0: f32, t1: f32) -> Option<(f32, Contact, Vec3)> {
-        let world = self.chop_world();
+        let (world, aim) = (self.chop_world(), self.chop_aim());
         let w = &self.terrain.world;
         let steps = ((t1 - t0) / 0.004).ceil().max(1.0) as usize;
         for i in 1..=steps {
             let t = t0 + (t1 - t0) * i as f32 / steps as f32;
-            let axe = world * ChopPose::at(kind, t).axe();
+            let axe = world * ChopPose::at(kind, t).aimed(aim).axe();
             for e in EDGE {
                 let q = axe.transform_point3(e);
                 if let Some(p) = in_trunk(w, q) {
@@ -97,7 +101,8 @@ impl Game {
 
     /// Chopping with an axe, instead of mining: a swing at a time while the button is held,
     /// the edge followed along its path; where it meets a trunk it bites in. True while it is
-    /// going on (the normal mining is left out, and the hand is drawn by the rig).
+    /// going on (the normal mining is left out, and the hand is drawn by the rig; after the
+    /// last swing, until the axe has settled back in the hands).
     pub(in crate::game) fn update_chopping(&mut self, active: bool, dt: f32) -> bool {
         if let Some(mut sw) = self.chop {
             let times = sw.kind.times();
@@ -123,17 +128,19 @@ impl Game {
             }
             self.chop = (!sw.done()).then_some(sw);
         }
-        if self.chop.is_none() {
+        // (between swings: a swing over is only settling back)
+        let idle = self.chop.is_none_or(|s| s.over());
+        if idle {
             self.come_apart();
             self.log_cut = None;
         }
         let target = if active { self.chop_target() } else { None };
-        if self.chop.is_none() && (target.is_none() || !self.input.left_down) {
-            self.hand.hidden = false;
-            return target.is_some();
+        if idle && (target.is_none() || !self.input.left_down) {
+            self.hand.hidden = self.chop.is_some();
+            return target.is_some() || self.chop.is_some();
         }
         self.mining = None;
-        if let (None, Some(kind)) = (self.chop, target) {
+        if let (true, Some(kind)) = (idle, target) {
             self.chop = Some(Swing { kind, ..Swing::default() });
             self.log_cut = self.log_aim.map(|a| (a.id, a.from_base));
         }
@@ -169,8 +176,10 @@ impl Game {
         self.particles.impact(&self.terrain.world, point, Vec3::Y, b, tint);
     }
 
-    /// Chips of the trunk at `p` flying out at `at` (the way `out`).
+    /// The axe bit into the trunk at `p`: its knock, and chips flying out at `at` (the way
+    /// `out`).
     pub(in crate::game) fn chips(&mut self, p: IVec3, b: Block, at: Vec3, out: Vec3) {
+        self.audio.play(crate::audio::Sound::AxeChop, Some(at), 1.0);
         let tint = self.block_tint(p, b);
         for _ in 0..3 {
             self.particles.impact(&self.terrain.world, at, out, b, tint);
@@ -207,43 +216,43 @@ impl Game {
             return;
         }
         let creative = self.creative();
-        let chops = if creative { 4.0 } else { chops_needed(self.held()).unwrap_or(10.0) };
         let middle = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
         // Where it bit in: round the trunk from its middle toward the point hit (or the
         // player, hit straight on), and how high.
         let side = Vec2::new(point.x - middle.x, point.z - middle.z);
         let side = if side.length() > 0.05 { side } else { Vec2::new(self.player.pos.x - middle.x, self.player.pos.z - middle.z) };
-        let (angle, height) = (side.y.atan2(side.x), (point.y - p.y as f32).clamp(0.25, 0.75));
-        let step = FELL_DEPTH / chops;
-        let notch = match self.terrain.world.notch(p) {
-            Some(n) => {
-                let k = step / (n.depth + step);
-                let turn = (angle - n.angle + PI).rem_euclid(TAU) - PI;
-                Notch { angle: n.angle + turn * k, height: n.height + (height - n.height) * k, ..n }
-            }
-            None => Notch { angle, height, depth: 0.0, felled: false },
-        };
-        let depth = notch.depth + step;
+        let (angle, height) = (side.y.atan2(side.x), point.y - p.y as f32);
+        let before = self.terrain.world.notch(p);
+        let notch = deepen(before, angle, height, chop_step(self.held(), creative));
         // Chips out of the cut, toward the player.
         let out = Vec3::new(notch.angle.cos(), 0.0, notch.angle.sin());
-        let r = log_radius(b) * (1.0 - notch.depth * 1.6).max(0.2);
+        let r = log_radius(b) * (1.0 - before.map_or(0.0, |n| n.depth) * 1.6).max(0.2);
         let at = middle + out * r + Vec3::Y * notch.height;
         self.chips(p, b, at, out);
         if !creative {
             self.wear_axe(crate::entity::survival::cost::MINE * 0.5, p);
         }
-        let notch = Notch { depth, ..notch };
-        // The server fells it (cut through, it answers with the stump and the tree
-        // falling); meanwhile the cut shows.
+        // The server cuts it (and fells it, cut through: it answers with the stump and the
+        // tree falling); meanwhile the cut shows as it will be.
         self.terrain.world.set_notch(p, Some(notch));
         self.send(crate::net::Msg::Notch { p, notch: Some(notch) });
         self.terrain.block_changed(p, false);
     }
 
-    /// The server says a falling tree is down: it breaks up in a burst of bark and leaves.
+    /// The server says a tree was cut through: it creaks and starts to go over.
+    pub(in crate::game) fn tree_falls(&mut self, t: FallingTree) {
+        self.audio.play(crate::audio::Sound::TreeCreak, Some(t.stump), 1.0);
+        self.level.falling_trees.retain(|f| f.id != t.id);
+        self.level.falling_trees.push(t);
+    }
+
+    /// The server says a falling tree is down: it crashes and breaks up in a burst of bark
+    /// and leaves.
     pub(in crate::game) fn tree_landed(&mut self, id: u32) {
         let Some(i) = self.level.falling_trees.iter().position(|t| t.id == id) else { return };
         let t = self.level.falling_trees.swap_remove(i);
+        let middle = t.at(&t.turn(), Vec3::new(0.0, t.height * 0.5, 0.0));
+        self.audio.play(crate::audio::Sound::TreeCrash, Some(middle), 1.0);
         self.crash_fx(&t);
     }
 
@@ -259,16 +268,15 @@ impl Game {
         }
     }
 
-    /// A LAN player's (or the server's player's) copies of the falling trees go over, as the
-    /// server's do, until it says they are down.
+    /// A tick of this game's copies of the falling trees: they go over as the server's do
+    /// (the same steps, through the same world), until it says they are down.
     pub(in crate::game) fn fall_trees_here(&mut self, dt: f32) {
         for t in &mut self.level.falling_trees {
             let angle = t.angle;
             if t.step(dt, &self.terrain.world) {
                 // (it waits lying there for the word)
-                (t.angle, t.speed) = (angle, 0.0);
+                (t.angle, t.prev_angle, t.speed) = (angle, angle, 0.0);
             }
-            t.prev_angle = t.angle;
         }
     }
 

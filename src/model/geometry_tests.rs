@@ -352,7 +352,7 @@ fn groups() -> Vec<(&'static str, u64)> {
 const EXPECTED: [(&str, u64); 9] = [
     ("items", 0xcdebd0935725c43b),
     ("logs", 0x0660b16dd6a12110),
-    ("players", 0xee6d4c5994db6f33),
+    ("players", 0xe3ca5a17bd4b7933),
     ("hands", 0xc61a12322bfd8c68),
     ("block_entities", 0xc217f7d52ef0b0e4),
     ("mobs", 0x1083b750e4ad0fa2),

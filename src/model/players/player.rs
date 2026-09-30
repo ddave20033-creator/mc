@@ -693,10 +693,12 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         // Chopping: the whole player as the chop's rig has it (seen from its own eyes, the
         // body under the arms: the first-person view draws the arms and the axe from the
         // same rig, where they are in the world).
-        use crate::model::chop_rig::{emit, to_world, Parts};
+        use crate::model::chop_rig::{emit, to_world, Aim, Parts};
         let parts = if p.first_person { Parts::Body } else { Parts::All };
         let shake = if p.burning { flail(p.time) } else { 0.0 };
-        emit(out, to_world(p.pos, p.head_yaw, p.pitch), &swing.pose(), parts, p.held, p.skin, tint, p.armor, shake, light, fl);
+        let aim = Aim::new(p.pitch, p.head_yaw, p.body_yaw);
+        let pose = swing.pose().aimed(aim);
+        emit(out, to_world(p.pos, p.head_yaw), &pose, parts, p.held, p.skin, tint, p.armor, shake, light, fl);
         return;
     }
     let root = model_root(p);

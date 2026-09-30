@@ -108,6 +108,10 @@ impl Game {
         self.hand.blocking = self.blocking;
         self.update_using(dt, control);
         if self.screen == Screen::Dead {
+            // (a swing does not go on after death)
+            self.chop = None;
+            self.struck = None;
+            self.hand.hidden = false;
             return;
         }
         let speed = self.player.horizontal_speed();
@@ -286,6 +290,9 @@ impl Game {
         if self.holding_gun() {
             // Turned with the look at once, all of it (the torso never twisted off the legs).
             self.body_yaw = self.yaw;
+        } else if self.chop.is_some() {
+            // Chopping: the feet step round after the swing (the upper body turns at once).
+            self.body_yaw += diff * (crate::util::damp(8.0, dt));
         } else if speed > 0.1 {
             self.body_yaw += diff * (crate::util::damp(10.0, dt));
         } else if !orbiting && diff.abs() > lag {

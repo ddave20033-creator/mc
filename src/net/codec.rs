@@ -151,6 +151,14 @@ impl W {
             }
             None => self.bool(false),
         }
+        match p.chop {
+            Some(s) => {
+                self.u8(1 + s.kind as u8);
+                self.f32(s.clock);
+                self.f32(s.hit.unwrap_or(-1.0));
+            }
+            None => self.u8(0),
+        }
     }
     fn bench_item(&mut self, i: &BenchItem) {
         self.u16(i.id);
@@ -316,7 +324,19 @@ impl R<'_> {
             bench_hold: if self.bool()? { Some((self.stack()?, self.vec3()?)) } else { None },
             grenade: self.u16()?,
             rod: if self.bool()? { Some(self.rod()?) } else { None },
+            chop: self.swing()?,
         })
+    }
+    fn swing(&mut self) -> Option<Option<crate::model::chop_rig::Swing>> {
+        use crate::model::chop_rig::{Kind, Swing};
+        let kind = match self.u8()? {
+            0 => return Some(None),
+            1 => Kind::Chop,
+            _ => Kind::Stump,
+        };
+        let clock = self.f32()?;
+        let hit = self.f32()?;
+        Some(Some(Swing { kind, clock, hit: (hit >= 0.0).then_some(hit) }))
     }
     fn rod(&mut self) -> Option<crate::model::angler::RodAnim> {
         let time = |v: f32| (v >= 0.0).then_some(v);
@@ -1087,6 +1107,7 @@ mod tests {
                 lift: None,
                 bobber: Some(Vec3::new(3.0, 60.5, -8.0)),
             }),
+            chop: Some(crate::model::chop_rig::Swing { kind: crate::model::chop_rig::Kind::Stump, clock: 0.4, hit: Some(0.38) }),
             ..Default::default()
         }));
         roundtrip(Msg::Grenade {

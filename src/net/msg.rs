@@ -68,6 +68,8 @@ pub struct Pose {
     pub grenade: u16,
     /// Holding a fishing rod: what it is doing, and where its bobber is.
     pub rod: Option<crate::model::angler::RodAnim>,
+    /// Chopping with an axe: the swing.
+    pub chop: Option<crate::model::chop_rig::Swing>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

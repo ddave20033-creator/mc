@@ -93,9 +93,14 @@ pub enum Sound {
     FishSplash,
     FishLand,
     GearClick,
+    /// Felling: an axe biting into wood, a cut-through tree creaking as it starts to go
+    /// over, and its crash to the ground (the thump, its leaves rustling).
+    AxeChop,
+    TreeCreak,
+    TreeCrash,
 }
 
-pub const SOUNDS: [Sound; 47] = [
+pub const SOUNDS: [Sound; 50] = [
     Sound::ShotPistol,
     Sound::ShotRifle,
     Sound::ShotSilenced,
@@ -143,6 +148,9 @@ pub const SOUNDS: [Sound; 47] = [
     Sound::FishSplash,
     Sound::FishLand,
     Sound::GearClick,
+    Sound::AxeChop,
+    Sound::TreeCreak,
+    Sound::TreeCrash,
 ];
 
 impl Sound {
@@ -161,6 +169,7 @@ impl Sound {
             | Sound::FishSplash
             | Sound::FishLand
             | Sound::GearClick => Group::Other,
+            Sound::AxeChop | Sound::TreeCreak | Sound::TreeCrash => Group::Other,
             _ => Group::Weapons,
         }
     }
@@ -214,6 +223,9 @@ impl Sound {
             // (a bobber far out on the lake must still be heard)
             Sound::BobberPlop | Sound::FishNibble | Sound::FishBite | Sound::FishSplash | Sound::FishLand => (6.0, 80.0),
             Sound::ReelClick | Sound::GearClick | Sound::LineZip | Sound::RodCreak => (1.0, 16.0),
+            Sound::AxeChop => (2.0, 40.0),
+            Sound::TreeCreak => (3.0, 40.0),
+            Sound::TreeCrash => (6.0, 90.0),
             _ => (1.5, 20.0),
         }
     }

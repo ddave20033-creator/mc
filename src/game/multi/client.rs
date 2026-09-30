@@ -261,10 +261,7 @@ impl Game {
                 self.terrain.world.set_notch(p, notch);
                 self.terrain.block_changed(p, false);
             }
-            Msg::TreeFalls(t) => {
-                self.level.falling_trees.retain(|f| f.id != t.id);
-                self.level.falling_trees.push(*t);
-            }
+            Msg::TreeFalls(t) => self.tree_falls(*t),
             Msg::TreeLands { id } => self.tree_landed(id),
             Msg::Collect { item, by } => {
                 let now = self.time;
@@ -505,7 +502,6 @@ impl Game {
 
     /// LAN player's `update_world`: things move toward what the host sent.
     pub(in crate::game) fn client_world(&mut self, dt: f32) {
-        self.fall_trees_here(dt);
         for m in &mut self.level.mobs {
             m.follow(dt);
             if let Some(s) = m.sound(dt) {

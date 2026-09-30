@@ -75,34 +75,18 @@ impl Game {
     /// worn by the stroke.
     pub(in crate::game) fn cut_log(&mut self, id: u32, from_base: bool) {
         let Some(i) = self.log_index(id) else { return };
-        // The server cuts it for real (and drops the logs); here it shows at once.
+        // The server cuts it for real (drops the logs, and says how long the next piece is:
+        // `Msg::Logs`); here it shows at once.
         self.send(crate::net::Msg::CutLog { id, from_base });
-        let next = 1 + (self.random() * 3.0) as usize;
-        let l = &mut self.level.lying_logs[i];
-        let taken = l.taken(from_base);
-        let at: Vec<Vec3> = taken.clone().map(|j| l.piece_middle(j)).collect();
-        let off: Vec<Block> = l.pieces.drain(taken.clone()).collect();
-        if taken.start == 0 {
-            l.base += l.dir * taken.end as f32;
-        }
-        l.next = next;
+        let off = self.level.lying_logs[i].cut(from_base);
         if self.level.lying_logs[i].pieces.is_empty() {
             self.level.lying_logs.remove(i);
         }
-        let held = self.held();
-        let creative = self.creative();
-        for (&b, &p) in off.iter().zip(&at) {
-            let q = p.floor().as_ivec3();
-            self.particles.burst(&self.terrain.world, q, b, 8, [255; 3]);
-            if !creative && !self.is_client() {
-                let r = self.random();
-                for s in crate::item::drops(b, held, r) {
-                    self.spawn_drop(p, s);
-                }
-            }
+        for &(b, p) in &off {
+            self.particles.burst(&self.terrain.world, p.floor().as_ivec3(), b, 8, [255; 3]);
         }
-        if !creative {
-            self.wear_axe(crate::entity::survival::cost::MINE, at[0].floor().as_ivec3());
+        if let (false, Some(&(_, at))) = (self.creative(), off.first()) {
+            self.wear_axe(crate::entity::survival::cost::MINE, at.floor().as_ivec3());
         }
     }
 

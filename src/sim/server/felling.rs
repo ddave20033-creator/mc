@@ -1,6 +1,7 @@
-//! Felling on the server: a player's axe cuts into a trunk (their game works out the cut and
-//! sends it); cut through, the tree falls over here and in everyone's game, and where it
-//! lands its trunk lies, to be cut up; a stump struck comes apart.
+//! Felling on the server: a player's axe cuts into a trunk (their game finds where it bit in;
+//! how deep it cuts is worked out here, `sim::felling::deepen`); cut through, the tree falls
+//! over here and in everyone's game, and where it lands its trunk lies, to be cut up; a stump
+//! struck comes apart.
 
 use super::Server;
 use crate::item::{ItemId, Stack, STICK};
@@ -11,24 +12,29 @@ use crate::world::*;
 use glam::{IVec3, Vec3};
 
 impl Server {
-    /// Player `id` cut into the trunk at `p` (with `held`, in creative or not): the cut is
-    /// kept and shown to the others; deep enough, the tree falls.
-    pub(super) fn player_notch(&mut self, id: u8, p: IVec3, notch: Notch, held: ItemId, creative: bool) {
-        if !is_trunk(self.world.geti(p)) || self.world.notch(p).is_some_and(|n| n.felled) {
-            self.send_to(id, &Msg::Notch { p, notch: self.world.notch(p) });
+    /// Player `id` chopped into the trunk at `p` (with `held`, in creative or not) where the
+    /// axe bit in (`angle` round it, `height` up the block): the cut goes deeper and is shown
+    /// to everyone (the chopper's game guessed it: this is how it really is); cut through,
+    /// the tree falls. Chops come no faster than a swing takes.
+    pub(super) fn player_notch(&mut self, id: u8, p: IVec3, angle: f32, height: f32, held: ItemId, creative: bool) {
+        const SWING: f64 = 0.3;
+        let now = self.time;
+        let rested = self.peer(id).is_some_and(|peer| now - peer.last_chop >= SWING);
+        let step = chop_step(held, creative);
+        let current = self.world.notch(p);
+        if !is_trunk(self.world.geti(p)) || current.is_some_and(|n| n.felled) || !rested || step <= 0.0 || !angle.is_finite() {
+            self.send_to(id, &Msg::Notch { p, notch: current });
             return;
         }
-        let notch = Notch {
-            depth: notch.depth.clamp(0.0, FELL_DEPTH),
-            height: notch.height.clamp(0.25, 0.75),
-            felled: false,
-            ..notch
-        };
+        if let Some(peer) = self.peer(id) {
+            peer.last_chop = now;
+        }
+        let notch = deepen(current, angle, height, step);
         if notch.depth >= FELL_DEPTH - 1e-3 {
             self.fell_tree(p, notch, held, creative);
         } else {
             self.world.set_notch(p, Some(notch));
-            self.broadcast(&Msg::Notch { p, notch: Some(notch) }, Some(id));
+            self.broadcast(&Msg::Notch { p, notch: Some(notch) }, None);
         }
     }
 
@@ -52,6 +58,9 @@ impl Server {
         let stump = Notch { felled: true, ..notch };
         self.world.set_notch(p, Some(stump));
         self.broadcast(&Msg::Notch { p, notch: Some(stump) }, None);
+        // (everyone gets the tree gone from where it stood first: their copy falls through
+        // the world as it is now, not into its own trunk)
+        self.send_block_log();
         self.level.next_tree_id += 1;
         tree.id = self.level.next_tree_id;
         self.broadcast(&Msg::TreeFalls(Box::new(tree.clone())), None);
@@ -171,17 +180,12 @@ impl Server {
         }
         let next = 1 + (self.random() * 3.0) as usize;
         let l = &mut self.level.lying_logs[i];
-        let taken = l.taken(from_base);
-        let at: Vec<Vec3> = taken.clone().map(|j| l.piece_middle(j)).collect();
-        let off: Vec<Block> = l.pieces.drain(taken.clone()).collect();
-        if taken.start == 0 {
-            l.base += l.dir * taken.end as f32;
-        }
+        let off = l.cut(from_base);
         l.next = next;
         if self.level.lying_logs[i].pieces.is_empty() {
             self.level.lying_logs.remove(i);
         }
-        for (&b, &p) in off.iter().zip(&at) {
+        for &(b, p) in &off {
             self.broadcast(&Msg::BreakFx { p: p.floor().as_ivec3(), block: b }, Some(id));
             if !creative {
                 let r = self.random();
