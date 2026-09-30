@@ -639,8 +639,8 @@ fn rasterize(base: &[u8], verts: &[crate::world::mesh::Vertex], size: usize) -> 
     let light = Vec3::new(-0.45, 0.75, 0.5).normalize();
     let layer_bytes = TILE * TILE * 4;
     for tri in verts.chunks_exact(3) {
-        let p: Vec<Vec3> = tri.iter().map(|v| to_px(Vec3::from(v.pos))).collect();
-        let world: Vec<Vec3> = tri.iter().map(|v| Vec3::from(v.pos)).collect();
+        let world: [Vec3; 3] = std::array::from_fn(|i| Vec3::from(tri[i].pos));
+        let p = world.map(to_px);
         let n = (world[1] - world[0]).cross(world[2] - world[0]).normalize_or_zero();
         // Faces seen from behind are not drawn (the cubes are closed).
         let n = if n.z < 0.0 { continue } else { n };
