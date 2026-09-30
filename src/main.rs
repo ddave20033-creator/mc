@@ -140,7 +140,18 @@ impl ApplicationHandler for App {
             }
             return;
         }
-        g.window.request_redraw();
+        // With a frame limit: wait for the next frame's time taking in input meanwhile; the
+        // last moment `frame` spins itself, to start it on time.
+        let early = std::time::Duration::from_micros(1500);
+        match g.next_frame_due() {
+            Some(t) if t > std::time::Instant::now() + early => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(t - early));
+            }
+            _ => {
+                event_loop.set_control_flow(ControlFlow::Poll);
+                g.window.request_redraw();
+            }
+        }
     }
 }
 

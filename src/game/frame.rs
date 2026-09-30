@@ -176,6 +176,13 @@ impl Game {
         });
     }
 
+    /// When the next frame may start (with a frame limit): till shortly before then, the
+    /// event loop waits and takes in input, so the frame is drawn with the latest of it (not
+    /// input read before a long sleep).
+    pub fn next_frame_due(&self) -> Option<Instant> {
+        self.clock.next_frame.filter(|_| self.settings.fps_limit != 0 && self.bench.is_none())
+    }
+
     pub fn frame(&mut self) {
         self.limit_fps();
         let now = Instant::now();
