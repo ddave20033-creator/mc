@@ -350,7 +350,7 @@ impl HandAnim {
         } else {
             0.0
         };
-        self.bob += (target - self.bob) * (1.0 - (-8.0 * dt).exp());
+        self.bob += (target - self.bob) * (crate::util::damp(8.0, dt));
         self.walk_dist += walk_speed * dt * 0.6;
         // Turning the view: the item lags behind and rolls into the turn, swinging back past
         // rest when the turning stops.
@@ -366,7 +366,7 @@ impl HandAnim {
         self.sprint = self.poses.x.x.max(0.0);
         self.crouch = self.poses.x.y.max(0.0);
         let target = if on_ground { (walk_speed / 4.3).min(1.4) } else { 0.0 };
-        self.stride += (target - self.stride) * (1.0 - (-8.0 * dt).exp());
+        self.stride += (target - self.stride) * (crate::util::damp(8.0, dt));
         let target = self.motion.clamp(Vec3::new(-6.0, -9.0, -6.0), Vec3::new(6.0, 9.0, 6.0));
         self.lag.step(target, 2.4, 0.42, dt);
     }

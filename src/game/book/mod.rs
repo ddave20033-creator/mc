@@ -287,13 +287,13 @@ impl Game {
         } else {
             0.0
         };
-        self.book.read += (target - self.book.read) * (1.0 - (-9.0 * dt).exp());
+        self.book.read += (target - self.book.read) * (crate::util::damp(9.0, dt));
         if !holding {
             self.book.showing = false;
             self.book.right_held = None;
         }
         let show = if self.book.showing { 1.0 } else { 0.0 };
-        self.book.show += (show - self.book.show) * (1.0 - (-8.0 * dt).exp());
+        self.book.show += (show - self.book.show) * (crate::util::damp(8.0, dt));
         if let Some(t) = &mut self.book.turn {
             t.t += dt;
             if t.t >= t.time {

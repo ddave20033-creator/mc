@@ -446,7 +446,7 @@ impl Game {
             None => {}
         }
         // Other players glide toward their latest pose.
-        let k = 1.0 - (-15.0 * dt).exp();
+        let k = crate::util::damp(15.0, dt);
         for r in &mut self.remotes {
             let (p, t) = (&mut r.pose, r.target);
             p.pos = if p.pos.distance_squared(t.pos) > 64.0 {

@@ -406,7 +406,7 @@ impl Game {
             }
         }
         if let Some(Net::Client(c)) = &self.net {
-            let k = 1.0 - (-15.0 * dt).exp();
+            let k = crate::util::damp(15.0, dt);
             for it in &mut self.level.items {
                 if let Some(&target) = c.item_targets.get(&it.id) {
                     it.pos = it.pos.lerp(target, k);

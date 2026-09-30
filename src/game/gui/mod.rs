@@ -202,7 +202,7 @@ impl Game {
                 // The wheel moves the target one row per notch; the list glides there.
                 self.inv_ui.creative_scroll =
                     (self.inv_ui.creative_scroll - self.ui.scroll).clamp(0.0, max_scroll);
-                let ease = 1.0 - (-18.0 * self.ui.dt).exp();
+                let ease = crate::util::damp(18.0, self.ui.dt);
                 self.inv_ui.creative_scroll_anim +=
                     (self.inv_ui.creative_scroll - self.inv_ui.creative_scroll_anim) * ease;
                 if (self.inv_ui.creative_scroll - self.inv_ui.creative_scroll_anim).abs() < 0.002 {

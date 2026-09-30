@@ -182,7 +182,7 @@ impl Game {
         self.player
             .update(dt, &self.terrain.world, self.yaw, &input);
         self.body_yaw = self.yaw;
-        self.limb_amount += (0.0 - self.limb_amount) * (1.0 - (-10.0 * dt).exp());
+        self.limb_amount += (0.0 - self.limb_amount) * (crate::util::damp(10.0, dt));
     }
 
     /// Instead of the hotbar: what spectator mode is doing and which keys work.

@@ -195,9 +195,9 @@ impl Fight {
             // (how fast it goes over to the new move: some are sudden, some gradual)
             self.snap = 2.0 + 8.0 * r();
         }
-        self.drift += (self.drift_to - self.drift) * (1.0 - (-self.snap * dt).exp());
+        self.drift += (self.drift_to - self.drift) * (crate::util::damp(self.snap, dt));
         self.pull = (0.5 + self.drift).clamp(0.05, 2.0);
-        self.side += (self.side_to - self.side) * (1.0 - (-1.5 * dt).exp());
+        self.side += (self.side_to - self.side) * (crate::util::damp(1.5, dt));
         // The wheel: its pace, lately.
         let k = 1.0 - (-dt / 0.3).exp();
         self.crank_rate += (notches as f32 / dt.max(1e-4) - self.crank_rate) * k;
@@ -214,7 +214,7 @@ impl Fight {
         };
         let before = self.dist;
         self.reel_left += reeled;
-        let now = self.reel_left * (1.0 - (-12.0 * dt).exp());
+        let now = self.reel_left * (crate::util::damp(12.0, dt));
         self.reel_left -= now;
         self.dist -= now;
         // Running, it takes line; coming in, it gives it.
@@ -547,15 +547,15 @@ impl Game {
             Some(Line { bite: Bite::Strike(_), state: Bobber::Floating, .. }) => (false, 0.3),
             _ => (false, 0.0),
         };
-        f.fight_k += ((fighting as i32 as f32) - f.fight_k) * (1.0 - (-4.0 * dt).exp());
-        f.tension += (want - f.tension) * (1.0 - (-10.0 * dt).exp());
+        f.fight_k += ((fighting as i32 as f32) - f.fight_k) * (crate::util::damp(4.0, dt));
+        f.tension += (want - f.tension) * (crate::util::damp(10.0, dt));
         self.smooth_fishing(dt);
     }
 
     /// What is drawn follows the game smoothly: the reel's handle, the bobber, the bobber
     /// swinging from the tip, and the HUD's values.
     fn smooth_fishing(&mut self, dt: f32) {
-        let ease = |rate: f32| 1.0 - (-rate * dt).exp();
+        let ease = |rate: f32| crate::util::damp(rate, dt);
         let gear = self.rod_gear() as f32;
         let tip = self.rod_tip();
         let f = &mut self.fishing;
@@ -776,7 +776,7 @@ impl Game {
             let to = tip - line.bobber;
             let d = to.length();
             if d > line.length + 0.05 {
-                let step = ((d - line.length) * (1.0 - (-7.0 * dt).exp())).min(9.0 * dt);
+                let step = ((d - line.length) * (crate::util::damp(7.0, dt))).min(9.0 * dt);
                 let flat = Vec3::new(to.x, 0.0, to.z);
                 let mut q = line.bobber + flat.normalize_or_zero() * step.min(flat.length());
                 let world = &self.terrain.world;
@@ -863,7 +863,7 @@ impl Game {
             _ => 0.0,
         };
         // A twitch jumps down at once and floats back up.
-        line.dip_now += (line.dip - line.dip_now) * (1.0 - (-6.0 * dt).exp());
+        line.dip_now += (line.dip - line.dip_now) * (crate::util::damp(6.0, dt));
 
         // The fight.
         if let Some(mut fight) = line.fight.take() {

@@ -305,7 +305,7 @@ impl SmoothSwing {
         let hand_step = pivot - previous;
         let speed = Vec2::new(hand_step.x, hand_step.z) / dt;
         let speed = speed.clamp_length_max(6.0);
-        self.hand_vel += (speed - self.hand_vel) * (1.0 - (-12.0 * dt).exp());
+        self.hand_vel += (speed - self.hand_vel) * (crate::util::damp(12.0, dt));
 
         let max_lean = style.max_tilt.tan();
         let target = (-self.hand_vel * 0.032).clamp_length_max(max_lean);

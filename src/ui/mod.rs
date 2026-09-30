@@ -857,7 +857,7 @@ impl Ui {
     // ---------- widgets ----------
 
     fn anim(&mut self, id: u64, on: bool) -> f32 {
-        let k = 1.0 - (-self.dt * 16.0).exp();
+        let k = crate::util::damp(self.dt, 16.0);
         let v = self.anims.entry(id).or_insert(0.0);
         *v += ((on as i32 as f32) - *v) * k;
         *v

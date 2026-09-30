@@ -603,7 +603,7 @@ impl Mob {
         let Some(s) = self.net_target else {
             return;
         };
-        let k = 1.0 - (-15.0 * dt).exp();
+        let k = crate::util::damp(15.0, dt);
         self.pos = if self.pos.distance_squared(s.pos) > 16.0 {
             s.pos
         } else {
@@ -1109,14 +1109,14 @@ impl Mob {
             // Minecraft's air drag: 0.91 per tick.
             1.9
         };
-        let k = 1.0 - (-grip * dt).exp();
+        let k = crate::util::damp(grip, dt);
         self.vel.x += (want.x - self.vel.x) * k;
         self.vel.z += (want.z - self.vel.z) * k;
 
         if self.in_water {
             // Floats up to the surface and bobs there (Minecraft's FloatGoal).
             let target_up = if self.alive() { 2.0 } else { 0.5 };
-            self.vel.y += (target_up - self.vel.y) * (1.0 - (-3.0 * dt).exp());
+            self.vel.y += (target_up - self.vel.y) * (crate::util::damp(3.0, dt));
             self.fall_peak = self.pos.y;
         } else if in_lava {
             self.vel.y = (self.vel.y - 8.0 * dt).max(-1.5);
@@ -1220,7 +1220,7 @@ impl Mob {
         };
         if self.alive() {
             self.head_yaw = turn(self.head_yaw, want_yaw, 8.0 * dt);
-            self.pitch += (want_pitch.clamp(-0.8, 0.8) - self.pitch) * (1.0 - (-8.0 * dt).exp());
+            self.pitch += (want_pitch.clamp(-0.8, 0.8) - self.pitch) * (crate::util::damp(8.0, dt));
         }
         let rel = wrap_angle(self.head_yaw - self.body_yaw);
         if moving {
@@ -1241,7 +1241,7 @@ impl Mob {
         // Leg swing follows horizontal movement.
         let speed = if self.alive() { hvel.length() } else { 0.0 };
         let target = (speed * 0.25).min(1.0);
-        self.limb_amount += (target - self.limb_amount) * (1.0 - (-10.0 * dt).exp());
+        self.limb_amount += (target - self.limb_amount) * (crate::util::damp(10.0, dt));
         self.limb_swing += speed * dt * 4.0;
 
         // Sheep graze now and then (Minecraft's EatBlockGoal: 1 in 1000 per tick) on tall

@@ -1573,7 +1573,7 @@ impl Game {
         // down toward the inventory looks into the drawer (it slides out, the camera goes down
         // to it), and back up over the table (it closes).
         let want = ((self.ui.mouse.x / w.max(1.0)) * 2.0 - 1.0).clamp(-1.0, 1.0);
-        self.bench_ui.pan += (want - self.bench_ui.pan) * (1.0 - (-4.0 * self.ui.dt).exp());
+        self.bench_ui.pan += (want - self.bench_ui.pan) * (crate::util::damp(4.0, self.ui.dt));
         let low = self.ui.mouse.y / py.max(1.0);
 
         let Some(table) = self.bench_table(p) else { return hovered };

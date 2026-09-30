@@ -268,16 +268,16 @@ impl Game {
             // Turned with the look at once, all of it (the torso never twisted off the legs).
             self.body_yaw = self.yaw;
         } else if speed > 0.1 {
-            self.body_yaw += diff * (1.0 - (-10.0 * dt).exp());
+            self.body_yaw += diff * (crate::util::damp(10.0, dt));
         } else if !orbiting && diff.abs() > lag {
             // In regular views the torso follows the head so a large turn still looks natural.
             let excess = diff - diff.signum() * lag;
-            self.body_yaw += excess * (1.0 - (-12.0 * dt).exp());
+            self.body_yaw += excess * (crate::util::damp(12.0, dt));
         }
         // Limb swing follows horizontal movement (in the air too, like Minecraft).
         let fly = if self.player.flying { 0.3 } else { 1.0 };
         let target = (speed / 4.3).min(1.0) * fly;
-        self.limb_amount += (target - self.limb_amount) * (1.0 - (-10.0 * dt).exp());
+        self.limb_amount += (target - self.limb_amount) * (crate::util::damp(10.0, dt));
     }
 
     pub(super) fn update_world(&mut self, dt: f32) {

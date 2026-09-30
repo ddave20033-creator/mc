@@ -111,9 +111,9 @@ impl Slosh {
         // noisy.
         let vel = ((pos - prev) / dt).clamp_length_max(30.0);
         let old = self.vel;
-        self.vel += (vel - self.vel) * (1.0 - (-25.0 * dt).exp());
+        self.vel += (vel - self.vel) * (crate::util::damp(25.0, dt));
         let acc = ((self.vel - old) / dt).clamp_length_max(120.0);
-        self.acc += (acc - self.acc) * (1.0 - (-18.0 * dt).exp());
+        self.acc += (acc - self.acc) * (crate::util::damp(18.0, dt));
 
         // The surface lies across the pull it feels (gravity less the push): it leans back
         // from where the bucket is pushed, like a pendulum, and swings about that.

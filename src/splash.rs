@@ -33,7 +33,7 @@ impl Splash {
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
         let before = self.shown;
-        self.shown += (self.target - self.shown) * (1.0 - (-dt * 6.0).exp());
+        self.shown += (self.target - self.shown) * (crate::util::damp(dt, 6.0));
         if self.target >= 1.0 && self.target - self.shown < 0.01 {
             self.shown = 1.0;
         }

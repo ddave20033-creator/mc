@@ -486,7 +486,7 @@ impl Game {
             }
             // The highlight glides to the selected slot, like the creative list scrolls.
             let target = self.hotbar_slot as f32;
-            let ease = 1.0 - (-18.0 * ui.dt).exp();
+            let ease = crate::util::damp(18.0, ui.dt);
             self.hotbar_anim += (target - self.hotbar_anim) * ease;
             if (target - self.hotbar_anim).abs() < 0.002 {
                 self.hotbar_anim = target;

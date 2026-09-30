@@ -64,7 +64,7 @@ impl Rig {
         }
         let goal = if self.fallback { Vec3::ZERO } else { desired };
         if self.transition {
-            let blend = 1.0 - (-11.0 * dt).exp();
+            let blend = crate::util::damp(11.0, dt);
             self.local += (goal - self.local) * blend;
             if self.local.distance(goal) < 0.02 {
                 self.local = goal;

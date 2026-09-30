@@ -455,11 +455,11 @@ impl Game {
             } else {
                 1.0
             };
-        self.fov_current += (fov_target - self.fov_current) * (1.0 - (-10.0 * dt).exp());
+        self.fov_current += (fov_target - self.fov_current) * (crate::util::damp(10.0, dt));
         // The field of view detail is measured with: the setting and the zoom, not the sprint
         // widening (the simplified distance would slide back and forth).
         let detail_target = self.settings.fov * gun_zoom * if zooming { 0.25 } else { 1.0 };
-        self.detail_fov += (detail_target - self.detail_fov) * (1.0 - (-10.0 * dt).exp());
+        self.detail_fov += (detail_target - self.detail_fov) * (crate::util::damp(10.0, dt));
         let fov = if in_world {
             self.fov_current
         } else {
@@ -918,7 +918,7 @@ impl Game {
         // The player model (shadow only in first person); a spectator has no body.
         // Running eases the gun across the chest (and back) on the player model.
         let run = if self.player.sprinting { 1.0 } else { 0.0 };
-        self.tp_sprint += (run - self.tp_sprint) * (1.0 - (-dt * 8.0).exp());
+        self.tp_sprint += (run - self.tp_sprint) * (crate::util::damp(dt, 8.0));
         if in_world && self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
             // In bed: built standing, then laid down on it.
             let bed = self.sleep.map(|s| {

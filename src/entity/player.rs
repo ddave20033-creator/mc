@@ -189,12 +189,12 @@ impl Player {
         self.hit_wall = false;
         self.sneaking = false;
         self.sprinting = input.sprint && input.forward > 0.0;
-        self.crouch += (0.0 - self.crouch) * (1.0 - (-14.0 * dt).exp());
+        self.crouch += (0.0 - self.crouch) * (crate::util::damp(14.0, dt));
         let speed = if input.sprint { 22.0 } else { 11.0 };
         let mut target = wish * speed;
         target.y = (input.up as i32 - input.down as i32) as f32
             * if input.sprint { 12.0 } else { 8.0 };
-        self.vel = self.vel.lerp(target, 1.0 - (-10.0 * dt).exp());
+        self.vel = self.vel.lerp(target, crate::util::damp(10.0, dt));
         self.pos += self.vel * dt;
     }
 
@@ -221,7 +221,7 @@ impl Player {
                 && !input.using
                 && !input.aiming;
         let target = if self.sneaking { 1.0 } else { 0.0 };
-        self.crouch += (target - self.crouch) * (1.0 - (-14.0 * dt).exp());
+        self.crouch += (target - self.crouch) * (crate::util::damp(14.0, dt));
 
         // The upward speed the move uses (see falling, below).
         let mut mean_vy = None;
@@ -230,7 +230,7 @@ impl Player {
             let mut target = wish * speed;
             target.y = (input.up as i32 - input.down as i32) as f32
                 * if input.sprint { 12.0 } else { 8.0 };
-            self.vel = self.vel.lerp(target, 1.0 - (-10.0 * dt).exp());
+            self.vel = self.vel.lerp(target, crate::util::damp(10.0, dt));
         } else {
             let speed = if in_lava {
                 1.2
@@ -254,7 +254,7 @@ impl Player {
             } else {
                 3.5
             };
-            let t = 1.0 - (-accel * dt).exp();
+            let t = crate::util::damp(accel, dt);
             self.vel.x += (wish.x * speed - self.vel.x) * t;
             self.vel.z += (wish.z * speed - self.vel.z) * t;
             if in_fluid {

@@ -340,7 +340,7 @@ impl TurnAnim {
     /// Eases toward showing the book (or not); returns how far it is turned around.
     pub fn show(&mut self, on: bool, dt: f32) -> f32 {
         let target = if on { 1.0 } else { 0.0 };
-        self.show += (target - self.show) * (1.0 - (-8.0 * dt).exp());
+        self.show += (target - self.show) * (crate::util::damp(8.0, dt));
         self.show
     }
 

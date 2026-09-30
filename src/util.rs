@@ -37,6 +37,13 @@ pub fn windows_safe(name: String) -> String {
     }
 }
 
+/// How far something easing toward a target at `rate` (per second) gets in `dt` seconds (0..1),
+/// the same whatever the frame rate: `x += (target - x) * damp(rate, dt)`.
+#[inline]
+pub fn damp(rate: f32, dt: f32) -> f32 {
+    1.0 - (-rate * dt).exp()
+}
+
 /// An angle wrapped into -PI..PI.
 pub fn wrap_angle(a: f32) -> f32 {
     (a + PI).rem_euclid(TAU) - PI
