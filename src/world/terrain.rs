@@ -12,7 +12,12 @@ pub struct Terrain {
     workers: Workers,
     in_flight: usize,
     generating: FastSet<ChunkPos>,
-    meshing: FastSet<ChunkPos>,
+    /// Chunks being meshed, with the ticket of their job (`Job::Mesh`): a mesh coming back for
+    /// any other (a job from before the chunk was unloaded) is out of date and dropped.
+    meshing: FastMap<ChunkPos, u64>,
+    tickets: u64,
+    /// How many times each chunk's jobs have failed (`Done::Failed`), till it is given up.
+    failed: FastMap<ChunkPos, u8>,
     dirty: FastSet<ChunkPos>,
     meshed: FastSet<ChunkPos>,
     offsets: Vec<(i32, i32)>,
@@ -48,6 +53,9 @@ pub fn listed_near(map: &FastMap<ChunkPos, Vec<IVec3>>, c: IVec3, reach: i32, up
 
 /// Chunks kept loaded around each other LAN player (on the host).
 const EXTRA_RADIUS: i32 = 6;
+/// Times a chunk's job may fail (a panic in the generator or the mesher) before the chunk is
+/// given up: left empty, or without a new mesh.
+const TRIES: u8 = 3;
 
 pub enum TerrainEvent {
     Mesh(MeshData),
@@ -73,7 +81,9 @@ impl Terrain {
             workers,
             in_flight: 0,
             generating: FastSet::default(),
-            meshing: FastSet::default(),
+            meshing: FastMap::default(),
+            tickets: 0,
+            failed: FastMap::default(),
             dirty: FastSet::default(),
             meshed: FastSet::default(),
             offsets,
@@ -90,6 +100,33 @@ impl Terrain {
     fn mark_dirty(&mut self, p: ChunkPos) {
         self.dirty.insert(p);
         self.settled = None;
+    }
+
+    /// Puts chunk `p` into the world (generated, or `restored`: an edited copy back from
+    /// memory, whose fluids may still need to flow). Every way a chunk comes in goes through
+    /// here: the changes waiting for it are applied, and it and the chunks round it are meshed
+    /// again (its blocks change their borders and their light).
+    fn insert_chunk(&mut self, p: ChunkPos, data: Arc<ChunkData>, restored: bool, out: &mut Vec<TerrainEvent>) {
+        self.world.chunks.insert(p, data);
+        self.world.apply_pending(p);
+        if restored {
+            out.push(TerrainEvent::Restored(p));
+        }
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let q = (p.0 + dx, p.1 + dz);
+                if self.world.chunks.contains_key(&q) {
+                    self.mark_dirty(q);
+                }
+            }
+        }
+    }
+
+    /// Counts a failed job for chunk `p`; true when it has failed too often.
+    fn give_up(&mut self, p: ChunkPos) -> bool {
+        let tries = self.failed.entry(p).or_default();
+        *tries += 1;
+        *tries >= TRIES
     }
 
     /// Re-mesh the chunk containing `b`. `wide` also re-meshes all 8 neighbours
@@ -134,29 +171,47 @@ impl Terrain {
             match done {
                 Done::Generated(p, data) => {
                     self.generating.remove(&p);
+                    self.failed.remove(&p);
                     let wanted = dist2(p) <= (radius + 3).pow(2) || near_extra(p, EXTRA_RADIUS + 2);
                     if wanted && !self.world.chunks.contains_key(&p) {
                         // An edited copy (LAN: sent by the host meanwhile) wins over the
                         // generated one.
-                        let data = self
-                            .world
-                            .saved
-                            .remove(&p)
-                            .unwrap_or_else(|| Arc::new(*data));
-                        self.world.chunks.insert(p, data);
-                        self.world.apply_pending(p);
-                        for dz in -1..=1 {
-                            for dx in -1..=1 {
-                                let q = (p.0 + dx, p.1 + dz);
-                                if self.world.chunks.contains_key(&q) {
-                                    self.mark_dirty(q);
-                                }
-                            }
+                        match self.world.saved.remove(&p) {
+                            Some(c) => self.insert_chunk(p, c, true, out),
+                            None => self.insert_chunk(p, Arc::new(*data), false, out),
                         }
                     }
                 }
-                Done::Meshed(mut m) => {
+                Done::Failed(p, None) => {
+                    self.generating.remove(&p);
+                    self.settled = None;
+                    let wanted = dist2(p) <= (radius + 3).pow(2) || near_extra(p, EXTRA_RADIUS + 2);
+                    if self.give_up(p) && wanted && !self.world.chunks.contains_key(&p) {
+                        // (before that it is generated again: the walk round asks for it)
+                        eprintln!("chunk {p:?} could not be generated: left empty");
+                        self.insert_chunk(p, Arc::new(ChunkData::new()), false, out);
+                    }
+                }
+                Done::Failed(p, Some(ticket)) => {
+                    if self.meshing.get(&p) == Some(&ticket) {
+                        self.meshing.remove(&p);
+                        if self.give_up(p) {
+                            // (shown with its old mesh, or none, but not waited for)
+                            eprintln!("chunk {p:?} could not be meshed");
+                            self.meshed.insert(p);
+                        } else {
+                            self.mark_dirty(p);
+                        }
+                    }
+                }
+                Done::Meshed(mut m, ticket) => {
+                    // (a mesh from before the chunk was unloaded is out of date: the chunk's
+                    // new job, if it has one, brings the right one)
+                    if self.meshing.get(&m.pos) != Some(&ticket) {
+                        continue;
+                    }
                     self.meshing.remove(&m.pos);
+                    self.failed.remove(&m.pos);
                     if self.world.chunks.contains_key(&m.pos) {
                         self.meshed.insert(m.pos);
                         self.world.light.insert(m.pos, std::mem::take(&mut m.light));
@@ -203,6 +258,7 @@ impl Terrain {
             self.stump_marks.remove(&p);
             self.world.light.remove(&p);
             self.dirty.remove(&p);
+            self.meshing.remove(&p);
             out.push(TerrainEvent::Unload(p));
         }
 
@@ -222,25 +278,7 @@ impl Terrain {
             }
             if !self.world.chunks.contains_key(&p) && !self.generating.contains(&p) {
                 if let Some(c) = self.world.saved.remove(&p) {
-                    self.world.chunks.insert(p, c);
-                    out.push(TerrainEvent::Restored(p));
-                    self.world.apply_pending(p);
-                    for (qx, qz) in [
-                        (0, 0),
-                        (1, 0),
-                        (-1, 0),
-                        (0, 1),
-                        (0, -1),
-                        (1, 1),
-                        (-1, -1),
-                        (1, -1),
-                        (-1, 1),
-                    ] {
-                        let q = (p.0 + qx, p.1 + qz);
-                        if self.world.chunks.contains_key(&q) {
-                            self.mark_dirty(q);
-                        }
-                    }
+                    self.insert_chunk(p, c, true, out);
                 } else if self.in_flight < cap {
                     self.workers.submit(Job::Generate(p));
                     self.generating.insert(p);
@@ -250,19 +288,21 @@ impl Terrain {
             let urgent = r2 <= 8;
             if r2 <= radius * radius
                 && self.dirty.contains(&p)
-                && !self.meshing.contains(&p)
+                && !self.meshing.contains_key(&p)
                 && (self.in_flight < cap || urgent)
             {
                 if let Some(nb) = self.neighborhood(p) {
                     self.dirty.remove(&p);
                     let anim = self.world.fluid_changes_near(p);
                     let notches = self.world.notches_near(p);
-                    self.workers.submit(Job::Mesh { pos: p, nb, anim, notches });
-                    self.meshing.insert(p);
+                    self.tickets += 1;
+                    let ticket = self.tickets;
+                    self.workers.submit(Job::Mesh { pos: p, ticket, nb, anim, notches });
+                    self.meshing.insert(p, ticket);
                     self.in_flight += 1;
                 }
             }
-            if r2 <= radius * radius && (self.dirty.contains(&p) || self.meshing.contains(&p)) {
+            if r2 <= radius * radius && (self.dirty.contains(&p) || self.meshing.contains_key(&p)) {
                 unfinished = true;
             }
         }
@@ -272,7 +312,8 @@ impl Terrain {
 
         // Around the other LAN players: generate or restore chunks (no meshes needed).
         for c in &extra {
-            for &(dx, dz) in &self.offsets {
+            for i in 0..self.offsets.len() {
+                let (dx, dz) = self.offsets[i];
                 if dx * dx + dz * dz > EXTRA_RADIUS * EXTRA_RADIUS {
                     break;
                 }
@@ -281,8 +322,7 @@ impl Terrain {
                     continue;
                 }
                 if let Some(data) = self.world.saved.remove(&p) {
-                    self.world.chunks.insert(p, data);
-                    out.push(TerrainEvent::Restored(p));
+                    self.insert_chunk(p, data, true, out);
                 } else if self.in_flight < cap {
                     self.workers.submit(Job::Generate(p));
                     self.generating.insert(p);

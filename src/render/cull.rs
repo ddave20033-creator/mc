@@ -7,6 +7,12 @@ use super::passes::ChunkMesh;
 use crate::world::{ChunkPos, FastMap};
 use glam::{Mat4, Vec3, Vec4};
 
+/// Pixels a block covers below which far chunks leave out grass and flowers (the shaders
+/// have faded them out: `PLANT_GONE_PX` in flags.glsl), and the faces between leaves (closed
+/// crowns).
+pub(super) const PLANT_GONE_PX: f32 = 5.0;
+const LEAF_INNER_PX: f32 = 1.5;
+
 pub(super) struct Frustum([Vec4; 6]);
 
 impl Frustum {
@@ -124,14 +130,13 @@ pub(super) fn select_chunks(
         if dist2 > max_d * max_d || !frustum.visible(c.min, c.max) {
             continue;
         }
-        // Far chunks leave out what the shaders would drop anyway: grass and flowers
-        // (world.vert, under ~5 pixels a block) and the faces between leaves (closed
-        // crowns, under ~1.5).
+        // Far chunks leave out what the shaders would drop anyway: grass and flowers and the
+        // faces between leaves.
         let near = cam.clamp(c.min, c.max);
         let block_px = detail_px / near.distance(cam).max(1e-3);
-        let drawn = if block_px >= 5.0 {
+        let drawn = if block_px >= PLANT_GONE_PX {
             c.opaque
-        } else if block_px >= 1.5 {
+        } else if block_px >= LEAF_INNER_PX {
             c.solid + c.leaf_inner
         } else {
             c.solid

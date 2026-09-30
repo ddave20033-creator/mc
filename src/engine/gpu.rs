@@ -814,9 +814,11 @@ impl Gpu {
                 .image(image)
                 .subresource_range(range)
         };
+        // (the render pass's dependency to TRANSFER has made the picture visible there, and
+        // its final layout change is done: this waits on that, not on the attachment writes)
         self.device.cmd_pipeline_barrier(
             cmd,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
             &[],
@@ -824,7 +826,7 @@ impl Gpu {
             &[barrier(
                 vk::ImageLayout::PRESENT_SRC_KHR,
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags::empty(),
                 vk::AccessFlags::TRANSFER_READ,
             )],
         );
@@ -845,6 +847,24 @@ impl Gpu {
                     height: self.extent.height,
                     depth: 1,
                 })],
+        );
+        // The copy's writes are made visible to the host (read after the fence).
+        let to_host = vk::BufferMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            .dst_access_mask(vk::AccessFlags::HOST_READ)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .buffer(buf.handle)
+            .offset(0)
+            .size(vk::WHOLE_SIZE);
+        self.device.cmd_pipeline_barrier(
+            cmd,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::HOST,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[to_host],
+            &[],
         );
         self.device.cmd_pipeline_barrier(
             cmd,
@@ -965,23 +985,42 @@ fn create_render_pass(
         subpass = subpass.resolve_attachments(&resolve_ref);
     }
     let subpasses = [subpass];
-    let deps = [vk::SubpassDependency::default()
-        .src_subpass(vk::SUBPASS_EXTERNAL)
-        .dst_subpass(0)
-        .src_stage_mask(
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-        )
-        .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
-        .dst_stage_mask(
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-        )
-        .dst_access_mask(
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-                | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-        )];
+    let deps = [
+        // The last frame's writes to the images all frames share (depth, the multisampled
+        // colour: its resolve is a colour attachment write too) are done before they are
+        // cleared and drawn again.
+        vk::SubpassDependency::default()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
+            .dst_subpass(0)
+            .src_stage_mask(
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                    | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+            )
+            .src_access_mask(
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            )
+            .dst_stage_mask(
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                    | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+            )
+            .dst_access_mask(
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            ),
+        // The picture (drawn, or resolved into the swapchain image) and its move to the
+        // presenting layout are done before a screenshot copies it (`record_copy`).
+        vk::SubpassDependency::default()
+            .src_subpass(0)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags::TRANSFER)
+            .dst_access_mask(vk::AccessFlags::TRANSFER_READ),
+    ];
     unsafe {
         device
             .create_render_pass(

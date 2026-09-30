@@ -135,10 +135,14 @@ impl Renderer {
             let Some(m) = self.pending.pop_front() else {
                 break;
             };
-            // Room for the head, the vertices wherever they line up, and the indices.
+            // Room for the head, the vertices wherever they line up, and the indices (at
+            // least what `total` below comes to). Whether it goes through the staging buffer is
+            // decided by this, not by `total`: a mesh whose `most` does not fit is never
+            // checked against the room left, so it must not use the staging buffer either.
             let vbytes = m.vertices.len() * VERTEX;
             let most = HEAD + VERTEX + vbytes + 16 + std::mem::size_of_val(m.indices.as_slice());
-            if most <= STAGING_SIZE && ring_used + most > STAGING_SIZE {
+            let staged = most <= STAGING_SIZE;
+            if staged && ring_used + most > STAGING_SIZE {
                 // Out of staging space this frame; upload it next frame.
                 self.pending.push_front(m);
                 break;
@@ -168,7 +172,8 @@ impl Renderer {
                 let total = ioff + std::mem::size_of_val(m.indices.as_slice());
                 let head = ChunkHead { x: m.pos.0 * 16, time, z: m.pos.1 * 16, _pad: 0 };
                 let packed: Vec<ChunkVertex> = m.vertices.iter().map(|v| pack_vertex(v, x0, z0, time)).collect();
-                let (src, src_offset) = if total <= STAGING_SIZE {
+                debug_assert!(total <= most);
+                let (src, src_offset) = if staged {
                     ring.write(ring_used, &[head]);
                     ring.write(ring_used + voff, packed.as_slice());
                     ring.write(ring_used + ioff, m.indices.as_slice());

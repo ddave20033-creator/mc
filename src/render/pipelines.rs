@@ -1,5 +1,5 @@
-//! The shaders, the vertex layouts and the pipelines drawn with: the main pass's set (made
-//! once more for the scope's pass), the shadow map's, and the ones showing the scope's image.
+//! The shaders, the vertex layouts and the pipelines drawn with: the main pass's set (its
+//! scene part made once more for the scope's pass), the shadow map's, and the ones showing the scope's image.
 
 use super::Renderer;
 use crate::engine::pipeline::{create_pipeline, PipelineDesc};
@@ -76,56 +76,71 @@ impl DrawPush {
     }
 }
 
-/// The pipelines of the main pass: sky, the chunks (plain whole-block faces, the rest, water),
-/// the world's other things (entities, particles...) and what is translucent of them, player
-/// fade, overlay, lines and UI.
-pub(super) struct MainPipes {
+/// The pipelines of a pass drawing the world: sky, the chunks (all but the plain whole-block
+/// faces, and water), the world's other things (entities, particles...) and what is
+/// translucent of them, and the overlay. The scope's pass draws with just these.
+pub(super) struct ScenePipes {
     pub sky: vk::Pipeline,
-    pub world_plain: vk::Pipeline,
     pub world_chunk: vk::Pipeline,
     pub water_chunk: vk::Pipeline,
     pub world: vk::Pipeline,
     pub water: vk::Pipeline,
-    pub player_fade: vk::Pipeline,
     pub overlay: vk::Pipeline,
+}
+
+/// The pipelines of the main pass: the scene's, and the plain whole-block faces, player fade,
+/// lines and UI.
+pub(super) struct MainPipes {
+    pub scene: ScenePipes,
+    pub world_plain: vk::Pipeline,
+    pub player_fade: vk::Pipeline,
     pub line: vk::Pipeline,
     pub ui: vk::Pipeline,
 }
 
-impl MainPipes {
+/// The world's other things (`Vertex`) drawn into `render_pass`.
+fn world_desc(render_pass: vk::RenderPass, samples: vk::SampleCountFlags, layout: vk::PipelineLayout) -> PipelineDesc<'static> {
+    PipelineDesc {
+        vert: WORLD_VERT,
+        frag: WORLD_FRAG,
+        stride: size_of::<Vertex>() as u32,
+        attributes: &WORLD_ATTRS,
+        layout,
+        render_pass,
+        topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        cull: true,
+        depth_test: true,
+        depth_write: true,
+        blend: false,
+        multiply: false,
+        color: true,
+        depth_bias: None,
+        samples,
+        alpha_to_coverage: false,
+        instance: false,
+    }
+}
+
+/// Chunk meshes (`ChunkVertex`) drawn into `render_pass`.
+fn chunk_desc(render_pass: vk::RenderPass, samples: vk::SampleCountFlags, layout: vk::PipelineLayout) -> PipelineDesc<'static> {
+    PipelineDesc {
+        vert: WORLD_CHUNK_VERT,
+        stride: size_of::<ChunkVertex>() as u32,
+        attributes: &CHUNK_ATTRS,
+        instance: true,
+        ..world_desc(render_pass, samples, layout)
+    }
+}
+
+impl ScenePipes {
     pub fn new(
         d: &ash::Device,
         render_pass: vk::RenderPass,
         samples: vk::SampleCountFlags,
         world_layout: vk::PipelineLayout,
-        ui_layout: vk::PipelineLayout,
     ) -> Self {
-        let world_desc = PipelineDesc {
-            vert: WORLD_VERT,
-            frag: WORLD_FRAG,
-            stride: size_of::<Vertex>() as u32,
-            attributes: &WORLD_ATTRS,
-            layout: world_layout,
-            render_pass,
-            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-            cull: true,
-            depth_test: true,
-            depth_write: true,
-            blend: false,
-            multiply: false,
-            color: true,
-            depth_bias: None,
-            samples,
-            alpha_to_coverage: false,
-            instance: false,
-        };
-        let chunk_desc = PipelineDesc {
-            vert: WORLD_CHUNK_VERT,
-            stride: size_of::<ChunkVertex>() as u32,
-            attributes: &CHUNK_ATTRS,
-            instance: true,
-            ..world_desc
-        };
+        let world_desc = world_desc(render_pass, samples, world_layout);
+        let chunk_desc = chunk_desc(render_pass, samples, world_layout);
         // Only the opaque world pass smooths cut-out edges (with anti-aliasing on).
         let world = create_pipeline(
             d,
@@ -138,15 +153,6 @@ impl MainPipes {
             d,
             &PipelineDesc {
                 alpha_to_coverage: samples != vk::SampleCountFlags::TYPE_1,
-                ..chunk_desc
-            },
-        );
-        // (no alpha to coverage either: that too would make the depth test wait for the shader;
-        // these faces are fully covered anyway)
-        let world_plain = create_pipeline(
-            d,
-            &PipelineDesc {
-                frag: WORLD_PLAIN_FRAG,
                 ..chunk_desc
             },
         );
@@ -168,30 +174,12 @@ impl MainPipes {
                 ..world_desc
             },
         );
-        let player_fade = create_pipeline(
-            d,
-            &PipelineDesc {
-                depth_write: false,
-                blend: true,
-                ..world_desc
-            },
-        );
         let overlay = create_pipeline(
             d,
             &PipelineDesc {
                 depth_write: false,
                 blend: true,
                 multiply: true,
-                ..world_desc
-            },
-        );
-        let line = create_pipeline(
-            d,
-            &PipelineDesc {
-                topology: vk::PrimitiveTopology::LINE_LIST,
-                cull: false,
-                depth_write: false,
-                blend: true,
                 ..world_desc
             },
         );
@@ -207,6 +195,52 @@ impl MainPipes {
                 ..world_desc
             },
         );
+        Self { sky, world_chunk, water_chunk, world, water, overlay }
+    }
+
+    pub unsafe fn destroy(&self, d: &ash::Device) {
+        for p in [self.sky, self.world_chunk, self.water_chunk, self.world, self.water, self.overlay] {
+            d.destroy_pipeline(p, None);
+        }
+    }
+}
+
+impl MainPipes {
+    pub fn new(
+        d: &ash::Device,
+        render_pass: vk::RenderPass,
+        samples: vk::SampleCountFlags,
+        world_layout: vk::PipelineLayout,
+        ui_layout: vk::PipelineLayout,
+    ) -> Self {
+        let world_desc = world_desc(render_pass, samples, world_layout);
+        // (no alpha to coverage either: that too would make the depth test wait for the shader;
+        // these faces are fully covered anyway)
+        let world_plain = create_pipeline(
+            d,
+            &PipelineDesc {
+                frag: WORLD_PLAIN_FRAG,
+                ..chunk_desc(render_pass, samples, world_layout)
+            },
+        );
+        let player_fade = create_pipeline(
+            d,
+            &PipelineDesc {
+                depth_write: false,
+                blend: true,
+                ..world_desc
+            },
+        );
+        let line = create_pipeline(
+            d,
+            &PipelineDesc {
+                topology: vk::PrimitiveTopology::LINE_LIST,
+                cull: false,
+                depth_write: false,
+                blend: true,
+                ..world_desc
+            },
+        );
         let ui = create_pipeline(
             d,
             &PipelineDesc {
@@ -215,47 +249,25 @@ impl MainPipes {
                 stride: size_of::<UiVertex>() as u32,
                 attributes: &UI_ATTRS,
                 layout: ui_layout,
-                render_pass,
-                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
                 cull: false,
                 depth_test: false,
                 depth_write: false,
                 blend: true,
-                multiply: false,
-                color: true,
-                depth_bias: None,
-                samples,
-                alpha_to_coverage: false,
-                instance: false,
+                ..world_desc
             },
         );
         Self {
-            sky,
+            scene: ScenePipes::new(d, render_pass, samples, world_layout),
             world_plain,
-            world_chunk,
-            water_chunk,
-            world,
-            water,
             player_fade,
-            overlay,
             line,
             ui,
         }
     }
 
     pub unsafe fn destroy(&self, d: &ash::Device) {
-        for p in [
-            self.sky,
-            self.world_plain,
-            self.world_chunk,
-            self.water_chunk,
-            self.world,
-            self.water,
-            self.player_fade,
-            self.overlay,
-            self.line,
-            self.ui,
-        ] {
+        self.scene.destroy(d);
+        for p in [self.world_plain, self.player_fade, self.line, self.ui] {
             d.destroy_pipeline(p, None);
         }
     }

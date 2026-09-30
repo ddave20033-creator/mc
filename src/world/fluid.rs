@@ -8,6 +8,8 @@ const TICK: f32 = 0.05;
 const WATER_DELAY: u64 = 5;
 const LAVA_DELAY: u64 = 20;
 const BUDGET: usize = 3000;
+/// Ticks till fluid next to a chunk not loaded is looked at again (see `update_block`).
+const UNLOADED_DELAY: u64 = 40;
 const HORIZONTAL: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
 /// Recomputed level of flowing fluid that no longer has anything feeding it.
 const DRY: u8 = u8::MAX;
@@ -196,6 +198,14 @@ impl Fluids {
                     }
                 }
             };
+            // What feeds it may be in a chunk not loaded (it reads as air): it is not dried up
+            // or weakened on that, just looked at again later (it could be strengthened).
+            let strength = |l: u8| if l >= FALLING { 0 } else { l };
+            let weaker = new == DRY || strength(new) > strength(level);
+            if weaker && HORIZONTAL.iter().any(|d| !w.is_loaded(p.x + d.x, p.z + d.z)) {
+                self.schedule(p, UNLOADED_DELAY);
+                return;
+            }
             if new == DRY {
                 self.set(w, p, AIR, changed);
                 return;
@@ -360,7 +370,7 @@ mod tests {
     }
 
     /// A stone floor with a 4 high ledge on the -X side, so fluid poured on the ledge
-    /// runs off it and falls down.
+    /// runs off it and falls down (in each chunk round the middle one too).
     fn ledge_world() -> World {
         let mut world = World::new();
         let mut chunk = ChunkData::new();
@@ -374,8 +384,42 @@ mod tests {
                 }
             }
         }
-        world.chunks.insert((0, 0), Arc::new(chunk));
+        // (the same all round: fluid next to a chunk not loaded is left as it is)
+        let chunk = Arc::new(chunk);
+        for cz in -1..=1 {
+            for cx in -1..=1 {
+                world.chunks.insert((cx, cz), chunk.clone());
+            }
+        }
         world
+    }
+
+    /// Water fed from the next chunk stays when that chunk is unloaded (it is not known to be
+    /// gone), and does not flow into it.
+    #[test]
+    fn fluid_at_an_unloaded_border_stays() {
+        let mut world = World::new();
+        for cx in 0..2 {
+            let mut chunk = ChunkData::new();
+            for z in 0..CHUNK {
+                for x in 0..CHUNK {
+                    chunk.set(x, 0, z, STONE);
+                }
+            }
+            world.chunks.insert((cx, 0), Arc::new(chunk));
+        }
+        let mut fluids = Fluids::new();
+        let src = IVec3::new(17, 1, 8);
+        world.seti(src, WATER);
+        fluids.notify(&world, src);
+        run(&mut fluids, &mut world, 400);
+        assert!(is_water(world.get(15, 1, 8)) && is_water(world.get(14, 1, 8)), "did not spread");
+        let before: Vec<Block> = (0..CHUNK as i32).map(|x| world.get(x, 1, 8)).collect();
+        world.chunks.remove(&(1, 0));
+        fluids.wake_chunk(&world, (0, 0));
+        run(&mut fluids, &mut world, 400);
+        let after: Vec<Block> = (0..CHUNK as i32).map(|x| world.get(x, 1, 8)).collect();
+        assert_eq!(before, after, "water next to the unloaded chunk changed");
     }
 
     #[test]

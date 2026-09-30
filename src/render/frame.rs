@@ -125,7 +125,7 @@ mod shader_tests {
     /// `world.frag`'s layer numbers: `textures::tests::shader_layer_numbers_match`).
     #[test]
     fn shader_copies_of_game_numbers_match() {
-        let world = include_str!("../../shaders/world.frag");
+        let flag_file = include_str!("../../shaders/flags.glsl");
         for (name, flag) in [
             ("F_LEAVES", flags::LEAVES),
             ("F_PLANT", flags::PLANT),
@@ -136,8 +136,10 @@ mod shader_tests {
             ("F_ENTITY", flags::ENTITY),
             ("F_FLUID", flags::FLUID),
         ] {
-            assert_eq!(value(world, name) as u8, flag, "{name}");
+            assert_eq!(value(flag_file, name) as u8, flag, "{name}");
         }
+        assert_eq!(value(flag_file, "PLANT_GONE_PX"), super::super::cull::PLANT_GONE_PX);
+        let world = include_str!("../../shaders/world.frag");
         assert_eq!(value(world, "LAVA_LAYER") as u32, tex::LAVA);
         assert_eq!(value(world, "FURNACE_ANIM_LAYER") as u32, tex::FURNACE_ANIM);
         assert_eq!(value(world, "FURNACE_FRAMES") as u32, tex::FURNACE_FRAMES);

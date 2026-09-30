@@ -27,7 +27,7 @@ impl Renderer {
         let pipes = &self.pipes;
 
         // Sky
-        r.bind_pipe(pipes.sky);
+        r.bind_pipe(pipes.scene.sky);
         r.bind_sets(self.world_layout, &[world_set]);
         r.push(self.world_layout, &DrawPush::new(f.view_proj, 0.0));
         d.cmd_draw(cmd, 3, 1, 0, 0);
@@ -60,7 +60,7 @@ impl Renderer {
         r.push(self.world_layout, &DrawPush::new(f.view_proj, 0.0));
         let ind = &self.indirect[r.slot];
         let mut next = Some(indirect_used);
-        for (pipe, plain) in [(pipes.world_plain, true), (pipes.world_chunk, false)] {
+        for (pipe, plain) in [(pipes.world_plain, true), (pipes.scene.world_chunk, false)] {
             r.bind_pipe(pipe);
             let mut draws: Vec<IndirectDraw> = Vec::with_capacity(visible.len() * 3);
             for c in &visible {
@@ -80,7 +80,7 @@ impl Renderer {
             }
         }
         marks[3] = Instant::now();
-        r.bind_pipe(pipes.world);
+        r.bind_pipe(pipes.scene.world);
         r.draw_dyn(PARTICLES);
         let (e0, en) = r.range(ENTITY);
         let player_n = f.player_vertex_count.min(en);
@@ -101,7 +101,7 @@ impl Renderer {
         }
 
         // Water (back to front)
-        r.bind_pipe(pipes.water_chunk);
+        r.bind_pipe(pipes.scene.water_chunk);
         r.push(self.world_layout, &DrawPush::new(f.view_proj, 1.0));
         let mut water: Vec<&VisibleChunk> = visible.iter().filter(|c| c.water > 0).collect();
         water.sort_unstable_by(|a, b| b.dist2.total_cmp(&a.dist2));
@@ -109,12 +109,12 @@ impl Renderer {
             c.mesh.bind(d, cmd);
             c.mesh.draw(d, cmd, c.opaque, c.water);
         }
-        r.bind_pipe(pipes.water);
+        r.bind_pipe(pipes.scene.water);
         r.draw_dyn(TRANSLUCENT);
 
         // Break cracks
         if r.range(OVERLAY).1 > 0 {
-            r.bind_pipe(pipes.overlay);
+            r.bind_pipe(pipes.scene.overlay);
             r.draw_dyn(OVERLAY);
         }
 
@@ -160,12 +160,12 @@ impl Renderer {
                     layer_count: 1,
                 }],
             );
-            r.bind_pipe(pipes.world);
+            r.bind_pipe(pipes.scene.world);
             r.push(self.world_layout, &DrawPush::new(f.vm_view_proj, 2.0));
             r.bind_dyn();
             d.cmd_draw(cmd, vn - vm_flame, 1, v0, 0);
             if vm_flame > 0 {
-                r.bind_pipe(pipes.water);
+                r.bind_pipe(pipes.scene.water);
                 d.cmd_draw(cmd, vm_flame, 1, v0 + vn - vm_flame, 0);
             }
             // The scope's eyepiece shows its view; the glass is drawn over what is behind.
@@ -179,7 +179,7 @@ impl Renderer {
             }
             let (g0, gn) = r.range(VIEWMODEL_GLASS);
             if gn > 0 {
-                r.bind_pipe(pipes.water);
+                r.bind_pipe(pipes.scene.water);
                 r.push(self.world_layout, &DrawPush::new(f.vm_view_proj, 4.0));
                 d.cmd_draw(cmd, gn, 1, g0, 0);
             }

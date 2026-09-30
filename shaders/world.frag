@@ -3,6 +3,7 @@
 #include "frame.glsl"
 #include "common.glsl"
 #include "fire.glsl"
+#include "flags.glsl"
 
 layout(set = 0, binding = 0) uniform sampler2DArray blocks;
 layout(set = 0, binding = 1) uniform sampler2DShadow shadowMap;
@@ -27,14 +28,6 @@ layout(location = 0) out vec4 outColor;
 #define DISCARD discard
 #endif
 
-const int F_LEAVES = 1;
-const int F_PLANT = 2;
-const int F_EMISSIVE = 4;
-const int F_WATER = 8;
-const int F_OVERLAY = 16;
-const int F_VIEWMODEL = 32;
-const int F_ENTITY = 64;
-const int F_FLUID = 128;
 const float LAVA_LAYER = 38.0;
 const float GRASS_SIDE_LAYER = 1.0;
 const float GRASS_TOP_LAYER = 0.0;
@@ -44,12 +37,10 @@ const float SNOWY_GRASS_SIDE_LAYER = 16.0;
 // Where a block covers only a few pixels on this screen, its fine detail cannot show and just
 // flickers as the view moves. Measured in pixels per block (the screen's height, field of view
 // and zoom decide it, so a sharper screen keeps detail farther out): below FULL_DETAIL_PX the
-// textures melt into their average color, fully at AVERAGE_PX...
+// textures melt into their average color, fully at AVERAGE_PX (and grass and flowers fade
+// out: PLANT_FULL_PX, PLANT_GONE_PX in flags.glsl).
 const float FULL_DETAIL_PX = 4.0;
 const float AVERAGE_PX = 1.0;
-// ...and grass and flowers fade out between these (world.vert drops them below).
-const float PLANT_FULL_PX = 10.0;
-const float PLANT_GONE_PX = 5.0;
 
 // Ordered 4x4 dither threshold: fading without alpha blending.
 float bayer4(vec2 p) {
