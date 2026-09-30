@@ -314,6 +314,20 @@ fn gun_stations() -> Vec<Vertex> {
     out
 }
 
+fn gun_fx() -> Vec<Vertex> {
+    use crate::model::ballistics::{emit_laser_dot, emit_muzzle_flash, emit_tracer};
+    let mut out = Vec::new();
+    let cam = Vec3::new(0.5, 1.7, 2.0);
+    for laser in [false, true] {
+        emit_tracer(&mut out, Vec3::new(1.0, 1.5, -2.0), Vec3::new(9.0, 2.5, -30.0), cam, 0.02, laser);
+    }
+    emit_laser_dot(&mut out, Vec3::new(3.0, 1.0, -8.0), Vec3::X, Vec3::Y, 0.05);
+    for (seed, k) in [(0.1, 1.0), (0.7, 0.4)] {
+        emit_muzzle_flash(&mut out, Vec3::new(0.3, 1.4, -1.0), Vec3::new(0.1, 0.05, -1.0), cam, 0.3, seed, k);
+    }
+    out
+}
+
 fn groups() -> Vec<(&'static str, u64)> {
     vec![
         ("items", hash(&items())),
@@ -324,11 +338,12 @@ fn groups() -> Vec<(&'static str, u64)> {
         ("mobs", hash(&mobs())),
         ("lanterns_buckets", hash(&lanterns_and_buckets())),
         ("gun_stations", hash(&gun_stations())),
+        ("gun_fx", hash(&gun_fx())),
     ]
 }
 
 /// The hashes as the models were before their shared pieces were merged into `prim`.
-const EXPECTED: [(&str, u64); 8] = [
+const EXPECTED: [(&str, u64); 9] = [
     ("items", 0x50f68223d79efdbb),
     ("logs", 0x0660b16dd6a12110),
     ("players", 0xee6d4c5994db6f33),
@@ -337,6 +352,7 @@ const EXPECTED: [(&str, u64); 8] = [
     ("mobs", 0x1083b750e4ad0fa2),
     ("lanterns_buckets", 0x0187d9767c083298),
     ("gun_stations", 0x0d93fe35725e60aa),
+    ("gun_fx", 0xbd26d53969799bed),
 ];
 
 #[test]

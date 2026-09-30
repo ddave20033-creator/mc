@@ -1,7 +1,7 @@
 //! The first-person hand: the arm or the held item, with Minecraft's swing, equip, bob,
 //! eating and sword-blocking animations. Built on the CPU each frame in world space.
 
-use crate::model::player::ARM as ARM_LAYERS;
+use crate::model::player::{skinned, ARM as ARM_LAYERS};
 use crate::model::spring::Spring3;
 use crate::model::emit_box;
 use crate::item::{icon, GunKind, Icon, ItemId, NONE};
@@ -21,6 +21,17 @@ fn ry(d: f32) -> Mat4 {
 }
 fn rz(d: f32) -> Mat4 {
     Mat4::from_rotation_z(d.to_radians())
+}
+
+/// A box of the player's own arm (its skin's arm texture on it), `m` taking its model pixels
+/// to the world.
+fn emit_skin_box(out: &mut Vec<Vertex>, m: Mat4, lo: Vec3, hi: Vec3, skin: u8, light: [u8; 4], fl: u8) {
+    emit_box(out, m, lo, hi, skinned(ARM_LAYERS, skin), [[255; 3]; 6], light, fl);
+}
+
+/// The first-person right arm (Minecraft's), `m` from `HandAnim::arm_part`.
+fn emit_arm(out: &mut Vec<Vertex>, m: Mat4, skin: u8, light: [u8; 4], fl: u8) {
+    emit_skin_box(out, m, Vec3::new(-3.0, -10.0, -2.0), Vec3::new(1.0, 2.0, 2.0), skin, light, fl);
 }
 
 /// Aimed with a scope, the gun comes this much further (model pixels): down to the scope's
@@ -465,16 +476,7 @@ impl HandAnim {
             // A grenade just thrown: the empty arm follows through.
             let k = (tt / THROW_TIME).min(1.0);
             let m = Self::arm_part(Self::arm_pose(base, k, k.sqrt(), 1.0));
-            emit_box(
-                out,
-                m,
-                Vec3::new(-3.0, -10.0, -2.0),
-                Vec3::new(1.0, 2.0, 2.0),
-                ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-                [[255; 3]; 6],
-                light,
-                fl,
-            );
+            emit_arm(out, m, skin, light, fl);
             return;
         }
         if let (Some((t, power)), true) = (self.grenade, crate::model::grenade_item(self.held)) {
@@ -487,16 +489,7 @@ impl HandAnim {
         }
         if self.held == NONE {
             let m = Self::arm_part(Self::arm_pose(base, s, sq, eq));
-            emit_box(
-                out,
-                m,
-                Vec3::new(-3.0, -10.0, -2.0),
-                Vec3::new(1.0, 2.0, 2.0),
-                ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-                [[255; 3]; 6],
-                light,
-                fl,
-            );
+            emit_arm(out, m, skin, light, fl);
             return;
         }
 
@@ -538,16 +531,7 @@ impl HandAnim {
             // gravity-driven swing as the player model.
             let grip = base * t(-0.025, 0.125, 0.0) * rz(10.0);
             let pose = Self::arm_pose(grip, s, sq, eq);
-            emit_box(
-                out,
-                Self::arm_part(pose),
-                Vec3::new(-3.0, -10.0, -2.0),
-                Vec3::new(1.0, 2.0, 2.0),
-                ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-                [[255; 3]; 6],
-                light,
-                fl,
-            );
+            emit_arm(out, Self::arm_part(pose), skin, light, fl);
             let turn = glam::Quat::from_xyzw(0.2077, -0.6488, 0.4433, 0.5825).normalize();
             let center = Vec3::splat(0.5);
             // Block model space (0..1) to the world, then the lantern's own pixel space.
@@ -649,16 +633,7 @@ impl HandAnim {
         let f1 = (sq * PI).sin();
         let grip = base * t(-0.025, 0.125, 0.0) * rz(10.0);
         let pose = Self::arm_pose(grip, s, sq, eq);
-        emit_box(
-            out,
-            Self::arm_part(pose),
-            Vec3::new(-3.0, -10.0, -2.0),
-            Vec3::new(1.0, 2.0, 2.0),
-            ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-            [[255; 3]; 6],
-            light,
-            fl,
-        );
+        emit_arm(out, Self::arm_part(pose), skin, light, fl);
         let turn = glam::Quat::from_xyzw(0.2077, -0.6488, 0.4433, 0.5825).normalize();
         let center = Vec3::splat(0.5);
         let block = pose
@@ -729,16 +704,7 @@ impl HandAnim {
                 * Mat4::from_translation(hand)
                 * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, along))
                 * Mat4::from_scale(Vec3::splat(1.0 / 20.0));
-            emit_box(
-                out,
-                arm,
-                Vec3::new(-2.0, -1.0, -2.0),
-                Vec3::new(2.0, 13.0, 2.0),
-                ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-                [[255; 3]; 6],
-                light,
-                fl,
-            );
+            emit_skin_box(out, arm, Vec3::new(-2.0, -1.0, -2.0), Vec3::new(2.0, 13.0, 2.0), skin, light, fl);
         }
         // The middle of the view is straight ahead in camera space.
         self.book_hit = book_hit(book, Vec3::ZERO, Vec3::NEG_Z, view.tabs.is_some());
@@ -888,16 +854,7 @@ impl HandAnim {
                     * Mat4::from_scale(Vec3::splat(1.0 / big.max(1e-3)))
                     * rx(90.0)
                     * Mat4::from_scale(Vec3::new(1.75, 2.45, 1.75));
-                emit_box(
-                    out,
-                    arm,
-                    Vec3::new(-2.0, -2.0, -2.0),
-                    Vec3::new(2.0, 10.0, 2.0),
-                    ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin)),
-                    [[255; 3]; 6],
-                    light,
-                    fl,
-                );
+                emit_skin_box(out, arm, Vec3::new(-2.0, -2.0, -2.0), Vec3::new(2.0, 10.0, 2.0), skin, light, fl);
             }
         }
 
@@ -964,7 +921,6 @@ impl HandAnim {
         self.grenade_tip = Some(item.transform_point3(Vec3::ZERO));
 
         let inv = base.inverse();
-        let layers = ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin));
         let mut arm = |hand: Vec3, shoulder: Vec3| {
             let along = (shoulder - hand).normalize_or(Vec3::Y);
             let m = base
@@ -972,7 +928,7 @@ impl HandAnim {
                 * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, along))
                 * Mat4::from_scale(Vec3::splat(1.0 / 28.0));
             let (lo, hi) = (Vec3::new(-2.0, -1.0, -2.0), Vec3::new(2.0, 20.0, 2.0));
-            emit_box(out, m, lo, hi, layers, [[255; 3]; 6], light, fl);
+            emit_skin_box(out, m, lo, hi, skin, light, fl);
         };
         // The right fist under it.
         let grip = inv.transform_point3(item.transform_point3(Vec3::new(0.0, -0.36, 0.04)));
@@ -1002,14 +958,13 @@ impl HandAnim {
         let (m, pose) = angler::first_person(&a, self.clock, bobber, eq);
         let p = crate::model::angler::emit_rod(out, base * m, &pose, light, fl);
         self.rod_tip = Some(p.tip);
-        let layers = ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin));
         let mut arm = |hand: Vec3, shoulder: Vec3| {
             let along = (shoulder - hand).normalize_or(Vec3::Y);
             let m = base
                 * Mat4::from_translation(hand)
                 * Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, along))
                 * Mat4::from_scale(Vec3::splat(1.0 / 34.0));
-            emit_box(out, m, Vec3::new(-2.0, -1.5, -2.0), Vec3::new(2.0, 26.0, 2.0), layers, [[255; 3]; 6], light, fl);
+            emit_skin_box(out, m, Vec3::new(-2.0, -1.5, -2.0), Vec3::new(2.0, 26.0, 2.0), skin, light, fl);
         };
         // The right fist around the grip, a little under it.
         let grip = inv.transform_point3(p.grip) - Vec3::new(0.0, 0.02, 0.0);

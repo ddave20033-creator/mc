@@ -11,6 +11,7 @@ mod fx;
 mod guns;
 mod items;
 mod players;
+pub mod prim;
 mod rig;
 #[cfg(test)]
 mod geometry_tests;
@@ -22,7 +23,8 @@ pub use players::{chop_rig, hand, player, tp_rig};
 pub use rig::{spring, viewmodel};
 
 use crate::item::{icon, Icon, ItemId};
-use crate::world::mesh::{corner_pos, corner_uv, flags, Vertex, CORNERS};
+use crate::world::mesh::{flags, Vertex};
+use prim::{quad, quad_at, tri_at, BoxUv, Paint, Sides};
 use crate::world::textures::{tex, ITEM_MASKS, MASK};
 use crate::world::{
     face_texture, icon_tint, is_log, is_plant, is_stairs, is_water, log_axis, log_radius, tint_kind,
@@ -173,28 +175,22 @@ pub fn emit_lying(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, light
         emit_held_data(out, m, st, light, fl);
         return;
     }
+    emit_sprite_faces(out, m, [layer, layer], light, fl);
+}
+
+/// A flat item's front and back: the unit square round the origin, 1/16 thick, +Z showing
+/// `faces[0]` and -Z `faces[1]`.
+fn emit_sprite_faces(out: &mut Vec<Vertex>, m: Mat4, faces: [u32; 2], light: [u8; 4], fl: u8) {
     let t = 1.0 / 32.0;
-    for (z, normal) in [(t, 4u8), (-t, 5u8)] {
-        let v = [
-            (Vec3::new(-0.5, -0.5, z), [0.0, 1.0]),
-            (Vec3::new(0.5, -0.5, z), [1.0, 1.0]),
-            (Vec3::new(0.5, 0.5, z), [1.0, 0.0]),
-            (Vec3::new(-0.5, 0.5, z), [0.0, 0.0]),
-        ]
-        .map(|(p, uv)| Vertex {
-            pos: m.transform_point3(p).to_array(),
-            uv,
-            layer: layer as f32,
-            light: [light[0], light[1], light[2], normal],
-            tint: [255, 255, 255, fl],
-        });
-        if normal == 5 {
-            out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
-        } else {
-            out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-        }
+    for (z, layer, face, sides) in [(t, faces[0], 4u8, Sides::Front), (-t, faces[1], 5u8, Sides::Back)] {
+        let corners = [Vec3::new(-0.5, -0.5, z), Vec3::new(0.5, -0.5, z), Vec3::new(0.5, 0.5, z), Vec3::new(-0.5, 0.5, z)];
+        let paint = Paint { layer, light, face, tint: [255; 3], fl };
+        quad(out, m, corners, SPRITE_UVS, &paint, sides);
     }
 }
+
+/// The whole texture on a quad (see `prim::rect_uvs`).
+const SPRITE_UVS: [[f32; 2]; 4] = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
 
 /// Wooden torch with a charcoal tip and two crossed, frame-animated flame planes.
 pub fn emit_torch(out: &mut Vec<Vertex>, m: Mat4, light: [u8; 4], fl: u8, seed: u8) {
@@ -238,23 +234,10 @@ pub fn emit_torch(out: &mut Vec<Vertex>, m: Mat4, light: [u8; 4], fl: u8, seed: 
         (Vec3::new(-0.11, 0.0, -0.11), Vec3::new(0.11, 0.0, 0.11)),
         (Vec3::new(0.11, 0.0, -0.11), Vec3::new(-0.11, 0.0, 0.11)),
     ] {
-        let pts = [
-            (a + Vec3::Y * 0.16, [0.0, 1.0]),
-            (b + Vec3::Y * 0.16, [1.0, 1.0]),
-            (b + Vec3::Y * 0.39, [1.0, 0.0]),
-            (a + Vec3::Y * 0.39, [0.0, 0.0]),
-        ];
-        let v = pts.map(|(p, uv)| Vertex {
-            pos: m.transform_point3(p).to_array(),
-            uv,
-            layer: tex::TORCH_FLAME as f32,
-            light: [light[0], light[1], light[2], 6],
-            // The red tint channel carries one constant animation phase per torch.
-            tint: [seed, 255, 255, fl | flags::EMISSIVE],
-        });
-        out.extend_from_slice(&[
-            v[0], v[1], v[2], v[0], v[2], v[3], v[0], v[2], v[1], v[0], v[3], v[2],
-        ]);
+        let corners = [a + Vec3::Y * 0.16, b + Vec3::Y * 0.16, b + Vec3::Y * 0.39, a + Vec3::Y * 0.39];
+        // The red tint channel carries one constant animation phase per torch.
+        let paint = Paint { layer: tex::TORCH_FLAME, light, face: 6, tint: [seed, 255, 255], fl: fl | flags::EMISSIVE };
+        quad(out, m, corners, SPRITE_UVS, &paint, Sides::Both);
     }
 }
 
@@ -266,22 +249,8 @@ pub fn emit_flame(out: &mut Vec<Vertex>, m: Mat4, fl: u8, seed: u8) {
         (Vec3::new(-0.5, 0.0, -0.5), Vec3::new(0.5, 0.0, 0.5)),
         (Vec3::new(0.5, 0.0, -0.5), Vec3::new(-0.5, 0.0, 0.5)),
     ] {
-        let pts = [
-            (a, [0.0, 1.0]),
-            (b, [1.0, 1.0]),
-            (b + Vec3::Y, [1.0, 0.0]),
-            (a + Vec3::Y, [0.0, 0.0]),
-        ];
-        let v = pts.map(|(p, uv)| Vertex {
-            pos: m.transform_point3(p).to_array(),
-            uv,
-            layer: tex::TORCH_FLAME as f32,
-            light: [255, 255, 255, 6],
-            tint: [seed, 255, 255, fl | flags::EMISSIVE],
-        });
-        out.extend_from_slice(&[
-            v[0], v[1], v[2], v[0], v[2], v[3], v[0], v[2], v[1], v[0], v[3], v[2],
-        ]);
+        let paint = Paint { layer: tex::TORCH_FLAME, light: [255; 4], face: 6, tint: [seed, 255, 255], fl: fl | flags::EMISSIVE };
+        quad(out, m, [a, b, b + Vec3::Y, a + Vec3::Y], SPRITE_UVS, &paint, Sides::Both);
     }
 }
 
@@ -328,54 +297,18 @@ pub fn emit_sprite_sides(
     light: [u8; 4],
     fl: u8,
 ) {
-    let [layer, back] = faces;
+    emit_sprite_faces(out, m, faces, light, fl);
     let t = 1.0 / 32.0;
-    let vert_on = |l: u32, p: Vec3, uv: [f32; 2], normal: u8| Vertex {
-        pos: m.transform_point3(p).to_array(),
-        uv,
-        layer: l as f32,
-        light: [light[0], light[1], light[2], normal],
-        tint: [255, 255, 255, fl],
-    };
-    let vert_uv = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(wall, p, uv, normal);
-    for (z, flip) in [(t, false), (-t, true)] {
-        let l = if flip { back } else { layer };
-        let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(l, p, uv, normal);
-        let v = [
-            vert(
-                Vec3::new(-0.5, -0.5, z),
-                [0.0, 1.0],
-                if flip { 5 } else { 4 },
-            ),
-            vert(
-                Vec3::new(0.5, -0.5, z),
-                [1.0, 1.0],
-                if flip { 5 } else { 4 },
-            ),
-            vert(Vec3::new(0.5, 0.5, z), [1.0, 0.0], if flip { 5 } else { 4 }),
-            vert(
-                Vec3::new(-0.5, 0.5, z),
-                [0.0, 0.0],
-                if flip { 5 } else { 4 },
-            ),
+    for w in sprite_walls(faces[0]).iter() {
+        let corners = [
+            Vec3::new(w.a.0, w.a.1, -t),
+            Vec3::new(w.b.0, w.b.1, -t),
+            Vec3::new(w.b.0, w.b.1, t),
+            Vec3::new(w.a.0, w.a.1, t),
         ];
-        if flip {
-            out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
-        } else {
-            out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-        }
-    }
-
-    for w in sprite_walls(layer).iter() {
-        let v = [
-            vert_uv(Vec3::new(w.a.0, w.a.1, -t), w.uv[0], w.normal),
-            vert_uv(Vec3::new(w.b.0, w.b.1, -t), w.uv[1], w.normal),
-            vert_uv(Vec3::new(w.b.0, w.b.1, t), w.uv[1], w.normal),
-            vert_uv(Vec3::new(w.a.0, w.a.1, t), w.uv[0], w.normal),
-        ];
+        let paint = Paint { layer: wall, light, face: w.normal, tint: [255; 3], fl };
         // Both windings: the wall is seen from either side depending on the transform.
-        out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-        out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+        quad(out, m, corners, [w.uv[0], w.uv[1], w.uv[1], w.uv[0]], &paint, Sides::Both);
     }
 }
 
@@ -528,26 +461,15 @@ fn emit_round_log(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8)
         p[axis] = t;
         p[ua] = u;
         p[va] = v;
-        m.transform_point3(Vec3::from(p)).to_array()
+        m.transform_point3(Vec3::from(p))
     };
-    let face_of = |n: [f32; 3]| {
+    let paint = |layer: u32, n: [f32; 3]| {
         let a = n.map(f32::abs);
         let k = if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 };
-        (k * 2 + (n[k] < 0.0) as usize) as u8
+        let face = (k * 2 + (n[k] < 0.0) as usize) as u8;
+        Paint { layer, light, face, tint: [255; 3], fl }
     };
-    let mut quad = |ps: [[f32; 3]; 4], uvs: [[f32; 2]; 4], layer: u32, n: [f32; 3]| {
-        let face = face_of(n);
-        let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-            pos: ps[i],
-            uv: uvs[i],
-            layer: layer as f32,
-            light: [light[0], light[1], light[2], face],
-            tint: [255, 255, 255, fl],
-        });
-        // Both windings: it is turned every way in the hand.
-        out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-        out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
-    };
+    // (Every face with both windings: it is turned every way in the hand.)
     // The bark goes round as many times as on the placed log (a whole texture each time).
     let rounds = if radius > 0.3 { 3 } else { 1 };
     let per = LOG_ITEM_SIDES / rounds;
@@ -561,21 +483,24 @@ fn emit_round_log(out: &mut Vec<Vertex>, m: Mat4, b: u8, light: [u8; 4], fl: u8)
         n[ua] = mid.cos();
         n[va] = mid.sin();
         let (u0, u1) = ((i % per) as f32 / per as f32, (i % per + 1) as f32 / per as f32);
-        quad(
+        quad_at(
+            out,
             [at(-0.5, c0, s0), at(-0.5, c1, s1), at(0.5, c1, s1), at(0.5, c0, s0)],
             [[u0, 1.0], [u1, 1.0], [u1, 0.0], [u0, 0.0]],
-            side,
-            n,
+            &paint(side, n),
+            Sides::Both,
         );
+        // The ends: a fan of triangles from the middle.
         for t in [-0.5f32, 0.5] {
             let mut n = [0.0f32; 3];
             n[axis] = t * 2.0;
             let uv = |u: f32, v: f32| [0.5 + u * k, 0.5 + v * k];
-            quad(
-                [at(t, 0.0, 0.0), at(t, c0, s0), at(t, c1, s1), at(t, 0.0, 0.0)],
-                [uv(0.0, 0.0), uv(c0, s0), uv(c1, s1), uv(0.0, 0.0)],
-                end,
-                n,
+            tri_at(
+                out,
+                [at(t, 0.0, 0.0), at(t, c0, s0), at(t, c1, s1)],
+                [uv(0.0, 0.0), uv(c0, s0), uv(c1, s1)],
+                &paint(end, n),
+                Sides::Both,
             );
         }
     }
@@ -610,48 +535,21 @@ pub fn emit_box_rows(
     fl: u8,
     rows: [f32; 2],
 ) {
-    for face in 0..6 {
-        let mut quad = [Vertex::default(); 4];
-        let upright = crate::world::mesh::FACE_V[face] == [0, 1, 0];
-        for (i, &(su, sv)) in CORNERS.iter().enumerate() {
-            let c = corner_pos(face, su, sv);
-            let local = min + (max - min) * Vec3::from(c);
-            let p = m.transform_point3(local);
-            let tn = tints[face];
-            let mut uv = corner_uv(su, sv);
-            if upright {
-                uv[1] = rows[0] + (rows[1] - rows[0]) * uv[1];
-            }
-            quad[i] = Vertex {
-                pos: p.to_array(),
-                uv,
-                layer: layers[face] as f32,
-                light: [light[0], light[1], light[2], face as u8],
-                tint: [tn[0], tn[1], tn[2], fl],
-            };
-        }
-        out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
-    }
+    prim::cuboid(out, m, min, max, BoxUv::Rows(rows), |face| {
+        Some(Paint { layer: layers[face], light, face: face as u8, tint: tints[face], fl })
+    });
 }
 
 fn emit_cross(out: &mut Vec<Vertex>, m: Mat4, layer: u32, tint: [u8; 3], light: [u8; 4], fl: u8) {
+    let paint = Paint { layer, light, face: light[3], tint, fl };
     for (a, b) in [((-0.5, -0.5), (0.5, 0.5)), ((0.5, -0.5), (-0.5, 0.5))] {
-        let pts = [
-            (Vec3::new(a.0, -0.5, a.1), [0.0, 1.0]),
-            (Vec3::new(b.0, -0.5, b.1), [1.0, 1.0]),
-            (Vec3::new(b.0, 0.5, b.1), [1.0, 0.0]),
-            (Vec3::new(a.0, 0.5, a.1), [0.0, 0.0]),
+        let corners = [
+            Vec3::new(a.0, -0.5, a.1),
+            Vec3::new(b.0, -0.5, b.1),
+            Vec3::new(b.0, 0.5, b.1),
+            Vec3::new(a.0, 0.5, a.1),
         ];
-        let v = pts.map(|(p, uv)| Vertex {
-            pos: m.transform_point3(p).to_array(),
-            uv,
-            layer: layer as f32,
-            light,
-            tint: [tint[0], tint[1], tint[2], fl],
-        });
-        out.extend_from_slice(&[
-            v[0], v[1], v[2], v[0], v[2], v[3], v[0], v[2], v[1], v[0], v[3], v[2],
-        ]);
+        quad(out, m, corners, SPRITE_UVS, &paint, Sides::Both);
     }
 }
 

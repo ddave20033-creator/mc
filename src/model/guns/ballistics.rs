@@ -2,6 +2,7 @@
 //! ground for a while, tracer streaks of bullets in flight and the laser sight's dot.
 
 use crate::item::GunKind;
+use crate::model::prim::{quad_at, Paint, Sides};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
 use crate::world::textures::tex;
@@ -185,33 +186,14 @@ pub fn emit_muzzle_flash(out: &mut Vec<Vertex>, pos: Vec3, dir: Vec3, cam: Vec3,
 
 /// A glowing sprite quad seen from both sides.
 fn emit_sprite(out: &mut Vec<Vertex>, corners: [Vec3; 4], layer: u32, tint: [u8; 3], uvs: [[f32; 2]; 4]) {
-    let mut light = vertex_light(15, 15);
-    light[3] = 6;
-    let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-        pos: corners[i].to_array(),
-        uv: uvs[i],
-        layer: layer as f32,
-        light,
-        tint: [tint[0], tint[1], tint[2], flags::EMISSIVE],
-    });
-    out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-    out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+    let paint = Paint { layer, light: vertex_light(15, 15), face: 6, tint, fl: flags::EMISSIVE };
+    quad_at(out, corners, uvs, &paint, Sides::Both);
 }
 
 /// A bright quad seen from both sides.
 fn emit_glow_quad(out: &mut Vec<Vertex>, corners: [Vec3; 4], tint: [u8; 3]) {
     let uvs = [[0.4, 0.6], [0.6, 0.6], [0.6, 0.4], [0.4, 0.4]];
-    let mut light = vertex_light(15, 15);
-    light[3] = 6;
-    let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-        pos: corners[i].to_array(),
-        uv: uvs[i],
-        layer: tex::WOOL as f32,
-        light,
-        tint: [tint[0], tint[1], tint[2], flags::EMISSIVE],
-    });
-    out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-    out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+    emit_sprite(out, corners, tex::WOOL, tint, uvs);
 }
 
 #[cfg(test)]

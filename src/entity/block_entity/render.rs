@@ -3,6 +3,7 @@
 
 use super::furnace::{grill_box, Furnace, FLIP_TIME};
 use crate::item::{icon, Icon, ItemId, Slot, Stack, BUCKET, COAL, LAVA_BUCKET};
+use crate::model::prim::{self, quad_at, BoxUv, Paint, Sides};
 use crate::util::vertex_light;
 use crate::world::mesh::{box_uv, corner_pos, flags, Vertex, CORNERS, FACE_N, FURNACE_HOLLOWS};
 use crate::world::textures::tex;
@@ -12,22 +13,13 @@ use std::f32::consts::{FRAC_PI_2, PI};
 
 /// Box in a block-local frame (0..1) with model UVs, transformed by `m` into the world.
 fn emit_part(out: &mut Vec<Vertex>, m: Mat4, lo: Vec3, hi: Vec3, layers: [u32; 6], light: [u8; 4]) {
-    for (face, &layer) in layers.iter().enumerate() {
-        let mut quad = [Vertex::default(); 4];
-        for (i, &(su, sv)) in CORNERS.iter().enumerate() {
-            let c = corner_pos(face, su, sv);
-            let local = lo + (hi - lo) * Vec3::from(c);
-            quad[i] = Vertex {
-                pos: m.transform_point3(local).to_array(),
-                uv: box_uv(face, local.to_array()),
-                layer: layer as f32,
-                light: [light[0], light[1], light[2], face as u8],
-                tint: [255, 255, 255, flags::ENTITY],
-            };
-        }
-        out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
-    }
+    prim::cuboid(out, m, lo, hi, BoxUv::Model, |face| {
+        Some(Paint { layer: layers[face], light, face: face as u8, tint: [255; 3], fl: flags::ENTITY })
+    });
 }
+
+/// The whole texture on a quad, its top left at the first corner.
+const FLAT_UVS: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
 
 /// A chest half's 27 slots lie on its floor in 3 rows of 9, like Minecraft's chest screen.
 pub const CHEST_COLS: usize = 9;
@@ -163,17 +155,9 @@ pub fn build_chest_items(
 /// chest or on a table, or the corner of a furnace where the held meat goes. `c` are its
 /// corners in order around it; drawn with the overlays (multiplied onto what is there).
 pub fn build_glow(out: &mut Vec<Vertex>, c: [Vec3; 4]) {
-    let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-    let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
-        pos: c[i].to_array(),
-        uv: uv[i],
-        layer: tex::SLOT_GLOW as f32,
-        light: [255, 255, 0, 0],
-        tint: [255, 255, 255, flags::OVERLAY],
-    });
+    let paint = Paint { layer: tex::SLOT_GLOW, light: [255, 255, 0, 0], face: 0, tint: [255; 3], fl: flags::OVERLAY };
     // Both sides.
-    out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-    out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+    quad_at(out, c, FLAT_UVS, &paint, Sides::Both);
 }
 
 /// Chest lid (with its latch) hinged at the back; `open` is 0 (closed) .. 1 (open). `side`:
@@ -300,7 +284,8 @@ pub fn build_door(out: &mut Vec<Vertex>, p: IVec3, b: u8, open: f32, sky: u8, bl
                 d(a).total_cmp(&d(b))
             })
             .unwrap();
-        let mut quad = [Vertex::default(); 4];
+        let mut pos = [Vec3::ZERO; 4];
+        let mut uvs = [[0.0; 2]; 4];
         for (i, &(su, sv)) in CORNERS.iter().enumerate() {
             let k = Vec3::from(corner_pos(face, su, sv));
             let local = lo + (hi - lo) * k;
@@ -309,15 +294,10 @@ pub fn build_door(out: &mut Vec<Vertex>, p: IVec3, b: u8, open: f32, sky: u8, bl
                 // Both sides show the hinges (the texture's left edge) at the hinge.
                 uv[0] = if flip { local.x } else { 1.0 - local.x };
             }
-            quad[i] = Vertex {
-                pos: to_world(local).to_array(),
-                uv,
-                layer: layer as f32,
-                light: [light[0], light[1], light[2], shade_face as u8],
-                tint: [255, 255, 255, flags::ENTITY],
-            };
+            (pos[i], uvs[i]) = (to_world(local), uv);
         }
-        out.extend_from_slice(&[quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]);
+        let paint = Paint { layer, light, face: shade_face as u8, tint: [255; 3], fl: flags::ENTITY };
+        quad_at(out, pos, uvs, &paint, Sides::Front);
     }
 }
 
@@ -654,16 +634,14 @@ fn build_furnace_inside(
             spot((a, t1, 0.0), y),
             spot((-a, t1, 0.0), y),
         ];
-        let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-        let v: [Vertex; 4] = std::array::from_fn(|k| Vertex {
-            pos: corners[k].to_array(),
-            uv: uv[k],
-            layer: tex::LAVA as f32,
-            light: [255, 255, 255, 2],
-            tint: [128, 128, 0, flags::FLUID | flags::EMISSIVE | flags::ENTITY],
-        });
-        out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-        out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+        let paint = Paint {
+            layer: tex::LAVA,
+            light: [255; 4],
+            face: 2,
+            tint: [128, 128, 0],
+            fl: flags::FLUID | flags::EMISSIVE | flags::ENTITY,
+        };
+        quad_at(out, corners, FLAT_UVS, &paint, Sides::Both);
     } else {
         // The fuel, or while the last of it burns away, embers.
         let (item, count) = match (f.fuel, lit) {
