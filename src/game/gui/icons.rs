@@ -156,7 +156,7 @@ mod tests {
 
 #[cfg(test)]
 mod timing {
-    use crate::game::*;
+    use super::*;
 
     #[test]
     #[ignore]
