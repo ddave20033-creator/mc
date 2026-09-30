@@ -263,7 +263,6 @@ fn double_chest_faces(left: &Image, right: &Image, put: &mut impl FnMut(u32, &Im
     }
 }
 
-/// Replaces layers with the textures of the resource packs (anything missing stays procedural).
 /// A log's end with square rings (Minecraft's, for a square log) redrawn round, for the
 /// round logs: each point takes the ring as far out as it is (round), in its direction (the
 /// square ring there). The corners outside the outermost ring are bark.
@@ -288,6 +287,7 @@ fn round_rings(img: &Image) -> Image {
     out
 }
 
+/// Replaces layers with the textures of the resource packs (anything missing stays procedural).
 pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
     let layer_bytes = TILE * TILE * 4;
     let mut put = |layer: u32, img: &Image| {
