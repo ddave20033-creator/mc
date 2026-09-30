@@ -39,7 +39,9 @@ pub struct Renderer {
     ui_layout: vk::PipelineLayout,
     /// The main pass's pipelines.
     pipes: MainPipes,
+    /// The shadow map's pipelines: with alpha tests, and without for plain whole-block faces.
     shadow_pipe: vk::Pipeline,
+    shadow_plain_pipe: vk::Pipeline,
     /// `Gpu::pass_version` the main-pass pipelines were made for.
     pass_version: u64,
     block_tex: Texture,
@@ -129,7 +131,8 @@ impl Renderer {
             let lens_layout = create_layout(d, &[desc.world_dsl, desc.lens_dsl], size_of::<DrawPush>() as u32);
             let lens_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, LENS_FRAG);
             let blur_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, BLUR_FRAG);
-            let shadow_pipe = create_shadow_pipe(d, shadow.pass, world_layout);
+            let shadow_pipe = create_shadow_pipe(d, shadow.pass, world_layout, false);
+            let shadow_plain_pipe = create_shadow_pipe(d, shadow.pass, world_layout, true);
 
             Self {
                 desc,
@@ -137,6 +140,7 @@ impl Renderer {
                 ui_layout,
                 pipes,
                 shadow_pipe,
+                shadow_plain_pipe,
                 pass_version: gpu.pass_version,
                 block_tex,
                 block_mips: block_levels.len(),
@@ -270,7 +274,7 @@ impl Renderer {
             }
             self.pipes.destroy(d);
             self.scope_pipes.destroy(d);
-            for p in [self.shadow_pipe, self.lens_pipe, self.blur_pipe] {
+            for p in [self.shadow_pipe, self.shadow_plain_pipe, self.lens_pipe, self.blur_pipe] {
                 d.destroy_pipeline(p, None);
             }
             d.destroy_pipeline_layout(self.lens_layout, None);

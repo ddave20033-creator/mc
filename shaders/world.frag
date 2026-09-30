@@ -18,6 +18,15 @@ layout(location = 7) in vec3 vSmoothN;
 
 layout(location = 0) out vec4 outColor;
 
+// Compiled a second time with NO_DISCARD for the plain faces of whole blocks (render::pipelines
+// WORLD_PLAIN_FRAG), whose texels are all opaque so no test here would cut anything: without
+// any `discard` the depth test runs before this shader.
+#ifdef NO_DISCARD
+#define DISCARD {}
+#else
+#define DISCARD discard
+#endif
+
 const int F_LEAVES = 1;
 const int F_PLANT = 2;
 const int F_EMISSIVE = 4;
@@ -273,7 +282,7 @@ void main() {
         // Multiply-blended (result = 2 * src * dst): mid-gray leaves the block unchanged, darker
         // pixels darken it, lighter ones brighten it. Minecraft does this in gamma space, so the
         // factor is converted to linear to match.
-        if (tex.a < 0.1) discard;
+        if (tex.a < 0.1) DISCARD;
         vec3 factor = pow(2.0 * mix(vec3(0.5), pow(tex.rgb, vec3(1.0 / 2.2)), tex.a), vec3(2.2));
         outColor = vec4(factor * 0.5, 1.0);
         return;
@@ -286,16 +295,16 @@ void main() {
     if (cutout && frame.lightDir.w > 0.5) {
         coverage = clamp((tex.a - 0.5) / max(fwidth(tex.a), 1e-4) + 0.5, 0.0, 1.0);
         coverage *= plantFade;
-        if (coverage <= 0.0) discard;
+        if (coverage <= 0.0) DISCARD;
     } else if (!water && tex.a < ((pc.params.x == 1.0 || pc.params.x == 4.0) ? 0.05 : 0.5)) {
         // (Blended, glass shows as see-through as its texture; elsewhere it is cut out.)
-        discard;
+        DISCARD;
     } else if (plantFade < bayer4(gl_FragCoord.xy)) {
-        discard;
+        DISCARD;
     }
     // Glass faces carry their connection mask inverted in the red tint channel.
     bool glass = abs(vLayer - GLASS_LAYER) < 0.5;
-    if (glass && glassSeam(uv, 255 - int(vTint.r * 255.0 + 0.5))) discard;
+    if (glass && glassSeam(uv, 255 - int(vTint.r * 255.0 + 0.5))) DISCARD;
 
     vec4 flame = vec4(0.0);
     if (torchFire || furnaceFire) {
@@ -304,7 +313,7 @@ void main() {
         float seed = vTint.r;
         if (torchFire) {
             flame = torchFlame(uv, time, seed);
-            if (flame.a < 0.02) discard;
+            if (flame.a < 0.02) DISCARD;
         } else {
             vec2 opening = (uv - vec2(32.0, 66.0) / 128.0) / (vec2(64.0, 46.0) / 128.0);
             if (all(greaterThanEqual(opening, vec2(0.0))) && all(lessThanEqual(opening, vec2(1.0)))) {

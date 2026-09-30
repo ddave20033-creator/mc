@@ -12,8 +12,12 @@ use std::mem::size_of;
 
 const WORLD_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/world.vert.spv"));
 const WORLD_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/world.frag.spv"));
+/// world.frag without its alpha tests (`NO_DISCARD`): for the plain whole-block faces, whose
+/// depth test can then run before the fragment shader.
+const WORLD_PLAIN_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/world_plain.frag.spv"));
 const SHADOW_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shadow.vert.spv"));
 const SHADOW_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shadow.frag.spv"));
+const SHADOW_PLAIN_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shadow_plain.frag.spv"));
 const SKY_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sky.vert.spv"));
 const SKY_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sky.frag.spv"));
 const UI_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui.vert.spv"));
@@ -58,9 +62,11 @@ impl DrawPush {
     }
 }
 
-/// The pipelines of the main pass: sky, world, water, player fade, overlay, lines and UI.
+/// The pipelines of the main pass: sky, world (plain whole-block faces, and the rest), water,
+/// player fade, overlay, lines and UI.
 pub(super) struct MainPipes {
     pub sky: vk::Pipeline,
+    pub world_plain: vk::Pipeline,
     pub world: vk::Pipeline,
     pub water: vk::Pipeline,
     pub player_fade: vk::Pipeline,
@@ -100,6 +106,15 @@ impl MainPipes {
             d,
             &PipelineDesc {
                 alpha_to_coverage: samples != vk::SampleCountFlags::TYPE_1,
+                ..world_desc
+            },
+        );
+        // (no alpha to coverage either: that too would make the depth test wait for the shader;
+        // these faces are fully covered anyway)
+        let world_plain = create_pipeline(
+            d,
+            &PipelineDesc {
+                frag: WORLD_PLAIN_FRAG,
                 ..world_desc
             },
         );
@@ -174,6 +189,7 @@ impl MainPipes {
         );
         Self {
             sky,
+            world_plain,
             world,
             water,
             player_fade,
@@ -186,6 +202,7 @@ impl MainPipes {
     pub unsafe fn destroy(&self, d: &ash::Device) {
         for p in [
             self.sky,
+            self.world_plain,
             self.world,
             self.water,
             self.player_fade,
@@ -229,17 +246,19 @@ pub(super) fn create_scope_view_pipe(
     )
 }
 
-/// The shadow map's: depth only, biased against shadow acne.
+/// The shadow map's: depth only, biased against shadow acne. `plain`: without alpha tests,
+/// for the plain whole-block faces.
 pub(super) fn create_shadow_pipe(
     d: &ash::Device,
     render_pass: vk::RenderPass,
     layout: vk::PipelineLayout,
+    plain: bool,
 ) -> vk::Pipeline {
     create_pipeline(
         d,
         &PipelineDesc {
             vert: SHADOW_VERT,
-            frag: SHADOW_FRAG,
+            frag: if plain { SHADOW_PLAIN_FRAG } else { SHADOW_FRAG },
             stride: size_of::<Vertex>() as u32,
             attributes: &WORLD_ATTRS,
             layout,

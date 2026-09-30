@@ -20,8 +20,10 @@ pub(super) struct ChunkGpu {
     /// Opaque indices without the faces between leaves and the plants, and the former's count
     /// (see `MeshData`).
     pub solid: u32,
-    /// Whole-block faces by direction, at the end of the solid indices.
+    /// Whole-block faces by direction: the plain ones at the start of the solid indices, the
+    /// cut-out ones at their end (see `MeshData`).
     pub dirs: [u32; 6],
+    pub cut_dirs: [u32; 6],
     pub leaf_inner: u32,
     pub water: u32,
     pub min: Vec3,
@@ -82,6 +84,7 @@ impl Renderer {
                 opaque: m.opaque_count,
                 solid: m.solid_count,
                 dirs: m.dir_counts,
+                cut_dirs: m.cut_dir_counts,
                 leaf_inner: m.leaf_inner_count,
                 water: m.indices.len() as u32 - m.opaque_count,
                 min: Vec3::new(x0 - 1.0, m.min_y - 1.0, z0 - 1.0),

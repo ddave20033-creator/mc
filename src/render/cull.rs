@@ -27,11 +27,70 @@ impl Frustum {
     }
 }
 
+/// A few index ranges of a chunk's mesh to draw, next ones joined.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Parts {
+    ranges: [(u32, u32); 4],
+    n: usize,
+}
+
+impl Parts {
+    /// Adds `count` indices from `first` (after the ranges already in).
+    pub fn push(&mut self, first: u32, count: u32) {
+        if count == 0 {
+            return;
+        }
+        let n = self.n;
+        if n > 0 && self.ranges[n - 1].0 + self.ranges[n - 1].1 == first {
+            self.ranges[n - 1].1 += count;
+        } else if n < self.ranges.len() {
+            self.ranges[n] = (first, count);
+            self.n += 1;
+        } else {
+            // Out of slots: draw on to the end of this one.
+            self.ranges[n - 1].1 = first + count - self.ranges[n - 1].0;
+        }
+    }
+
+    /// The ranges (first, count).
+    pub fn iter(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.ranges[..self.n].iter().copied()
+    }
+}
+
+impl ChunkGpu {
+    /// The solid indices to draw when only the whole-block faces turned toward `facing`
+    /// directions (see `FACE_N`) show: the plain faces (drawn without alpha testing), and the
+    /// rest (the other solid ones and the cut-out faces).
+    pub fn solid_parts(&self, facing: [bool; 6]) -> (Parts, Parts) {
+        let (mut plain, mut rest) = (Parts::default(), Parts::default());
+        let mut at = 0;
+        for (d, &count) in self.dirs.iter().enumerate() {
+            if facing[d] {
+                plain.push(at, count);
+            }
+            at += count;
+        }
+        let cut_total: u32 = self.cut_dirs.iter().sum();
+        let mut cut_at = self.solid - cut_total;
+        rest.push(at, cut_at - at);
+        for (d, &count) in self.cut_dirs.iter().enumerate() {
+            if facing[d] {
+                rest.push(cut_at, count);
+            }
+            cut_at += count;
+        }
+        (plain, rest)
+    }
+}
+
 /// A chunk drawn this frame: where its mesh is and how far away it is.
 pub(super) struct VisibleChunk {
-    /// Index ranges (first, count) of its opaque part to draw: the faces turned toward the
-    /// camera, without the small detail far chunks leave out.
-    pub parts: [(u32, u32); 4],
+    /// Index ranges of its opaque part to draw: the faces turned toward the camera, without
+    /// the small detail far chunks leave out. Plain whole-block faces (drawn without alpha
+    /// testing), and the rest.
+    pub plain: Parts,
+    pub parts: Parts,
     /// Opaque indices drawn from the start, all directions (without the small detail far
     /// chunks leave out): for views that do not leave out faces by direction.
     pub drawn: u32,
@@ -89,33 +148,10 @@ pub(super) fn select_chunks(
             cam.z > c.min.z,
             cam.z < c.max.z,
         ];
-        let dirs_total: u32 = c.dirs.iter().sum();
-        let mut parts = [(0u32, 0u32); 4];
-        let mut n = 0;
-        let mut push = |first: u32, count: u32| {
-            if count == 0 {
-                return;
-            }
-            if n > 0 && parts[n - 1].0 + parts[n - 1].1 == first {
-                parts[n - 1].1 += count;
-            } else if n < parts.len() {
-                parts[n] = (first, count);
-                n += 1;
-            } else {
-                // Out of slots: draw on to the end of this one.
-                parts[n - 1].1 = first + count - parts[n - 1].0;
-            }
-        };
-        let mut at = c.solid - dirs_total;
-        push(0, at);
-        for (d, &count) in c.dirs.iter().enumerate() {
-            if facing[d] {
-                push(at, count);
-            }
-            at += count;
-        }
-        push(c.solid, drawn - c.solid);
+        let (plain, mut parts) = c.solid_parts(facing);
+        parts.push(c.solid, drawn - c.solid);
         visible.push(VisibleChunk {
+            plain,
             parts,
             drawn,
             buffer: arena.buffer(r),

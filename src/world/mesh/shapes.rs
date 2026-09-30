@@ -257,8 +257,7 @@ impl Builder {
             };
             let from = self.opaque.len();
             self.cube_face(r, x, y, z, face, layer, [255; 3], 0, face_rotated(b, face));
-            let quad = self.opaque.drain(from..);
-            self.dirs[face].extend(quad);
+            self.to_dir(face, from, layer);
         }
         let d = FACE_N[front];
         if is_opaque(r.get(x + d[0], y + d[1], z + d[2])) {

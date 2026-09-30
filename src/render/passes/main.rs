@@ -56,30 +56,34 @@ impl Renderer {
             d.cmd_bind_index_buffer(cmd, c.buffer, c.indices, vk::IndexType::UINT32);
         };
 
-        // Opaque (front to back)
-        r.bind_pipe(pipes.world);
+        // Opaque (front to back): all chunks' opaque parts as indirect draws, one command per
+        // mesh buffer (the meshes share a few big buffers). First the plain whole-block faces
+        // without alpha testing (their depth test runs before the fragment shader), then the
+        // rest.
         r.push(self.world_layout, &DrawPush::new(f.view_proj, 0.0));
-        // All chunks' opaque parts as indirect draws, one command per mesh buffer (the
-        // meshes share a few big buffers).
-        let mut draws: Vec<IndirectDraw> = Vec::with_capacity(visible.len() * 3);
-        for c in &visible {
-            for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
-                draws.push(chunk_draw(c.buffer, c.vertices, c.indices, first, count));
-            }
-        }
         let ind = &self.indirect[r.slot];
         let multi = r.gpu.multi_draw_indirect;
-        // Sorted by buffer, front to back within each (the sort is stable).
-        let recorded = record_indirect(d, cmd, ind, indirect_used, &mut draws, multi);
-        marks[3] = Instant::now();
-        if recorded.is_none() {
+        let mut next = Some(indirect_used);
+        for (pipe, plain) in [(pipes.world_plain, true), (pipes.world, false)] {
+            r.bind_pipe(pipe);
+            let mut draws: Vec<IndirectDraw> = Vec::with_capacity(visible.len() * 3);
             for c in &visible {
-                bind(c);
-                for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
-                    d.cmd_draw_indexed(cmd, count, 1, first, 0, 0);
+                for (first, count) in if plain { c.plain } else { c.parts }.iter() {
+                    draws.push(chunk_draw(c.buffer, c.vertices, c.indices, first, count));
+                }
+            }
+            // Sorted by buffer, front to back within each (the sort is stable).
+            next = next.and_then(|base| record_indirect(d, cmd, ind, base, &mut draws, multi));
+            if next.is_none() {
+                for c in &visible {
+                    bind(c);
+                    for (first, count) in if plain { c.plain } else { c.parts }.iter() {
+                        d.cmd_draw_indexed(cmd, count, 1, first, 0, 0);
+                    }
                 }
             }
         }
+        marks[3] = Instant::now();
         r.draw_dyn(PARTICLES);
         let (e0, en) = r.range(ENTITY);
         let player_n = f.player_vertex_count.min(en);

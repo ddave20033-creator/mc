@@ -52,6 +52,13 @@ const SHADERS: &[&str] = &[
     "lens.frag",
     "blur.frag",
 ];
+/// Shaders compiled once more with a define: (source, output name, define).
+const VARIANTS: &[(&str, &str, &str)] = &[
+    // Without alpha tests (`discard`), for faces with no see-through texels: the depth test
+    // then runs before the fragment shader.
+    ("world.frag", "world_plain.frag", "NO_DISCARD"),
+    ("shadow.frag", "shadow_plain.frag", "NO_DISCARD"),
+];
 const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl"];
 
 fn glslc_path() -> PathBuf {
@@ -75,10 +82,18 @@ fn main() {
     for inc in INCLUDES {
         println!("cargo:rerun-if-changed=shaders/{inc}");
     }
-    for name in SHADERS {
-        println!("cargo:rerun-if-changed=shaders/{name}");
-        let status = Command::new(&glslc)
-            .arg(format!("shaders/{name}"))
+    let jobs = SHADERS
+        .iter()
+        .map(|&name| (name, name, None))
+        .chain(VARIANTS.iter().map(|&(src, name, def)| (src, name, Some(def))));
+    for (src, name, define) in jobs {
+        println!("cargo:rerun-if-changed=shaders/{src}");
+        let mut cmd = Command::new(&glslc);
+        cmd.arg(format!("shaders/{src}"));
+        if let Some(def) = define {
+            cmd.arg(format!("-D{def}"));
+        }
+        let status = cmd
             .arg("-O")
             .arg("-o")
             .arg(out.join(format!("{name}.spv")))

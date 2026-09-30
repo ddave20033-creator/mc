@@ -20,7 +20,6 @@ impl Renderer {
         self.shadow.begin(d, cmd);
         if f.shadows {
             r.set_view(full_rect(SHADOW_SIZE, SHADOW_SIZE));
-            r.bind_pipe(self.shadow_pipe);
             r.bind_sets(self.world_layout, &[world_set]);
             r.push(self.world_layout, &DrawPush::new(f.light_view_proj, 3.0));
             let lf = Frustum::new(f.light_view_proj);
@@ -32,6 +31,8 @@ impl Renderer {
                 let n = crate::world::mesh::FACE_N[k];
                 Vec3::new(n[0] as f32, n[1] as f32, n[2] as f32).dot(l) > 0.0
             });
+            // The plain whole-block faces without alpha tests, then the rest.
+            let mut plain_draws: Vec<IndirectDraw> = Vec::new();
             let mut draws: Vec<IndirectDraw> = Vec::new();
             let mut shadow_chunks = Vec::new();
             // Only the chunks around the camera can be in range (not all loaded ones).
@@ -57,28 +58,28 @@ impl Renderer {
                 }
                 let (b, v, i) = (self.arena.buffer(m), m.offset, m.offset + c.index_offset);
                 shadow_chunks.push((b, v, i, c.opaque));
-                let dirs_total: u32 = c.dirs.iter().sum();
-                let mut at = c.solid - dirs_total;
-                draws.push(chunk_draw(b, v, i, 0, at));
-                for (k, &count) in c.dirs.iter().enumerate() {
-                    if lit[k] && count > 0 {
-                        draws.push(chunk_draw(b, v, i, at, count));
-                    }
-                    at += count;
-                }
+                let (plain, rest) = c.solid_parts(lit);
+                plain_draws.extend(plain.iter().map(|(first, n)| chunk_draw(b, v, i, first, n)));
+                draws.extend(rest.iter().map(|(first, n)| chunk_draw(b, v, i, first, n)));
                 let plants = c.solid + c.leaf_inner;
                 draws.push(chunk_draw(b, v, i, plants, c.opaque - plants));
             }
             draws.retain(|(_, c)| c.index_count > 0);
             let ind = &self.indirect[r.slot];
             let multi = r.gpu.multi_draw_indirect;
-            indirect_used = record_indirect(d, cmd, ind, 0, &mut draws, multi).unwrap_or_else(|| {
+            r.bind_pipe(self.shadow_plain_pipe);
+            let plain_end = record_indirect(d, cmd, ind, 0, &mut plain_draws, multi);
+            r.bind_pipe(self.shadow_pipe);
+            let end = plain_end.and_then(|base| record_indirect(d, cmd, ind, base, &mut draws, multi));
+            indirect_used = end.unwrap_or_else(|| {
+                // (did not fit: every chunk's opaque part, alpha tested; drawn again over the
+                // plain faces if those fitted, which leaves the same depths)
                 for &(b, v, i, n) in &shadow_chunks {
                     d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[v]);
                     d.cmd_bind_index_buffer(cmd, b, i, vk::IndexType::UINT32);
                     d.cmd_draw_indexed(cmd, n, 1, 0, 0, 0);
                 }
-                0
+                plain_end.unwrap_or(0)
             });
             r.draw_dyn(ENTITY);
         }

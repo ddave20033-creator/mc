@@ -13,6 +13,9 @@ layout(push_constant) uniform Push {
 } pc;
 
 void main() {
+    // Compiled a second time with NO_DISCARD for the plain faces of whole blocks (nothing to
+    // cut out): depth only, the depth test before this shader.
+#ifndef NO_DISCARD
     // A weapon light shines through glass.
     if (pc.params.x == 5.0 && abs(vLayer - 13.0) < 0.5) {
         discard;
@@ -23,4 +26,5 @@ void main() {
     if (abs(vLayer - 13.0) < 0.5 && glassSeam(vUV, vGlassMask)) {
         discard;
     }
+#endif
 }

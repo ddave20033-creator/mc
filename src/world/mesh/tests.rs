@@ -147,7 +147,7 @@ impl Fnv {
         for c in [m.opaque_count, m.solid_count, m.leaf_inner_count] {
             self.u32(c);
         }
-        m.dir_counts.iter().for_each(|&c| self.u32(c));
+        m.dir_counts.iter().chain(&m.cut_dir_counts).for_each(|&c| self.u32(c));
         self.f32(m.min_y);
         self.f32(m.max_y);
         for p in m.doors.iter().chain(&m.chests).chain(&m.gun_stations).chain(&m.torches).chain(&m.stump_marks) {
@@ -187,9 +187,18 @@ fn terrain_and_meshes_are_unchanged() {
         h.mesh(&mesh_chunk((cx, cz), &nb, &anim, NO_NOTCHES, &gen));
         chunks += 1;
     }
-    // Every block id on a floor, spaced out, and a few next to each other (stairs
-    // bending, double chests, glass joining, logs meeting) in a hood far from the others.
     let (px, pz) = (1000, -1000);
+    let (nb, notches) = all_blocks(px, pz);
+    let m = mesh_chunk((px, pz), &nb, &[], &notches, &Generator::new(3));
+    h.mesh(&m);
+    println!("{chunks} generated chunks + all blocks: {}", fingerprint(&h));
+    assert_eq!(fingerprint(&h), "b2aff256cb9bc4c1");
+}
+
+/// Every block id on a floor, spaced out, and a few next to each other (stairs bending,
+/// double chests, glass joining, logs meeting), for a chunk at `(px, pz)`, and cuts in two
+/// trunks.
+fn all_blocks(px: i32, pz: i32) -> ([Arc<ChunkData>; 9], [(glam::IVec3, Notch); 2]) {
     let nb = hood(|c| {
         for b in 1..=255u8 {
             let i = b as usize;
@@ -213,11 +222,45 @@ fn terrain_and_meshes_are_unchanged() {
         (n1, Notch { angle: 0.7, height: 0.5, depth: 0.6, felled: false }),
         (n2, Notch { angle: 2.1, height: 0.4, depth: 0.8, felled: true }),
     ];
-    let m = mesh_chunk((px, pz), &nb, &[], &notches, &Generator::new(3));
-    h.mesh(&m);
-    println!("{chunks} generated chunks + all blocks: {}", fingerprint(&h));
-    assert_eq!(fingerprint(&h), "8b5c88996fa6e919");
+    (nb, notches)
 }
+
+/// The whole-block faces drawn without alpha testing (the first solid indices, see
+/// `MeshData`) have no see-through texel at any mip level, in every block and in generated
+/// terrain.
+#[test]
+fn plain_faces_have_no_see_through_texels() {
+    let levels = crate::world::textures::generate(&crate::pack::Packs::none());
+    let layers = levels[0].len() / (crate::world::textures::TILE * crate::world::textures::TILE * 4);
+    let opaque_layer = |l: usize| {
+        levels.iter().all(|lv| {
+            let n = lv.len() / layers;
+            lv[l * n..(l + 1) * n].chunks_exact(4).all(|p| p[3] >= 128)
+        })
+    };
+    let (nb, notches) = all_blocks(1000, -1000);
+    let mut meshes = vec![mesh_chunk((1000, -1000), &nb, &[], &notches, &Generator::new(3))];
+    for (seed, cx, cz) in [(1201871768u32, 0, 0), (12345, 40, -7)] {
+        let gen = Generator::new(seed);
+        let nb: [Arc<ChunkData>; 9] =
+            std::array::from_fn(|i| Arc::new(gen.generate_chunk(cx + i as i32 % 3 - 1, cz + i as i32 / 3 - 1)));
+        meshes.push(mesh_chunk((cx, cz), &nb, &[], NO_NOTCHES, &gen));
+    }
+    let mut checked = std::collections::HashSet::new();
+    for m in &meshes {
+        let plain: u32 = m.dir_counts.iter().sum();
+        assert!(plain > 0);
+        for &i in &m.indices[..plain as usize] {
+            let v = m.vertices[i as usize];
+            assert_eq!(v.tint[3] & (flags::LEAVES | flags::PLANT | flags::OVERLAY), 0);
+            let l = v.layer as usize;
+            if checked.insert(l) {
+                assert!(opaque_layer(l), "layer {l} has see-through texels");
+            }
+        }
+    }
+}
+
 const SEA_TEST: i32 = crate::world::gen::SEA;
 
 #[test]

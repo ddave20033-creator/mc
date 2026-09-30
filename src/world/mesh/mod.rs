@@ -54,11 +54,17 @@ pub struct MeshData {
     /// far chunks leave out: faces between leaves, then grass and flowers.
     pub indices: Vec<u32>,
     pub opaque_count: u32,
-    /// Opaque indices without the faces between leaves and the plants.
+    /// Opaque indices without the faces between leaves and the plants. They are, in order:
+    /// faces of whole blocks with no see-through texels grouped by direction (see `FACE_N`;
+    /// drawn without alpha testing, so the depth test runs before their fragment shader),
+    /// the other solid ones (stairs, chests, torches...), then the faces of whole blocks
+    /// with cut-out texels (glass, the outside of leaves, stump marks, furnace fronts) grouped
+    /// by direction.
     pub solid_count: u32,
-    /// Where the solid indices are faces of whole blocks grouped by direction (see `FACE_N`):
-    /// the other solid ones (stairs, chests, torches...) come first, then these groups.
+    /// Counts of the plain whole-block faces by direction (from index 0 on).
     pub dir_counts: [u32; 6],
+    /// Counts of the cut-out whole-block faces by direction (ending the solid indices).
+    pub cut_dir_counts: [u32; 6],
     /// Indices of the faces between leaves (after the solid ones).
     pub leaf_inner_count: u32,
     pub min_y: f32,
@@ -89,8 +95,9 @@ struct Builder {
     leaf_inner: Vec<u32>,
     plants: Vec<u32>,
     /// Faces of whole blocks by direction: a chunk's faces turned away from the camera can be
-    /// left out as a group.
+    /// left out as a group. Plain ones, and ones with cut-out texels (see `MeshData`).
     dirs: [Vec<u32>; 6],
+    cut_dirs: [Vec<u32>; 6],
     water: Vec<u32>,
     min_y: f32,
     max_y: f32,
@@ -105,12 +112,40 @@ impl Builder {
         self.notches.iter().find(|(q, _)| *q == p).map(|(_, n)| *n)
     }
 
+    /// Moves the whole-block face whose indices start at `from` in `opaque` to its
+    /// direction's group: the cut-out one if its texture `layer` has see-through texels.
+    fn to_dir(&mut self, face: usize, from: usize, layer: u32) {
+        let quad = self.opaque.drain(from..);
+        if has_cutout(layer) {
+            self.cut_dirs[face].extend(quad);
+        } else {
+            self.dirs[face].extend(quad);
+        }
+    }
+
     #[inline]
     fn push(&mut self, v: Vertex) {
         self.min_y = self.min_y.min(v.pos[1]);
         self.max_y = self.max_y.max(v.pos[1]);
         self.verts.push(v);
     }
+}
+
+/// Texture layers of whole-block faces with see-through texels (alpha tested). Every other
+/// layer of a whole-block face is opaque throughout (a resource pack's too: `textures::pack`
+/// fills in the alpha of layers that are not cut out), so it needs no alpha test; the test
+/// `plain_faces_have_no_see_through_texels` checks the procedural ones.
+fn has_cutout(layer: u32) -> bool {
+    matches!(
+        layer,
+        tex::GLASS
+            | tex::OAK_LEAVES
+            | tex::SPRUCE_LEAVES
+            | tex::BIRCH_LEAVES
+            | tex::FURNACE_FRONT_CUT
+            | tex::BLAST_FRONT_CUT
+            | tex::ADV_FRONT_CUT
+    ) || (tex::STUMP_MARK..tex::STUMP_MARK + STUMP_STAGES as u32).contains(&layer)
 }
 
 pub fn mesh_chunk(
@@ -144,6 +179,7 @@ pub fn mesh_chunk(
         leaf_inner: Vec::new(),
         plants: Vec::new(),
         dirs: Default::default(),
+        cut_dirs: Default::default(),
         water: Vec::new(),
         min_y: HEIGHT as f32,
         max_y: 0.0,
@@ -259,23 +295,26 @@ pub fn mesh_chunk(
                         TintKind::Birch => BIRCH_TINT,
                     };
                     let rotated = face_rotated(b, face);
+                    let layer = face_texture(b, face);
+                    // (moved over without a list of its own for every face)
                     let from = m.opaque.len();
-                    m.cube_face(&r, x, y, z, face, face_texture(b, face), tint, fl, rotated);
+                    m.cube_face(&r, x, y, z, face, layer, tint, fl, rotated);
+                    if is_leaves(b) && is_leaves(nbk) {
+                        let quad = m.opaque.drain(from..);
+                        m.leaf_inner.extend(quad);
+                    } else {
+                        m.to_dir(face, from, layer);
+                    }
                     if face == 2 && is_stump_mark(b) {
                         // The mark of the cut-down trunk, a hair over the grass.
                         let v0 = m.verts.len();
+                        let from = m.opaque.len();
                         let layer = tex::STUMP_MARK + stump_stage(b) as u32;
                         m.cube_face(&r, x, y, z, face, layer, [255; 3], fl, false);
                         for v in &mut m.verts[v0..] {
                             v.pos[1] += 0.002;
                         }
-                    }
-                    // (moved over without a list of its own for every face)
-                    let quad = m.opaque.drain(from..);
-                    if is_leaves(b) && is_leaves(nbk) {
-                        m.leaf_inner.extend(quad);
-                    } else {
-                        m.dirs[face].extend(quad);
+                        m.to_dir(face, from, layer);
                     }
                 }
             }
@@ -294,8 +333,10 @@ pub fn mesh_chunk(
     }
 
     let dir_counts = std::array::from_fn(|d| m.dirs[d].len() as u32);
-    let mut indices = m.opaque;
-    for d in &m.dirs {
+    let cut_dir_counts = std::array::from_fn(|d| m.cut_dirs[d].len() as u32);
+    let mut indices: Vec<u32> = m.dirs.concat();
+    indices.extend_from_slice(&m.opaque);
+    for d in &m.cut_dirs {
         indices.extend_from_slice(d);
     }
     let solid_count = indices.len() as u32;
@@ -311,6 +352,7 @@ pub fn mesh_chunk(
         opaque_count,
         solid_count,
         dir_counts,
+        cut_dir_counts,
         leaf_inner_count,
         min_y: m.min_y,
         max_y: m.max_y,
