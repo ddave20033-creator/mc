@@ -27,7 +27,7 @@ const MAX_BLOCKS: usize = 900;
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Struck {
     Stump(IVec3),
-    Log(u32, usize),
+    Log(u32, bool),
 }
 
 /// What the axe's edge came into.
@@ -271,7 +271,7 @@ impl Game {
         self.mining = None;
         if let (None, Some(kind)) = (self.chop, target) {
             self.chop = Some(Swing { kind, ..Swing::default() });
-            self.log_cut = self.log_aim.map(|a| (a.id, a.cut));
+            self.log_cut = self.log_aim.map(|a| (a.id, a.from_base));
         }
         self.hand.hidden = true;
         true
@@ -281,7 +281,7 @@ impl Game {
     fn come_apart(&mut self) {
         match self.struck.take() {
             Some(Struck::Stump(p)) => self.break_stump(p),
-            Some(Struck::Log(id, cut)) => self.cut_log(id, cut),
+            Some(Struck::Log(id, from_base)) => self.cut_log(id, from_base),
             None => {}
         }
     }
@@ -534,8 +534,9 @@ impl Game {
         }
     }
 
-    /// A fallen tree breaks up where it lies: its leaves and branches drop what they would
-    /// when mined, in a burst of bark and leaves; its trunk stays lying there, to be cut up.
+    /// A fallen tree breaks up where it lies: its leaves and branches shatter in a burst of
+    /// bark and leaves, leaving little (a sapling or two from the leaves, a few sticks from
+    /// the branches); its trunk stays lying there, to be cut up.
     fn tree_lands(&mut self, t: FallingTree) {
         let turn = t.turn();
         // The trunk from just past the stump, the way it fell (the ground's lie of it).
@@ -543,27 +544,48 @@ impl Game {
         let fell = turn.transform_vector3(Vec3::Y);
         let fell = Vec3::new(fell.x, 0.0, fell.z).normalize_or_zero();
         self.lay_log(t.stump + fell * 0.5, fell, pieces, t.tool, t.creative);
+        let (mut leaves, mut branches) = (Vec::new(), Vec::new());
         for (n, &(o, b)) in t.blocks.iter().enumerate().skip(t.trunk) {
-            let at = t.at(&turn, o);
+            let mut at = t.at(&turn, o);
             let q = at.floor().as_ivec3();
             let tint = if is_leaves(b) { t.leaf_tint } else { [255; 3] };
             if !is_leaves(b) || n % 3 == 0 {
                 self.particles.burst(&self.terrain.world, q, b, if is_leaves(b) { 3 } else { 6 }, tint);
             }
-            if t.creative {
-                continue;
+            // (up out of whatever it came down into)
+            while is_solid(self.terrain.world.geti(at.floor().as_ivec3())) && at.y < t.pivot.y + 30.0 {
+                at.y += 1.0;
             }
-            let r = self.random();
-            let held = if is_leaves(b) { NONE } else { t.tool };
-            for s in crate::item::drops(b, held, r) {
-                // Up out of whatever it came down into.
-                let mut at = at;
-                while is_solid(self.terrain.world.geti(at.floor().as_ivec3())) && at.y < t.pivot.y + 30.0 {
-                    at.y += 1.0;
-                }
-                self.spawn_drop(at, s);
+            if is_leaves(b) {
+                leaves.push(at);
+            } else {
+                branches.push(at);
             }
         }
+        if t.creative {
+            return;
+        }
+        let sapling = match log_base(t.stub.1) {
+            BIRCH_LOG => BIRCH_SAPLING,
+            SPRUCE_LOG => SPRUCE_SAPLING,
+            _ => OAK_SAPLING,
+        } as ItemId;
+        let r = self.random();
+        let saplings = if leaves.is_empty() { 0 } else if r < 0.4 { 0 } else if r < 0.85 { 1 } else { 2 };
+        let r = self.random();
+        let sticks = if branches.is_empty() { (r < 0.5) as usize } else { 1 + (r * 3.0) as usize };
+        let drop = |g: &mut Self, from: &[Vec3], what: ItemId, n: usize| {
+            for _ in 0..n {
+                if from.is_empty() {
+                    return;
+                }
+                let at = from[(g.random() * from.len() as f32) as usize % from.len()];
+                g.spawn_drop(at, crate::item::Stack::one(what));
+            }
+        };
+        drop(self, &leaves, sapling, saplings);
+        let from = if branches.is_empty() { &leaves } else { &branches };
+        drop(self, from, crate::item::STICK, sticks);
     }
 
     /// The falling trees' blocks where they are now: the logs round, the leaves.

@@ -32,7 +32,7 @@ pub const SCOPE_SIZE: u32 = 512;
 const SCOPE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
 const SHADOW_FORMAT: vk::Format = vk::Format::D32_SFLOAT;
 const UI_MAX_VERTS: usize = 150_000;
-const DYN_MAX_VERTS: usize = 250_000;
+const DYN_MAX_VERTS: usize = 1_000_000;
 const MAX_UPLOADS_PER_FRAME: usize = 24;
 /// Indirect draw commands per frame (chunks' opaque parts, a few each).
 const MAX_INDIRECT: usize = 65536;

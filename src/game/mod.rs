@@ -323,7 +323,7 @@ pub struct Game {
     lying_logs: Vec<logs::LyingLog>,
     next_log_id: u32,
     log_aim: Option<logs::LogAim>,
-    log_cut: Option<(u32, usize)>,
+    log_cut: Option<(u32, bool)>,
     mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
     mob_spawn_timer: f32,

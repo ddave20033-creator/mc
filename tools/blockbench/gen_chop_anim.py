@@ -162,14 +162,15 @@ def stump_frame(yaw, pitch):
 
 # (time, (handle yaw, handle pitch, grip ahead of the chest, grip height, the torso's lean
 # forward, hips down, the hands' gap along the handle, the grip to the right)). From the
-# chop's rest, the axe goes up over the right shoulder, beside the head (the body leaning back
-# a little), stops a blink there, then comes down straight and fast in front, the body
-# bending into it; the edge bites into the stump and the axe is worked out and back to rest.
+# chop's rest, the axe comes up on the right, the hands at the chest out in front and to the
+# side (never before the face: it is seen from the eyes), the head of the axe over the right
+# shoulder; a blink there, then it comes down straight and fast in front, the body bending
+# into it; the edge bites into the stump and the axe is worked out and back to rest.
 STUMP_KEYS = [
     (0.00, (-22.0, 52.0, 6.0, 15.0, 0.0, 0.0, 5.0, 0.5)),     # the chop's rest
-    (0.20, (-14.0, 125.0, 2.0, 27.0, -6.0, 0.0, 4.5, 4.0)),   # going up by the head
-    (0.30, (-10.0, 150.0, 0.5, 29.0, -9.0, 0.0, 4.0, 4.5)),   # raised over the right shoulder
-    (0.36, (-4.0, 80.0, 5.0, 23.0, 6.0, 0.4, 3.2, 2.0)),      # coming down
+    (0.18, (-18.0, 98.0, 5.5, 19.5, -2.0, 0.0, 4.2, 3.5)),    # coming up on the right
+    (0.28, (-20.0, 116.0, 5.0, 21.0, -4.0, 0.0, 4.0, 4.5)),   # raised, over the right shoulder
+    (0.35, (-8.0, 62.0, 7.0, 20.0, 8.0, 0.4, 3.4, 2.4)),      # coming down
     (0.42, (0.0, -38.0, 8.0, 14.5, 24.0, 1.4, 2.4, 0.5)),     # into the stump
     (0.45, (0.0, -35.0, 7.8, 14.8, 23.0, 1.5, 2.4, 0.5)),     # the jolt of it
     (0.58, (0.0, -36.0, 7.9, 14.6, 23.5, 1.4, 2.4, 0.5)),     # stuck
@@ -182,7 +183,7 @@ def stump_state_at(t):
     for i, ((t0, a), (t1, b)) in enumerate(zip(STUMP_KEYS, STUMP_KEYS[1:])):
         if t <= t1:
             k = (t - t0) / (t1 - t0)
-            if (t0, t1) == (0.36, 0.42):
+            if (t0, t1) == (0.35, 0.42):
                 k = k ** 1.6
             pa = STUMP_KEYS[max(i - 1, 0)][1]
             pb = STUMP_KEYS[min(i + 2, len(STUMP_KEYS) - 1)][1]

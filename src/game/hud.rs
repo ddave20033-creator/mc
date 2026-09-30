@@ -419,9 +419,6 @@ impl Game {
                 ui.ring(center, 3.0, 1.2, rgba(255, 255, 255, 235));
             }
         }
-        if self.screen == Screen::Playing {
-            self.draw_log_aim();
-        }
 
         if matches!(self.screen, Screen::Playing | Screen::Chat)
             && self.sleep.is_none()

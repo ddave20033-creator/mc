@@ -1,8 +1,9 @@
 //! The trunk of a felled tree, lying where it fell (its leaves and branches came off as it
 //! hit the ground): a row of pieces, each one block of the trunk it was. An axe cuts it up,
-//! struck straight down into it (`chop_rig::Kind::Stump`): aimed at, it shows how long it is
-//! and where the stroke would cut it (at a piece's end, a pale ring round the bark), and the
-//! shorter part comes off as the logs it is made of.
+//! struck straight down into it (`chop_rig::Kind::Stump`): each stroke takes a piece of one
+//! to three blocks (as it happens) off the end nearer where it is aimed, which drops the logs
+//! it is made of; aimed at, a pale ring round the bark shows where it will come off. The last
+//! block left is not cut: it comes apart by itself.
 
 use super::*;
 use super::felling::Struck;
@@ -19,6 +20,8 @@ pub(super) struct LyingLog {
     pub dir: Vec3,
     /// Its pieces from the base: the trunk's blocks they were.
     pub pieces: Vec<u8>,
+    /// How many blocks the next stroke takes off (1 to 3, rolled after each).
+    pub next: usize,
 }
 
 impl LyingLog {
@@ -45,29 +48,30 @@ impl LyingLog {
         self.base + self.dir * (i as f32 + 0.5)
     }
 
-    /// Where a stroke at `s` along it would cut it: the end of a piece (1 .. len-1), or the
-    /// whole of it when it is a single piece (1).
-    fn cut_at(&self, s: f32) -> usize {
-        let n = self.pieces.len();
-        if n <= 1 {
-            1
-        } else {
-            (s.round() as usize).clamp(1, n - 1)
-        }
+    /// Which end a stroke at `s` along it takes the next piece off: the nearer one.
+    fn from_base_at(&self, s: f32) -> bool {
+        s < self.len() * 0.5
     }
 
-    /// The two parts a cut at `k` leaves (from the base).
-    pub fn parts(&self, k: usize) -> (usize, usize) {
+    /// The pieces the next stroke takes off from that end (the rest too, if only one would be
+    /// left).
+    fn taken(&self, from_base: bool) -> std::ops::Range<usize> {
         let n = self.pieces.len();
-        (k.min(n), n - k.min(n))
+        let k = self.next.clamp(1, 3).min(n);
+        let k = if n - k <= 1 { n } else { k };
+        if from_base {
+            0..k
+        } else {
+            n - k..n
+        }
     }
 }
 
-/// A lying trunk aimed at with an axe: which, and where a stroke would cut it.
+/// A lying trunk aimed at with an axe: which, and which end a stroke would cut from.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct LogAim {
     pub id: u32,
-    pub cut: usize,
+    pub from_base: bool,
 }
 
 /// Lying trunks saved with a world: `x,y,z,dx,dz,piece;piece;...` a line.
@@ -96,7 +100,8 @@ pub fn parse_logs(text: &str) -> Vec<LyingLog> {
         if dir == Vec3::ZERO {
             continue;
         }
-        out.push(LyingLog { id: out.len() as u32 + 1, base: Vec3::new(f[0], f[1], f[2]), dir, pieces });
+        let id = out.len() as u32 + 1;
+        out.push(LyingLog { id, base: Vec3::new(f[0], f[1], f[2]), dir, pieces, next: 1 + id as usize % 3 });
     }
     out
 }
@@ -148,6 +153,8 @@ impl Game {
                 !solid(m) && !solid(m + Vec3::Y * (r * 0.5))
             })
             .count();
+        // (a single block left lying comes apart at once)
+        let free = if free == 1 { 0 } else { free };
         let (lying, broken) = pieces.split_at(free);
         let lying = lying.to_vec();
         for (i, &b) in broken.iter().enumerate() {
@@ -168,7 +175,8 @@ impl Game {
         if !lying.is_empty() {
             self.next_log_id += 1;
             let id = self.next_log_id;
-            self.lying_logs.push(LyingLog { id, base, dir, pieces: lying });
+            let next = 1 + (self.random() * 3.0) as usize;
+            self.lying_logs.push(LyingLog { id, base, dir, pieces: lying, next });
         }
     }
 
@@ -195,7 +203,7 @@ impl Game {
             let mut t = 0.0;
             while t < block_dist.min(best.map_or(f32::MAX, |b| b.0)) {
                 if let Some(s) = l.contains(eye + dir * t) {
-                    best = Some((t, LogAim { id: l.id, cut: l.cut_at(s) }));
+                    best = Some((t, LogAim { id: l.id, from_base: l.from_base_at(s) }));
                     break;
                 }
                 t += 0.02;
@@ -213,30 +221,30 @@ impl Game {
         let Some(i) = self.log_index(id) else { return };
         let b = self.lying_logs[i].pieces[0];
         self.chips(point.floor().as_ivec3(), b, point, Vec3::Y);
-        let cut = match self.log_cut {
-            Some((c_id, cut)) if c_id == id => cut,
+        let from_base = match self.log_cut {
+            Some((c_id, from_base)) if c_id == id => from_base,
             _ => {
                 let l = &self.lying_logs[i];
-                l.cut_at((point - l.base).dot(l.dir))
+                l.from_base_at((point - l.base).dot(l.dir))
             }
         };
-        self.struck = Some(Struck::Log(id, cut));
+        self.struck = Some(Struck::Log(id, from_base));
     }
 
-    /// The axe pulled out of the lying trunk `id`: it comes apart at `cut`, the shorter part
-    /// (the whole of a single piece) dropping its logs; the axe worn by the stroke.
-    pub(super) fn cut_log(&mut self, id: u32, cut: usize) {
+    /// The axe pulled out of the lying trunk `id`: the next piece comes off the end it was
+    /// struck nearer (`from_base`) and drops its logs (the last block left with it); the axe
+    /// worn by the stroke.
+    pub(super) fn cut_log(&mut self, id: u32, from_base: bool) {
         let Some(i) = self.log_index(id) else { return };
+        let next = 1 + (self.random() * 3.0) as usize;
         let l = &mut self.lying_logs[i];
-        let n = l.pieces.len();
-        let k = if n <= 1 { n } else { cut.clamp(1, n - 1) };
-        // (the shorter part comes off; of two alike, the far end's)
-        let (from, to) = if n <= 1 { (0, n) } else if k * 2 < n { (0, k) } else { (k, n) };
-        let at: Vec<Vec3> = (from..to).map(|j| l.piece_middle(j)).collect();
-        let off: Vec<u8> = l.pieces.drain(from..to).collect();
-        if from == 0 && to < n {
-            l.base += l.dir * to as f32;
+        let taken = l.taken(from_base);
+        let at: Vec<Vec3> = taken.clone().map(|j| l.piece_middle(j)).collect();
+        let off: Vec<u8> = l.pieces.drain(taken.clone()).collect();
+        if taken.start == 0 {
+            l.base += l.dir * taken.end as f32;
         }
+        l.next = next;
         if self.lying_logs[i].pieces.is_empty() {
             self.lying_logs.remove(i);
         }
@@ -266,7 +274,7 @@ impl Game {
     pub(super) fn build_lying_logs(&self, out: &mut Vec<Vertex>) {
         use crate::model::emit_item;
         let fl = crate::world::mesh::flags::ENTITY;
-        let aim = self.log_aim.or(self.log_cut.map(|(id, cut)| LogAim { id, cut }));
+        let aim = self.log_aim.or(self.log_cut.map(|(id, from_base)| LogAim { id, from_base }));
         for l in &self.lying_logs {
             let turn = Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, l.dir));
             for (i, &b) in l.pieces.iter().enumerate() {
@@ -276,9 +284,11 @@ impl Game {
                 emit_item(out, Mat4::from_translation(mid) * turn, b, light, fl);
             }
             let Some(a) = aim.filter(|a| a.id == l.id) else { continue };
-            // Where it would be cut (all of it: a ring at each end).
-            let marks: Vec<usize> = if l.pieces.len() <= 1 { vec![0, 1] } else { vec![a.cut.min(l.pieces.len())] };
-            let layer = face_texture(l.pieces[0], 2);
+            // Where it will be cut (all of it going: a ring at each end).
+            let n = l.pieces.len();
+            let taken = l.taken(a.from_base);
+            let marks: Vec<usize> = if taken.len() == n { vec![0, n] } else if a.from_base { vec![taken.end] } else { vec![taken.start] };
+            let layer = face_texture(PLANKS, 2);
             let pulse = 0.85 + 0.15 * (self.time * 6.0).sin();
             // (lit up, day or night, a little pulsing)
             let light = [255, 255, (255.0 * pulse) as u8, 0];
@@ -289,23 +299,6 @@ impl Game {
         }
     }
 
-    /// Under the crosshair, aiming at a lying trunk: how long it is, and what the stroke would
-    /// cut it into.
-    pub(super) fn draw_log_aim(&mut self) {
-        let Some(a) = self.log_aim else { return };
-        let Some(i) = self.log_index(a.id) else { return };
-        let l = &self.lying_logs[i];
-        let n = l.pieces.len();
-        let mut line = format!("{}: {} {}", t("log.trunk"), n, t("log.blocks"));
-        if n > 1 {
-            let (x, y) = l.parts(a.cut);
-            line += &format!("   {}: {} | {}", t("log.cut"), x, y);
-        }
-        let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
-        let tw = self.ui.text_width(&line, s);
-        self.ui.rect(w * 0.5 - tw * 0.5 - 4.0 * s, h * 0.5 + 10.0 * s, tw + 8.0 * s, 12.0 * s, rgba(0, 0, 0, 110), 3.0 * s);
-        self.ui.text_centered(&line, w * 0.5, h * 0.5 + 12.0 * s, s, rgba(255, 236, 190, 255), true);
-    }
 }
 
 /// A thin band round a trunk (`m`: its middle, the trunk along +Y), `radius` out and `wide`

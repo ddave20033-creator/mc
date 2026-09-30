@@ -360,10 +360,6 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Nincs otthoni ágyad, vagy el van torlaszolva",
     ),
     ("bed.leave", "Sneak to leave the bed", "Guggolj a felkeléshez"),
-    // A felled trunk lying on the ground, aimed at with an axe
-    ("log.trunk", "Trunk", "Törzs"),
-    ("log.blocks", "blocks long", "blokk hosszú"),
-    ("log.cut", "cut", "vágás"),
     // Fishing
     ("fish.caught", "You caught a {} kg {}!", "Fogtál egy {} kg-os {}!"),
     ("fish.bite", "A bite! Reel in!", "Kapás! Tekerj!"),

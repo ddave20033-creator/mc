@@ -342,7 +342,7 @@ pub fn emit_sprite_sides(
         light: [light[0], light[1], light[2], normal],
         tint: [255, 255, 255, fl],
     };
-    let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(wall, p, uv, normal);
+    let vert_uv = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(wall, p, uv, normal);
     for (z, flip) in [(t, false), (-t, true)] {
         let l = if flip { back } else { layer };
         let vert = |p: Vec3, uv: [f32; 2], normal: u8| vert_on(l, p, uv, normal);
@@ -382,34 +382,66 @@ pub fn emit_sprite_sides(
         (0..n).contains(&x) && (0..n).contains(&y) && mask[y as usize] >> x & 1 == 1
     };
     let f = |i: i32| i as f32 / n as f32;
+    let mut wall = |a: (f32, f32), b: (f32, f32), uv: [[f32; 2]; 2], normal: u8| {
+        let v = [
+            vert_uv(Vec3::new(a.0, a.1, -t), uv[0], normal),
+            vert_uv(Vec3::new(b.0, b.1, -t), uv[1], normal),
+            vert_uv(Vec3::new(b.0, b.1, t), uv[1], normal),
+            vert_uv(Vec3::new(a.0, a.1, t), uv[0], normal),
+        ];
+        // Both windings: the wall is seen from either side depending on the transform.
+        out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
+        out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+    };
+    // The walls round the opaque pixels, a run of pixels along a row (or a column) with the
+    // same side bare one wall, the texture's pixels along it.
     for y in 0..n {
-        for x in 0..n {
-            if !opaque(x, y) {
-                continue;
-            }
-            let (x0, x1) = (f(x) - 0.5, f(x + 1) - 0.5);
-            let (top, bottom) = (0.5 - f(y), 0.5 - f(y + 1));
-            let uv = [f(x) + 0.5 / n as f32, f(y) + 0.5 / n as f32];
-            // (neighbour, edge from, edge to, normal index)
-            let sides = [
-                ((-1, 0), (x0, bottom), (x0, top), 1),
-                ((1, 0), (x1, top), (x1, bottom), 0),
-                ((0, -1), (x0, top), (x1, top), 2),
-                ((0, 1), (x1, bottom), (x0, bottom), 3),
-            ];
-            for ((dx, dy), a, b, normal) in sides {
-                if opaque(x + dx, y + dy) {
+        let v = f(y) + 0.5 / n as f32;
+        for (dy, normal) in [(-1, 2u8), (1, 3u8)] {
+            let mut x = 0;
+            while x < n {
+                if !opaque(x, y) || opaque(x, y + dy) {
+                    x += 1;
                     continue;
                 }
-                let v = [
-                    vert(Vec3::new(a.0, a.1, -t), uv, normal),
-                    vert(Vec3::new(b.0, b.1, -t), uv, normal),
-                    vert(Vec3::new(b.0, b.1, t), uv, normal),
-                    vert(Vec3::new(a.0, a.1, t), uv, normal),
-                ];
-                // Both windings: the wall is seen from either side depending on the transform.
-                out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
-                out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
+                let start = x;
+                while x < n && opaque(x, y) && !opaque(x, y + dy) {
+                    x += 1;
+                }
+                let (x0, x1) = (f(start) - 0.5, f(x) - 0.5);
+                let (ua, ub) = ([f(start), v], [f(x), v]);
+                if dy < 0 {
+                    let top = 0.5 - f(y);
+                    wall((x0, top), (x1, top), [ua, ub], normal);
+                } else {
+                    let bottom = 0.5 - f(y + 1);
+                    wall((x1, bottom), (x0, bottom), [ub, ua], normal);
+                }
+            }
+        }
+    }
+    for x in 0..n {
+        let u = f(x) + 0.5 / n as f32;
+        for (dx, normal) in [(-1, 1u8), (1, 0u8)] {
+            let mut y = 0;
+            while y < n {
+                if !opaque(x, y) || opaque(x + dx, y) {
+                    y += 1;
+                    continue;
+                }
+                let start = y;
+                while y < n && opaque(x, y) && !opaque(x + dx, y) {
+                    y += 1;
+                }
+                let (top, bottom) = (0.5 - f(start), 0.5 - f(y));
+                let (ua, ub) = ([u, f(start)], [u, f(y)]);
+                if dx < 0 {
+                    let x0 = f(x) - 0.5;
+                    wall((x0, bottom), (x0, top), [ub, ua], normal);
+                } else {
+                    let x1 = f(x + 1) - 0.5;
+                    wall((x1, top), (x1, bottom), [ua, ub], normal);
+                }
             }
         }
     }
