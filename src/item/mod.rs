@@ -8,11 +8,13 @@ pub mod crafting;
 pub mod firearm;
 pub mod inventory;
 pub mod mining;
+pub mod weapons;
 
 pub use armor::*;
 pub use crafting::*;
 pub use firearm::*;
 pub use mining::*;
+pub use weapons::*;
 
 use crate::lang::is_hungarian;
 use crate::world::textures::tex;
@@ -329,22 +331,29 @@ pub fn gun_ready_rounds(s: &Stack) -> u8 {
 
 /// A magazine (or a speedloader): how many rounds it holds. Its data is the rounds in it.
 pub fn magazine_capacity(item: ItemId) -> Option<u8> {
-    match item {
-        PISTOL_MAGAZINE => Some(12),
-        EXTENDED_MAGAZINE => Some(20),
-        SPEEDLOADER => Some(6),
-        AK_MAGAZINE => Some(30),
-        _ => None,
+    if item == SPEEDLOADER {
+        return Some(6);
     }
+    let (kind, extended) = magazine_of(item)?;
+    Some(if extended { kind.magazine_size(gun_mod::EXTENDED_MAGAZINE) } else { kind.magazine_size(0) })
+}
+
+/// A magazine that goes into a gun (not a speedloader): which gun, and whether it is its
+/// extended one.
+fn magazine_of(item: ItemId) -> Option<(GunKind, bool)> {
+    GUN_KINDS.into_iter().find_map(|k| {
+        let m = k.magazine()?;
+        if m.item == item {
+            Some((k, false))
+        } else {
+            m.extended.filter(|&(e, _)| e == item).map(|_| (k, true))
+        }
+    })
 }
 
 /// A magazine that goes into a gun (not a speedloader): which gun.
 pub fn magazine_gun(item: ItemId) -> Option<GunKind> {
-    match item {
-        PISTOL_MAGAZINE | EXTENDED_MAGAZINE => Some(GunKind::Pistol),
-        AK_MAGAZINE => Some(GunKind::Ak),
-        _ => None,
-    }
+    magazine_of(item).map(|(k, _)| k)
 }
 
 /// A magazine that goes into a gun (not a speedloader).
@@ -703,15 +712,9 @@ pub fn max_damage(id: ItemId) -> u16 {
     if let Some(k) = GunKind::of(id) {
         return k.stats().dirt_max;
     }
-    // A gun's parts get dirty with it (taken apart, each is cleaned on its own).
-    if (PISTOL_FRAME..=PISTOL_MAGAZINE).contains(&id) || id == EXTENDED_MAGAZINE {
-        return GunKind::Pistol.stats().dirt_max;
-    }
-    if REVOLVER_PARTS.contains(&id) {
-        return GunKind::Revolver.stats().dirt_max;
-    }
-    if AK_PARTS.contains(&id) {
-        return GunKind::Ak.stats().dirt_max;
+    // A gun's parts and magazines get dirty with it (taken apart, each is cleaned on its own).
+    if let Some(k) = GUN_KINDS.into_iter().find(|k| k.parts().contains(&id)).or_else(|| magazine_gun(id)) {
+        return k.stats().dirt_max;
     }
     if armor_of(id).is_some() {
         return armor_durability(id);

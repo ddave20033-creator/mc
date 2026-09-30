@@ -15,7 +15,7 @@ pub const SLIDE: usize = 3;
 pub const MAGAZINE: usize = 4;
 pub const PARTS: usize = 5;
 
-/// Where things are on a gun, and how it is held.
+/// Where things are on a gun, and how it is held (each gun's is in `item::WEAPONS`).
 pub struct Spec {
     /// The middle of the right fist on the grip.
     pub hand: Vec3,
@@ -28,38 +28,9 @@ pub struct Spec {
     pub bounds: (Vec3, Vec3),
 }
 
-static PISTOL: Spec = Spec {
-    hand: Vec3::new(-5.8, -4.4, 0.0),
-    arm_scale: 0.45,
-    thick: 1.7,
-    bounds: (Vec3::new(-10.8, -9.8, -1.5), Vec3::new(7.5, 3.8, 1.5)),
-};
-
-/// Held like the pistol (`revolver_view::to_gun_space` puts its grip in the same fist); longer
-/// (its 4.2" barrel), the cylinder bulging out either side.
-static REVOLVER: Spec = Spec {
-    hand: Vec3::new(-5.8, -4.4, 0.0),
-    arm_scale: 0.45,
-    thick: 1.6,
-    bounds: (Vec3::new(-9.9, -9.5, -1.8), Vec3::new(12.2, 4.0, 1.8)),
-};
-
-/// The AK-47: the grip in the same fist as the pistol's, the left hand under the handguard;
-/// on the player model smaller against the hands than the handguns are (a rifle as big
-/// against the fists as they are would be longer than the player is tall).
-static AK: Spec = Spec {
-    hand: Vec3::new(-5.8, -4.4, 0.0),
-    arm_scale: 0.2,
-    thick: 2.5,
-    bounds: (Vec3::new(-29.0, -14.5, -1.7), Vec3::new(49.4, 4.6, 2.8)),
-};
-
+/// A gun's (its row of `item::WEAPONS`).
 pub fn spec(kind: GunKind) -> &'static Spec {
-    match kind {
-        GunKind::Pistol => &PISTOL,
-        GunKind::Revolver => &REVOLVER,
-        GunKind::Ak => &AK,
-    }
+    &kind.def().spec
 }
 
 /// From gun space to the unit-sized item space of `emit_held` (centered; the longest gun one

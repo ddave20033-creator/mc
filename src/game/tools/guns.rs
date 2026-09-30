@@ -8,7 +8,7 @@ use crate::game::*;
 use crate::entity::player::{ray_boxes, raycast_solid};
 use crate::item::*;
 use crate::lang::tf;
-use crate::model::ballistics::{self, CaseKind, Cases};
+use crate::model::ballistics::{self, Cases};
 use crate::audio::Sound;
 use crate::model::pistol_view::{
     reload_anim_time, reload_seconds, GunAnim, ReloadKind, RELOAD_MAG_IN, RELOAD_MAG_OUT, RELOAD_SLIDE,
@@ -160,38 +160,13 @@ fn zeroed(dir: Vec3, dist: f32, speed: f32, gravity: f32) -> Vec3 {
     (dir * dist + Vec3::Y * 0.5 * gravity * t * t).normalize_or(dir)
 }
 
-/// What a gun sounds like firing.
-fn shot_sound(kind: GunKind, silenced: bool) -> Sound {
-    if silenced {
-        return Sound::ShotSilenced;
-    }
-    match kind {
-        GunKind::Pistol => Sound::ShotPistol,
-        GunKind::Revolver => Sound::ShotRevolver,
-        GunKind::Ak => Sound::ShotRifle,
-    }
-}
-
-/// How big a hole a gun's bullet leaves (blocks across): the 9 mm the smallest, the .357
-/// Magnum's bigger, the 7.62x39's (much faster) the biggest; a shotgun's pellets small ones.
-fn hole_size(kind: GunKind, pellets: u32) -> f32 {
-    if pellets > 1 {
+/// How big a hole a gun's bullet leaves (blocks across; its `WEAPONS` row's); a shotgun's
+/// pellets small ones.
+fn hole_size(kind: GunKind) -> f32 {
+    if kind.stats().pellets > 1 {
         return 0.07;
     }
-    match kind {
-        GunKind::Pistol => 0.085,
-        GunKind::Revolver => 0.105,
-        GunKind::Ak => 0.125,
-    }
-}
-
-/// The case a gun throws out.
-fn case_kind(kind: GunKind) -> CaseKind {
-    match kind {
-        GunKind::Pistol => CaseKind::Pistol,
-        GunKind::Revolver => CaseKind::Magnum,
-        GunKind::Ak => CaseKind::Rifle,
-    }
+    kind.def().hole
 }
 
 /// A random direction within `deg` degrees of `dir` (more often near the middle).
@@ -251,13 +226,11 @@ impl Game {
 
     /// How much the gun narrows the view now (1 = not at all).
     pub(in crate::game) fn gun_zoom(&self) -> f32 {
-        let Some((s, kind)) = self.held_gun() else {
+        let Some((_, kind)) = self.held_gun() else {
             return 1.0;
         };
-        let stats = kind.stats();
         // A scope magnifies only in its eyepiece (the view through it is rendered there).
-        let full = stats.sight_zoom;
-        let _ = s;
+        let full = kind.stats().sight_zoom;
         let a = smoothstep(0.0, 1.0, self.guns.aim);
         1.0 + (full - 1.0) * a
     }
@@ -269,7 +242,7 @@ impl Game {
     pub(in crate::game) fn update_shots(&mut self, dt: f32) {
         self.update_bullets(dt);
         for (at, kind, hard) in self.guns.cases.update(dt, &self.terrain.world) {
-            self.audio.play(kind.sound(), Some(at), 0.06 + 0.18 * hard);
+            self.audio.play(kind.def().case_sound, Some(at), 0.06 + 0.18 * hard);
         }
         for f in &mut self.guns.remote_flashes {
             f.0 -= dt / 0.06;
@@ -329,9 +302,9 @@ impl Game {
         g.recover -= back;
         self.pitch -= back;
 
-        if let (Some(_), Some((_, GunKind::Revolver))) = (self.guns.cylinder, held) {
+        if self.guns.cylinder.is_some() && held.is_some_and(|(_, k)| !k.uses_magazine()) {
             self.update_revolver_reload(dt);
-        } else if let (Some(t), Some(_)) = (self.guns.reload, held) {
+        } else if let (Some(t), Some((_, gun))) = (self.guns.reload, held) {
             // The steps happen with the animation: the old magazine drops out, the new one is
             // seated, the slide slams shut (whatever was not done yet is done at the end).
             let (kind, rack, length) = (self.guns.plan.kind, self.guns.plan.rack, self.guns.plan.length.max(0.01));
@@ -342,23 +315,29 @@ impl Game {
             let finished = t + dt >= length;
             let at = self.player.eye();
             let due = |k: f32| (was < k && now >= k) || finished;
-            // A rifle's magazine and bolt sound its own.
-            let rifle = held.is_some_and(|(_, k)| k.long());
+            // Each gun's magazine and slide (or bolt) sound its own.
+            let feed = gun.magazine();
             let takes_out = matches!(kind, ReloadKind::Swap | ReloadKind::Eject);
             if takes_out && !self.guns.plan.out_done && due(RELOAD_MAG_OUT) {
                 self.guns.plan.out_done = true;
-                self.audio.play(if rifle { Sound::MagOutRifle } else { Sound::MagOut }, Some(at), 0.8);
+                if let Some(f) = feed {
+                    self.audio.play(f.out_sound, Some(at), 0.8);
+                }
                 self.magazine_out();
             }
             let puts_in = matches!(kind, ReloadKind::Swap | ReloadKind::Insert);
             if puts_in && !self.guns.plan.in_done && due(RELOAD_MAG_IN) {
                 self.guns.plan.in_done = true;
-                self.audio.play(if rifle { Sound::MagInRifle } else { Sound::MagIn }, Some(at), 0.9);
+                if let Some(f) = feed {
+                    self.audio.play(f.in_sound, Some(at), 0.9);
+                }
                 self.magazine_in();
             }
             if rack && !self.guns.plan.rack_done && due(RELOAD_SLIDE) {
                 self.guns.plan.rack_done = true;
-                self.audio.play(if rifle { Sound::BoltRifle } else { Sound::SlideRelease }, Some(at), 0.9);
+                if let Some(f) = feed {
+                    self.audio.play(f.rack_sound, Some(at), 0.9);
+                }
                 self.rack_slide();
             }
             self.guns.reload = (!finished).then_some(t + dt);
@@ -366,12 +345,12 @@ impl Game {
         let kind = held.map(|(_, k)| k);
         self.hand.aim = self.guns.aim;
         self.hand.inspect = self.guns.inspect.map(|(t, _)| t);
-        let cylinder = self.guns.cylinder.filter(|_| kind == Some(GunKind::Revolver));
-        self.hand.reload = match (self.guns.reload, kind, cylinder) {
+        let revolver = kind.is_some_and(|k| !k.uses_magazine());
+        let cylinder = self.guns.cylinder.filter(|_| revolver);
+        self.hand.reload = match (self.guns.reload, kind) {
             // The revolver's: where its reload animation is.
-            (_, Some(GunKind::Revolver), Some(c)) => Some(c.anim().0 / crate::model::revolver_view::RELOAD_END),
-            (_, Some(GunKind::Revolver), None) => None,
-            (Some(t), Some(_), _) => Some(t / self.guns.plan.length.max(0.01)),
+            (_, Some(_)) if revolver => cylinder.map(|c| c.anim().0 / crate::model::revolver_view::RELOAD_END),
+            (Some(t), Some(_)) => Some(t / self.guns.plan.length.max(0.01)),
             _ => None,
         };
         self.hand.gun_mods = mods;
@@ -383,7 +362,7 @@ impl Game {
         let plan = &self.guns.plan;
         self.hand.gun_state = match held {
             // A revolver: its cylinder as it is, and what its reload does.
-            Some((g, GunKind::Revolver)) => GunAnim {
+            Some((g, k)) if !k.uses_magazine() => GunAnim {
                 chambered: gun_rounds(&g) > 0,
                 cyl: g.data,
                 load: cylinder.and_then(|c| c.anim().1),
@@ -607,9 +586,7 @@ impl Game {
             // Nothing live in the cylinder, and something to load it with: it only clicks (R
             // reloads), like the others.
             let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
-            self.gun_message(&tf("gun.empty_reload", &[&key]));
-            self.audio.play(Sound::DryFire, None, 0.8);
-            self.hand.dry_fire();
+            self.dry_fire(Some(&tf("gun.empty_reload", &[&key])));
             return;
         }
         if !revolver && !gun_chambered(&gun) {
@@ -618,13 +595,9 @@ impl Game {
             let can_reload = (gun_has_mag(&gun) && gun_rounds(&gun) > 0) || self.has_loaded_magazine(kind);
             if can_reload {
                 let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
-                self.gun_message(&tf("gun.empty_reload", &[&key]));
-                self.audio.play(Sound::DryFire, None, 0.8);
-                self.hand.dry_fire();
+                self.dry_fire(Some(&tf("gun.empty_reload", &[&key])));
             } else {
-                self.gun_message(t("gun.no_ammo"));
-                self.audio.play(Sound::DryFire, None, 0.8);
-                self.hand.dry_fire();
+                self.dry_fire(Some(t("gun.no_ammo")));
             }
             return;
         }
@@ -632,18 +605,12 @@ impl Game {
         // Dirt makes it jam more and more often; a completely dirty one does not fire at all. A
         // jam comes before the revolver's cylinder turns, so it costs no round.
         if dirt >= 1.0 || (dirt > 0.6 && self.random() < (dirt - 0.6) * 1.2) {
-            self.gun_message(t("gun.jammed"));
-            self.audio.play(Sound::DryFire, None, 0.8);
-            self.hand.dry_fire();
+            self.dry_fire(Some(t("gun.jammed")));
             return;
         }
         // The revolver's next chamber comes under the hammer: only a live round there fires.
         if revolver && !self.revolver_pull() {
-            if gun_rounds(&gun) == 0 {
-                self.gun_message(t("gun.no_ammo"));
-            }
-            self.audio.play(Sound::DryFire, None, 0.8);
-            self.hand.dry_fire();
+            self.dry_fire((gun_rounds(&gun) == 0).then(|| t("gun.no_ammo")));
             return;
         }
         let mods = gun_mods(&gun);
@@ -702,7 +669,7 @@ impl Game {
                 damage: stats.damage,
                 knockback: stats.knockback,
                 visual: false,
-                hole: hole_size(kind, stats.pellets as u32),
+                hole: hole_size(kind),
             });
         }
         // The others see the shot too.
@@ -731,20 +698,40 @@ impl Game {
             self.eject_case(kind);
         }
 
-        self.audio.play(shot_sound(kind, silenced), Some(muzzle), 1.0);
+        self.shot_fx(kind, silenced, muzzle, look, seed, true);
+        // The barrel heats up.
+        self.guns.heat = (self.guns.heat + 0.07 * stats.flash.max(0.8)).min(3.0);
+    }
 
-        // Muzzle flash, its light, sparks and a puff of smoke (a silencer leaves only a
-        // little smoke). The barrel heats up.
+    /// A shot's sound, its muzzle flash (the held gun's, or another player's: `own`), the
+    /// flash's light, sparks and a puff of smoke (a silencer leaves only a little smoke).
+    fn shot_fx(&mut self, kind: GunKind, silenced: bool, muzzle: Vec3, look: Vec3, seed: f32, own: bool) {
+        let shot = if silenced { Sound::ShotSilenced } else { kind.def().shot_sound };
+        self.audio.play(shot, Some(muzzle), 1.0);
         let (sky, blk) = self.terrain.world.light_estimate(muzzle);
-        let size = stats.flash;
+        let size = kind.stats().flash;
         if !silenced {
-            self.guns.flash = Some((1.0, muzzle, look, 0.1 * size, seed));
+            let flash = (1.0, muzzle, look, 0.1 * size, seed);
+            if own {
+                self.guns.flash = Some(flash);
+            } else {
+                self.guns.remote_flashes.push(flash);
+            }
             self.guns.flash_light = ((0.6 + 0.2 * size).min(1.0), muzzle + look * 0.3);
             self.particles.sparks(muzzle, look, 3 + (size * 3.0) as usize);
         }
         let puff = if size > 1.5 { 2 } else { 1 };
         self.particles.gun_smoke(muzzle, look, puff, sky, blk);
-        self.guns.heat = (self.guns.heat + 0.07 * size.max(0.8)).min(3.0);
+    }
+
+    /// A shot that does not go off: the trigger only clicks, with a message why (at most about
+    /// once a second).
+    fn dry_fire(&mut self, message: Option<&str>) {
+        if let Some(m) = message {
+            self.gun_message(m);
+        }
+        self.audio.play(Sound::DryFire, None, 0.8);
+        self.hand.dry_fire();
     }
 
     /// Where the held gun's muzzle is now: on the first-person gun, or on the player model.
@@ -761,15 +748,22 @@ impl Game {
         let eye = self.player.eye();
         let look = look_dir(self.yaw, self.pitch);
         let right = look.cross(Vec3::Y).normalize_or_zero();
-        let up = right.cross(look);
         let port = match (self.camera.mode, self.guns.eject, self.guns.eject_tp) {
             (0, Some(p), _) | (_, _, Some(p)) => p,
             _ => eye - Vec3::Y * 0.25 + look * 0.5 + right * 0.25,
         };
+        self.throw_case(port, look, self.player.vel * 0.8, kind);
+    }
+
+    /// A spent case thrown out of `port` to the right of a gun pointing along `look`,
+    /// tumbling, with `carry` (the shooter's own speed) on top.
+    fn throw_case(&mut self, port: Vec3, look: Vec3, carry: Vec3, kind: GunKind) {
+        let right = look.cross(Vec3::Y).normalize_or(Vec3::X);
+        let up = right.cross(look);
         let r = |g: &mut Self| g.random() - 0.5;
-        let vel = right * (2.4 + r(self)) + up * (2.6 + r(self)) - look * 0.6 + self.player.vel * 0.8;
+        let vel = right * (2.4 + r(self)) + up * (2.6 + r(self)) - look * 0.6 + carry;
         let spin = Vec3::new(r(self), r(self), r(self)) * 40.0;
-        self.guns.cases.eject(port, vel, spin, case_kind(kind));
+        self.guns.cases.eject(port, vel, spin, kind);
     }
 
     /// Another player fired (`kind` is the gun's index in GUN_KINDS): their bullets fly
@@ -804,29 +798,14 @@ impl Game {
                 damage: 0.0,
                 knockback: 0.0,
                 visual: true,
-                hole: hole_size(kind, stats.pellets as u32),
+                hole: hole_size(kind),
             });
         }
-        let silenced = mods & gun_mod::SILENCER != 0;
-        self.audio.play(shot_sound(kind, silenced), Some(muzzle), 1.0);
-        let (sky, blk) = self.terrain.world.light_estimate(muzzle);
-        let size = stats.flash;
-        if !silenced {
-            self.guns.remote_flashes.push((1.0, muzzle, look, 0.1 * size, seed));
-            self.guns.flash_light = ((0.6 + 0.2 * size).min(1.0), muzzle + look * 0.3);
-            self.particles.sparks(muzzle, look, 3 + (size * 3.0) as usize);
-        }
-        let puff = if size > 1.5 { 2 } else { 1 };
-        self.particles.gun_smoke(muzzle, look, puff, sky, blk);
+        self.shot_fx(kind, mods & gun_mod::SILENCER != 0, muzzle, look, seed, false);
         // A revolver keeps its cases until it is reloaded.
         let port = kind.uses_magazine().then(|| self.remote_gun_point(id, kind, crate::model::gun_view::eject(kind))).flatten();
         if let Some(port) = port {
-            let right = look.cross(Vec3::Y).normalize_or(Vec3::X);
-            let up = right.cross(look);
-            let r = |g: &mut Self| g.random() - 0.5;
-            let vel = right * (2.4 + r(self)) + up * (2.6 + r(self)) - look * 0.6;
-            let spin = Vec3::new(r(self), r(self), r(self)) * 40.0;
-            self.guns.cases.eject(port, vel, spin, case_kind(kind));
+            self.throw_case(port, look, Vec3::ZERO, kind);
         }
     }
 

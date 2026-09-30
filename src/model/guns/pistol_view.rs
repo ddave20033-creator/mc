@@ -32,9 +32,6 @@ const RELOAD_RACK: f32 = 1.32;
 const RELOAD_PULL: f32 = 1.45;
 const RELOAD_PULLED: f32 = 1.55;
 
-/// The bones that are the arms and what holds the gun, not the gun's own parts.
-const HOLDING: [&str; 5] = ["viewmodel", "right_arm", "right_arm_mesh", "left_arm", "left_arm_mesh"];
-
 /// A magazine-fed gun's Blockbench model: its bones, cubes, animations and texture pages, the
 /// points the game needs, and how it is placed.
 pub struct Rig {
@@ -56,6 +53,10 @@ pub struct Rig {
     parts: [&'static [&'static str]; PARTS],
     /// Degrees a magazine lying on its own is turned to stand up (the slant it has in the gun).
     mag_upright: f32,
+    /// The rear sight's notch, and the scope's eyepiece with one (model space): aiming brings
+    /// it to the middle of the view.
+    sight: [f32; 3],
+    scope_sight: Option<[f32; 3]>,
 }
 
 /// The pistol: a slide, the barrel with the chambered round, the recoil spring; attachments.
@@ -74,6 +75,8 @@ pub static PISTOL: Rig = Rig {
     gun_bone: "pistol",
     parts: [&["frame", "grip"], &["barrel", "chambered_round"], &["recoil_spring"], &["slide"], &["magazine"]],
     mag_upright: 18.0,
+    sight: [7.0, 14.3 - 24.0, 6.5 - 34.0],
+    scope_sight: Some([7.0, 15.5 - 24.0, 5.2 - 34.0]),
 };
 
 /// The AK-47: its parts at the gun station are the receiver (with the barrel, sights,
@@ -94,14 +97,14 @@ pub static AK: Rig = Rig {
     gun_bone: "rifle",
     parts: [&["frame", "grip", "chambered_round"], &["gas_tube"], &["slide"], &["dust_cover"], &["magazine"]],
     mag_upright: 0.0,
+    // The rear sight's notch, far forward on the receiver.
+    sight: [7.0, 15.1 - 24.0, -18.25 - 34.0],
+    scope_sight: None,
 };
 
-/// The model of a magazine-fed gun (the pistol's for any other).
+/// The model of a magazine-fed gun (its `item::WEAPONS` row's; the pistol's for any other).
 pub fn rig(kind: GunKind) -> &'static Rig {
-    match kind {
-        GunKind::Ak => &AK,
-        _ => &PISTOL,
-    }
+    kind.magazine().map_or(&PISTOL, |m| m.rig)
 }
 
 impl Rig {
@@ -326,7 +329,7 @@ pub fn rest_pose(r: &Rig) -> Vec<BonePose> {
 /// magazine missing as the gun is. With `parts_only` the arms and what holds the pistol are
 /// left still (the player model holds it with its own arms).
 pub fn add_gun_anims(r: &Rig, pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
-    let holding: Vec<usize> = if parts_only { HOLDING.iter().filter_map(|n| r.bone(n)).collect() } else { Vec::new() };
+    let holding = crate::model::gun_view::holding(r.bones, parts_only);
     let slide = r.bone("slide");
     let chamber = r.bone("chambered_round");
     let rounds = r.bone("magazine_rounds");
@@ -414,7 +417,15 @@ pub fn dirt_level(damage: u16, max: u16) -> u8 {
 
 /// The first texture layer of the gun's pages as dirty as `dirt` (`dirt_level`).
 pub fn layers(r: &Rig, dirt: u8) -> u32 {
-    r.view + (dirt as u32).min(tex::PISTOL_DIRT_LEVELS - 1) * r.pages
+    crate::model::gun_view::dirty_layer(r.view, r.pages, dirt)
+}
+
+/// The rear sight's notch (or the scope's eyepiece, with one), model space.
+pub fn sight_point(r: &Rig, mods: u8) -> Vec3 {
+    match r.scope_sight {
+        Some(s) if mods & gun_mod::SCOPE != 0 => Vec3::from(s),
+        _ => Vec3::from(r.sight),
+    }
 }
 
 /// The pistol's cubes (with the attachments `apply_mods` left shown). The see-through glass
@@ -496,15 +507,7 @@ pub mod bench {
     pub type Bones = u64;
 
     fn subtree(r: &Rig, name: &str) -> Bones {
-        let Some(root) = r.bone(name) else { return 0 };
-        let mut set: Bones = 1 << root;
-        // Parents come before their children.
-        for (i, b) in r.bones.iter().enumerate() {
-            if b.parent >= 0 && set & (1 << b.parent) != 0 {
-                set |= 1 << i;
-            }
-        }
-        set
+        crate::model::gun_view::subtree(r.bones, name)
     }
 
     /// The bones an attachment is (`gun_mod` bit; several bits: all of them).
@@ -713,44 +716,6 @@ pub fn laser(r: &Rig) -> (usize, Vec3) {
     (b, Vec3::from(p))
 }
 
-/// From the Blockbench model's space to the old gun space (`gun::Spec`: the muzzle +X, the
-/// right side +Z, about a centimetre a unit), so the pistol sits where the old one did: the
-/// right fist's middle on the grip at the spec's `hand`, the same length (the AK at the same
-/// scale, its grip in the same fist).
-pub fn to_gun_space(r: &Rig) -> Mat4 {
-    let spec = crate::model::gun::spec(r.kind);
-    let fist = r.bone("right_arm_mesh").map_or(Vec3::ZERO, |b| Vec3::from(r.bones[b].origin));
-    // The old pistol is 18.2 gun units long, the Blockbench one 21.8 pixels.
-    let scale = 18.2 / 21.8;
-    Mat4::from_translation(spec.hand)
-        * Mat4::from_rotation_y((-90.0f32).to_radians())
-        * Mat4::from_scale(Vec3::splat(scale))
-        * Mat4::from_translation(-fist)
-}
-
-/// A model point of the gun at rest, in the old gun space (for the third-person muzzle,
-/// ejection port and laser, see `player::gun_point`).
-/// (The rest pose's bone matrices are made once for each rig: asked for every frame for the
-/// muzzle, the ejection port and the light.)
-pub fn rest_point_in_gun_space(r: &Rig, (b, p): (usize, Vec3)) -> Vec3 {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    thread_local! {
-        static REST: RefCell<Vec<(usize, Rc<Vec<Mat4>>)>> = const { RefCell::new(Vec::new()) };
-    }
-    let id = r.bones.as_ptr() as usize;
-    let mats = REST.with_borrow_mut(|rest| match rest.iter().find(|(k, _)| *k == id) {
-        Some((_, m)) => m.clone(),
-        None => {
-            let (mats, _) = crate::model::viewmodel::bone_matrices(r.bones, &rest_pose(r), to_gun_space(r));
-            let m = Rc::new(mats);
-            rest.push((id, m.clone()));
-            m
-        }
-    });
-    mats[b].transform_point3(p)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -819,6 +784,10 @@ mod tests {
         assert!(crosses(Eject, false, RELOAD_MAG_OUT) && !crosses(Eject, false, RELOAD_MAG_IN));
         assert!(!crosses(Insert, true, RELOAD_MAG_OUT) && crosses(Insert, true, RELOAD_MAG_IN) && crosses(Insert, true, RELOAD_SLIDE));
         assert!(crosses(Rack, true, RELOAD_SLIDE) && !crosses(Rack, true, RELOAD_MAG_IN));
+    }
+
+    fn rest_point_in_gun_space(r: &Rig, point: (usize, Vec3)) -> Vec3 {
+        crate::model::gun_view::rest_point_in_gun_space(r.kind, point)
     }
 
     #[test]

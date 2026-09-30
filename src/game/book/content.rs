@@ -606,7 +606,10 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
         v.push(Stat(
             s("Magazine", "Tár"),
             st.magazine as f32 / max(&|s: &Stats| s.magazine as f32),
-            if kind == GunKind::Pistol { format!("{} ({})", st.magazine, st.extended) } else { st.magazine.to_string() },
+            match kind.magazine().and_then(|m| m.extended) {
+                Some((_, extended)) => format!("{} ({})", st.magazine, extended),
+                None => st.magazine.to_string(),
+            },
         ));
         v.push(Stat(
             s("Range", "Lőtáv"),
@@ -689,8 +692,7 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
             (EXTENDED_MAGAZINE, _) => {
                 let list: Vec<String> = GUN_KINDS
                     .iter()
-                    .filter(|k| k.fits(gun_mod::EXTENDED_MAGAZINE))
-                    .map(|k| format!("{} {}", name(k.item()), k.stats().extended))
+                    .filter_map(|k| Some(format!("{} {}", name(k.item()), k.magazine()?.extended?.1)))
                     .collect();
                 format!(
                     "{}: {}.",

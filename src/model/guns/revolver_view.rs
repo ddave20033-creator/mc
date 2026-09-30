@@ -31,9 +31,6 @@ pub const LOAD_END: f32 = 0.6;
 /// hammer.
 pub const STRIP: [(f32, f32); 5] = [(0.0, 0.0), (1.8, 2.5), (1.3, 1.8), (0.0, 0.8), (0.8, 1.3)];
 
-/// The bones that are the arms and what holds the revolver, not its own parts.
-const HOLDING: [&str; 5] = ["viewmodel", "right_arm", "right_arm_mesh", "left_arm", "left_arm_mesh"];
-
 fn anim(name: &str) -> Option<&'static Anim> {
     find_anim(vm::ANIMS, name)
 }
@@ -78,7 +75,7 @@ pub const FULL: u16 = 0b0101_0101_0101;
 /// With `parts_only` the arms and what holds the revolver are left still (the player model
 /// holds it with its own arms).
 pub fn add_gun_anims(pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
-    let holding: Vec<usize> = if parts_only { HOLDING.iter().filter_map(|n| bone(n)).collect() } else { Vec::new() };
+    let holding = crate::model::gun_view::holding(vm::BONES, parts_only);
     let hold = |b: usize| holding.contains(&b);
     // What is in each chamber: nothing, a live round, or a fired case (its primer dented).
     for k in 0..6 {
@@ -143,7 +140,7 @@ pub fn add_gun_anims(pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
 /// The first texture layer of the revolver's pages as dirty as `dirt`
 /// (`pistol_view::dirt_level`).
 pub fn layers(dirt: u8) -> u32 {
-    tex::REVOLVER_VIEW + (dirt as u32).min(tex::PISTOL_DIRT_LEVELS - 1) * vm::PAGES
+    crate::model::gun_view::dirty_layer(tex::REVOLVER_VIEW, vm::PAGES, dirt)
 }
 
 /// The revolver's cubes.
@@ -180,19 +177,6 @@ pub fn gun_bone() -> usize {
     bone("revolver").unwrap_or(0)
 }
 
-/// From the Blockbench model's space to the old gun space (`gun::Spec`: the muzzle +X, the
-/// right side +Z, about a centimetre a unit): the right fist's middle on the grip at the
-/// spec's `hand`, the same scale as the pistol.
-pub fn to_gun_space() -> Mat4 {
-    let spec = crate::model::gun::spec(crate::item::GunKind::Revolver);
-    let fist = bone("right_arm_mesh").map_or(Vec3::ZERO, |b| Vec3::from(vm::BONES[b].origin));
-    let scale = 18.2 / 21.8;
-    Mat4::from_translation(spec.hand)
-        * Mat4::from_rotation_y((-90.0f32).to_radians())
-        * Mat4::from_scale(Vec3::splat(scale))
-        * Mat4::from_translation(-fist)
-}
-
 /// The rear sight's notch (model space), which aiming brings to the middle of the view: the
 /// top of its ears, in the middle of the gun.
 pub fn sight_point() -> Vec3 {
@@ -204,14 +188,6 @@ pub fn sight_point() -> Vec3 {
     })
 }
 
-/// A model point of the revolver at rest, in the old gun space.
-/// (The rest pose's bone matrices are made once.)
-pub fn rest_point_in_gun_space((b, p): (usize, Vec3)) -> Vec3 {
-    static REST: std::sync::OnceLock<Vec<Mat4>> = std::sync::OnceLock::new();
-    let mats = REST.get_or_init(|| crate::model::viewmodel::bone_matrices(vm::BONES, &rest_pose(), to_gun_space()).0);
-    mats[b].transform_point3(p)
-}
-
 /// The revolver at the gun station: which bones each of its parts is.
 pub mod bench {
     use crate::model::gun::{BARREL, FRAME, PARTS};
@@ -221,14 +197,7 @@ pub mod bench {
     pub type Bones = u64;
 
     fn subtree(name: &str) -> Bones {
-        let Some(root) = bone(name) else { return 0 };
-        let mut set: Bones = 1 << root;
-        for (i, b) in vm::BONES.iter().enumerate() {
-            if b.parent >= 0 && set & (1 << b.parent) != 0 {
-                set |= 1 << i;
-            }
-        }
-        set
+        crate::model::gun_view::subtree(vm::BONES, name)
     }
 
     /// The bones a part is (`gun::FRAME` ..: frame, barrel, mainspring, cylinder, hammer).
@@ -346,7 +315,7 @@ mod tests {
 
     #[test]
     fn the_revolver_sits_like_the_pistol() {
-        let m = rest_point_in_gun_space(muzzle());
+        let m = crate::model::gun_view::rest_point_in_gun_space(crate::item::GunKind::Revolver, muzzle());
         assert!((m - Vec3::new(8.6, 3.0, 0.0)).length() < 4.0, "{m}");
     }
 }

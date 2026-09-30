@@ -329,7 +329,7 @@ impl Game {
             let vel = back * (1.1 + r(self) * 0.4) + spread + Vec3::Y * 0.3 + self.player.vel * 0.8;
             if what == chamber::SPENT {
                 let spin = Vec3::new(r(self), r(self), r(self)) * 18.0;
-                self.guns.cases.eject(at, vel, spin, crate::model::ballistics::CaseKind::Magnum);
+                self.guns.cases.eject(at, vel, spin, GunKind::Revolver);
             } else if !creative {
                 self.add_item(crate::entity::dropped::ItemEntity::new(at, vel, Stack::one(MAGNUM_ROUND), 1.0));
             }

@@ -914,7 +914,7 @@ impl HandAnim {
         }
         let (eb, ep) = gun_view::eject(kind);
         self.eject_tip = Some(mats[eb].transform_point3(ep));
-        self.chamber_tips = (kind == GunKind::Revolver).then(|| {
+        self.chamber_tips = (!kind.uses_magazine()).then(|| {
             std::array::from_fn(|c| {
                 let (b, p) = crate::model::revolver_view::chamber_head(c);
                 mats[b].transform_point3(p)
