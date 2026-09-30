@@ -9,6 +9,9 @@ pub enum Job {
     Generate(ChunkPos),
     Mesh {
         pos: ChunkPos,
+        /// Which job it is (given back with the mesh): the terrain takes only the mesh of the
+        /// latest job for a chunk.
+        ticket: u64,
         nb: Box<[Arc<ChunkData>; 9]>,
         anim: Vec<(glam::IVec3, crate::world::block::Block, f32)>,
         notches: Vec<(glam::IVec3, super::mesh::Notch)>,
@@ -17,7 +20,11 @@ pub enum Job {
 
 pub enum Done {
     Generated(ChunkPos, Box<ChunkData>),
-    Meshed(MeshData),
+    /// A mesh and its job's ticket.
+    Meshed(MeshData, u64),
+    /// The job panicked (a bug; the thread lives on): generating chunk `pos` (no ticket), or
+    /// meshing it.
+    Failed(ChunkPos, Option<u64>),
 }
 
 /// Background work must never take the processor from the render thread: a frame that has to
@@ -74,14 +81,21 @@ impl Workers {
                             lock.recv()
                         };
                         let Ok(job) = job else { break };
-                        let out = match job {
+                        let (pos, ticket) = match &job {
+                            Job::Generate(p) => (*p, None),
+                            Job::Mesh { pos, ticket, .. } => (*pos, Some(*ticket)),
+                        };
+                        // A panic is reported (so the chunk is not waited for forever), not
+                        // taken down with the thread.
+                        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
                             Job::Generate(p) => {
                                 Done::Generated(p, Box::new(gen.generate_chunk(p.0, p.1)))
                             }
-                            Job::Mesh { pos, nb, anim, notches } => {
-                                Done::Meshed(mesh_chunk(pos, &nb, &anim, &notches, &gen))
+                            Job::Mesh { pos, ticket, nb, anim, notches } => {
+                                Done::Meshed(mesh_chunk(pos, &nb, &anim, &notches, &gen), ticket)
                             }
-                        };
+                        }))
+                        .unwrap_or(Done::Failed(pos, ticket));
                         if done_tx.send(out).is_err() {
                             break;
                         }

@@ -25,7 +25,7 @@ use chunks::{ChunkGpu, STAGING_SIZE};
 use descriptors::Descriptors;
 use dynamic::{DYN_MAX_VERTS, LENS};
 use passes::{Rec, MAX_INDIRECT};
-use pipelines::{create_blur_across_pipe, create_scope_view_pipe, create_shadow_pipe, DrawPush, MainPipes, BLUR_FRAG, LENS_FRAG};
+use pipelines::{create_blur_across_pipe, create_scope_view_pipe, create_shadow_pipe, DrawPush, MainPipes, ScenePipes, BLUR_FRAG, LENS_FRAG};
 use std::collections::VecDeque;
 use std::mem::size_of;
 use std::time::Instant;
@@ -63,7 +63,7 @@ pub struct Renderer {
     /// descriptor sets are `desc.scope_sets`); and the eyepiece's pipeline, which shows it on
     /// the gun, and the menus' blurred backdrop's.
     scope: ScopeTarget,
-    scope_pipes: MainPipes,
+    scope_pipes: ScenePipes,
     scope_ubos: Vec<Buffer>,
     lens_layout: vk::PipelineLayout,
     lens_pipe: vk::Pipeline,
@@ -137,7 +137,7 @@ impl Renderer {
             let world_layout = create_layout(d, &[desc.world_dsl], size_of::<DrawPush>() as u32);
             let ui_layout = create_layout(d, &[desc.ui_dsl], 16);
             let pipes = MainPipes::new(d, gpu.render_pass, gpu.samples, world_layout, ui_layout);
-            let scope_pipes = MainPipes::new(d, scope.pass, vk::SampleCountFlags::TYPE_1, world_layout, ui_layout);
+            let scope_pipes = ScenePipes::new(d, scope.pass, vk::SampleCountFlags::TYPE_1, world_layout);
             let lens_layout = create_layout(d, &[desc.world_dsl, desc.lens_dsl], size_of::<DrawPush>() as u32);
             let lens_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, LENS_FRAG);
             let blur_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, BLUR_FRAG);

@@ -20,9 +20,10 @@ void main() {
     vec3 p = displace(v.pos, v.uv, flags, frame.camPos.w, v.layer, inTint.rg);
     gl_Position = pc.viewProj * vec4(p, 1.0);
     // Grass and flowers smaller on screen than where world.frag has faded them out: dropped
-    // (the whole quad, judged by its block, lands outside the view).
+    // (the whole quad, judged by its block's middle, lands outside the view; a little under
+    // PLANT_GONE_PX, as the middle is farther than the nearest texel).
     float blockPx = frame.detail.x / max(length(floor(v.pos.xz) + 0.5 - frame.camPos.xz), 1e-3);
-    if ((flags & F_PLANT) != 0 && blockPx < 4.7) {
+    if ((flags & F_PLANT) != 0 && blockPx < PLANT_GONE_PX * 0.94) {
         gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     }
     int normal = int(inLight.w * 255.0 + 0.5);

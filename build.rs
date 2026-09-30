@@ -64,7 +64,7 @@ const VARIANTS: &[(&str, &str, &str)] = &[
     // The menus' backdrop blurred across first (the second half is blur.frag itself).
     ("blur.frag", "blur_across.frag", "ACROSS"),
 ];
-const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl", "vertex.glsl"];
+const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl", "vertex.glsl", "flags.glsl"];
 
 fn glslc_path() -> PathBuf {
     if let Ok(sdk) = env::var("VULKAN_SDK") {

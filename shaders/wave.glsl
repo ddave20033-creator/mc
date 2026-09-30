@@ -1,11 +1,5 @@
 // Vertex animation shared by the main and shadow passes so shadows match.
-const int F_LEAVES = 1;
-const int F_PLANT = 2;
-const int F_EMISSIVE = 4;
-const int F_WATER = 8;
-const int F_OVERLAY = 16;
-const int F_VIEWMODEL = 32;
-const int F_FLUID = 128;
+#include "flags.glsl"
 
 vec3 displace(vec3 p, vec2 uv, int flags, float t, float layer, vec2 flowEnc) {
     // Fluids: uv = (previous y, change time). Move to the new shape over exactly one flow
