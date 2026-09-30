@@ -62,8 +62,20 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
     let layer_bytes = TILE * TILE * 4;
     let mut base = vec![0u8; layer_bytes * layers];
     set_progress(0.0);
+    // The packs' layers first: those the packs give are not made procedurally (the built-in
+    // pack gives about 150 of them).
+    let given = apply_pack(packs, &mut base);
+    procedural_layers(&mut base, &given, &crack);
+    set_progress(0.8);
+    finish_base(base)
+}
+
+/// Every layer not `given` (by the packs), made procedurally, in parallel (the layers are
+/// independent of each other).
+fn procedural_layers(base: &mut [u8], given: &[bool], crack: &[u16]) {
+    let layer_bytes = TILE * TILE * 4;
     let done = std::sync::atomic::AtomicUsize::new(0);
-    // Layers are independent: generate them in parallel.
+    let todo = given.iter().filter(|g| !**g).count().max(1);
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
@@ -79,7 +91,7 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
             scope.spawn(move || {
                 for (l, out) in batch {
                     // Uploaded skins and the double chest faces are filled in later.
-                    if (tex::CUSTOM_SKIN_START..tex::DOOR_TOP).contains(&(l as u32)) {
+                    if (tex::CUSTOM_SKIN_START..tex::DOOR_TOP).contains(&(l as u32)) || given[l] {
                         continue;
                     }
                     for y in 0..TILE {
@@ -90,13 +102,16 @@ pub fn generate_base(packs: &Packs) -> Vec<u8> {
                         }
                     }
                     let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    set_progress(0.75 * n as f32 / layers as f32);
+                    set_progress(0.75 * n as f32 / todo as f32);
                 }
             });
         }
     });
-    apply_pack(packs, &mut base);
-    set_progress(0.8);
+}
+
+/// `generate_base` after the pack and procedural layers: the synthesized ones.
+fn finish_base(mut base: Vec<u8>) -> Vec<u8> {
+    let layer_bytes = TILE * TILE * 4;
     use crate::model::{ak_vm, gun_station, pistol_vm, revolver_vm};
     synth_model_pages(&mut base, pistol_vm::PNG, pistol_vm::PAGES, tex::PISTOL_VIEW);
     synth_model_pages(&mut base, revolver_vm::PNG, revolver_vm::PAGES, tex::REVOLVER_VIEW);
@@ -150,6 +165,18 @@ pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layers_a_pack_gives_are_not_made_first() {
+        // The built-in pack over everything made procedurally, as it used to be done, and
+        // the pack's layers first with the rest made: the same.
+        let packs = Packs::load(&[]);
+        let fast = generate_base(&packs);
+        let mut slow = vec![0u8; TILE * TILE * 4 * tex::LAYERS];
+        procedural_layers(&mut slow, &vec![false; tex::LAYERS], &crack_pattern());
+        apply_pack(&packs, &mut slow);
+        assert!(fast == finish_base(slow));
+    }
 
     #[test]
     fn uploaded_skin_maps_its_face_and_clothes_to_own_slot() {

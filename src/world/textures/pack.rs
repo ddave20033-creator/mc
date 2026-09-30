@@ -288,9 +288,12 @@ fn round_rings(img: &Image) -> Image {
 }
 
 /// Replaces layers with the textures of the resource packs (anything missing stays procedural).
-pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
+/// Returns which layers it gave (whole): those need not be made procedurally at all.
+pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) -> Vec<bool> {
     let layer_bytes = TILE * TILE * 4;
+    let mut given = vec![false; base.len() / layer_bytes];
     let mut put = |layer: u32, img: &Image| {
+        given[layer as usize] = true;
         let mut px = img.resized(TILE);
         if !is_cutout(layer) && layer != tex::GRASS_SIDE && layer != tex::TORCH_FLAME {
             // Opaque layers: alpha is the tint mask, fully set (translucent ice becomes solid).
@@ -507,6 +510,7 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) {
             put(layer, &skin.region(64, x, y, w, h));
         }
     }
+    given
 }
 
 /// A skin's pages (`entity::skin_pages`) cut out of its atlas (64 units wide, at any
