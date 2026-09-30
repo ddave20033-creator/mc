@@ -100,9 +100,10 @@ struct Lighting {
     view_distance: f32,
 }
 
-/// Geometry built on the CPU this frame, by render range.
+/// Geometry built on the CPU this frame, by render range. Kept from frame to frame (emptied,
+/// not freed), so its lists do not grow anew to hundreds of thousands of vertices each frame.
 #[derive(Default)]
-struct Scene {
+pub(super) struct Scene {
     particles: Vec<Vertex>,
     overlay: Vec<Vertex>,
     viewmodel: Vec<Vertex>,
@@ -119,6 +120,28 @@ struct Scene {
     /// Where the scope looks (a direction) and its field of view (radians), while its view
     /// shows on the eyepiece.
     scope: Option<(Vec3, Vec3, Vec3, f32, f32)>,
+    /// (scratch: the mobs and the other players, before they go into `entity`)
+    mobs: Vec<Vertex>,
+}
+
+impl Scene {
+    fn clear(&mut self) {
+        for v in [
+            &mut self.particles,
+            &mut self.overlay,
+            &mut self.viewmodel,
+            &mut self.entity,
+            &mut self.translucent,
+            &mut self.viewmodel_glass,
+            &mut self.lens,
+            &mut self.mobs,
+        ] {
+            v.clear();
+        }
+        self.entity_visible = false;
+        self.player_vertex_count = 0;
+        self.scope = None;
+    }
 }
 
 impl Game {
@@ -196,7 +219,7 @@ impl Game {
                 ..Default::default()
             };
             let (a, b, c, d) = (corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0));
-            scene.lens = vec![a, b, c, a, c, d];
+            scene.lens.extend_from_slice(&[a, b, c, a, c, d]);
         }
         self.apply(action);
 
@@ -273,6 +296,7 @@ impl Game {
         ];
         // This frame's own duration (the frame time measured at the start is the previous one's).
         self.bench_record(self.between_ms + ms(now, t_end));
+        self.scene = scene;
         self.end_input();
         self.frame_end = Instant::now();
     }
@@ -711,7 +735,8 @@ impl Game {
     /// crafting tables.
     fn build_scene(&mut self, view: &View, dt: f32) -> Scene {
         let (in_world, third_person, cam) = (view.in_world, view.third_person, view.cam);
-        let mut scene = Scene::default();
+        let mut scene = std::mem::take(&mut self.scene);
+        scene.clear();
         if in_world {
             // The pages the books in hands are open at.
             self.update_book_views(dt);
@@ -1059,25 +1084,30 @@ impl Game {
         } else {
             &mut scene.particles
         };
-        for it in &self.items {
+        // Only what can be seen from here: a dropped item is lost to sight past `ITEM_SIGHT`,
+        // the rest past the view distance.
+        const ITEM_SIGHT: f32 = 64.0;
+        let sight = self.settings.render_distance * CHUNK as f32;
+        let eye = self.player.pos;
+        for it in self.items.iter().filter(|it| it.pos.distance_squared(eye) < ITEM_SIGHT * ITEM_SIGHT) {
             let (sky, blk) = world.light_estimate(it.pos + Vec3::Y * 0.3);
             it.build(target, self.time, sky, blk);
         }
-        for f in &self.falling {
+        for f in self.falling.iter().filter(|f| f.pos.distance_squared(eye) < sight * sight) {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
             f.build(target, sky, blk);
         }
-        self.build_falling_trees(target);
-        self.build_lying_logs(target);
+        self.build_falling_trees(target, eye, sight);
+        self.build_lying_logs(target, eye, sight);
         // Mobs always go into the entity range so they cast shadows; in first person that
         // range only draws shadows, so they are copied into the particle range to be seen too.
-        let mut mob_verts = Vec::new();
+        let mob_verts = &mut scene.mobs;
         for m in &self.mobs {
             if (m.pos - self.player.pos).length_squared() > 128.0 * 128.0 {
                 continue;
             }
             let (sky, blk) = world.light_estimate(m.center());
-            m.build(&mut mob_verts, sky, blk);
+            m.build(mob_verts, sky, blk);
         }
         // Watching someone through their eyes: their own model would be in the way.
         let inside = self.spectating.filter(|_| !third_person);
@@ -1085,7 +1115,7 @@ impl Game {
             &mut self.remotes,
             world,
             self.time,
-            &mut mob_verts,
+            mob_verts,
             &mut scene.translucent,
             dt,
             inside,
@@ -1133,6 +1163,12 @@ impl Game {
         for p in self.terrain.doors.values().flatten() {
             let b = world.geti(*p);
             if !is_door(b) {
+                continue;
+            }
+            if !in_sight(p) {
+                // (out of sight it is not drawn, but it still swings shut or open)
+                let target_open = if door_open(b) { 1.0 } else { 0.0 };
+                self.door_swing.insert(*p, target_open);
                 continue;
             }
             let target_open = if door_open(b) { 1.0 } else { 0.0 };
@@ -1194,9 +1230,9 @@ impl Game {
             build_glow(&mut scene.overlay, corners);
         }
         if !third_person {
-            scene.particles.extend_from_slice(&mob_verts);
+            scene.particles.extend_from_slice(&scene.mobs);
         }
-        scene.entity.extend(mob_verts);
+        scene.entity.extend_from_slice(&scene.mobs);
     }
 
     /// The HUD and the open screen; returns what the screen asks for.

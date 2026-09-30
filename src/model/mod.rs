@@ -371,30 +371,60 @@ pub fn emit_sprite_sides(
         }
     }
 
-    let Ok(masks) = ITEM_MASKS.read() else {
-        return;
-    };
-    let Some(mask) = masks.get(layer as usize) else {
-        return;
-    };
-    let n = MASK as i32;
-    let opaque = |x: i32, y: i32| {
-        (0..n).contains(&x) && (0..n).contains(&y) && mask[y as usize] >> x & 1 == 1
-    };
-    let f = |i: i32| i as f32 / n as f32;
-    let mut wall = |a: (f32, f32), b: (f32, f32), uv: [[f32; 2]; 2], normal: u8| {
+    for w in sprite_walls(layer).iter() {
         let v = [
-            vert_uv(Vec3::new(a.0, a.1, -t), uv[0], normal),
-            vert_uv(Vec3::new(b.0, b.1, -t), uv[1], normal),
-            vert_uv(Vec3::new(b.0, b.1, t), uv[1], normal),
-            vert_uv(Vec3::new(a.0, a.1, t), uv[0], normal),
+            vert_uv(Vec3::new(w.a.0, w.a.1, -t), w.uv[0], w.normal),
+            vert_uv(Vec3::new(w.b.0, w.b.1, -t), w.uv[1], w.normal),
+            vert_uv(Vec3::new(w.b.0, w.b.1, t), w.uv[1], w.normal),
+            vert_uv(Vec3::new(w.a.0, w.a.1, t), w.uv[0], w.normal),
         ];
         // Both windings: the wall is seen from either side depending on the transform.
         out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
         out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
-    };
-    // The walls round the opaque pixels, a run of pixels along a row (or a column) with the
-    // same side bare one wall, the texture's pixels along it.
+    }
+}
+
+/// One side wall of a flat item: from `a` to `b` in the sprite's plane (-0.5..0.5), the
+/// texture there and the face it looks to.
+struct SpriteWall {
+    a: (f32, f32),
+    b: (f32, f32),
+    uv: [[f32; 2]; 2],
+    normal: u8,
+}
+
+/// The side walls of a layer's flat item, worked out once from its opaque pixels (again when
+/// the textures are made anew): a dropped stack or a held item is drawn every frame.
+fn sprite_walls(layer: u32) -> std::sync::Arc<[SpriteWall]> {
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+    type Cache = (u32, Vec<Option<Arc<[SpriteWall]>>>);
+    static CACHE: Mutex<Cache> = Mutex::new((u32::MAX, Vec::new()));
+    let version = crate::world::textures::ITEM_MASKS_VERSION.load(Ordering::Acquire);
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.0 != version {
+        *cache = (version, Vec::new());
+    }
+    let i = layer as usize;
+    if let Some(Some(w)) = cache.1.get(i) {
+        return w.clone();
+    }
+    let walls: Arc<[SpriteWall]> = ITEM_MASKS.read().ok().and_then(|m| m.get(i).map(walls_of)).unwrap_or_default().into();
+    if cache.1.len() <= i {
+        cache.1.resize(i + 1, None);
+    }
+    cache.1[i] = Some(walls.clone());
+    walls
+}
+
+/// The walls round the opaque pixels of a mask: a run of pixels along a row (or a column)
+/// with the same side bare one wall, the texture's pixels along it.
+fn walls_of(mask: &[u128; MASK]) -> Vec<SpriteWall> {
+    let n = MASK as i32;
+    let opaque = |x: i32, y: i32| (0..n).contains(&x) && (0..n).contains(&y) && mask[y as usize] >> x & 1 == 1;
+    let f = |i: i32| i as f32 / n as f32;
+    let mut out = Vec::new();
+    let mut wall = |a: (f32, f32), b: (f32, f32), uv: [[f32; 2]; 2], normal: u8| out.push(SpriteWall { a, b, uv, normal });
     for y in 0..n {
         let v = f(y) + 0.5 / n as f32;
         for (dy, normal) in [(-1, 2u8), (1, 3u8)] {
@@ -445,6 +475,7 @@ pub fn emit_sprite_sides(
             }
         }
     }
+    out
 }
 
 /// A block item centered on the origin with unit size (cube, or a crossed sprite for plants).

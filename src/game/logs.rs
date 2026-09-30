@@ -271,11 +271,16 @@ impl Game {
 
     /// The lying trunks (round, their pieces end to end), and where the one aimed at would
     /// be cut: a pale ring round it there.
-    pub(super) fn build_lying_logs(&self, out: &mut Vec<Vertex>) {
+    /// Those within `sight` of `eye`.
+    pub(super) fn build_lying_logs(&self, out: &mut Vec<Vertex>, eye: Vec3, sight: f32) {
         use crate::model::emit_item;
         let fl = crate::world::mesh::flags::ENTITY;
         let aim = self.log_aim.or(self.log_cut.map(|(id, from_base)| LogAim { id, from_base }));
         for l in &self.lying_logs {
+            let length = l.pieces.len() as f32;
+            if (l.base + l.dir * length * 0.5).distance(eye) > sight + length {
+                continue;
+            }
             let turn = Mat4::from_quat(glam::Quat::from_rotation_arc(Vec3::Y, l.dir));
             for (i, &b) in l.pieces.iter().enumerate() {
                 let mid = l.piece_middle(i);

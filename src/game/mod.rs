@@ -343,6 +343,8 @@ pub struct Game {
     action_cooldown: f32,
     hand: HandAnim,
     particles: Particles,
+    /// Last frame's geometry lists, to be filled again (see `frame::Scene`).
+    scene: frame::Scene,
     time_of_day: f32,
     fov_current: f32,
     /// Field of view for simplifying detail too small for the screen (setting and zoom only).
@@ -615,6 +617,7 @@ impl Game {
             action_cooldown: 0.0,
             hand: HandAnim::new(),
             particles: Particles::new(),
+            scene: Default::default(),
             time_of_day: MENU_TIME_OF_DAY,
             last_space: -1.0,
             last_w: -1.0,
@@ -775,6 +778,16 @@ impl Game {
         self.book.textures_remade();
     }
 
+    /// Only one player slot's skin layers are made again and uploaded (not all the textures).
+    pub(super) fn refresh_skin_slot(&mut self, slot: u8) {
+        if self.texture_base.is_empty() {
+            // (the textures are still being made: they will have it)
+            return;
+        }
+        let (first, count, levels) = textures::skin_slot_levels(&self.texture_base, slot, self.custom_skins.get(&slot));
+        self.renderer.queue_layers(first, count, levels);
+    }
+
     fn set_skin_png(&mut self, slot: u8, png: Vec<u8>) -> Result<(), &'static str> {
         if slot >= textures::tex::CUSTOM_SKIN_SLOTS {
             return Err("Túl sok LAN játékos.");
@@ -782,7 +795,7 @@ impl Game {
         let image = textures::decode_skin_png(&png)?;
         self.custom_skins.insert(slot, image);
         self.skin_pngs.insert(slot, png);
-        self.refresh_skin_textures();
+        self.refresh_skin_slot(slot);
         Ok(())
     }
 

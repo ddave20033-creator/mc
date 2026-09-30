@@ -863,6 +863,8 @@ pub const MASK: usize = TILE;
 /// Opaque pixels of every layer at MASK x MASK (one row per u128, bit x = column x, row 0 at the
 /// top of the texture). Filled by `generate`, so it follows the active resource pack.
 pub static ITEM_MASKS: std::sync::RwLock<Vec<[u128; MASK]>> = std::sync::RwLock::new(Vec::new());
+/// Counts the times `ITEM_MASKS` was made anew (what is worked out from it is then stale).
+pub static ITEM_MASKS_VERSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 fn opaque_masks(base: &[u8]) -> Vec<[u128; MASK]> {
     let step = TILE / MASK;
@@ -1555,34 +1557,52 @@ fn synth_grilled(base: &mut [u8]) {
 /// The full mip chain (each level holds all layers back to back): `generate_base` with the
 /// uploaded skins (by player slot) filled in.
 pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> Vec<Vec<u8>> {
-    let layers = tex::LAYERS;
-    let layer_bytes = TILE * TILE * 4;
     let mut base = base.to_vec();
     for slot in 0..tex::CUSTOM_SKIN_SLOTS {
-        for (part, &(source, region)) in SKIN_PARTS.iter().enumerate() {
-            let dst = (tex::CUSTOM_SKIN_START + slot as u32 * tex::CUSTOM_SKIN_LAYERS + part as u32)
-                as usize
-                * layer_bytes;
-            if let Some(atlas) = skins.get(&slot) {
-                let mut pixels = atlas
-                    .region(64, region[0], region[1], region[2], region[3])
-                    .resized(TILE);
-                for p in pixels.chunks_exact_mut(4) {
-                    p[3] = 255;
-                }
-                base[dst..dst + layer_bytes].copy_from_slice(&pixels);
-            } else {
-                let src = source as usize * layer_bytes;
-                base.copy_within(src..src + layer_bytes, dst);
-            }
-        }
+        let (first, layers) = skin_slot_layers(&base, slot, skins.get(&slot));
+        let at = first as usize * TILE * TILE * 4;
+        base[at..at + layers.len()].copy_from_slice(&layers);
     }
     if let Ok(mut masks) = ITEM_MASKS.write() {
         *masks = opaque_masks(&base);
+        ITEM_MASKS_VERSION.fetch_add(1, std::sync::atomic::Ordering::Release);
     }
+    mip_chain(base, 0)
+}
 
+/// Only one player slot's skin layers with their mips, to replace in the textures already
+/// made (a player joining or changing skin): the first layer, how many, and the levels.
+pub fn skin_slot_levels(base: &[u8], slot: u8, skin: Option<&Image>) -> (u32, u32, Vec<Vec<u8>>) {
+    let (first, layers) = skin_slot_layers(base, slot, skin);
+    (first, tex::CUSTOM_SKIN_LAYERS, mip_chain(layers, first))
+}
+
+/// A player slot's skin layers (back to back, full size): cut from the uploaded skin, or the
+/// default skin's (from `base`) without one. Returns its first layer too.
+fn skin_slot_layers(base: &[u8], slot: u8, skin: Option<&Image>) -> (u32, Vec<u8>) {
+    let layer_bytes = TILE * TILE * 4;
+    let first = tex::CUSTOM_SKIN_START + slot as u32 * tex::CUSTOM_SKIN_LAYERS;
+    let mut out = Vec::with_capacity(SKIN_PARTS.len() * layer_bytes);
+    for &(source, region) in SKIN_PARTS.iter() {
+        if let Some(atlas) = skin {
+            let mut pixels = atlas.region(64, region[0], region[1], region[2], region[3]).resized(TILE);
+            for p in pixels.chunks_exact_mut(4) {
+                p[3] = 255;
+            }
+            out.extend_from_slice(&pixels);
+        } else {
+            let src = source as usize * layer_bytes;
+            out.extend_from_slice(&base[src..src + layer_bytes]);
+        }
+    }
+    (first, out)
+}
+
+/// The mip levels of layers `first..` (full size and back to back in `base`), down to 1x1.
+fn mip_chain(base: Vec<u8>, first: u32) -> Vec<Vec<u8>> {
     // Mipmaps average in linear light; the sRGB decode of every byte value is looked up.
     let linear: [f32; 256] = std::array::from_fn(|v| (v as f32 / 255.0).powf(2.2));
+    let layers = base.len() / (TILE * TILE * 4);
     let mut levels = vec![base];
     let mut size = TILE;
     while size > 1 {
@@ -1590,7 +1610,8 @@ pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> 
         let ns = size / 2;
         let mut next = vec![0u8; ns * ns * 4 * layers];
         for l in 0..layers {
-            let cutout = is_cutout(l as u32);
+            let id = first + l as u32;
+            let cutout = is_cutout(id);
             for y in 0..ns {
                 for x in 0..ns {
                     let mut rgb = [0.0f32; 3];
@@ -1607,10 +1628,10 @@ pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> 
                         asum += a;
                     }
                     let mut a = asum / 4.0;
-                    let logo = (tex::LOGO..tex::LOGO + tex::LOGO_TILES).contains(&(l as u32));
-                    if cutout && l as u32 != tex::GLASS && !is_crack(l as u32) && !logo {
+                    let logo = (tex::LOGO..tex::LOGO + tex::LOGO_TILES).contains(&id);
+                    if cutout && id != tex::GLASS && !is_crack(id) && !logo {
                         a = if a > 0.3 { 1.0 } else { 0.0 };
-                    } else if l as u32 == tex::GLASS {
+                    } else if id == tex::GLASS {
                         a = if a > 0.45 { 1.0 } else { 0.0 };
                     }
                     let o = ((l * ns + y) * ns + x) * 4;
@@ -1619,9 +1640,9 @@ pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> 
                         next[o + c] = (v.powf(1.0 / 2.2) * 255.0).round() as u8;
                     }
                     // Keep the tint masks exact instead of averaging them.
-                    let first = prev[((l * size + y * 2) * size + x * 2) * 4 + 3];
-                    next[o + 3] = if !cutout && l as u32 != tex::GRASS_SIDE && !is_crack(l as u32) {
-                        first
+                    let first_alpha = prev[((l * size + y * 2) * size + x * 2) * 4 + 3];
+                    next[o + 3] = if !cutout && id != tex::GRASS_SIDE && !is_crack(id) {
+                        first_alpha
                     } else {
                         (a * 255.0).round() as u8
                     };
@@ -1629,7 +1650,9 @@ pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> 
             }
         }
         for layer in [tex::OAK_LEAVES, tex::SPRUCE_LEAVES, tex::BIRCH_LEAVES] {
-            preserve_leaf_coverage(&levels[0], &mut next, ns, layer as usize);
+            if (first..first + layers as u32).contains(&layer) {
+                preserve_leaf_coverage(&levels[0], &mut next, ns, (layer - first) as usize);
+            }
         }
         levels.push(next);
         size = ns;

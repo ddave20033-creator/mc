@@ -468,10 +468,15 @@ impl Game {
             i += 1;
         }
         // Mobs push each other apart, and the player pushes them.
-        let n = self.mobs.len();
-        for a in 0..n {
-            for b in a + 1..n {
+        // (swept along x: only mobs less than 2 blocks apart that way are compared)
+        let mut order: Vec<usize> = (0..self.mobs.len()).collect();
+        order.sort_unstable_by(|&a, &b| self.mobs[a].pos.x.total_cmp(&self.mobs[b].pos.x));
+        for (i, &a) in order.iter().enumerate() {
+            for &b in &order[i + 1..] {
                 let (pa, pb) = (self.mobs[a].pos, self.mobs[b].pos);
+                if pb.x - pa.x > 2.0 {
+                    break;
+                }
                 if (pa - pb).length_squared() > 4.0 {
                     continue;
                 }

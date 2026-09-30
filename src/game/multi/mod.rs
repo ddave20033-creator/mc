@@ -517,6 +517,10 @@ impl Game {
         self.remotes.retain(|r| r.id != id);
         self.custom_skins.remove(&id);
         self.skin_pngs.remove(&id);
+        // (its slot shows the default skin again, for whoever gets it next)
+        if id < crate::world::textures::tex::CUSTOM_SKIN_SLOTS {
+            self.refresh_skin_slot(id);
+        }
     }
 
     fn add_remote(&mut self, id: u8, name: String) {

@@ -673,7 +673,7 @@ impl Builder {
             };
             let from = self.opaque.len();
             self.cube_face(r, x, y, z, face, layer, [255; 3], 0, face_rotated(b, face));
-            let quad = self.opaque.split_off(from);
+            let quad = self.opaque.drain(from..);
             self.dirs[face].extend(quad);
         }
         let d = FACE_N[front];
@@ -1415,8 +1415,7 @@ pub fn mesh_chunk(
                     };
                     let from = m.opaque.len();
                     m.plant(&r, x, y, z, face_texture(b, 0), tint);
-                    let quads = m.opaque.split_off(from);
-                    m.plants.extend(quads);
+                    m.plants.extend(m.opaque.drain(from..));
                     continue;
                 }
                 if is_fluid(b) {
@@ -1510,7 +1509,8 @@ pub fn mesh_chunk(
                             v.pos[1] += 0.002;
                         }
                     }
-                    let quad = m.opaque.split_off(from);
+                    // (moved over without a list of its own for every face)
+                    let quad = m.opaque.drain(from..);
                     if is_leaves(b) && is_leaves(nbk) {
                         m.leaf_inner.extend(quad);
                     } else {

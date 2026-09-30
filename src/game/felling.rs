@@ -597,12 +597,16 @@ impl Game {
     }
 
     /// The falling trees' blocks where they are now: the logs round, the leaves.
-    pub(super) fn build_falling_trees(&self, out: &mut Vec<Vertex>) {
+    /// Those within `sight` of `eye`.
+    pub(super) fn build_falling_trees(&self, out: &mut Vec<Vertex>, eye: Vec3, sight: f32) {
         use crate::model::{emit_box, emit_item};
         let fl = crate::world::mesh::flags::ENTITY;
         for t in &self.falling_trees {
             let turn = t.turn();
             let mid = t.at(&turn, Vec3::new(0.0, t.height * 0.5, 0.0));
+            if mid.distance(eye) > sight + t.height {
+                continue;
+            }
             let (sky, blk) = self.terrain.world.light_estimate(mid);
             let light = crate::util::vertex_light(sky, blk);
             // The top of the cut block, from the cut up.

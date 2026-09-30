@@ -528,30 +528,46 @@ impl Game {
     }
 
     /// Nearby dropped stacks of the same item combine into one entity, like in Minecraft.
+    /// (Swept along x: only stacks less than half a block apart that way are compared, not
+    /// every pair, as there can be hundreds after a tree comes down.)
     pub(super) fn merge_items(&mut self) {
-        let mut a = 0;
-        while a < self.items.len() {
-            let mut b = a + 1;
-            while b < self.items.len() {
-                let (x, y) = (&self.items[a], &self.items[b]);
-                let fits =
-                    x.stack.count as u16 + y.stack.count as u16 <= max_stack(x.stack.item) as u16;
-                if !x.is_picking_up()
+        const NEAR: f32 = 0.5;
+        let items = &mut self.items;
+        let mut order: Vec<usize> = (0..items.len()).collect();
+        order.sort_unstable_by(|&a, &b| items[a].pos.x.total_cmp(&items[b].pos.x));
+        let mut gone = vec![false; items.len()];
+        for (i, &a) in order.iter().enumerate() {
+            if gone[a] {
+                continue;
+            }
+            for &b in &order[i + 1..] {
+                if items[b].pos.x - items[a].pos.x >= NEAR {
+                    break;
+                }
+                let (x, y) = (&items[a], &items[b]);
+                let fits = x.stack.count as u16 + y.stack.count as u16 <= max_stack(x.stack.item) as u16;
+                if !gone[b]
+                    && !x.is_picking_up()
                     && !y.is_picking_up()
                     && x.stack.stacks_with(&y.stack)
                     && fits
-                    && x.pos.distance_squared(y.pos) < 0.5 * 0.5
+                    && x.pos.distance_squared(y.pos) < NEAR * NEAR
                 {
-                    let y = self.items.swap_remove(b);
-                    let x = &mut self.items[a];
-                    x.stack.count += y.stack.count;
-                    x.age = x.age.min(y.age);
-                    x.pickup_delay = x.pickup_delay.max(y.pickup_delay);
-                } else {
-                    b += 1;
+                    gone[b] = true;
+                    let (count, age, delay) = (y.stack.count, y.age, y.pickup_delay);
+                    let x = &mut items[a];
+                    x.stack.count += count;
+                    x.age = x.age.min(age);
+                    x.pickup_delay = x.pickup_delay.max(delay);
                 }
             }
-            a += 1;
+        }
+        if gone.contains(&true) {
+            let mut i = 0;
+            items.retain(|_| {
+                i += 1;
+                !gone[i - 1]
+            });
         }
     }
 }

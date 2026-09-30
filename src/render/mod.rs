@@ -1849,292 +1849,297 @@ impl Renderer {
             let d = &gpu.device;
             let ext = gpu.extent;
 
-            // Sky
-            d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.sky_pipe);
-            d.cmd_bind_descriptor_sets(
-                cmd,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.world_layout,
-                0,
-                &[world_set],
-                &[],
-            );
-            d.cmd_push_constants(
-                cmd,
-                self.world_layout,
-                stages,
-                0,
-                as_bytes(&push(f.view_proj, 0.0)),
-            );
-            d.cmd_draw(cmd, 3, 1, 0, 0);
-
-            marks[1] = std::time::Instant::now();
-            // Visible chunks
-            let frustum = Frustum::new(f.view_proj);
-            let max_d = f.view_distance + 24.0;
-            let mut visible: Vec<VisibleChunk> = Vec::with_capacity(self.drawn_chunks + 64);
-            for c in self.chunks.values() {
-                let Some(r) = c.mesh else { continue };
-                let center = (c.min + c.max) * 0.5;
-                let (dx, dz) = (center.x - f.cam_pos.x, center.z - f.cam_pos.z);
-                let dist2 = dx * dx + dz * dz;
-                if dist2 > max_d * max_d || !frustum.visible(c.min, c.max) {
-                    continue;
-                }
-                // Far chunks leave out what the shaders would drop anyway: grass and flowers
-                // (world.vert, under ~5 pixels a block) and the faces between leaves (closed
-                // crowns, under ~1.5).
-                let near = f.cam_pos.clamp(c.min, c.max);
-                let block_px = f.detail_px / near.distance(f.cam_pos).max(1e-3);
-                let drawn = if block_px >= 5.0 {
-                    c.opaque
-                } else if block_px >= 1.5 {
-                    c.solid + c.leaf_inner
-                } else {
-                    c.solid
-                };
-                // Whole-block faces turned away from the camera are left out by direction:
-                // +X faces only show from the +X side of the chunk's west edge, and so on.
-                let facing = [
-                    f.cam_pos.x > c.min.x,
-                    f.cam_pos.x < c.max.x,
-                    f.cam_pos.y > c.min.y,
-                    f.cam_pos.y < c.max.y,
-                    f.cam_pos.z > c.min.z,
-                    f.cam_pos.z < c.max.z,
-                ];
-                let dirs_total: u32 = c.dirs.iter().sum();
-                let mut parts = [(0u32, 0u32); 4];
-                let mut n = 0;
-                let mut push = |first: u32, count: u32| {
-                    if count == 0 {
-                        return;
-                    }
-                    if n > 0 && parts[n - 1].0 + parts[n - 1].1 == first {
-                        parts[n - 1].1 += count;
-                    } else if n < parts.len() {
-                        parts[n] = (first, count);
-                        n += 1;
-                    } else {
-                        // Out of slots: draw on to the end of this one.
-                        parts[n - 1].1 = first + count - parts[n - 1].0;
-                    }
-                };
-                let mut at = c.solid - dirs_total;
-                push(0, at);
-                for (d, &count) in c.dirs.iter().enumerate() {
-                    if facing[d] {
-                        push(at, count);
-                    }
-                    at += count;
-                }
-                push(c.solid, drawn - c.solid);
-                visible.push(VisibleChunk {
-                    parts,
-                    buffer: self.arena.buffer(r),
-                    vertices: r.offset,
-                    indices: r.offset + c.index_offset,
-                    opaque: c.opaque,
-                    water: c.water,
-                    dist2,
-                });
-            }
-            marks[2] = std::time::Instant::now();
-            self.drawn_chunks = visible.len();
-            // By mesh buffer, then front to back: the world's indirect draws come out grouped
-            // per buffer already (the sort in `record_indirect` then only confirms it).
-            visible.sort_unstable_by(|a, b| {
-                vk::Handle::as_raw(a.buffer)
-                    .cmp(&vk::Handle::as_raw(b.buffer))
-                    .then(a.dist2.total_cmp(&b.dist2))
-            });
-            let bind = |c: &VisibleChunk| {
-                d.cmd_bind_vertex_buffers(cmd, 0, &[c.buffer], &[c.vertices]);
-                d.cmd_bind_index_buffer(cmd, c.buffer, c.indices, vk::IndexType::UINT32);
-            };
-
-            // Opaque (front to back)
-            d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.world_pipe);
-            d.cmd_push_constants(
-                cmd,
-                self.world_layout,
-                stages,
-                0,
-                as_bytes(&push(f.view_proj, 0.0)),
-            );
-            // All chunks' opaque parts as indirect draws, one command per mesh buffer (the
-            // meshes share a few big buffers).
-            let mut draws: Vec<IndirectDraw> = Vec::with_capacity(visible.len() * 3);
-            for c in &visible {
-                for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
-                    draws.push(chunk_draw(c.buffer, c.vertices, c.indices, first, count));
-                }
-            }
-            let ind = &self.indirect[slot];
-            let multi = gpu.multi_draw_indirect;
-            // Sorted by buffer, front to back within each (the sort is stable).
-            let recorded = record_indirect(d, cmd, ind, indirect_used, &mut draws, multi);
-            marks[3] = std::time::Instant::now();
-            if recorded.is_none() {
-                for c in &visible {
-                    bind(c);
-                    for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
-                        d.cmd_draw_indexed(cmd, count, 1, first, 0, 0);
-                    }
-                }
-            }
-            let dynb = self.dyn_bufs[slot].handle;
-            let (p0, pn) = range(0);
-            if pn > 0 {
-                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
-                d.cmd_draw(cmd, pn, 1, p0, 0);
-            }
-            let (e0, en) = range(4);
-            let player_n = f.player_vertex_count.min(en);
-            if f.entity_visible && en > 0 {
-                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
-                if en > player_n {
-                    d.cmd_draw(cmd, en - player_n, 1, e0 + player_n, 0);
-                }
-                if player_n > 0 && f.player_opacity >= 0.999 {
-                    d.cmd_draw(cmd, player_n, 1, e0, 0);
-                }
-            }
-
-            // Outline
-            let (l0, ln) = range(3);
-            if ln > 0 {
-                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.line_pipe);
-                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
-                d.cmd_draw(cmd, ln, 1, l0, 0);
-            }
-
-            // Water (back to front)
-            d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
-            d.cmd_push_constants(
-                cmd,
-                self.world_layout,
-                stages,
-                0,
-                as_bytes(&push(f.view_proj, 1.0)),
-            );
-            // Water back to front.
-            let mut water: Vec<&VisibleChunk> = visible.iter().filter(|c| c.water > 0).collect();
-            water.sort_unstable_by(|a, b| b.dist2.total_cmp(&a.dist2));
-            for c in water {
-                bind(c);
-                d.cmd_draw_indexed(cmd, c.water, 1, c.opaque, 0, 0);
-            }
-            let (t0, tn) = range(5);
-            if tn > 0 {
-                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
-                d.cmd_draw(cmd, tn, 1, t0, 0);
-            }
-
-            // Break cracks
-            let (o0, on) = range(1);
-            if on > 0 {
-                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.overlay_pipe);
-                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
-                d.cmd_draw(cmd, on, 1, o0, 0);
-            }
-
-            if f.entity_visible && player_n > 0 && (0.01..0.999).contains(&f.player_opacity) {
-                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.player_fade_pipe);
-                let mut fade = push(f.view_proj, 0.0);
-                fade.params[1] = f.player_opacity;
-                d.cmd_push_constants(cmd, self.world_layout, stages, 0, as_bytes(&fade));
-                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
-                d.cmd_draw(cmd, player_n, 1, e0, 0);
-            }
-
-            // First-person hand: clear depth so it never clips into walls
-            let (v0, vn) = range(2);
-            if vn > 0 {
-                let vm_flame = if f
-                    .viewmodel
-                    .last()
-                    .is_some_and(|v| v.layer == crate::world::textures::tex::TORCH_FLAME as f32)
-                {
-                    vn.min(24)
-                } else {
-                    0
-                };
-                d.cmd_clear_attachments(
+            // Under a menu's blurred backdrop (which covers all of it) the world is not drawn
+            // again: the scope pass has drawn it for the blur.
+            let blurred = f.backdrop_blur && f.scope.is_some() && range(7).1 > 0;
+            if !blurred {
+                // Sky
+                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.sky_pipe);
+                d.cmd_bind_descriptor_sets(
                     cmd,
-                    &[vk::ClearAttachment {
-                        aspect_mask: vk::ImageAspectFlags::DEPTH,
-                        color_attachment: 0,
-                        clear_value: vk::ClearValue {
-                            depth_stencil: vk::ClearDepthStencilValue {
-                                depth: 1.0,
-                                stencil: 0,
-                            },
-                        },
-                    }],
-                    &[vk::ClearRect {
-                        rect: vk::Rect2D {
-                            offset: vk::Offset2D { x: 0, y: 0 },
-                            extent: ext,
-                        },
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    }],
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.world_layout,
+                    0,
+                    &[world_set],
+                    &[],
                 );
+                d.cmd_push_constants(
+                    cmd,
+                    self.world_layout,
+                    stages,
+                    0,
+                    as_bytes(&push(f.view_proj, 0.0)),
+                );
+                d.cmd_draw(cmd, 3, 1, 0, 0);
+
+                marks[1] = std::time::Instant::now();
+                // Visible chunks
+                let frustum = Frustum::new(f.view_proj);
+                let max_d = f.view_distance + 24.0;
+                let mut visible: Vec<VisibleChunk> = Vec::with_capacity(self.drawn_chunks + 64);
+                for c in self.chunks.values() {
+                    let Some(r) = c.mesh else { continue };
+                    let center = (c.min + c.max) * 0.5;
+                    let (dx, dz) = (center.x - f.cam_pos.x, center.z - f.cam_pos.z);
+                    let dist2 = dx * dx + dz * dz;
+                    if dist2 > max_d * max_d || !frustum.visible(c.min, c.max) {
+                        continue;
+                    }
+                    // Far chunks leave out what the shaders would drop anyway: grass and flowers
+                    // (world.vert, under ~5 pixels a block) and the faces between leaves (closed
+                    // crowns, under ~1.5).
+                    let near = f.cam_pos.clamp(c.min, c.max);
+                    let block_px = f.detail_px / near.distance(f.cam_pos).max(1e-3);
+                    let drawn = if block_px >= 5.0 {
+                        c.opaque
+                    } else if block_px >= 1.5 {
+                        c.solid + c.leaf_inner
+                    } else {
+                        c.solid
+                    };
+                    // Whole-block faces turned away from the camera are left out by direction:
+                    // +X faces only show from the +X side of the chunk's west edge, and so on.
+                    let facing = [
+                        f.cam_pos.x > c.min.x,
+                        f.cam_pos.x < c.max.x,
+                        f.cam_pos.y > c.min.y,
+                        f.cam_pos.y < c.max.y,
+                        f.cam_pos.z > c.min.z,
+                        f.cam_pos.z < c.max.z,
+                    ];
+                    let dirs_total: u32 = c.dirs.iter().sum();
+                    let mut parts = [(0u32, 0u32); 4];
+                    let mut n = 0;
+                    let mut push = |first: u32, count: u32| {
+                        if count == 0 {
+                            return;
+                        }
+                        if n > 0 && parts[n - 1].0 + parts[n - 1].1 == first {
+                            parts[n - 1].1 += count;
+                        } else if n < parts.len() {
+                            parts[n] = (first, count);
+                            n += 1;
+                        } else {
+                            // Out of slots: draw on to the end of this one.
+                            parts[n - 1].1 = first + count - parts[n - 1].0;
+                        }
+                    };
+                    let mut at = c.solid - dirs_total;
+                    push(0, at);
+                    for (d, &count) in c.dirs.iter().enumerate() {
+                        if facing[d] {
+                            push(at, count);
+                        }
+                        at += count;
+                    }
+                    push(c.solid, drawn - c.solid);
+                    visible.push(VisibleChunk {
+                        parts,
+                        buffer: self.arena.buffer(r),
+                        vertices: r.offset,
+                        indices: r.offset + c.index_offset,
+                        opaque: c.opaque,
+                        water: c.water,
+                        dist2,
+                    });
+                }
+                marks[2] = std::time::Instant::now();
+                self.drawn_chunks = visible.len();
+                // By mesh buffer, then front to back: the world's indirect draws come out grouped
+                // per buffer already (the sort in `record_indirect` then only confirms it).
+                visible.sort_unstable_by(|a, b| {
+                    vk::Handle::as_raw(a.buffer)
+                        .cmp(&vk::Handle::as_raw(b.buffer))
+                        .then(a.dist2.total_cmp(&b.dist2))
+                });
+                let bind = |c: &VisibleChunk| {
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[c.buffer], &[c.vertices]);
+                    d.cmd_bind_index_buffer(cmd, c.buffer, c.indices, vk::IndexType::UINT32);
+                };
+
+                // Opaque (front to back)
                 d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.world_pipe);
                 d.cmd_push_constants(
                     cmd,
                     self.world_layout,
                     stages,
                     0,
-                    as_bytes(&push(f.vm_view_proj, 2.0)),
+                    as_bytes(&push(f.view_proj, 0.0)),
                 );
-                d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
-                d.cmd_draw(cmd, vn - vm_flame, 1, v0, 0);
-                if vm_flame > 0 {
-                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
-                    d.cmd_draw(cmd, vm_flame, 1, v0 + vn - vm_flame, 0);
+                // All chunks' opaque parts as indirect draws, one command per mesh buffer (the
+                // meshes share a few big buffers).
+                let mut draws: Vec<IndirectDraw> = Vec::with_capacity(visible.len() * 3);
+                for c in &visible {
+                    for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
+                        draws.push(chunk_draw(c.buffer, c.vertices, c.indices, first, count));
+                    }
                 }
-                // The scope's eyepiece shows its view; the glass is drawn over what is behind.
-                let (n0, nn) = range(7);
-                if nn > 0 && f.scope.is_some() && !f.backdrop_blur {
-                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.lens_pipe);
-                    d.cmd_bind_descriptor_sets(
+                let ind = &self.indirect[slot];
+                let multi = gpu.multi_draw_indirect;
+                // Sorted by buffer, front to back within each (the sort is stable).
+                let recorded = record_indirect(d, cmd, ind, indirect_used, &mut draws, multi);
+                marks[3] = std::time::Instant::now();
+                if recorded.is_none() {
+                    for c in &visible {
+                        bind(c);
+                        for &(first, count) in c.parts.iter().filter(|p| p.1 > 0) {
+                            d.cmd_draw_indexed(cmd, count, 1, first, 0, 0);
+                        }
+                    }
+                }
+                let dynb = self.dyn_bufs[slot].handle;
+                let (p0, pn) = range(0);
+                if pn > 0 {
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, pn, 1, p0, 0);
+                }
+                let (e0, en) = range(4);
+                let player_n = f.player_vertex_count.min(en);
+                if f.entity_visible && en > 0 {
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    if en > player_n {
+                        d.cmd_draw(cmd, en - player_n, 1, e0 + player_n, 0);
+                    }
+                    if player_n > 0 && f.player_opacity >= 0.999 {
+                        d.cmd_draw(cmd, player_n, 1, e0, 0);
+                    }
+                }
+
+                // Outline
+                let (l0, ln) = range(3);
+                if ln > 0 {
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.line_pipe);
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, ln, 1, l0, 0);
+                }
+
+                // Water (back to front)
+                d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
+                d.cmd_push_constants(
+                    cmd,
+                    self.world_layout,
+                    stages,
+                    0,
+                    as_bytes(&push(f.view_proj, 1.0)),
+                );
+                // Water back to front.
+                let mut water: Vec<&VisibleChunk> = visible.iter().filter(|c| c.water > 0).collect();
+                water.sort_unstable_by(|a, b| b.dist2.total_cmp(&a.dist2));
+                for c in water {
+                    bind(c);
+                    d.cmd_draw_indexed(cmd, c.water, 1, c.opaque, 0, 0);
+                }
+                let (t0, tn) = range(5);
+                if tn > 0 {
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, tn, 1, t0, 0);
+                }
+
+                // Break cracks
+                let (o0, on) = range(1);
+                if on > 0 {
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.overlay_pipe);
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, on, 1, o0, 0);
+                }
+
+                if f.entity_visible && player_n > 0 && (0.01..0.999).contains(&f.player_opacity) {
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.player_fade_pipe);
+                    let mut fade = push(f.view_proj, 0.0);
+                    fade.params[1] = f.player_opacity;
+                    d.cmd_push_constants(cmd, self.world_layout, stages, 0, as_bytes(&fade));
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, player_n, 1, e0, 0);
+                }
+
+                // First-person hand: clear depth so it never clips into walls
+                let (v0, vn) = range(2);
+                if vn > 0 {
+                    let vm_flame = if f
+                        .viewmodel
+                        .last()
+                        .is_some_and(|v| v.layer == crate::world::textures::tex::TORCH_FLAME as f32)
+                    {
+                        vn.min(24)
+                    } else {
+                        0
+                    };
+                    d.cmd_clear_attachments(
                         cmd,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        self.lens_layout,
-                        0,
-                        &[world_set, self.lens_set],
-                        &[],
+                        &[vk::ClearAttachment {
+                            aspect_mask: vk::ImageAspectFlags::DEPTH,
+                            color_attachment: 0,
+                            clear_value: vk::ClearValue {
+                                depth_stencil: vk::ClearDepthStencilValue {
+                                    depth: 1.0,
+                                    stencil: 0,
+                                },
+                            },
+                        }],
+                        &[vk::ClearRect {
+                            rect: vk::Rect2D {
+                                offset: vk::Offset2D { x: 0, y: 0 },
+                                extent: ext,
+                            },
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        }],
                     );
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.world_pipe);
                     d.cmd_push_constants(
                         cmd,
-                        self.lens_layout,
+                        self.world_layout,
                         stages,
                         0,
                         as_bytes(&push(f.vm_view_proj, 2.0)),
                     );
-                    d.cmd_draw(cmd, nn, 1, n0, 0);
-                    d.cmd_bind_descriptor_sets(
-                        cmd,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        self.world_layout,
-                        0,
-                        &[world_set],
-                        &[],
-                    );
-                }
-                let (g0, gn) = range(6);
-                if gn > 0 {
-                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
-                    d.cmd_push_constants(
-                        cmd,
-                        self.world_layout,
-                        stages,
-                        0,
-                        as_bytes(&push(f.vm_view_proj, 4.0)),
-                    );
-                    d.cmd_draw(cmd, gn, 1, g0, 0);
+                    d.cmd_bind_vertex_buffers(cmd, 0, &[dynb], &[0]);
+                    d.cmd_draw(cmd, vn - vm_flame, 1, v0, 0);
+                    if vm_flame > 0 {
+                        d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
+                        d.cmd_draw(cmd, vm_flame, 1, v0 + vn - vm_flame, 0);
+                    }
+                    // The scope's eyepiece shows its view; the glass is drawn over what is behind.
+                    let (n0, nn) = range(7);
+                    if nn > 0 && f.scope.is_some() && !f.backdrop_blur {
+                        d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.lens_pipe);
+                        d.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            self.lens_layout,
+                            0,
+                            &[world_set, self.lens_set],
+                            &[],
+                        );
+                        d.cmd_push_constants(
+                            cmd,
+                            self.lens_layout,
+                            stages,
+                            0,
+                            as_bytes(&push(f.vm_view_proj, 2.0)),
+                        );
+                        d.cmd_draw(cmd, nn, 1, n0, 0);
+                        d.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            self.world_layout,
+                            0,
+                            &[world_set],
+                            &[],
+                        );
+                    }
+                    let (g0, gn) = range(6);
+                    if gn > 0 {
+                        d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.water_pipe);
+                        d.cmd_push_constants(
+                            cmd,
+                            self.world_layout,
+                            stages,
+                            0,
+                            as_bytes(&push(f.vm_view_proj, 4.0)),
+                        );
+                        d.cmd_draw(cmd, gn, 1, g0, 0);
+                    }
                 }
             }
 
