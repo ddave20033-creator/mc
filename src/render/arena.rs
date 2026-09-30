@@ -99,6 +99,13 @@ impl Arena {
         })
     }
 
+    /// (pages, bytes in them, bytes used, ranges waiting to be freed)
+    pub fn stats(&self) -> (usize, u64, u64, usize) {
+        let pages = self.pages.iter().flatten();
+        let (n, total, used) = pages.fold((0, 0, 0), |(n, t, u), p| (n + 1, t + p.buffer.size, u + p.used));
+        (n, total, used, self.retired.len())
+    }
+
     /// Gives `r` back once the frames that may still draw from it are done. `frame` is the
     /// number of the next frame to be recorded.
     pub fn retire(&mut self, r: Range, frame: u64) {

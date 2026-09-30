@@ -30,6 +30,8 @@ pub struct Gpu {
     pub max_anisotropy: Option<f32>,
     /// Several indirect draws in one command (multiDrawIndirect).
     pub multi_draw_indirect: bool,
+    /// Indirect draws may start at an instance other than 0 (the chunk meshes' heads).
+    pub indirect_first_instance: bool,
     pub device_name: String,
     /// VK_EXT_memory_budget is enabled (video memory use can be read).
     memory_budget: bool,
@@ -206,9 +208,11 @@ impl Gpu {
                 .queue_family_index(queue_family)
                 .queue_priorities(&priorities)];
             let multi_draw_indirect = features.multi_draw_indirect == vk::TRUE;
+            let indirect_first_instance = features.draw_indirect_first_instance == vk::TRUE;
             let enabled = vk::PhysicalDeviceFeatures::default()
                 .sampler_anisotropy(anisotropy)
-                .multi_draw_indirect(multi_draw_indirect);
+                .multi_draw_indirect(multi_draw_indirect)
+                .draw_indirect_first_instance(indirect_first_instance);
             let memory_budget = instance
                 .enumerate_device_extension_properties(physical)
                 .unwrap_or_default()
@@ -297,6 +301,7 @@ impl Gpu {
                 mem_props,
                 max_anisotropy,
                 multi_draw_indirect,
+                indirect_first_instance,
                 device_name,
                 memory_budget,
                 timestamp_period,

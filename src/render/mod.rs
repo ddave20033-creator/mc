@@ -2,7 +2,7 @@
 //! hand) and the UI, drawn with Vulkan.
 
 mod arena;
-mod chunks;
+pub(crate) mod chunks;
 mod cull;
 mod descriptors;
 mod dynamic;
@@ -40,7 +40,10 @@ pub struct Renderer {
     /// The main pass's pipelines.
     pipes: MainPipes,
     /// The shadow map's pipelines: with alpha tests, and without for plain whole-block faces.
+    /// Shadow maps: the world's other things (entities...), and the chunks' faces (alpha
+    /// tested, and the plain whole-block ones).
     shadow_pipe: vk::Pipeline,
+    shadow_chunk_pipe: vk::Pipeline,
     shadow_plain_pipe: vk::Pipeline,
     /// `Gpu::pass_version` the main-pass pipelines were made for.
     pass_version: u64,
@@ -76,8 +79,6 @@ pub struct Renderer {
     staging: Vec<Buffer>,
     chunks: FastMap<ChunkPos, ChunkGpu>,
     arena: arena::Arena,
-    /// A chunk mesh did not fit into the video memory (see `take_out_of_memory`).
-    out_of_memory: bool,
     /// Frames recorded so far (for giving chunk memory back once no frame uses it).
     frame: u64,
     pending: VecDeque<MeshData>,
@@ -141,8 +142,9 @@ impl Renderer {
             let lens_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, LENS_FRAG);
             let blur_pipe = create_scope_view_pipe(d, gpu.render_pass, gpu.samples, lens_layout, BLUR_FRAG);
             let blur_across_pipe = create_blur_across_pipe(d, blur.pass, lens_layout);
-            let shadow_pipe = create_shadow_pipe(d, shadow.pass, world_layout, false);
-            let shadow_plain_pipe = create_shadow_pipe(d, shadow.pass, world_layout, true);
+            let shadow_pipe = create_shadow_pipe(d, shadow.pass, world_layout, false, false);
+            let shadow_chunk_pipe = create_shadow_pipe(d, shadow.pass, world_layout, false, true);
+            let shadow_plain_pipe = create_shadow_pipe(d, shadow.pass, world_layout, true, true);
 
             Self {
                 desc,
@@ -150,6 +152,7 @@ impl Renderer {
                 ui_layout,
                 pipes,
                 shadow_pipe,
+                shadow_chunk_pipe,
                 shadow_plain_pipe,
                 pass_version: gpu.pass_version,
                 block_tex,
@@ -177,7 +180,6 @@ impl Renderer {
                 staging: per_slot(gpu, STAGING_SIZE, vk::BufferUsageFlags::TRANSFER_SRC),
                 chunks: FastMap::default(),
                 arena: arena::Arena::default(),
-                out_of_memory: false,
                 frame: 0,
                 pending: VecDeque::new(),
                 drawn_chunks: 0,
@@ -188,11 +190,6 @@ impl Renderer {
                 rec_detail: [0.0; 5],
             }
         }
-    }
-
-    /// Whether a chunk mesh has not fitted into the video memory since last asked.
-    pub fn take_out_of_memory(&mut self) -> bool {
-        std::mem::take(&mut self.out_of_memory)
     }
 
     pub fn render(&mut self, gpu: &mut Gpu, f: &FrameInfo) {
@@ -213,7 +210,7 @@ impl Renderer {
             let slot = gpu.frame_slot;
             self.begin_timestamps(gpu, cmd, slot);
             let clock_start = Instant::now();
-            self.flush_uploads(gpu, cmd);
+            self.flush_uploads(gpu, cmd, f.ubo.cam_pos[3]);
             self.flush_layer_uploads(gpu, cmd);
             let clock_uploaded = Instant::now();
             let mut marks = [clock_uploaded; 4];
@@ -304,7 +301,7 @@ impl Renderer {
             }
             self.pipes.destroy(d);
             self.scope_pipes.destroy(d);
-            for p in [self.shadow_pipe, self.shadow_plain_pipe, self.lens_pipe, self.blur_pipe, self.blur_across_pipe] {
+            for p in [self.shadow_pipe, self.shadow_chunk_pipe, self.shadow_plain_pipe, self.lens_pipe, self.blur_pipe, self.blur_across_pipe] {
                 d.destroy_pipeline(p, None);
             }
             d.destroy_pipeline_layout(self.lens_layout, None);

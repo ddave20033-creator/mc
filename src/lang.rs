@@ -372,11 +372,6 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("death.respawn", "Respawn", "Újraéledés"),
     ("death.title_screen", "Title Screen", "Főmenü"),
     ("loading.generating", "Generating world", "Világ generálása"),
-    (
-        "vram.low",
-        "Video memory is running out: view distance lowered to {} chunks",
-        "Fogy a videomemória: a látótáv {} chunkra csökkent",
-    ),
     ("save.failed", "Could not save the world: {}", "Nem sikerült menteni a világot: {}"),
     (
         "tip.1",

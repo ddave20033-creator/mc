@@ -2,12 +2,8 @@
 #extension GL_GOOGLE_include_directive : require
 #include "frame.glsl"
 #include "wave.glsl"
-
-layout(location = 0) in vec3 inPos;
-layout(location = 1) in vec2 inUV;
-layout(location = 2) in float inLayer;
-layout(location = 3) in vec4 inLight; // ao, sky, block, normal index
-layout(location = 4) in vec4 inTint;  // rgb tint, a = flags
+// (inLight: ao, sky, block, normal index; inTint: rgb tint, a = flags)
+#include "vertex.glsl"
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) flat out float vLayer;
@@ -19,22 +15,23 @@ layout(location = 6) flat out int vNormal;
 layout(location = 7) out vec3 vSmoothN;
 
 void main() {
+    VertexIn v = readVertex(frame.camPos.w);
     int flags = int(inTint.a * 255.0 + 0.5);
-    vec3 p = displace(inPos, inUV, flags, frame.camPos.w, inLayer, inTint.rg);
+    vec3 p = displace(v.pos, v.uv, flags, frame.camPos.w, v.layer, inTint.rg);
     gl_Position = pc.viewProj * vec4(p, 1.0);
     // Grass and flowers smaller on screen than where world.frag has faded them out: dropped
     // (the whole quad, judged by its block, lands outside the view).
-    float blockPx = frame.detail.x / max(length(floor(inPos.xz) + 0.5 - frame.camPos.xz), 1e-3);
+    float blockPx = frame.detail.x / max(length(floor(v.pos.xz) + 0.5 - frame.camPos.xz), 1e-3);
     if ((flags & F_PLANT) != 0 && blockPx < 4.7) {
         gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     }
     int normal = int(inLight.w * 255.0 + 0.5);
-    vUV = inUV;
+    vUV = v.uv;
     if ((flags & F_FLUID) != 0) {
         // Fluid texture coordinates come from the world position (uv holds animation data).
         vUV = (normal == 2 || normal == 3) ? p.xz : (normal < 2 ? vec2(p.z, -p.y) : vec2(p.x, -p.y));
     }
-    vLayer = inLayer;
+    vLayer = v.layer;
     vLight = inLight;
     vTint = inTint.rgb;
     vWorld = p;

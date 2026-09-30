@@ -75,6 +75,11 @@ impl ChunkData {
         }
     }
 
+    /// Bytes its blocks take.
+    pub fn memory(&self) -> usize {
+        self.sections.iter().flatten().count() * SECTION_VOL * size_of::<Block>()
+    }
+
     /// All the blocks, y-major (`(y * 16 + z) * 16 + x`), for saving and sending.
     pub fn to_vec(&self) -> Vec<Block> {
         let mut v = Vec::with_capacity(VOL);

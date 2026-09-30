@@ -274,3 +274,39 @@ fn torches_and_stump_marks_are_listed() {
     assert_eq!(m.stump_marks, vec![glam::IVec3::new(5, 0, 5)]);
 }
 
+
+/// Every vertex of every block and of generated terrain packs into the GPU's chunk vertex
+/// (`render::chunks::ChunkVertex`) and reads back as it was: its position and uv within their
+/// steps, its layer, light and tint the same.
+#[test]
+fn chunk_vertices_pack_without_loss() {
+    use crate::render::chunks::pack_vertex;
+    let mut check = |m: &MeshData| {
+        let (x0, z0) = ((m.pos.0 * 16) as f32, (m.pos.1 * 16) as f32);
+        for v in &m.vertices {
+            let p = pack_vertex(v, x0, z0, 0.0);
+            let back = [p.pos[0] as f32 / 2048.0 - 8.0 + x0, p.pos[1] as f32 / 128.0 - 32.0, p.pos[2] as f32 / 2048.0 - 8.0 + z0];
+            for k in 0..3 {
+                assert!((back[k] - v.pos[k]).abs() <= 1.0 / 256.0, "{v:?} -> {back:?}");
+            }
+            if v.tint[3] & flags::FLUID == 0 {
+                for k in 0..2 {
+                    assert!((p.uv[k] as i16 as f32 / 4096.0 - v.uv[k]).abs() <= 1.0 / 8192.0, "{v:?}");
+                }
+            }
+            let layer = (p.layer & 0x7fff) as f32 + if p.layer & 0x8000 != 0 { 0.25 } else { 0.0 };
+            assert_eq!(layer, v.layer);
+            assert_eq!((p.light, p.tint), (v.light, v.tint));
+        }
+    };
+    let (px, pz) = (1000, -1000);
+    let (nb, notches) = all_blocks(px, pz);
+    check(&mesh_chunk((px, pz), &nb, &[], &notches, &Generator::new(3)));
+    let gen = Generator::new(12345);
+    for c in 0..8 {
+        let nb: [Arc<ChunkData>; 9] = std::array::from_fn(|i| Arc::new(gen.generate_chunk(c * 5 + i as i32 % 3 - 1, i as i32 / 3 - 1)));
+        // (a fluid changing, to animate)
+        let anim = [(glam::IVec3::new(c * 80 + 3, SEA_TEST, 4), AIR, 0.5)];
+        check(&mesh_chunk((c * 5, 0), &nb, &anim, NO_NOTCHES, &gen));
+    }
+}

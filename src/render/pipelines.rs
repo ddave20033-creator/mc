@@ -5,6 +5,7 @@ use super::Renderer;
 use crate::engine::pipeline::{create_pipeline, PipelineDesc};
 use crate::engine::Gpu;
 use crate::ui::UiVertex;
+use super::chunks::ChunkVertex;
 use crate::world::mesh::Vertex;
 use ash::vk;
 use glam::Mat4;
@@ -16,6 +17,9 @@ const WORLD_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/world.frag.s
 /// depth test can then run before the fragment shader.
 const WORLD_PLAIN_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/world_plain.frag.spv"));
 const SHADOW_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shadow.vert.spv"));
+/// world.vert and shadow.vert reading chunk meshes' packed vertices (`CHUNK`).
+const WORLD_CHUNK_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/world_chunk.vert.spv"));
+const SHADOW_CHUNK_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shadow_chunk.vert.spv"));
 const SHADOW_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shadow.frag.spv"));
 const SHADOW_PLAIN_FRAG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shadow_plain.frag.spv"));
 const SKY_VERT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sky.vert.spv"));
@@ -35,6 +39,14 @@ const WORLD_ATTRS: [(vk::Format, u32); 5] = [
     (vk::Format::R32_SFLOAT, 20),
     (vk::Format::R8G8B8A8_UNORM, 24),
     (vk::Format::R8G8B8A8_UNORM, 28),
+];
+
+/// A chunk mesh's `ChunkVertex`: position and layer, uv, light, tint.
+const CHUNK_ATTRS: [(vk::Format, u32); 4] = [
+    (vk::Format::R16G16B16A16_UINT, 0),
+    (vk::Format::R16G16_UINT, 8),
+    (vk::Format::R8G8B8A8_UNORM, 12),
+    (vk::Format::R8G8B8A8_UNORM, 16),
 ];
 
 const UI_ATTRS: [(vk::Format, u32); 5] = [
@@ -64,11 +76,14 @@ impl DrawPush {
     }
 }
 
-/// The pipelines of the main pass: sky, world (plain whole-block faces, and the rest), water,
-/// player fade, overlay, lines and UI.
+/// The pipelines of the main pass: sky, the chunks (plain whole-block faces, the rest, water),
+/// the world's other things (entities, particles...) and what is translucent of them, player
+/// fade, overlay, lines and UI.
 pub(super) struct MainPipes {
     pub sky: vk::Pipeline,
     pub world_plain: vk::Pipeline,
+    pub world_chunk: vk::Pipeline,
+    pub water_chunk: vk::Pipeline,
     pub world: vk::Pipeline,
     pub water: vk::Pipeline,
     pub player_fade: vk::Pipeline,
@@ -102,6 +117,14 @@ impl MainPipes {
             depth_bias: None,
             samples,
             alpha_to_coverage: false,
+            instance: false,
+        };
+        let chunk_desc = PipelineDesc {
+            vert: WORLD_CHUNK_VERT,
+            stride: size_of::<ChunkVertex>() as u32,
+            attributes: &CHUNK_ATTRS,
+            instance: true,
+            ..world_desc
         };
         // Only the opaque world pass smooths cut-out edges (with anti-aliasing on).
         let world = create_pipeline(
@@ -111,13 +134,29 @@ impl MainPipes {
                 ..world_desc
             },
         );
+        let world_chunk = create_pipeline(
+            d,
+            &PipelineDesc {
+                alpha_to_coverage: samples != vk::SampleCountFlags::TYPE_1,
+                ..chunk_desc
+            },
+        );
         // (no alpha to coverage either: that too would make the depth test wait for the shader;
         // these faces are fully covered anyway)
         let world_plain = create_pipeline(
             d,
             &PipelineDesc {
                 frag: WORLD_PLAIN_FRAG,
-                ..world_desc
+                ..chunk_desc
+            },
+        );
+        let water_chunk = create_pipeline(
+            d,
+            &PipelineDesc {
+                cull: false,
+                depth_write: false,
+                blend: true,
+                ..chunk_desc
             },
         );
         let water = create_pipeline(
@@ -187,11 +226,14 @@ impl MainPipes {
                 depth_bias: None,
                 samples,
                 alpha_to_coverage: false,
+                instance: false,
             },
         );
         Self {
             sky,
             world_plain,
+            world_chunk,
+            water_chunk,
             world,
             water,
             player_fade,
@@ -205,6 +247,8 @@ impl MainPipes {
         for p in [
             self.sky,
             self.world_plain,
+            self.world_chunk,
+            self.water_chunk,
             self.world,
             self.water,
             self.player_fade,
@@ -244,6 +288,7 @@ pub(super) fn create_scope_view_pipe(
             depth_bias: None,
             samples,
             alpha_to_coverage: false,
+            instance: false,
         },
     )
 }
@@ -274,25 +319,28 @@ pub(super) fn create_blur_across_pipe(
             depth_bias: None,
             samples: vk::SampleCountFlags::TYPE_1,
             alpha_to_coverage: false,
+            instance: false,
         },
     )
 }
 
 /// The shadow map's: depth only, biased against shadow acne. `plain`: without alpha tests,
-/// for the plain whole-block faces.
+/// for the plain whole-block faces; `chunk`: for chunk meshes (their packed vertices).
 pub(super) fn create_shadow_pipe(
     d: &ash::Device,
     render_pass: vk::RenderPass,
     layout: vk::PipelineLayout,
     plain: bool,
+    chunk: bool,
 ) -> vk::Pipeline {
     create_pipeline(
         d,
         &PipelineDesc {
-            vert: SHADOW_VERT,
+            vert: if chunk { SHADOW_CHUNK_VERT } else { SHADOW_VERT },
             frag: if plain { SHADOW_PLAIN_FRAG } else { SHADOW_FRAG },
-            stride: size_of::<Vertex>() as u32,
-            attributes: &WORLD_ATTRS,
+            stride: if chunk { size_of::<ChunkVertex>() } else { size_of::<Vertex>() } as u32,
+            attributes: if chunk { &CHUNK_ATTRS } else { &WORLD_ATTRS },
+            instance: chunk,
             layout,
             render_pass,
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,

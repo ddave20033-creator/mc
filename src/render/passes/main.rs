@@ -48,14 +48,10 @@ impl Renderer {
         // By mesh buffer, then front to back: the world's indirect draws come out grouped
         // per buffer already (the sort in `record_indirect` then only confirms it).
         visible.sort_unstable_by(|a, b| {
-            vk::Handle::as_raw(a.buffer)
-                .cmp(&vk::Handle::as_raw(b.buffer))
+            vk::Handle::as_raw(a.mesh.buffer)
+                .cmp(&vk::Handle::as_raw(b.mesh.buffer))
                 .then(a.dist2.total_cmp(&b.dist2))
         });
-        let bind = |c: &VisibleChunk| {
-            d.cmd_bind_vertex_buffers(cmd, 0, &[c.buffer], &[c.vertices]);
-            d.cmd_bind_index_buffer(cmd, c.buffer, c.indices, vk::IndexType::UINT32);
-        };
 
         // Opaque (front to back): all chunks' opaque parts as indirect draws, one command per
         // mesh buffer (the meshes share a few big buffers). First the plain whole-block faces
@@ -63,28 +59,28 @@ impl Renderer {
         // rest.
         r.push(self.world_layout, &DrawPush::new(f.view_proj, 0.0));
         let ind = &self.indirect[r.slot];
-        let multi = r.gpu.multi_draw_indirect;
         let mut next = Some(indirect_used);
-        for (pipe, plain) in [(pipes.world_plain, true), (pipes.world, false)] {
+        for (pipe, plain) in [(pipes.world_plain, true), (pipes.world_chunk, false)] {
             r.bind_pipe(pipe);
             let mut draws: Vec<IndirectDraw> = Vec::with_capacity(visible.len() * 3);
             for c in &visible {
                 for (first, count) in if plain { c.plain } else { c.parts }.iter() {
-                    draws.push(chunk_draw(c.buffer, c.vertices, c.indices, first, count));
+                    draws.push(chunk_draw(&c.mesh, first, count));
                 }
             }
             // Sorted by buffer, front to back within each (the sort is stable).
-            next = next.and_then(|base| record_indirect(d, cmd, ind, base, &mut draws, multi));
+            next = next.and_then(|base| record_indirect(d, cmd, ind, base, &mut draws, r.gpu));
             if next.is_none() {
                 for c in &visible {
-                    bind(c);
+                    c.mesh.bind(d, cmd);
                     for (first, count) in if plain { c.plain } else { c.parts }.iter() {
-                        d.cmd_draw_indexed(cmd, count, 1, first, 0, 0);
+                        c.mesh.draw(d, cmd, first, count);
                     }
                 }
             }
         }
         marks[3] = Instant::now();
+        r.bind_pipe(pipes.world);
         r.draw_dyn(PARTICLES);
         let (e0, en) = r.range(ENTITY);
         let player_n = f.player_vertex_count.min(en);
@@ -105,14 +101,15 @@ impl Renderer {
         }
 
         // Water (back to front)
-        r.bind_pipe(pipes.water);
+        r.bind_pipe(pipes.water_chunk);
         r.push(self.world_layout, &DrawPush::new(f.view_proj, 1.0));
         let mut water: Vec<&VisibleChunk> = visible.iter().filter(|c| c.water > 0).collect();
         water.sort_unstable_by(|a, b| b.dist2.total_cmp(&a.dist2));
         for c in water {
-            bind(c);
-            d.cmd_draw_indexed(cmd, c.water, 1, c.opaque, 0, 0);
+            c.mesh.bind(d, cmd);
+            c.mesh.draw(d, cmd, c.opaque, c.water);
         }
+        r.bind_pipe(pipes.water);
         r.draw_dyn(TRANSLUCENT);
 
         // Break cracks

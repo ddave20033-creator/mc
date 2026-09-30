@@ -58,10 +58,13 @@ const VARIANTS: &[(&str, &str, &str)] = &[
     // then runs before the fragment shader.
     ("world.frag", "world_plain.frag", "NO_DISCARD"),
     ("shadow.frag", "shadow_plain.frag", "NO_DISCARD"),
+    // Chunk meshes' packed vertices (`render::chunks::ChunkVertex`).
+    ("world.vert", "world_chunk.vert", "CHUNK"),
+    ("shadow.vert", "shadow_chunk.vert", "CHUNK"),
     // The menus' backdrop blurred across first (the second half is blur.frag itself).
     ("blur.frag", "blur_across.frag", "ACROSS"),
 ];
-const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl"];
+const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl", "vertex.glsl"];
 
 fn glslc_path() -> PathBuf {
     if let Ok(sdk) = env::var("VULKAN_SDK") {

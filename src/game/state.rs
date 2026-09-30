@@ -129,18 +129,11 @@ pub(super) struct FrameClock {
     /// Video memory (used, budget) in bytes, refreshed once a second.
     pub(super) vram: Option<(u64, u64)>,
     pub(super) vram_timer: f32,
-    /// The video memory ran (nearly) full: the view distance drawn is kept to this, for the
-    /// view distance set then (another one set, it goes); and seconds till it may go lower
-    /// again (the far chunks take a moment to go).
-    pub(super) view_cap: Option<(f32, f32)>,
-    pub(super) cap_wait: f32,
 }
 
 impl FrameClock {
     pub(super) fn new() -> Self {
         Self {
-            view_cap: None,
-            cap_wait: 0.0,
             last: Instant::now(),
             fps: 0.0,
             fps_accum: 0.0,

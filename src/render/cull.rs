@@ -3,8 +3,8 @@
 
 use super::arena::Arena;
 use super::chunks::ChunkGpu;
+use super::passes::ChunkMesh;
 use crate::world::{ChunkPos, FastMap};
-use ash::vk;
 use glam::{Mat4, Vec3, Vec4};
 
 pub(super) struct Frustum([Vec4; 6]);
@@ -94,9 +94,7 @@ pub(super) struct VisibleChunk {
     /// Opaque indices drawn from the start, all directions (without the small detail far
     /// chunks leave out): for views that do not leave out faces by direction.
     pub drawn: u32,
-    pub buffer: vk::Buffer,
-    pub vertices: u64,
-    pub indices: u64,
+    pub mesh: ChunkMesh,
     /// Opaque indices (where the water's start).
     pub opaque: u32,
     pub water: u32,
@@ -154,9 +152,7 @@ pub(super) fn select_chunks(
             plain,
             parts,
             drawn,
-            buffer: arena.buffer(r),
-            vertices: r.offset,
-            indices: r.offset + c.index_offset,
+            mesh: ChunkMesh::new(arena.buffer(r), r.offset, c.vertex_offset, c.index_offset),
             opaque: c.opaque,
             water: c.water,
             dist2,

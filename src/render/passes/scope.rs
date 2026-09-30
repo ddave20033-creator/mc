@@ -8,7 +8,6 @@ use crate::render::frame::{FrameInfo, ScopeView, SCOPE_SIZE};
 use crate::render::pipelines::DrawPush;
 use crate::render::targets::full_rect;
 use crate::render::Renderer;
-use ash::vk;
 
 impl Renderer {
     /// Records the scope pass, its indirect draws from command `indirect_used` on. Returns the
@@ -45,20 +44,20 @@ impl Renderer {
         let mut draws: Vec<IndirectDraw> = visible
             .iter()
             .filter(|c| c.drawn > 0)
-            .map(|c| chunk_draw(c.buffer, c.vertices, c.indices, 0, c.drawn))
+            .map(|c| chunk_draw(&c.mesh, 0, c.drawn))
             .collect();
-        r.bind_pipe(pipes.world);
+        r.bind_pipe(pipes.world_chunk);
         let ind = &self.indirect[r.slot];
-        match record_indirect(d, cmd, ind, indirect_used, &mut draws, r.gpu.multi_draw_indirect) {
+        match record_indirect(d, cmd, ind, indirect_used, &mut draws, r.gpu) {
             Some(next) => indirect_used = next,
             None => {
-                for (b, c) in &draws {
-                    d.cmd_bind_vertex_buffers(cmd, 0, &[*b], &[0]);
-                    d.cmd_bind_index_buffer(cmd, *b, 0, vk::IndexType::UINT32);
-                    d.cmd_draw_indexed(cmd, c.index_count, 1, c.first_index, c.vertex_offset, 0);
+                for c in visible.iter().filter(|c| c.drawn > 0) {
+                    c.mesh.bind(d, cmd);
+                    c.mesh.draw(d, cmd, 0, c.drawn);
                 }
             }
         }
+        r.bind_pipe(pipes.world);
         r.bind_dyn();
         let (p0, pn) = r.range(PARTICLES);
         if pn > 0 {
@@ -68,16 +67,16 @@ impl Renderer {
         if f.entity_visible && en > 0 {
             d.cmd_draw(cmd, en, 1, e0, 0);
         }
-        r.bind_pipe(pipes.water);
+        r.bind_pipe(pipes.water_chunk);
         r.push(self.world_layout, &DrawPush::new(sv.view_proj, 1.0));
         // Water back to front.
         let mut water: Vec<&VisibleChunk> = visible.iter().filter(|c| c.water > 0).collect();
         water.sort_unstable_by(|a, b| b.dist2.total_cmp(&a.dist2));
         for c in water {
-            d.cmd_bind_vertex_buffers(cmd, 0, &[c.buffer], &[c.vertices]);
-            d.cmd_bind_index_buffer(cmd, c.buffer, c.indices, vk::IndexType::UINT32);
-            d.cmd_draw_indexed(cmd, c.water, 1, c.opaque, 0, 0);
+            c.mesh.bind(d, cmd);
+            c.mesh.draw(d, cmd, c.opaque, c.water);
         }
+        r.bind_pipe(pipes.water);
         r.draw_dyn(TRANSLUCENT);
         // Bullet holes and break cracks on the blocks.
         if r.range(OVERLAY).1 > 0 {

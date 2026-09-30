@@ -1,6 +1,6 @@
 //! The shadow pass: the sun's shadow map, and the weapon lights' in the strip under it.
 
-use super::{chunk_draw, record_indirect, IndirectDraw, Rec};
+use super::{chunk_draw, record_indirect, ChunkMesh, IndirectDraw, Rec};
 use crate::render::cull::Frustum;
 use crate::render::dynamic::ENTITY;
 use crate::render::frame::{FrameInfo, MAX_SPOTS, SHADOW_SIZE, SPOT_REACH, SPOT_SHADOW};
@@ -56,31 +56,30 @@ impl Renderer {
                 {
                     continue;
                 }
-                let (b, v, i) = (self.arena.buffer(m), m.offset, m.offset + c.index_offset);
-                shadow_chunks.push((b, v, i, c.opaque));
+                let mesh = ChunkMesh::new(self.arena.buffer(m), m.offset, c.vertex_offset, c.index_offset);
+                shadow_chunks.push((mesh, c.opaque));
                 let (plain, rest) = c.solid_parts(lit);
-                plain_draws.extend(plain.iter().map(|(first, n)| chunk_draw(b, v, i, first, n)));
-                draws.extend(rest.iter().map(|(first, n)| chunk_draw(b, v, i, first, n)));
+                plain_draws.extend(plain.iter().map(|(first, n)| chunk_draw(&mesh, first, n)));
+                draws.extend(rest.iter().map(|(first, n)| chunk_draw(&mesh, first, n)));
                 let plants = c.solid + c.leaf_inner;
-                draws.push(chunk_draw(b, v, i, plants, c.opaque - plants));
+                draws.push(chunk_draw(&mesh, plants, c.opaque - plants));
             }
             draws.retain(|(_, c)| c.index_count > 0);
             let ind = &self.indirect[r.slot];
-            let multi = r.gpu.multi_draw_indirect;
             r.bind_pipe(self.shadow_plain_pipe);
-            let plain_end = record_indirect(d, cmd, ind, 0, &mut plain_draws, multi);
-            r.bind_pipe(self.shadow_pipe);
-            let end = plain_end.and_then(|base| record_indirect(d, cmd, ind, base, &mut draws, multi));
+            let plain_end = record_indirect(d, cmd, ind, 0, &mut plain_draws, r.gpu);
+            r.bind_pipe(self.shadow_chunk_pipe);
+            let end = plain_end.and_then(|base| record_indirect(d, cmd, ind, base, &mut draws, r.gpu));
             indirect_used = end.unwrap_or_else(|| {
                 // (did not fit: every chunk's opaque part, alpha tested; drawn again over the
                 // plain faces if those fitted, which leaves the same depths)
-                for &(b, v, i, n) in &shadow_chunks {
-                    d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[v]);
-                    d.cmd_bind_index_buffer(cmd, b, i, vk::IndexType::UINT32);
-                    d.cmd_draw_indexed(cmd, n, 1, 0, 0, 0);
+                for (mesh, n) in &shadow_chunks {
+                    mesh.bind(d, cmd);
+                    mesh.draw(d, cmd, 0, *n);
                 }
                 plain_end.unwrap_or(0)
             });
+            r.bind_pipe(self.shadow_pipe);
             r.draw_dyn(ENTITY);
         }
         // Each weapon light's shadow map: the blocks around it, seen from it (glass, grass and
@@ -96,7 +95,7 @@ impl Renderer {
                 offset: vk::Offset2D { x: (k as u32 * SPOT_SHADOW) as i32, y: SHADOW_SIZE as i32 },
                 extent: vk::Extent2D { width: SPOT_SHADOW, height: SPOT_SHADOW },
             });
-            r.bind_pipe(self.shadow_pipe);
+            r.bind_pipe(self.shadow_chunk_pipe);
             r.bind_sets(self.world_layout, &[world_set]);
             r.push(self.world_layout, &DrawPush::new(vp, 5.0));
             let seen = Frustum::new(vp);
@@ -111,10 +110,9 @@ impl Renderer {
                     if c.solid == 0 || !seen.visible(c.min, c.max) {
                         continue;
                     }
-                    let b = self.arena.buffer(m);
-                    d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[m.offset]);
-                    d.cmd_bind_index_buffer(cmd, b, m.offset + c.index_offset, vk::IndexType::UINT32);
-                    d.cmd_draw_indexed(cmd, c.solid, 1, 0, 0, 0);
+                    let mesh = ChunkMesh::new(self.arena.buffer(m), m.offset, c.vertex_offset, c.index_offset);
+                    mesh.bind(d, cmd);
+                    mesh.draw(d, cmd, 0, c.solid);
                 }
             }
         }

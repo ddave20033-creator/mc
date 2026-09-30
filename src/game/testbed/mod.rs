@@ -410,6 +410,29 @@ impl Game {
                 }
             }
             Cmd::Echo(text) => tb.log(format!("**{text}**")),
+            Cmd::Stats => {
+                let mb = |b: u64| b / (1 << 20);
+                let (pages, bytes, used, retired) = self.renderer.mesh_memory();
+                let vram = self.gpu.vram_usage().map_or("?".into(), |(u, b)| format!("{}/{} MB", mb(u), mb(b)));
+                let ram = self.clock.sys_stats.get().ram_game;
+                let w = &self.terrain.world;
+                let blocks: usize = w.chunks.values().map(|c| c.memory()).sum();
+                let light: usize = w.light.values().map(|l| l.data.len()).sum();
+                tb.log(format!("memory: blocks {} MB, light {} MB", mb(blocks as u64), mb(light as u64)));
+                tb.log(format!(
+                    "stats: {:.0} fps, {:.1} ms; chunks {} loaded, {} meshed, {} waiting; mesh memory {} pages {} MB ({} MB used), {} to free; VRAM {vram}; RAM {} MB",
+                    self.clock.fps,
+                    self.clock.frame_times.back().copied().unwrap_or(0.0),
+                    self.terrain.world.chunks.len(),
+                    self.renderer.chunk_count(),
+                    self.renderer.pending(),
+                    pages,
+                    mb(bytes),
+                    mb(used),
+                    retired,
+                    mb(ram),
+                ))
+            }
             Cmd::Lan(args) => {
                 for line in self.testbed_lan(&args) {
                     self.testbed.as_mut().unwrap().log(line);

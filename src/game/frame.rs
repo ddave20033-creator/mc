@@ -176,33 +176,6 @@ impl Game {
         });
     }
 
-    /// The view distance drawn (chunks): the one set, unless the video memory ran full.
-    pub(super) fn view_distance(&self) -> f32 {
-        match self.clock.view_cap {
-            Some((set, cap)) if set == self.settings.render_distance => self.settings.render_distance.min(cap),
-            _ => self.settings.render_distance,
-        }
-    }
-
-    /// The video memory full (a chunk mesh did not fit) or nearly (over 92% of what the
-    /// driver gives the game): the view distance drawn goes 2 chunks lower, and the player is
-    /// told, instead of the game running out of it and stopping.
-    fn check_video_memory(&mut self, dt: f32) {
-        self.clock.cap_wait -= dt;
-        let full = self.renderer.take_out_of_memory();
-        let nearly = self.clock.vram.is_some_and(|(used, budget)| budget > 0 && used as f64 > budget as f64 * 0.92);
-        if !(full || nearly) || self.clock.cap_wait > 0.0 || self.world_meta.is_none() {
-            return;
-        }
-        let now = self.view_distance();
-        let lower = (now - 2.0).max(4.0);
-        if lower < now {
-            self.clock.view_cap = Some((self.settings.render_distance, lower));
-            self.clock.cap_wait = 5.0;
-            self.say(crate::lang::tf("vram.low", &[&(lower as i32)]), chat::YELLOW);
-        }
-    }
-
     /// When the next frame may start (with a frame limit): till shortly before then, the
     /// event loop waits and takes in input, so the frame is drawn with the latest of it (not
     /// input read before a long sleep).
@@ -347,11 +320,10 @@ impl Game {
         self.clock.frame_times.push_back(frame_ms);
         self.clock.sys_stats.set_active(self.show_debug);
         self.clock.vram_timer -= dt;
-        if self.clock.vram_timer <= 0.0 {
+        if self.show_debug && self.clock.vram_timer <= 0.0 {
             self.clock.vram_timer = 1.0;
             self.clock.vram = self.gpu.vram_usage();
         }
-        self.check_video_memory(dt);
         self.bench_step(dt);
         self.time += dt;
         self.clock.fps_accum += dt;
@@ -376,7 +348,7 @@ impl Game {
         };
         let center = World::chunk_pos(focus.x.floor() as i32, focus.z.floor() as i32);
         let mut events = Vec::new();
-        let radius = self.view_distance() as i32;
+        let radius = self.settings.render_distance as i32;
         self.terrain.update(center, radius, &mut events);
         for e in events {
             match e {
@@ -612,7 +584,7 @@ impl Game {
         );
         let light_view_proj = light_proj * light_view;
 
-        let view_distance = self.view_distance() * CHUNK as f32;
+        let view_distance = self.settings.render_distance * CHUNK as f32;
         let (fog_start, fog_end) = if medium.underwater {
             (0.0, 20.0)
         } else if medium.in_lava {
@@ -1124,7 +1096,7 @@ impl Game {
         // Only what can be seen from here: a dropped item is lost to sight past `ITEM_SIGHT`,
         // the rest past the view distance.
         const ITEM_SIGHT: f32 = 64.0;
-        let sight = self.view_distance() * CHUNK as f32;
+        let sight = self.settings.render_distance * CHUNK as f32;
         let eye = self.player.pos;
         for it in self.level.items.iter().filter(|it| it.pos.distance_squared(eye) < ITEM_SIGHT * ITEM_SIGHT) {
             let (sky, blk) = world.light_estimate(it.pos + Vec3::Y * 0.3);
@@ -1161,7 +1133,7 @@ impl Game {
         let light = |p: IVec3| world.light_estimate(p.as_vec3() + Vec3::new(0.5, 1.2, 0.5));
         // Every chest in sight gets its lid, known contents or not (the chunk mesh has only
         // its body: a lid missing would leave it open-topped).
-        let sight = (self.view_distance() * CHUNK as f32).powi(2);
+        let sight = (self.settings.render_distance * CHUNK as f32).powi(2);
         let in_sight = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < sight;
         for p in self.terrain.chests.values().flatten().filter(|p| in_sight(p)) {
             let b = world.geti(*p);

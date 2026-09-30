@@ -8,7 +8,7 @@ mod ui;
 
 use super::dynamic::DynRanges;
 use crate::engine::{Buffer, Gpu};
-use crate::world::mesh::Vertex;
+use super::chunks::ChunkVertex;
 use ash::vk;
 use std::mem::size_of;
 
@@ -88,16 +88,43 @@ impl Rec<'_> {
 
 type IndirectDraw = (vk::Buffer, vk::DrawIndexedIndirectCommand);
 
+/// Where a chunk's mesh is: its buffer, its vertices and indices in it (bytes), and its head
+/// as an instance (`ChunkVertex`: the head is read per instance, from the buffer's start).
+#[derive(Clone, Copy)]
+pub(super) struct ChunkMesh {
+    pub buffer: vk::Buffer,
+    pub vertices: u64,
+    pub indices: u64,
+    pub instance: u32,
+}
+
+impl ChunkMesh {
+    pub fn new(buffer: vk::Buffer, range: u64, vertex_offset: u64, index_offset: u64) -> Self {
+        Self { buffer, vertices: range + vertex_offset, indices: range + index_offset, instance: (range / 16) as u32 }
+    }
+
+    /// Binds its buffers for `draw`.
+    pub unsafe fn bind(&self, d: &ash::Device, cmd: vk::CommandBuffer) {
+        d.cmd_bind_vertex_buffers(cmd, 0, &[self.buffer, self.buffer], &[self.vertices, 0]);
+        d.cmd_bind_index_buffer(cmd, self.buffer, self.indices, vk::IndexType::UINT32);
+    }
+
+    /// Draws `count` indices from `first` (bound).
+    pub unsafe fn draw(&self, d: &ash::Device, cmd: vk::CommandBuffer, first: u32, count: u32) {
+        d.cmd_draw_indexed(cmd, count, 1, first, 0, self.instance);
+    }
+}
+
 /// One indirect draw of `count` indices from `first` of a chunk's mesh.
-fn chunk_draw(buffer: vk::Buffer, vertices: u64, indices: u64, first: u32, count: u32) -> IndirectDraw {
+fn chunk_draw(m: &ChunkMesh, first: u32, count: u32) -> IndirectDraw {
     (
-        buffer,
+        m.buffer,
         vk::DrawIndexedIndirectCommand {
             index_count: count,
             instance_count: 1,
-            first_index: (indices / 4) as u32 + first,
-            vertex_offset: (vertices / size_of::<Vertex>() as u64) as i32,
-            first_instance: 0,
+            first_index: (m.indices / 4) as u32 + first,
+            vertex_offset: (m.vertices / size_of::<ChunkVertex>() as u64) as i32,
+            first_instance: m.instance,
         },
     )
 }
@@ -111,9 +138,12 @@ unsafe fn record_indirect(
     ind: &Buffer,
     base: usize,
     draws: &mut [IndirectDraw],
-    multi: bool,
+    gpu: &Gpu,
 ) -> Option<usize> {
-    if base + draws.len() > MAX_INDIRECT {
+    // (the chunks' heads are instances: without indirect draws starting at an instance, they
+    // are drawn one by one)
+    let multi = gpu.multi_draw_indirect;
+    if base + draws.len() > MAX_INDIRECT || !gpu.indirect_first_instance {
         return None;
     }
     draws.sort_by_key(|(b, _)| vk::Handle::as_raw(*b));
@@ -124,7 +154,7 @@ unsafe fn record_indirect(
     while i < draws.len() {
         let b = draws[i].0;
         let n = draws[i..].iter().take_while(|(x, _)| *x == b).count();
-        d.cmd_bind_vertex_buffers(cmd, 0, &[b], &[0]);
+        d.cmd_bind_vertex_buffers(cmd, 0, &[b, b], &[0, 0]);
         d.cmd_bind_index_buffer(cmd, b, 0, vk::IndexType::UINT32);
         let offset = ((base + i) * stride) as u64;
         if multi {

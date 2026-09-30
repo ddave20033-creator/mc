@@ -8,6 +8,9 @@ pub struct PipelineDesc<'a> {
     /// (format, offset) per vertex attribute; locations are assigned in order.
     /// Empty = no vertex input (e.g. fullscreen triangle).
     pub attributes: &'a [(vk::Format, u32)],
+    /// A second vertex buffer read per instance (after the attributes): 16 bytes, four
+    /// signed ints (a chunk mesh's head, see `render::chunks::ChunkVertex`).
+    pub instance: bool,
     pub layout: vk::PipelineLayout,
     pub render_pass: vk::RenderPass,
     pub topology: vk::PrimitiveTopology,
@@ -72,7 +75,7 @@ pub fn create_pipeline(device: &Device, d: &PipelineDesc) -> vk::Pipeline {
                 .module(fs)
                 .name(c"main"),
         ];
-        let bindings: Vec<vk::VertexInputBindingDescription> = if d.attributes.is_empty() {
+        let mut bindings: Vec<vk::VertexInputBindingDescription> = if d.attributes.is_empty() {
             Vec::new()
         } else {
             vec![vk::VertexInputBindingDescription {
@@ -81,7 +84,7 @@ pub fn create_pipeline(device: &Device, d: &PipelineDesc) -> vk::Pipeline {
                 input_rate: vk::VertexInputRate::VERTEX,
             }]
         };
-        let attrs: Vec<vk::VertexInputAttributeDescription> = d
+        let mut attrs: Vec<vk::VertexInputAttributeDescription> = d
             .attributes
             .iter()
             .enumerate()
@@ -94,6 +97,19 @@ pub fn create_pipeline(device: &Device, d: &PipelineDesc) -> vk::Pipeline {
                 },
             )
             .collect();
+        if d.instance {
+            bindings.push(vk::VertexInputBindingDescription {
+                binding: 1,
+                stride: 16,
+                input_rate: vk::VertexInputRate::INSTANCE,
+            });
+            attrs.push(vk::VertexInputAttributeDescription {
+                location: attrs.len() as u32,
+                binding: 1,
+                format: vk::Format::R32G32B32A32_SINT,
+                offset: 0,
+            });
+        }
         let vi = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(&bindings)
             .vertex_attribute_descriptions(&attrs);

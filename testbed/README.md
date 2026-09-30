@@ -91,6 +91,8 @@ start after `lane`) unless `abs` follows the command.
   a name of its own) · `lan report` (players, entities, bytes sent, chunks waiting) ·
   `lan block <x> <y> <z>` (the block there, world coordinates). Two windows, each with its
   script, started together.
+- `stats`: a line with the frame rate, chunks (loaded, meshed, waiting), the chunk meshes'
+  video memory, all video memory and the game's RAM (`set debug on` first, for the RAM).
 - `echo <text>`: a note in the steps. · `quit`: stop here.
 
 ## Known findings (as of writing)
