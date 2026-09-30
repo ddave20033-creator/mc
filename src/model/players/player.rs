@@ -2,7 +2,7 @@
 //! and attack animations.
 //! Model space is in pixels (1 px = 1/16 of the model height unit), Y up, facing -Z.
 
-use super::{emit_box, emit_box_rows};
+use crate::model::{emit_box, emit_box_rows};
 use crate::item::{icon, tool_of, Icon, ItemId, NONE, STICK};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
@@ -54,18 +54,18 @@ pub struct PlayerPose {
     pub gun_mods: u8,
     /// How dirty the held gun looks (`pistol_view::dirt_level`).
     pub gun_dirt: u8,
-    pub gun: super::pistol_view::GunAnim,
+    pub gun: crate::model::pistol_view::GunAnim,
     /// What is worn (`item::armor_code`).
     pub armor: u16,
     /// Holding the guide book open: its pages (see `book::BookView`).
-    pub book: Option<super::book::BookView>,
+    pub book: Option<crate::model::book::BookView>,
     /// Readying the held grenade: seconds since the button went down (raised, the pin pulled
     /// by the left hand, drawn back higher the harder it will be thrown).
     pub grenade: Option<f32>,
     /// Holding a fishing rod: what it is doing (cast, line out, fighting a fish...).
-    pub rod: Option<super::angler::RodAnim>,
+    pub rod: Option<crate::model::angler::RodAnim>,
     /// Chopping a tree: the axe's swing (`chop_rig`); the whole player is posed by it then.
-    pub chop: Option<super::chop_rig::Swing>,
+    pub chop: Option<crate::model::chop_rig::Swing>,
 }
 
 // Face order for layers: +X, -X, +Y, -Y, +Z (back), -Z (front)
@@ -184,7 +184,7 @@ fn gait(p: &PlayerPose) -> Gait {
 /// shoulder forward; less while sneaking), the head still looking ahead.
 fn gun_turn(p: &PlayerPose) -> f32 {
     match crate::item::GunKind::of(p.held).filter(|_| p.attack <= 0.0 && !p.blocking) {
-        Some(kind) => super::tp_rig::held(kind, p).turn * (1.0 - 0.35 * p.crouch.clamp(0.0, 1.0)),
+        Some(kind) => crate::model::tp_rig::held(kind, p).turn * (1.0 - 0.35 * p.crouch.clamp(0.0, 1.0)),
         None => 0.0,
     }
 }
@@ -399,7 +399,7 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
         // left hand comes up by it and takes the pin off down to the side, then it goes a
         // little to the right and down, and up again in front, higher the harder it will be
         // thrown.
-        use super::grenade::{power, PULL_TIME, RAISE_TIME};
+        use crate::model::grenade::{power, PULL_TIME, RAISE_TIME};
         let smooth = |x: f32| {
             let x = x.clamp(0.0, 1.0);
             x * x * (3.0 - 2.0 * x)
@@ -439,11 +439,11 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
     } else if let Some((rod, pose)) = rod_on_torso(p) {
         // Holding a fishing rod: the right hand on its grip, the left on the reel's handle
         // (off it to the side while the rod is swung).
-        let pts = super::angler::points(rod, &pose);
+        let pts = crate::model::angler::points(rod, &pose);
         let a = rod_anim(p).unwrap_or_default();
         let shoulder_y = 22.0 - SNEAK_DROP * c;
-        let free = super::angler::model_free_hand() - Vec3::Y * SNEAK_DROP * c;
-        let left = pts.crank.lerp(free, super::angler::hand_off_crank(&a));
+        let free = crate::model::angler::model_free_hand() - Vec3::Y * SNEAK_DROP * c;
+        let left = pts.crank.lerp(free, crate::model::angler::hand_off_crank(&a));
         let (sr, sl) = (Vec3::new(5.0, shoulder_y, 0.0), Vec3::new(-5.0, shoulder_y, 0.0));
         (l.right_arm, l.right_elbow, l.right_shift) = reach_bent(sr, pts.grip, Vec3::new(1.0, -1.0, 0.35), 0.0);
         (l.left_arm, l.left_elbow, l.left_shift) = reach_bent(sl, left, Vec3::new(-1.0, -1.0, 0.35), 0.0);
@@ -453,7 +453,7 @@ pub fn limb_targets(p: &PlayerPose) -> Limbs {
         // Holding a gun: both arms reach for it where its rig has it (`tp_rig`: at rest,
         // walking, running, sneaking, aimed, reloading; it turns with the head), the right
         // hand to the grip, the left where the rig puts it, the elbows bent out.
-        let held = super::tp_rig::held(kind, p);
+        let held = crate::model::tp_rig::held(kind, p);
         // (The rig holds the gun on a body turned into its stance; the model's root is turned
         // so already.)
         let look = Mat4::from_rotation_y(-gun_turn(p)) * look_turn(p);
@@ -678,7 +678,7 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         // Chopping: the whole player as the chop's rig has it (seen from its own eyes, the
         // body under the arms: the first-person view draws the arms and the axe from the
         // same rig, where they are in the world).
-        use super::chop_rig::{emit, to_world, Parts};
+        use crate::model::chop_rig::{emit, to_world, Parts};
         let parts = if p.first_person { Parts::Body } else { Parts::All };
         let shake = if p.burning { flail(p.time) } else { 0.0 };
         emit(out, to_world(p.pos, p.head_yaw, p.pitch), &swing.pose(), parts, p.held, p.skin, tint, p.armor, shake, light, fl);
@@ -803,10 +803,10 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
         let dir = p.lantern.unwrap_or(Vec3::NEG_Y);
         let style = crate::model::lantern::ON_MODEL;
         crate::model::lantern::emit_held_lantern(out, style, pivot, dir, p.body_yaw, light, fl);
-    } else if let (Some(fill), true) = (super::bucket::Fill::of(p.held), show_right) {
+    } else if let (Some(fill), true) = (crate::model::bucket::Fill::of(p.held), show_right) {
         // Hanging from the hand by its handle like the lantern, swinging with the same
         // pendulum, its ears to the sides.
-        use super::bucket;
+        use crate::model::bucket;
         // (the grip in the fist)
         let pivot = right_hand.transform_point3(Vec3::new(1.0, -10.2, 0.0));
         let dir = p.lantern.unwrap_or(Vec3::NEG_Y);
@@ -819,25 +819,25 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
             * Mat4::from_translation(Vec3::new(0.0, -bucket::handle_top(), 0.0));
         bucket::emit(out, m, fill, &bucket::Surface::still(false), 0.0, light, fl);
     } else if let (Some(view), true) = (&p.book, show_right) {
-        super::book::emit_open_book(out, root * book_on_model(p), view, light, fl);
+        crate::model::book::emit_open_book(out, root * book_on_model(p), view, light, fl);
     } else if let (Some(kind), true) = (crate::item::GunKind::of(p.held), show_right) {
         // The Blockbench gun, its parts moving like in the first-person view.
         let (mats, shown) = gun_matrices(p, kind, root * gun_on_model(p, kind));
         let lamp = p.gun_mods & crate::item::gun_mod::LIGHT != 0 && p.gun_mods & crate::item::gun_mod::LIGHT_ON != 0;
-        super::gun_view::emit(kind, out, Some(glass), &mats, &shown, false, p.gun_dirt, lamp, &p.gun, light, fl);
+        crate::model::gun_view::emit(kind, out, Some(glass), &mats, &shown, false, p.gun_dirt, lamp, &p.gun, light, fl);
     } else if let (Some((rod, pose)), true) = (rod_on_torso(p), show_right) {
         // The fishing rod, where the hands hold it.
-        super::angler::emit_rod(out, torso * rod, &pose, light, fl);
+        crate::model::angler::emit_rod(out, torso * rod, &pose, light, fl);
     } else if throwing(p) && p.attack > 0.0 {
         // (it has just left the hand)
     } else if let (Some(t), true) = (p.grenade.filter(|_| readying(p)), show_right) {
         // A grenade being readied: its pin coming out, then gone.
-        use super::grenade::{emit, sized, Look};
+        use crate::model::grenade::{emit, sized, Look};
         let smoke = p.held == crate::item::SMOKE_GRENADE;
         emit(out, smoke, sized(smoke, held_item(p, right_hand), 0.62), Look::readied(t), light, fl);
     } else if p.held != NONE && show_right {
         let st = crate::item::Stack { data: p.held_data, ..crate::item::Stack::one(p.held) };
-        super::emit_held_data(out, held_item(p, right_hand), &st, light, fl);
+        crate::model::emit_held_data(out, held_item(p, right_hand), &st, light, fl);
     }
 }
 
@@ -871,8 +871,8 @@ fn look_turn(p: &PlayerPose) -> Mat4 {
 /// third-person rig has it for what the player is doing (`tp_rig`), turned with the head,
 /// drawn thicker across than it is (`gun::Spec::thick`).
 pub fn gun_on_model(p: &PlayerPose, kind: crate::item::GunKind) -> Mat4 {
-    let spec = super::gun::spec(kind);
-    let held = super::tp_rig::held(kind, p);
+    let spec = crate::model::gun::spec(kind);
+    let held = crate::model::tp_rig::held(kind, p);
     // Gun space to model space: the muzzle forward (-Z), its right side to the right (+X).
     let basis = Mat4::from_cols(
         glam::Vec4::new(0.0, 0.0, -1.0, 0.0),
@@ -884,7 +884,7 @@ pub fn gun_on_model(p: &PlayerPose, kind: crate::item::GunKind) -> Mat4 {
         * look_turn(p)
         * held.gun
         * basis
-        * Mat4::from_scale(Vec3::splat(spec.arm_scale * super::gun_view::MODEL_SCALE))
+        * Mat4::from_scale(Vec3::splat(spec.arm_scale * crate::model::gun_view::MODEL_SCALE))
         * Mat4::from_scale(Vec3::new(1.0, 1.0, spec.thick))
         * Mat4::from_translation(-spec.hand)
 }
@@ -892,7 +892,7 @@ pub fn gun_on_model(p: &PlayerPose, kind: crate::item::GunKind) -> Mat4 {
 /// The Blockbench gun's bones held by the model: `gun` is the old gun space's transform
 /// (`gun_on_model`, with the model's own root in front for the world).
 fn gun_matrices(p: &PlayerPose, kind: crate::item::GunKind, gun: Mat4) -> (Vec<Mat4>, Vec<bool>) {
-    use super::gun_view;
+    use crate::model::gun_view;
     gun_view::matrices(kind, &p.gun, p.gun_mods, true, gun * gun_view::to_gun_space(kind))
 }
 
@@ -911,7 +911,7 @@ fn held_item(p: &PlayerPose, right: Mat4) -> Mat4 {
         ([0.0, 4.0, 0.5], [0.0, -90.0, 55.0], 0.85)
     } else if matches!(icon(p.held), Icon::Block(_)) {
         ([0.0, 2.5, 0.0], [75.0, 45.0, 0.0], 0.375)
-    } else if super::is_model_item(p.held) {
+    } else if crate::model::is_model_item(p.held) {
         // A gun's part, a magazine, a grenade...: in the fist, its side outward.
         ([0.0, 2.0, 0.5], [0.0, -90.0, 0.0], 0.42)
     } else {
@@ -931,19 +931,19 @@ fn held_item(p: &PlayerPose, right: Mat4) -> Mat4 {
 }
 
 /// What the held fishing rod is doing (None: no rod in the hand).
-fn rod_anim(p: &PlayerPose) -> Option<super::angler::RodAnim> {
+fn rod_anim(p: &PlayerPose) -> Option<crate::model::angler::RodAnim> {
     (p.held == crate::item::FISHING_ROD).then(|| p.rod.unwrap_or_default())
 }
 
 /// The held fishing rod on the model: its model (blocks) to the torso's frame (model pixels),
 /// and how it bends toward the line.
-fn rod_on_torso(p: &PlayerPose) -> Option<(Mat4, super::fishing_rod::RodPose)> {
+fn rod_on_torso(p: &PlayerPose) -> Option<(Mat4, crate::model::fishing_rod::RodPose)> {
     let a = rod_anim(p)?;
     // Lowered with the shoulders while sneaking.
     let sink = Mat4::from_translation(Vec3::new(0.0, -SNEAK_DROP * p.crouch, 0.0));
     let torso = torso_of(p, model_root(p)) * sink;
     let bobber = a.bobber.map(|b| torso.inverse().transform_point3(b));
-    let (m, pose) = super::angler::on_model(&a, p.time, (look_yaw(p), p.pitch), bobber, PX);
+    let (m, pose) = crate::model::angler::on_model(&a, p.time, (look_yaw(p), p.pitch), bobber, PX);
     Some((sink * m, pose))
 }
 
@@ -952,17 +952,17 @@ fn rod_on_torso(p: &PlayerPose) -> Option<(Mat4, super::fishing_rod::RodPose)> {
 pub fn rod_tip(p: &PlayerPose) -> Option<Vec3> {
     let (rod, pose) = rod_on_torso(p)?;
     let torso = torso_of(p, model_root(p));
-    Some(super::angler::points(torso * rod, &pose).tip)
+    Some(crate::model::angler::points(torso * rod, &pose).tip)
 }
 
 /// Whether a grenade is being readied in the hand.
 fn readying(p: &PlayerPose) -> bool {
-    p.grenade.is_some() && super::grenade_item(p.held)
+    p.grenade.is_some() && crate::model::grenade_item(p.held)
 }
 
 /// A grenade in the hand and not being readied: a swing now is its throw.
 fn throwing(p: &PlayerPose) -> bool {
-    p.grenade.is_none() && super::grenade_item(p.held)
+    p.grenade.is_none() && crate::model::grenade_item(p.held)
 }
 
 /// Where the right hand holds a readied grenade once the pin is out (model pixels, the
@@ -994,7 +994,7 @@ pub fn held_up(item: ItemId) -> bool {
 /// Whether a held item hangs from the hand and swings (a lantern by its chain, a bucket by
 /// its handle).
 pub fn hangs(item: ItemId) -> bool {
-    item == crate::world::LANTERN as ItemId || super::bucket::is_bucket(item)
+    item == crate::world::LANTERN as ItemId || crate::model::bucket::is_bucket(item)
 }
 
 /// Whether a held item lights up the world around its holder (a torch, a lantern, a bucket

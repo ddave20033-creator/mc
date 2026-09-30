@@ -1,9 +1,9 @@
 //! The first-person hand: the arm or the held item, with Minecraft's swing, equip, bob,
 //! eating and sword-blocking animations. Built on the CPU each frame in world space.
 
-use super::player::ARM as ARM_LAYERS;
-use super::spring::Spring3;
-use super::emit_box;
+use crate::model::player::ARM as ARM_LAYERS;
+use crate::model::spring::Spring3;
+use crate::model::emit_box;
 use crate::item::{icon, GunKind, Icon, ItemId, NONE};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
@@ -83,14 +83,14 @@ pub struct HandAnim {
     pub grenade_tip: Option<Vec3>,
     /// The held fishing rod: what it is doing (set by the game each frame), and where its tip
     /// was drawn last frame (like `torch_tip`: the line leaves from there).
-    pub rod: Option<super::angler::RodAnim>,
+    pub rod: Option<crate::model::angler::RodAnim>,
     pub rod_tip: Option<Vec3>,
     /// With the first-person body: a held lantern hangs from the fist by its chain and swings;
     /// otherwise it is held still by its handle.
     pub fancy_lantern: bool,
     lantern_swing: crate::model::lantern::SmoothSwing,
     /// The liquid in a held bucket, and the bucket swinging on its handle.
-    bucket: super::bucket::Slosh,
+    bucket: crate::model::bucket::Slosh,
     /// Blend 0..1 from the normal hold to the blocking pose.
     block: f32,
     /// Where the held torch's fire was drawn last frame (world, but in the hand's own
@@ -125,7 +125,7 @@ pub struct HandAnim {
     pub gun_dirt: u8,
     /// The held pistol's state and what its reload does (set by the game; the shot and the
     /// reload's progress are `shot` and `reload`).
-    pub gun_state: super::pistol_view::GunAnim,
+    pub gun_state: crate::model::pistol_view::GunAnim,
     /// Sprinting and sneaking this frame (set by the game), and how far the gun has gone into
     /// the sprinting and the crouched pose (0..1, eased).
     pub sprinting: bool,
@@ -145,10 +145,10 @@ pub struct HandAnim {
     pub inspect: Option<f32>,
     /// The held guide book: how far it is lifted up to read (0 held low .. 1 in front of the
     /// eyes) and how it looks. Set by the game each frame.
-    pub book: Option<(f32, super::book::BookView)>,
+    pub book: Option<(f32, crate::model::book::BookView)>,
     /// Where the view's middle falls on the book's pages (see `book::page_hit`), from the
     /// last build.
-    pub book_hit: Option<super::book::BookHit>,
+    pub book_hit: Option<crate::model::book::BookHit>,
     /// The held gun's see-through glass from the last build (drawn blended after the hand),
     /// and its scope's eyepiece when that shows the scope's view: middle, right and up
     /// (unit), radius (world, in the hand's own view).
@@ -203,7 +203,7 @@ impl HandAnim {
             reload: None,
             gun_mods: 0,
             gun_dirt: 0,
-            gun_state: super::pistol_view::GunAnim { chambered: true, ..Default::default() },
+            gun_state: crate::model::pistol_view::GunAnim { chambered: true, ..Default::default() },
             sprinting: false,
             crouching: false,
             sprint: 0.0,
@@ -246,8 +246,8 @@ impl HandAnim {
     }
 
     /// What the held gun is doing, for its moving parts (also on the player model).
-    pub fn gun_anim(&self) -> super::pistol_view::GunAnim {
-        super::pistol_view::GunAnim {
+    pub fn gun_anim(&self) -> crate::model::pistol_view::GunAnim {
+        crate::model::pistol_view::GunAnim {
             shot: self.shot,
             dry: self.dry,
             reload: self.reload,
@@ -477,7 +477,7 @@ impl HandAnim {
             );
             return;
         }
-        if let (Some((t, power)), true) = (self.grenade, super::grenade_item(self.held)) {
+        if let (Some((t, power)), true) = (self.grenade, crate::model::grenade_item(self.held)) {
             self.build_grenade_hold(out, base, t, power, light, fl, skin);
             return;
         }
@@ -564,12 +564,12 @@ impl HandAnim {
             crate::model::lantern::emit_held_lantern(out, style, pivot, dir, yaw, light, fl);
             return;
         }
-        if let Some(fill) = super::bucket::Fill::of(self.held) {
+        if let Some(fill) = crate::model::bucket::Fill::of(self.held) {
             self.build_bucket(out, base, fill, s, sq, eq, light, fl, dt, skin);
             return;
         }
         let lantern = self.held == crate::world::LANTERN as ItemId;
-        let item = if super::is_model_item(self.held) {
+        let item = if crate::model::is_model_item(self.held) {
             // A gun's part, a magazine, an attachment, a round or a grenade: held low in the
             // right hand, turned a little so its side and top show, swinging with it.
             base * eat
@@ -619,10 +619,10 @@ impl HandAnim {
             return;
         }
         if self.held == TORCH as ItemId {
-            self.torch_tip = Some(item.transform_point3(super::player::TORCH_TIP));
+            self.torch_tip = Some(item.transform_point3(crate::model::player::TORCH_TIP));
         }
         let st = crate::item::Stack { data: self.held_data, damage: self.held_damage, ..crate::item::Stack::one(self.held) };
-        super::emit_held_data(out, item, &st, light, fl);
+        crate::model::emit_held_data(out, item, &st, light, fl);
     }
 }
 
@@ -635,7 +635,7 @@ impl HandAnim {
         &mut self,
         out: &mut Vec<Vertex>,
         base: Mat4,
-        fill: super::bucket::Fill,
+        fill: crate::model::bucket::Fill,
         s: f32,
         sq: f32,
         eq: f32,
@@ -644,7 +644,7 @@ impl HandAnim {
         dt: f32,
         skin: u8,
     ) {
-        use super::bucket;
+        use crate::model::bucket;
         // The arm and the fist exactly as for a lantern; the handle's grip in the fist.
         let f1 = (sq * PI).sin();
         let grip = base * t(-0.025, 0.125, 0.0) * rz(10.0);
@@ -692,13 +692,13 @@ impl HandAnim {
         out: &mut Vec<Vertex>,
         base: Mat4,
         read: f32,
-        view: &super::book::BookView,
+        view: &crate::model::book::BookView,
         eq: f32,
         light: [u8; 4],
         fl: u8,
         skin: u8,
     ) {
-        use super::book::{book_hit, emit_open_book, PAGE_H, PAGE_W};
+        use crate::model::book::{book_hit, emit_open_book, PAGE_H, PAGE_W};
         let r = read * read * (3.0 - 2.0 * read);
         // Camera space (blocks): below the view, lying back; read, upright in front of it.
         let pos = Vec3::new(0.0, -0.64 + 0.62 * r - (1.0 - eq) * 0.5, -0.66 + 0.06 * r);
@@ -764,8 +764,8 @@ impl HandAnim {
         eq: f32,
         skin: u8,
     ) {
-        use super::gun_view;
-        use super::viewmodel::{add_anim, bone_matrices, find_anim, find_bone};
+        use crate::model::gun_view;
+        use crate::model::viewmodel::{add_anim, bone_matrices, find_anim, find_bone};
         use crate::item::gun_mod;
         let smooth = |x: f32| {
             let x = x.clamp(0.0, 1.0);
@@ -910,13 +910,13 @@ impl HandAnim {
         self.barrel_dir = Some(dir);
         if self.flash > 0.0 {
             let size = 0.11 * self.flash_size * k;
-            super::ballistics::emit_muzzle_flash(out, muzzle, dir, cam, size, self.flash_seed, self.flash);
+            crate::model::ballistics::emit_muzzle_flash(out, muzzle, dir, cam, size, self.flash_seed, self.flash);
         }
         let (eb, ep) = gun_view::eject(kind);
         self.eject_tip = Some(mats[eb].transform_point3(ep));
         self.chamber_tips = (kind == GunKind::Revolver).then(|| {
             std::array::from_fn(|c| {
-                let (b, p) = super::revolver_view::chamber_head(c);
+                let (b, p) = crate::model::revolver_view::chamber_head(c);
                 mats[b].transform_point3(p)
             })
         });
@@ -941,7 +941,7 @@ impl HandAnim {
     /// would go the farthest. Both arms are the player's own, coming up from below.
     #[allow(clippy::too_many_arguments)]
     fn build_grenade_hold(&mut self, out: &mut Vec<Vertex>, base: Mat4, held: f32, power: f32, light: [u8; 4], fl: u8, skin: u8) {
-        use super::grenade::{self, Look, PULL_TIME, RAISE_TIME as RAISE};
+        use crate::model::grenade::{self, Look, PULL_TIME, RAISE_TIME as RAISE};
         let smooth = |x: f32| {
             let x = x.clamp(0.0, 1.0);
             x * x * (3.0 - 2.0 * x)
@@ -995,12 +995,12 @@ impl HandAnim {
     /// (off it while the rod is swung). Both arms are the player's own, from below.
     #[allow(clippy::too_many_arguments)]
     fn build_rod(&mut self, out: &mut Vec<Vertex>, base: Mat4, eq: f32, light: [u8; 4], fl: u8, skin: u8) {
-        use super::angler;
+        use crate::model::angler;
         let a = self.rod.unwrap_or_default();
         let inv = base.inverse();
         let bobber = a.bobber.map(|b| inv.transform_point3(b));
         let (m, pose) = angler::first_person(&a, self.clock, bobber, eq);
-        let p = super::angler::emit_rod(out, base * m, &pose, light, fl);
+        let p = crate::model::angler::emit_rod(out, base * m, &pose, light, fl);
         self.rod_tip = Some(p.tip);
         let layers = ARM_LAYERS.map(|layer| crate::world::textures::skin_layer(layer, skin));
         let mut arm = |hand: Vec3, shoulder: Vec3| {

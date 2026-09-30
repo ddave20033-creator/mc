@@ -1,4 +1,4 @@
-"""Generates tp_<gun>_anim.bbmodel: the game's player (`model/player.rs`) with elbows and knees,
+"""Generates tp_<gun>_anim.bbmodel: the game's player (`model/players/player.rs`) with elbows and knees,
 holding a gun, to pose and animate in Blockbench.
 
 Run:  python tools/blockbench/gen_tp_anim.py            (the pistol)

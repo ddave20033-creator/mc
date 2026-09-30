@@ -20,7 +20,7 @@ mod big {
 pub use small::PAGES;
 use small::{BONES, CUBES};
 
-use super::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, Anim, Bone, BonePose, Cube};
+use crate::model::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, Anim, Bone, BonePose, Cube};
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
 use glam::{IVec3, Mat4, Vec3};
@@ -89,7 +89,7 @@ fn emit_box_rounds(out: &mut Vec<Vertex>, m: Mat4, floor: &Cube, v: u16, light: 
         let (row, col) = (k / BOX_ACROSS, k % BOX_ACROSS);
         let at = Vec3::new(x0 + dx * (col as f32 + 0.5), hi.y, z0 + dz * (row as f32 + 0.5));
         let r = m * Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(ROUND_PX));
-        super::gun_view::emit_round(out, ammo, false, r, light, fl);
+        crate::model::gun_view::emit_round(out, ammo, false, r, light, fl);
     }
 }
 /// The count stencilled on a box: pale yellow, on a box of magnum rounds red.
@@ -307,7 +307,7 @@ fn emit_number(out: &mut Vec<Vertex>, m: Mat4, (lo, hi): (Vec3, Vec3), n: u16, c
         ];
         for (k, &(a, b, c, d)) in segs.iter().enumerate() {
             if bits & (1 << k) != 0 {
-                super::emit_box(out, m, Vec3::new(a, b, z0), Vec3::new(c, d, z1), [tex::WOOL; 6], paint, light, fl);
+                crate::model::emit_box(out, m, Vec3::new(a, b, z0), Vec3::new(c, d, z1), [tex::WOOL; 6], paint, light, fl);
             }
         }
         x += dw + gap;
@@ -343,7 +343,7 @@ pub fn emit_crate(out: &mut Vec<Vertex>, p: IVec3, toward: Vec3, n: [u8; 2], lig
             let at = Vec3::new(x0 + dx * (col as f32 + 0.5), CRATE_FLOOR + CRATE_GRENADE * 0.5, CRATE_Z.0 + dz * (row as f32 + 0.5));
             // (each turned a little its own way)
             let turn = Mat4::from_rotation_y(((k * 47 + half * 13) % 360) as f32 * 0.35_f32.to_radians() * 7.0);
-            super::grenade::emit_sized(out, half == 1, m * Mat4::from_translation(at) * turn, CRATE_GRENADE, light, fl);
+            crate::model::grenade::emit_sized(out, half == 1, m * Mat4::from_translation(at) * turn, CRATE_GRENADE, light, fl);
         }
         let name = format!("crate_front_{half}");
         if let Some(c) = RIFLE.cubes.iter().find(|c| c.name == name) {

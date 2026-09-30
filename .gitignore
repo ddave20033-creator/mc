@@ -3,3 +3,4 @@ options.txt
 /dist
 /saves
 /test-out
+__pycache__/

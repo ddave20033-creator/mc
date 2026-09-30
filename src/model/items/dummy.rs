@@ -13,7 +13,7 @@ mod data {
 use data::{BONES, CUBES};
 pub use data::PAGES;
 
-use super::viewmodel::{cube_matrix, emit_cube, find_bone};
+use crate::model::viewmodel::{cube_matrix, emit_cube, find_bone};
 use crate::world::mesh::Vertex;
 use crate::world::textures::tex;
 use glam::{Mat4, Quat, Vec2, Vec3};
