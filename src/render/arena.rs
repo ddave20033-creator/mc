@@ -43,8 +43,9 @@ impl Arena {
             .handle
     }
 
-    /// A range of at least `size` bytes (first fit, a new page if none has room).
-    pub fn alloc(&mut self, gpu: &Gpu, size: u64) -> Range {
+    /// A range of at least `size` bytes (first fit, a new page if none has room); None when
+    /// the video memory has no room for another page.
+    pub fn alloc(&mut self, gpu: &Gpu, size: u64) -> Option<Range> {
         let size = size.max(1).div_ceil(ALIGN) * ALIGN;
         for (i, page) in self.pages.iter_mut().enumerate() {
             let Some(page) = page else { continue };
@@ -56,23 +57,24 @@ impl Arena {
                     page.free[k] = (offset + size, s - size);
                 }
                 page.used += size;
-                return Range {
+                return Some(Range {
                     page: i,
                     offset,
                     size,
-                };
+                });
             }
         }
         let page_size = size.max(PAGE_SIZE);
         let page = Page {
-            buffer: Buffer::new(
+            buffer: Buffer::try_new(
                 gpu,
                 page_size,
                 vk::BufferUsageFlags::VERTEX_BUFFER
                     | vk::BufferUsageFlags::INDEX_BUFFER
                     | vk::BufferUsageFlags::TRANSFER_DST,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            ),
+            )
+            .ok()?,
             free: if page_size > size {
                 vec![(size, page_size - size)]
             } else {
@@ -90,11 +92,11 @@ impl Arena {
                 self.pages.len() - 1
             }
         };
-        Range {
+        Some(Range {
             page: page_index,
             offset: 0,
             size,
-        }
+        })
     }
 
     /// Gives `r` back once the frames that may still draw from it are done. `frame` is the

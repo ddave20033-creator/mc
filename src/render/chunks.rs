@@ -91,7 +91,12 @@ impl Renderer {
                 max: Vec3::new(x0 + 17.0, m.max_y + 1.0, z0 + 17.0),
             };
             if !m.vertices.is_empty() {
-                let range = self.arena.alloc(gpu, total as u64);
+                let Some(range) = self.arena.alloc(gpu, total as u64) else {
+                    // The video memory is full: it waits (the game draws less far, freeing some).
+                    self.pending.push_front(m);
+                    self.out_of_memory = true;
+                    break;
+                };
                 let (src, src_offset) = if total <= STAGING_SIZE {
                     ring.write(ring_used, m.vertices.as_slice());
                     ring.write(ring_used + ioff, m.indices.as_slice());

@@ -48,7 +48,7 @@ start after `lane`) unless `abs` follows the command.
   · `fly on|off` · `turn <deg/s> <secs>` (the view turns while later commands run).
 - `camera fp|back|front|side|side_left|fixed` (fixed: in front, not turning with the player).
 - `set body on|off` (first-person body) · `set blur on|off` (menu backdrop) · `set hud on|off`
-  · `set fov <deg>` · `set gui <scale>`.
+  · `set fov <deg>` · `set gui <scale>` · `set view <chunks>` (view distance) · `set debug on|off` (F3).
 
 **Things**
 - `empty`: inventory emptied, slot 0 (use before `hold` in a copied world).

@@ -344,6 +344,8 @@ impl Game {
                     "hud" => self.hide_hud = !on,
                     "fov" => self.settings.fov = value.parse().unwrap_or(self.settings.fov),
                     "gui" => self.settings.gui_scale = value.parse().unwrap_or(self.settings.gui_scale),
+                    "view" => self.settings.render_distance = value.parse().unwrap_or(self.settings.render_distance),
+                    "debug" => self.show_debug = on,
                     _ => tb.problems.push(format!("set: unknown `{what}`")),
                 }
             }

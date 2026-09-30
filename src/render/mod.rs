@@ -76,6 +76,8 @@ pub struct Renderer {
     staging: Vec<Buffer>,
     chunks: FastMap<ChunkPos, ChunkGpu>,
     arena: arena::Arena,
+    /// A chunk mesh did not fit into the video memory (see `take_out_of_memory`).
+    out_of_memory: bool,
     /// Frames recorded so far (for giving chunk memory back once no frame uses it).
     frame: u64,
     pending: VecDeque<MeshData>,
@@ -175,6 +177,7 @@ impl Renderer {
                 staging: per_slot(gpu, STAGING_SIZE, vk::BufferUsageFlags::TRANSFER_SRC),
                 chunks: FastMap::default(),
                 arena: arena::Arena::default(),
+                out_of_memory: false,
                 frame: 0,
                 pending: VecDeque::new(),
                 drawn_chunks: 0,
@@ -185,6 +188,11 @@ impl Renderer {
                 rec_detail: [0.0; 5],
             }
         }
+    }
+
+    /// Whether a chunk mesh has not fitted into the video memory since last asked.
+    pub fn take_out_of_memory(&mut self) -> bool {
+        std::mem::take(&mut self.out_of_memory)
     }
 
     pub fn render(&mut self, gpu: &mut Gpu, f: &FrameInfo) {

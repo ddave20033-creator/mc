@@ -69,6 +69,16 @@ impl Buffer {
         usage: vk::BufferUsageFlags,
         flags: vk::MemoryPropertyFlags,
     ) -> Self {
+        Self::try_new(gpu, size, usage, flags).expect("allocate buffer memory")
+    }
+
+    /// As `new`, but the video memory running out is an error to handle (not a crash).
+    pub fn try_new(
+        gpu: &Gpu,
+        size: u64,
+        usage: vk::BufferUsageFlags,
+        flags: vk::MemoryPropertyFlags,
+    ) -> Result<Self, vk::Result> {
         unsafe {
             let d = &gpu.device;
             let handle = d
@@ -81,18 +91,18 @@ impl Buffer {
                 )
                 .expect("create buffer");
             let req = d.get_buffer_memory_requirements(handle);
-            let memory = d
-                .allocate_memory(
-                    &vk::MemoryAllocateInfo::default()
-                        .allocation_size(req.size)
-                        .memory_type_index(find_memory_type(
-                            &gpu.mem_props,
-                            req.memory_type_bits,
-                            flags,
-                        )),
-                    None,
-                )
-                .expect("allocate buffer memory");
+            let memory = match d.allocate_memory(
+                &vk::MemoryAllocateInfo::default()
+                    .allocation_size(req.size)
+                    .memory_type_index(find_memory_type(&gpu.mem_props, req.memory_type_bits, flags)),
+                None,
+            ) {
+                Ok(m) => m,
+                Err(e) => {
+                    d.destroy_buffer(handle, None);
+                    return Err(e);
+                }
+            };
             d.bind_buffer_memory(handle, memory, 0).unwrap();
             let mapped = if flags.contains(vk::MemoryPropertyFlags::HOST_VISIBLE) {
                 d.map_memory(memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
@@ -100,13 +110,13 @@ impl Buffer {
             } else {
                 std::ptr::null_mut()
             };
-            Self {
+            Ok(Self {
                 handle,
                 memory,
                 size,
                 mapped,
                 destroyed: Destroyed::default(),
-            }
+            })
         }
     }
 
