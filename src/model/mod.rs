@@ -12,6 +12,8 @@ mod guns;
 mod items;
 mod players;
 mod rig;
+#[cfg(test)]
+mod geometry_tests;
 
 pub use fx::particles;
 pub use guns::{ak_vm, ballistics, grenade, gun, gun_station, gun_view, pistol_view, pistol_vm, revolver_view, revolver_vm};
