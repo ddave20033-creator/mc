@@ -989,8 +989,6 @@ impl Ui {
         self.rect(x + 1.0, y + 1.0, fill_w, h - 2.0, with_alpha(ACCENT, 0.38 + 0.12 * t), r - 1.0);
         // The knob: a pill, glowing when held.
         let (ky, kh) = (y + 3.0 * s, h - 6.0 * s);
-        let held = if active { 1.0 } else { t };
-        let _ = held;
         self.rect(kx + s, ky, knob - 2.0 * s, kh, lerp_color(rgba(214, 214, 222, 255), WHITE, t), 3.0 * s);
         let tc = lerp_color(rgba(232, 234, 240, 255), HOVER_TEXT, t);
         let tw = self.text_width(label, s);

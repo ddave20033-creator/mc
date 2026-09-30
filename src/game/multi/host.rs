@@ -130,7 +130,7 @@ impl Game {
                 let Some(id) = (1..crate::world::textures::tex::CUSTOM_SKIN_SLOTS)
                     .find(|id| host.peers.iter().all(|p| p.id != *id))
                 else {
-                    conn.send(&Msg::Refuse("A LAN jatek megtelt.".into()));
+                    conn.send(&Msg::Refuse(t("lan.full").to_string()));
                     conn.close();
                     continue;
                 };

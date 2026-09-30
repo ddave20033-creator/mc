@@ -415,9 +415,7 @@ impl Game {
         self.merge_items();
 
         // The rifle stations' magazine loaders.
-        if !self.is_client() {
-            self.update_loaders(dt);
-        }
+        self.update_loaders(dt);
 
         // Mobs
         self.update_mobs(dt);

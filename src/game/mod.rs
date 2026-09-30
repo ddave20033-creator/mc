@@ -284,7 +284,6 @@ pub struct Game {
     bench: Option<bench::Bench>,
     /// `--aa-shots`: anti-aliasing comparison pictures (runs in bench mode).
     shots: Option<bench::Shots>,
-    /// `--gun-shots`: pictures of the guns' animations (runs in bench mode).
     /// `--test`: a test script running (see `testbed`).
     testbed: Option<testbed::Testbed>,
     /// A test asked for the menus' backdrop sharp.
@@ -575,7 +574,7 @@ impl Game {
 
     fn set_skin_png(&mut self, slot: u8, png: Vec<u8>) -> Result<(), &'static str> {
         if slot >= textures::tex::CUSTOM_SKIN_SLOTS {
-            return Err("Túl sok LAN játékos.");
+            return Err(t("skin.too_many"));
         }
         let image = textures::decode_skin_png(&png)?;
         self.custom_skins.insert(slot, image);
@@ -1037,7 +1036,7 @@ impl Game {
                                 self.settings.save();
                                 self.screen = Screen::MainMenu;
                             } else {
-                                self.menus.skin_error = "Nem sikerült menteni a skint.".into();
+                                self.menus.skin_error = t("skin.save_failed").into();
                             }
                         }
                         Err(msg) => self.menus.skin_error = msg.into(),

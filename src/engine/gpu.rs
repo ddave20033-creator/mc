@@ -353,14 +353,6 @@ impl Gpu {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn set_vsync(&mut self, vsync: bool) {
-        if self.vsync != vsync {
-            self.vsync = vsync;
-            self.needs_recreate = true;
-        }
-    }
-
     /// Video memory (device-local heaps) used by this program and the budget the driver gives
     /// it, in bytes; None without VK_EXT_memory_budget.
     pub fn vram_usage(&self) -> Option<(u64, u64)> {
