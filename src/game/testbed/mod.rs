@@ -422,7 +422,10 @@ impl Game {
                 let light: usize = w.light.values().map(|l| l.data.len()).sum();
                 tb.log(format!("memory: blocks {} MB, light {} MB", mb(blocks as u64), mb(light as u64)));
                 tb.log(format!(
-                    "stats: {:.0} fps, {:.1} ms; chunks {} loaded, {} meshed, {} waiting; mesh memory {} pages {} MB ({} MB used), {} to free; VRAM {vram}; RAM {} MB",
+                    "stats: at {:.1} {:.1} {:.1}; {:.0} fps, {:.1} ms; chunks {} loaded, {} meshed, {} waiting; mesh memory {} pages {} MB ({} MB used), {} to free; VRAM {vram}; RAM {} MB",
+                    self.player.pos.x,
+                    self.player.pos.y,
+                    self.player.pos.z,
                     self.clock.fps,
                     self.clock.frame_times.back().copied().unwrap_or(0.0),
                     self.terrain.world.chunks.len(),
