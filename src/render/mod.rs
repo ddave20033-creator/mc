@@ -52,6 +52,9 @@ pub struct Renderer {
     layer_uploads: VecDeque<(u32, u32, Vec<Vec<u8>>)>,
     font_tex: Texture,
     shadow: ShadowTarget,
+    /// The shadow map has been through its pass once (so it is in the layout the shaders
+    /// read it in): with no shadows and no weapon lights the pass is then left out.
+    shadow_ready: bool,
     /// The scope's view (picture in picture): its images, pass and framebuffer, the pipelines
     /// it is drawn with (like the main pass's), its uniform buffers per frame slot (its
     /// descriptor sets are `desc.scope_sets`); and the eyepiece's pipeline, which shows it on
@@ -147,6 +150,7 @@ impl Renderer {
                 layer_uploads: VecDeque::new(),
                 font_tex,
                 shadow,
+                shadow_ready: false,
                 scope,
                 scope_pipes,
                 scope_ubos,
@@ -216,7 +220,15 @@ impl Renderer {
             marks[0] = Instant::now();
             // Indirect draw commands of this frame are used by the shadow pass, then the
             // scope's, then the world's.
-            let mut indirect_used = self.record_shadow_pass(&r, f);
+            // With no sun shadows and no weapon lights nothing reads the shadow map (world.frag
+            // checks both first): its pass (clearing 4096x5120 depths) is left out, once it has
+            // run to put the image in its layout.
+            let spots = (0..MAX_SPOTS).any(|k| f.ubo.spots[2 * k][3] > 0.0);
+            let mut indirect_used = 0;
+            if f.shadows || spots || !self.shadow_ready {
+                indirect_used = self.record_shadow_pass(&r, f);
+                self.shadow_ready = true;
+            }
             self.stamp(&r, 1);
             if let Some(sv) = &f.scope {
                 indirect_used = self.record_scope_pass(&r, f, sv, indirect_used);
