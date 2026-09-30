@@ -16,12 +16,50 @@ pub fn find_memory_type(
         .expect("no suitable Vulkan memory type")
 }
 
+/// Debug builds: whether a GPU resource's `destroy` has run, checked when it is dropped, so a
+/// forgotten destroy (leaked GPU memory) stops a debug run where it happens. Nothing in release
+/// builds (no field, no check).
+#[derive(Default)]
+struct Destroyed {
+    #[cfg(debug_assertions)]
+    done: std::sync::atomic::AtomicBool,
+}
+
+impl Destroyed {
+    #[inline]
+    fn set(&self) {
+        #[cfg(debug_assertions)]
+        {
+            let again = self.done.swap(true, std::sync::atomic::Ordering::Relaxed);
+            debug_assert!(!again, "GPU resource destroyed twice");
+        }
+    }
+
+    #[inline]
+    fn check(&self, _what: &str) {
+        #[cfg(debug_assertions)]
+        if !std::thread::panicking() {
+            debug_assert!(
+                self.done.load(std::sync::atomic::Ordering::Relaxed),
+                "{_what} dropped without destroy() (its GPU memory leaks)"
+            );
+        }
+    }
+}
+
 /// A buffer with its own device memory. Host-visible buffers stay persistently mapped.
 pub struct Buffer {
     pub handle: vk::Buffer,
     pub memory: vk::DeviceMemory,
     pub size: u64,
     mapped: *mut u8,
+    destroyed: Destroyed,
+}
+
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        self.destroyed.check("Buffer");
+    }
 }
 
 impl Buffer {
@@ -67,6 +105,7 @@ impl Buffer {
                 memory,
                 size,
                 mapped,
+                destroyed: Destroyed::default(),
             }
         }
     }
@@ -94,6 +133,7 @@ impl Buffer {
     }
 
     pub fn destroy(&self, device: &Device) {
+        self.destroyed.set();
         unsafe {
             device.destroy_buffer(self.handle, None);
             device.free_memory(self.memory, None);
@@ -105,6 +145,13 @@ pub struct Image {
     pub handle: vk::Image,
     pub memory: vk::DeviceMemory,
     pub view: vk::ImageView,
+    destroyed: Destroyed,
+}
+
+impl Drop for Image {
+    fn drop(&mut self) {
+        self.destroyed.check("Image");
+    }
 }
 
 impl Image {
@@ -206,11 +253,13 @@ impl Image {
                 handle,
                 memory,
                 view,
+                destroyed: Destroyed::default(),
             }
         }
     }
 
     pub fn destroy(&self, device: &Device) {
+        self.destroyed.set();
         unsafe {
             device.destroy_image_view(self.view, None);
             device.destroy_image(self.handle, None);
@@ -230,6 +279,13 @@ pub enum SamplerKind {
 pub struct Texture {
     pub image: Image,
     pub sampler: vk::Sampler,
+    destroyed: Destroyed,
+}
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        self.destroyed.check("Texture");
+    }
 }
 
 impl Texture {
@@ -378,10 +434,15 @@ impl Texture {
                 .create_sampler(&info, None)
                 .expect("create sampler")
         };
-        Self { image, sampler }
+        Self {
+            image,
+            sampler,
+            destroyed: Destroyed::default(),
+        }
     }
 
     pub fn destroy(&self, device: &Device) {
+        self.destroyed.set();
         unsafe { device.destroy_sampler(self.sampler, None) };
         self.image.destroy(device);
     }
