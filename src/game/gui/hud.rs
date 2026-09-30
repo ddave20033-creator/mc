@@ -78,35 +78,32 @@ impl Game {
         } else {
             rgba(20, 0, 0, 255)
         };
-        for (r, row) in SHAPE.iter().enumerate() {
-            for (c, ch) in row.chars().enumerate() {
-                let color = match ch {
-                    'o' => outline,
-                    'x' => {
-                        let red = fill == 2 || (fill == 1 && c <= 4);
-                        if !red {
-                            rgba(60, 12, 12, 255)
-                        } else if poison {
-                            if r == 1 && (c == 1 || c == 2) {
-                                rgba(200, 230, 150, 255)
-                            } else if r >= 4 {
-                                rgba(100, 120, 20, 255)
-                            } else {
-                                rgba(140, 160, 34, 255)
-                            }
-                        } else if r == 1 && (c == 1 || c == 2) {
-                            rgba(255, 190, 190, 255)
+        pixel_rows(ui, x, y, px, &SHAPE, |r, c, ch| {
+            Some(match ch {
+                'o' => outline,
+                'x' => {
+                    let red = fill == 2 || (fill == 1 && c <= 4);
+                    if !red {
+                        rgba(60, 12, 12, 255)
+                    } else if poison {
+                        if r == 1 && (c == 1 || c == 2) {
+                            rgba(200, 230, 150, 255)
                         } else if r >= 4 {
-                            rgba(190, 20, 24, 255)
+                            rgba(100, 120, 20, 255)
                         } else {
-                            rgba(230, 36, 40, 255)
+                            rgba(140, 160, 34, 255)
                         }
+                    } else if r == 1 && (c == 1 || c == 2) {
+                        rgba(255, 190, 190, 255)
+                    } else if r >= 4 {
+                        rgba(190, 20, 24, 255)
+                    } else {
+                        rgba(230, 36, 40, 255)
                     }
-                    _ => continue,
-                };
-                ui.solid(x + c as f32 * px, y + r as f32 * px, px, px, color);
-            }
-        }
+                }
+                _ => return None,
+            })
+        });
     }
 
     /// A pixel icon from rows of characters: 'o' outline, 'x' fill, 'h' highlight, 'b' bone
@@ -121,20 +118,17 @@ impl Game {
         fill: u8,
     ) {
         let [outline, full, light, empty] = colors;
-        for (r, row) in shape.iter().enumerate() {
-            for (c, ch) in row.chars().enumerate() {
-                let filled = fill == 2 || (fill == 1 && c >= 4);
-                let color = match ch {
-                    'o' => outline,
-                    'b' => rgba(236, 228, 214, 255),
-                    'x' if filled => full,
-                    'h' if filled => light,
-                    'x' | 'h' => empty,
-                    _ => continue,
-                };
-                ui.solid(x + c as f32 * px, y + r as f32 * px, px, px, color);
-            }
-        }
+        pixel_rows(ui, x, y, px, shape, |_, c, ch| {
+            let filled = fill == 2 || (fill == 1 && c >= 4);
+            Some(match ch {
+                'o' => outline,
+                'b' => rgba(236, 228, 214, 255),
+                'x' if filled => full,
+                'h' if filled => light,
+                'x' | 'h' => empty,
+                _ => return None,
+            })
+        });
     }
 
     fn draw_food(ui: &mut Ui, x: f32, y: f32, px: f32, fill: u8) {
@@ -338,17 +332,14 @@ impl Game {
             " o.....o ",
             "  ooooo  ",
         ];
-        for (r, row) in SHAPE.iter().enumerate() {
-            for (c, ch) in row.chars().enumerate() {
-                let color = match ch {
-                    'o' => rgba(20, 40, 90, 255),
-                    'x' => rgba(255, 255, 255, 255),
-                    '.' => rgba(90, 160, 255, 200),
-                    _ => continue,
-                };
-                ui.solid(x + c as f32 * px, y + r as f32 * px, px, px, color);
-            }
-        }
+        pixel_rows(ui, x, y, px, &SHAPE, |_, _, ch| {
+            Some(match ch {
+                'o' => rgba(20, 40, 90, 255),
+                'x' => rgba(255, 255, 255, 255),
+                '.' => rgba(90, 160, 255, 200),
+                _ => return None,
+            })
+        });
     }
 
     pub(in crate::game) fn draw_hud(&mut self, underwater: bool, in_lava: bool) {
@@ -825,6 +816,27 @@ impl Game {
                 rgba(230, 230, 230, 200),
                 true,
             );
+        }
+    }
+}
+
+/// Draws a pixel icon from rows of characters, `color` giving each one's color (None: none
+/// there). A run of the same color along a row is one quad.
+fn pixel_rows(ui: &mut Ui, x: f32, y: f32, px: f32, shape: &[&str], mut color: impl FnMut(usize, usize, char) -> Option<Color>) {
+    for (r, row) in shape.iter().enumerate() {
+        let mut run: Option<(usize, usize, Color)> = None;
+        // (the rows are plain ASCII; one past the end closes the last run)
+        for c in 0..=row.len() {
+            let here = row.as_bytes().get(c).and_then(|&ch| color(r, c, ch as char));
+            match (&mut run, here) {
+                (Some((_, len, k)), Some(h)) if *k == h => *len += 1,
+                _ => {
+                    if let Some((start, len, k)) = run.take() {
+                        ui.solid(x + start as f32 * px, y + r as f32 * px, len as f32 * px, px, k);
+                    }
+                    run = here.map(|h| (c, 1, h));
+                }
+            }
         }
     }
 }

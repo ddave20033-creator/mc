@@ -249,7 +249,8 @@ impl Game {
                 self.hotbar_slot = 0;
             }
             Cmd::Command(line) => {
-                tb.log(format!("/{line}"));
+                let line = format!("/{line}");
+                tb.log(line.clone());
                 self.run_command(&line);
             }
             Cmd::Place(o, v, name) => match block_named(&name) {
