@@ -100,3 +100,56 @@ pub struct ScopeView {
     /// Pixels a block at distance 1 covers in the scope's image.
     pub detail_px: f32,
 }
+
+#[cfg(test)]
+mod shader_tests {
+    use super::*;
+    use crate::world::mesh::flags;
+    use crate::world::textures::tex;
+
+    /// The value of `const <type> <name> = <value>;` in a shader.
+    fn value(src: &str, name: &str) -> f32 {
+        let line = src
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with("const ") && l.split_whitespace().nth(2) == Some(name))
+            .unwrap_or_else(|| panic!("{name} missing"));
+        let v = line.split('=').nth(1).unwrap().trim().trim_end_matches(';').trim();
+        match v.split_once('/') {
+            Some((a, b)) => a.trim().parse::<f32>().unwrap() / b.trim().parse::<f32>().unwrap(),
+            None => v.parse().unwrap(),
+        }
+    }
+
+    /// The numbers the shaders keep their own copies of are the game's (the rest of
+    /// `world.frag`'s layer numbers: `textures::tests::shader_layer_numbers_match`).
+    #[test]
+    fn shader_copies_of_game_numbers_match() {
+        let world = include_str!("../../shaders/world.frag");
+        for (name, flag) in [
+            ("F_LEAVES", flags::LEAVES),
+            ("F_PLANT", flags::PLANT),
+            ("F_EMISSIVE", flags::EMISSIVE),
+            ("F_WATER", flags::WATER),
+            ("F_OVERLAY", flags::OVERLAY),
+            ("F_VIEWMODEL", flags::VIEWMODEL),
+            ("F_ENTITY", flags::ENTITY),
+            ("F_FLUID", flags::FLUID),
+        ] {
+            assert_eq!(value(world, name) as u8, flag, "{name}");
+        }
+        assert_eq!(value(world, "LAVA_LAYER") as u32, tex::LAVA);
+        assert_eq!(value(world, "FURNACE_ANIM_LAYER") as u32, tex::FURNACE_ANIM);
+        assert_eq!(value(world, "FURNACE_FRAMES") as u32, tex::FURNACE_FRAMES);
+
+        let frame = include_str!("../../shaders/frame.glsl");
+        assert!(frame.contains(&format!("heldLights[{MAX_HELD_LIGHTS}]")));
+        assert_eq!(value(frame, "SHADOW_SUN_V"), SHADOW_SIZE as f32 / SHADOW_HEIGHT as f32);
+        assert_eq!(value(frame, "SHADOW_SPOT_U"), SPOT_SHADOW as f32 / SHADOW_SIZE as f32);
+        assert_eq!(value(frame, "SHADOW_SPOT_V"), SPOT_SHADOW as f32 / SHADOW_HEIGHT as f32);
+
+        // The shadow pass lets light through glass (its layer written out there).
+        let shadow = include_str!("../../shaders/shadow.frag");
+        assert_eq!(shadow.matches(&format!("vLayer - {}.0", tex::GLASS)).count(), 2);
+    }
+}

@@ -256,7 +256,7 @@ mod tests {
         }
     }
 
-    /// Generates every layer; with TEX_DUMP=<file.bmp> also writes a contact sheet to look at.
+    /// The layer numbers `world.frag` keeps its own copies of are the game's.
     #[test]
     fn shader_layer_numbers_match() {
         let src = include_str!("../../../shaders/world.frag");
@@ -280,6 +280,7 @@ mod tests {
         assert_eq!(value("FLUID_FRAMES"), tex::FLUID_FRAMES);
     }
 
+    /// Generates every layer; with TEX_DUMP=<file.bmp> also writes a contact sheet to look at.
     #[test]
     fn generate_all_layers() {
         // TEX_PACK=<name in resourcepacks/> dumps a resource pack's version instead (over the
