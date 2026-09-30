@@ -14,7 +14,6 @@ mod update;
 mod worlds;
 
 use gui::{hud, station};
-pub(crate) use gui::icons;
 use player::{camera, sleep};
 use sim::{felling, logs};
 use tools::{fishing, grenades, guns, revolver};
