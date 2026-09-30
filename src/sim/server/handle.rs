@@ -7,6 +7,7 @@ use super::Server;
 use crate::entity::mob::{Foe, MobKind};
 use crate::entity::ItemEntity;
 use crate::net::{hurt, pose_flags, Msg};
+use crate::sim::rules;
 
 /// Seconds after a shot its bullets may still hit (they fly a few hundred blocks at most).
 const BULLET_TIME: f32 = 10.0;
@@ -48,26 +49,29 @@ impl Server {
                 if !self.world.is_loaded(p.x, p.z) {
                     return;
                 }
+                // (a double chest half: the chest beside it, which their game may have joined
+                // it with)
+                let guessed = chest_partner_offset(b).map(|d| p + d);
                 if near_block(p) && may_place(self.world.geti(p), b, held) {
                     self.place_world(p, b);
                 }
                 // The player guessed the result; make sure it matches.
-                let actual = self.world.geti(p);
-                self.send_to(id, &Msg::Blocks(vec![(p, actual)]));
+                self.send_actual(id, std::iter::once(p).chain(guessed));
             }
             Msg::Break { p, held, creative } => {
                 if !self.world.is_loaded(p.x, p.z) {
                     return;
                 }
                 let b = self.world.geti(p);
+                // (the blocks that go with it, which their game took away too)
+                let guessed: Vec<IVec3> = rules::other_cells(&self.world, p, b).into_iter().map(|(q, _)| q).collect();
                 if b != AIR && near_block(p) && known_item(held) {
                     // (mined as in creative, without drops, only by a player in creative)
                     let creative = creative && pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
                     self.break_world(p, held, creative);
                     self.broadcast(&Msg::BreakFx { p, block: b }, Some(id));
                 }
-                let actual = self.world.geti(p);
-                self.send_to(id, &Msg::Blocks(vec![(p, actual)]));
+                self.send_actual(id, std::iter::once(p).chain(guessed));
             }
             Msg::AttackMob { id: mob, dmg, knock } => {
                 let (melee, bullet) = self.damage_caps(id, held);
@@ -249,6 +253,13 @@ impl Server {
         }
     }
 
+    /// The blocks at `cells` as they are, to player `id` (whose game guessed them: a change
+    /// refused, or done only in part, is put right there).
+    fn send_actual(&mut self, id: u8, cells: impl Iterator<Item = IVec3>) {
+        let list = cells.map(|q| (q, self.world.geti(q))).collect();
+        self.send_to(id, &Msg::Blocks(list));
+    }
+
     /// The most damage player `id` can deal now: with what they hold (a critical hit, a
     /// bullet of the gun) or with the bullets of their last shot (`melee`, `bullet`).
     fn damage_caps(&mut self, id: u8, held: crate::item::ItemId) -> (f32, f32) {
@@ -303,7 +314,7 @@ impl Server {
             return;
         }
         let answer = match args.as_slice() {
-            ["time", "set", v] => match parse_time(v) {
+            ["time", "set", v] => match crate::sim::parse_time(v) {
                 Some(ticks) => {
                     self.time_of_day = (ticks / 24000.0).rem_euclid(1.0);
                     Ok(tf("cmd.time_set", &[&(ticks as i32)]))
@@ -336,19 +347,6 @@ impl Server {
         };
         self.send_to(id, &Msg::Chat { text, color });
     }
-}
-
-/// A time of day as a command gives it: a name or Minecraft ticks.
-fn parse_time(v: &str) -> Option<f32> {
-    Some(match v {
-        "day" => 1000.0,
-        "noon" => 6000.0,
-        "sunset" => 12000.0,
-        "night" => 13000.0,
-        "midnight" => 18000.0,
-        "sunrise" => 23000.0,
-        _ => v.parse::<f32>().ok()?,
-    })
 }
 
 /// Whether a player holding `held` may put `b` where `current` is: over something replaceable

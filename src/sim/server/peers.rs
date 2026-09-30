@@ -495,54 +495,13 @@ impl Server {
     /// Contents of the block entity at `p` as a message (a chest: both halves of a double
     /// one; a crafting table: its grid).
     pub(super) fn container_msg(&self, p: IVec3) -> Option<Msg> {
-        let b = self.world.geti(p);
-        let (kind, slots) = if is_chest(b) {
-            self.level.block_entities.chests.get(&p)?;
-            (container::CHEST, self.chest_slots(p))
-        } else if b == CRAFTING_TABLE {
-            let grid = self.level.block_entities.tables.get(&p).copied().unwrap_or([None; 9]);
-            (container::TABLE, grid.to_vec())
-        } else {
-            return None;
-        };
+        let (kind, slots) = self.level.block_entities.container(&self.world, p)?;
         Some(Msg::Container { p, kind, slots })
-    }
-
-    fn chest_slots(&self, p: IVec3) -> Vec<Slot> {
-        let (a, b) = self.chest_halves(p);
-        let get = |q: IVec3| self.level.block_entities.chests.get(&q).map_or([None; 27], |c| **c);
-        let mut out = get(a).to_vec();
-        if let Some(b) = b {
-            out.extend(get(b));
-        }
-        out
     }
 
     /// Stores a container's contents (sent by the player who has it open).
     pub(super) fn apply_container(&mut self, p: IVec3, kind: u8, slots: &[Slot]) {
-        let get = |i: usize| slots.get(i).copied().flatten();
-        match kind {
-            container::CHEST => {
-                let (a, b) = self.chest_halves(p);
-                let n = if b.is_some() { 54 } else { 27 };
-                let all: Vec<Slot> = (0..n).map(get).collect();
-                for (q, part) in std::iter::once(a).chain(b).zip(all.chunks(27)) {
-                    let c = self.level.block_entities.chests.entry(q).or_insert_with(|| Box::new([None; 27]));
-                    for (s, v) in c.iter_mut().zip(part) {
-                        *s = *v;
-                    }
-                }
-            }
-            container::TABLE => {
-                let grid: [Slot; 9] = std::array::from_fn(get);
-                if grid.iter().any(|s| s.is_some()) {
-                    self.level.block_entities.tables.insert(p, grid);
-                } else {
-                    self.level.block_entities.tables.remove(&p);
-                }
-            }
-            _ => {}
-        }
+        self.level.block_entities.apply_container(&self.world, p, kind, slots);
     }
 
     /// Crafting table grids that changed go to everyone (the items lie on top of the tables),

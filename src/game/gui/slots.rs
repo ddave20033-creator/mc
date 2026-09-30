@@ -29,7 +29,7 @@ pub(super) fn droppable(r: SlotRef) -> bool {
 impl Game {
     pub(in crate::game) fn open_container(&mut self, c: Container) {
         if let Some(p) = Self::container_pos(c) {
-            // LAN player: ask the host for the contents.
+            // (the server sends its contents)
             self.net_container_opened(p);
         }
         self.inv_ui.drag = None;
@@ -64,7 +64,7 @@ impl Game {
         self.inv_ui.search_focused = false;
         if let Screen::Container(c) = self.screen {
             if Self::container_pos(c).is_some() {
-                // LAN player: the last changes go to the host before closing.
+                // (the last changes go to the server before closing)
                 self.net_container_sync();
                 self.net_container_closed();
             }
@@ -93,33 +93,12 @@ impl Game {
 
     /// Contents of a chest: 27 slots, or 54 for a double chest (left half first).
     pub(in crate::game) fn chest_slots(&self, p: IVec3) -> Vec<Slot> {
-        let (a, b) = self.chest_halves(p);
-        let get = |q: IVec3| {
-            self.level.block_entities
-                .chests
-                .get(&q)
-                .map_or([None; 27], |c| **c)
-        };
-        let mut out = get(a).to_vec();
-        if let Some(b) = b {
-            out.extend(get(b));
-        }
-        out
+        self.level.block_entities.chest_slots(&self.terrain.world, p)
     }
 
     /// Stores `slots` (as `chest_slots` returns them) into the chest's halves.
     pub(in crate::game) fn set_chest_slots(&mut self, p: IVec3, slots: &[Slot]) {
-        let (a, b) = self.chest_halves(p);
-        for (q, part) in std::iter::once(a).chain(b).zip(slots.chunks(27)) {
-            let c = self
-                .level.block_entities
-                .chests
-                .entry(q)
-                .or_insert_with(|| Box::new([None; 27]));
-            for (s, v) in c.iter_mut().zip(part) {
-                *s = *v;
-            }
-        }
+        self.level.block_entities.set_chest_slots(&self.terrain.world, p, slots);
     }
 
     pub(super) fn craft_size(c: Container) -> usize {

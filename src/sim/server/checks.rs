@@ -1,4 +1,4 @@
-//! What the host believes of a LAN player: the item ids they send are items there are, the
+//! What the server believes of a player: the item ids they send are items there are, the
 //! damage they deal is what their weapon can deal, and what they do is where they stand.
 //! Cheap sanity checks for a LAN game (a player still runs their own inventory); an honest
 //! player never runs into them.
@@ -53,7 +53,7 @@ pub(crate) fn knock_cap() -> f32 {
     GUN_KINDS.iter().map(|k| k.stats().knockback).fold(MELEE_KNOCK, f32::max)
 }
 
-/// `dmg` and `knock` as the host takes them: at most `cap` and `knock_cap`, never negative;
+/// `dmg` and `knock` as the server takes them: at most `cap` and `knock_cap`, never negative;
 /// None if there is nothing to deal.
 pub(crate) fn clamp_hit(dmg: f32, knock: f32, cap: f32) -> Option<(f32, f32)> {
     let dmg = dmg.min(cap);

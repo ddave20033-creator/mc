@@ -428,8 +428,8 @@ impl Game {
         if self.in_world_view() {
             self.draw_dummy_tags();
         }
-        // Tab held in a LAN game: who is playing.
-        if self.net.is_some() && self.screen == Screen::Playing && self.bind_down(Bind::PlayerList)
+        // Tab held: who is playing.
+        if self.screen == Screen::Playing && self.bind_down(Bind::PlayerList)
         {
             self.draw_player_list();
         }

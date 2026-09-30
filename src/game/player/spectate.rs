@@ -235,10 +235,11 @@ impl Game {
         ui.text_centered(t("spectate.title"), w * 0.5, y - 26.0 * s, s, WHITE, true);
         let mut pick = None;
         if players.is_empty() {
-            let msg = if self.net.is_some() {
-                t("spectate.none")
-            } else {
+            // (this game's own world, not open to the LAN: nobody else can be in it)
+            let msg = if self.local.is_some() && self.lan_address.is_none() {
                 t("spectate.single")
+            } else {
+                t("spectate.none")
             };
             ui.text_centered(msg, w * 0.5, y + 6.0 * s, s, rgba(190, 190, 190, 255), true);
             y += 24.0 * s;

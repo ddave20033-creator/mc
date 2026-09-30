@@ -60,12 +60,9 @@ impl Game {
         })
     }
 
-    /// Tab: everyone in the LAN game, top center (the host first, marked).
+    /// Tab: everyone in the world, top center (the world's owner first, marked).
     pub(in crate::game) fn draw_player_list(&mut self) {
-        let my_id = match &self.net {
-            Some(Net::Client(c)) => c.id,
-            _ => HOST_ID,
-        };
+        let my_id = self.net.as_ref().map_or(OWNER_ID, |c| c.id);
         let mut players: Vec<(u8, String)> = self
             .remotes
             .iter()
@@ -78,7 +75,7 @@ impl Game {
         let title = tf("lan.players", &[&players.len()]);
         let host_tag = t("lan.host_tag");
         let label = |id: u8, name: &str| {
-            if id == HOST_ID {
+            if id == OWNER_ID {
                 format!("{name} {host_tag}")
             } else {
                 name.to_string()

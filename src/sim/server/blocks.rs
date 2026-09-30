@@ -6,7 +6,7 @@
 use super::Server;
 use crate::entity::{FallingBlock, ItemEntity};
 use crate::item::{drops, ItemId, Stack, NONE};
-use crate::sim::rules::{chest_halves, left_after_mining, supported};
+use crate::sim::rules::{chest_halves, chest_join, contents_elsewhere, left_after_mining, other_cells, supported};
 use crate::world::*;
 use glam::{IVec3, Vec3};
 
@@ -39,7 +39,6 @@ impl Server {
     pub fn break_world(&mut self, p: IVec3, held: ItemId, creative: bool) {
         let b = self.world.geti(p);
         let mut contents = self.level.block_entities.remove(p);
-        self.split_chest(p, b);
         contents.extend(self.remove_other_half(p, b));
         let replacement = left_after_mining(&self.world, p, b, creative);
         self.set_block(p, replacement);
@@ -78,26 +77,14 @@ impl Server {
         self.block_updated(at);
     }
 
-    /// A double chest half placed at `at` turns the single chest it pairs with (facing the
-    /// same way) into the other half. Without one it becomes a single chest.
+    /// A double chest half placed at `at` turns the single chest it pairs with into the other
+    /// half (`rules::chest_join`); what goes at `at`.
     fn join_chest(&mut self, at: IVec3, b: Block) -> Block {
-        let (Some(d), Some(f), Some(other)) = (chest_partner_offset(b), facing(b), chest_other_half(b)) else {
-            return b;
-        };
-        if self.world.geti(at + d) != chest_id(f, 0) {
-            return chest_id(f, 0);
+        let (b, other) = chest_join(&self.world, at, b);
+        if let Some((q, ob)) = other {
+            self.set_block(q, ob);
         }
-        self.set_block(at + d, other);
         b
-    }
-
-    /// A double chest half is going away: the other half becomes a single chest.
-    fn split_chest(&mut self, p: IVec3, b: Block) {
-        let Some(d) = chest_partner_offset(b) else { return };
-        let q = self.world.geti(p + d);
-        if chest_partner_offset(q) == Some(-d) {
-            self.set_block(p + d, chest_id(facing(q).unwrap_or(0), 0));
-        }
     }
 
     /// A chest's halves (see `rules::chest_halves`).
@@ -105,46 +92,18 @@ impl Server {
         chest_halves(&self.world, p)
     }
 
-    /// A door or bed half is going away: the other half goes with it (without a second drop).
-    /// So do the other blocks of a big furnace or a gun station; what was in it is returned.
+    /// The block `b` at `p` is going away: the blocks that belong with it follow
+    /// (`rules::other_cells`, without a second drop); what was in a big furnace or gun
+    /// station kept by another of its blocks is returned.
     fn remove_other_half(&mut self, p: IVec3, b: Block) -> Vec<Stack> {
-        if let (Some(base), Some(f)) = (furnace_base(b).filter(|&k| k != FURNACE), facing(b)) {
-            let origin = furnace_origin(p, b);
-            let contents = if origin != p { self.level.block_entities.remove(origin) } else { Vec::new() };
-            for (o, _) in furnace_cells(base, f, false) {
-                let q = origin + o;
-                if q != p && furnace_base(self.world.geti(q)) == Some(base) {
-                    self.set_block(q, AIR);
-                }
-            }
-            return contents;
-        }
-        if is_gun_bench(b) {
-            // Its other blocks go too; what lay on the table (kept by its left block) drops.
-            let w = &self.world;
-            let Some(main) = bench_main(p, b, |q| w.geti(q)) else { return Vec::new() };
-            // (the left block's id says how wide it is; it is gone already when it was broken)
-            let main_b = if main == p { b } else { w.geti(main) };
-            let contents = if main != p { self.level.block_entities.remove(main) } else { Vec::new() };
-            for q in bench_cells(main, main_b) {
-                if q != p && is_gun_bench(self.world.geti(q)) {
-                    self.set_block(q, AIR);
-                }
-            }
-            return contents;
-        }
-        let q = if is_door(b) {
-            p + door_other_half(b)
-        } else if is_bed(b) {
-            p + bed_other_half(b)
-        } else {
-            return Vec::new();
+        let contents = match contents_elsewhere(&self.world, p, b) {
+            Some(q) => self.level.block_entities.remove(q),
+            None => Vec::new(),
         };
-        let other = self.world.geti(q);
-        if (is_door(b) && is_door(other)) || (is_bed(b) && is_bed(other)) {
-            self.set_block(q, AIR);
+        for (q, nb) in other_cells(&self.world, p, b) {
+            self.set_block(q, nb);
         }
-        Vec::new()
+        contents
     }
 
     /// A trunk cut down off grass leaves its mark on the grass under it: a circle of bare

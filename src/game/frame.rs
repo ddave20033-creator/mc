@@ -354,7 +354,6 @@ impl Game {
             match e {
                 TerrainEvent::Mesh(m) => self.renderer.queue_mesh(m),
                 TerrainEvent::Unload(p) => self.renderer.remove_chunk(p),
-                TerrainEvent::Restored(p) => self.fluids.wake_chunk(&self.terrain.world, p),
             }
         }
         if self.screen == Screen::Loading && self.world_ready() {
@@ -381,7 +380,7 @@ impl Game {
             | Screen::Options { in_game: true }
             | Screen::ResourcePacks { in_game: true }
             | Screen::KeyBinds { in_game: true }
-                if self.net.is_some() && !(self.local.is_some() && self.remotes.is_empty()) =>
+                if !(self.local.is_some() && self.remotes.is_empty()) =>
             {
                 (Some(false), true)
             }
@@ -1345,11 +1344,10 @@ impl Game {
                 Action::None
             }
             Screen::Paused => {
-                let lan = match (&self.net, &self.lan_address) {
-                    (_, Some(address)) => screens::PauseLan::Open(address),
-                    (Some(multi::Net::Client(_)), None) if self.local.is_some() => screens::PauseLan::Available,
-                    (Some(multi::Net::Client(_)), None) => screens::PauseLan::Joined,
-                    (None, None) => screens::PauseLan::Available,
+                let lan = match (&self.lan_address, &self.local) {
+                    (Some(address), _) => screens::PauseLan::Open(address),
+                    (None, Some(_)) => screens::PauseLan::Available,
+                    (None, None) => screens::PauseLan::Joined,
                 };
                 screens::pause(&mut self.ui, lan)
             }

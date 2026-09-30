@@ -178,14 +178,12 @@ impl Game {
         }
     }
 
-    /// A block the script sets: here at once, and (the world having a server of this game's)
-    /// there too.
+    /// A block the script sets: here at once, and on the world's server (which takes it from
+    /// the world's owner).
     fn test_set(&mut self, p: IVec3, b: Block) {
         self.set_block(p, b);
-        if self.local.is_some() {
-            if let Some(tb) = self.testbed.as_mut() {
-                tb.edits.push((p, b));
-            }
+        if let Some(tb) = self.testbed.as_mut() {
+            tb.edits.push((p, b));
         }
     }
 
@@ -315,11 +313,11 @@ impl Game {
                 }
             }
             Cmd::Drop(name, v) => match crate::item::from_key(&name) {
-                Some(id) if self.local.is_some() => {
+                // (the server puts it there: near enough, or the world's owner's)
+                Some(id) => {
                     let pos = origin + Vec3::from(v);
                     self.send(crate::net::Msg::DropItem { pos, vel: Vec3::ZERO, stack: Stack::one(id), delay: 1000.0 });
                 }
-                Some(id) => self.level.items.push(crate::entity::dropped::ItemEntity::new(origin + Vec3::from(v), Vec3::ZERO, Stack::one(id), 1000.0)),
                 None => tb.problems.push(format!("drop: no item `{name}`")),
             },
             Cmd::Key(name, secs) => match key_named(&self.settings, &name) {

@@ -1,10 +1,10 @@
-//! LAN multiplayer: opening a world to LAN, joining one, and keeping everything in sync.
+//! The game's side of playing in a world: it is always a player connected to the world's
+//! server (`sim::server`), the one this game runs for its own world or a LAN game's.
 //!
-//! The host runs the world as usual and is the authority for blocks, fluids, mobs, dropped
-//! items, falling blocks and block entities. Each player moves, fights, eats and manages
-//! their own inventory, and tells the host what they do to the world; the host applies it
-//! with the world's rules and sends the result to everyone. A player's inventory, position,
-//! health and hunger are kept by the host between visits (`saves/<world>/players/`).
+//! The server is the authority for blocks, fluids, mobs, dropped items, falling blocks and
+//! block entities. This game moves, fights, eats and manages the player's own inventory, and
+//! tells the server what the player does to the world; it shows that at once and takes what
+//! the server sends (`client`). The other players are drawn from the poses they send.
 
 mod client;
 mod lan_ui;
@@ -21,14 +21,12 @@ use crate::net::{
 use crate::save::unrle;
 use crate::util::lerp_angle;
 
-/// Seconds between pose and entity updates (20 per second, Minecraft's tick rate).
-const TICK: f32 = 0.05;
 /// `Msg::Open` at this height means the player closed their container.
 const CLOSED_Y: i32 = i32::MIN;
 /// How far away other players' names show.
 const NAME_RANGE: f32 = 48.0;
-/// The host's player id.
-pub(super) const HOST_ID: u8 = 0;
+/// The world's owner's player id (the one whose game runs its server).
+pub(super) const OWNER_ID: u8 = 0;
 
 /// Another player, as drawn here.
 pub(super) struct RemotePlayer {
@@ -70,17 +68,16 @@ pub(super) struct Client {
     conn: Conn,
     pub(super) id: u8,
     tick: f32,
-    /// Where the host says each dropped item is; they glide there.
+    /// Where the server says each dropped item is; they glide there.
     item_targets: FastMap<u32, Vec3>,
-    /// The open container as last sent to or received from the host.
+    /// The open container as last sent to or received from the server.
     container_known: Option<Vec<u8>>,
     /// Dropped items flying to whoever picked them up (item, player).
     collecting: FastMap<u32, u8>,
-}
-
-/// The game's connection to the world's server (its own, or a LAN host's).
-pub(super) enum Net {
-    Client(Client),
+    /// Where the server says each falling block is (in the order of `Level::falling`), and
+    /// when it last said.
+    falling_targets: Vec<Vec3>,
+    falling_at: f32,
 }
 
 fn color_bytes(c: Color) -> [u8; 4] {
@@ -92,14 +89,10 @@ fn color_from(b: [u8; 4]) -> Color {
 }
 
 impl Game {
-    pub(super) fn is_client(&self) -> bool {
-        matches!(self.net, Some(Net::Client(_)))
-    }
-
     /// Sends a message to the server.
     pub(super) fn send(&self, m: Msg) {
-        if let Some(Net::Client(c)) = &self.net {
-            // The host checks what a player does against where they stand and what they
+        if let Some(c) = &self.net {
+            // The server checks what a player does against where they stand and what they
             // hold: it gets the pose as it is right now first.
             let checked = matches!(
                 m,
@@ -120,11 +113,6 @@ impl Game {
             }
             c.conn.send(&m);
         }
-    }
-
-    pub(super) fn entity_id(&mut self) -> u32 {
-        self.next_entity_id = self.next_entity_id.wrapping_add(1).max(1);
-        self.next_entity_id
     }
 
     /// Drops an item into the world (the server puts it there).
@@ -323,17 +311,13 @@ impl Game {
             .collect()
     }
 
-    /// Debris from a block broken by someone: shown here if `local`, and the host sends it to
-    /// the other players (but `except`, who broke it).
-    pub(super) fn break_fx(&mut self, p: IVec3, block: Block, local: bool, _except: Option<u8>) {
+    /// Debris from a block another player broke.
+    pub(super) fn break_fx(&mut self, p: IVec3, block: Block) {
         if block == AIR {
             return;
         }
-        if local {
-            let tint = self.block_tint(p, block);
-            self.particles
-                .burst(&self.terrain.world, p, block, 28, tint);
-        }
+        let tint = self.block_tint(p, block);
+        self.particles.burst(&self.terrain.world, p, block, 28, tint);
     }
 
     /// Hit by another player (or blown about by a grenade they threw, or bitten by a wolf):
@@ -358,12 +342,10 @@ impl Game {
 
     // ------------------------------------------------------------------ every frame
 
-    /// Network work for this frame (host or player).
+    /// Network work for this frame: messages in and out, the other players' poses.
     pub(super) fn net_tick(&mut self, dt: f32) {
         self.poll_joining();
-        if self.net.is_some() {
-            self.client_tick(dt);
-        }
+        self.client_tick(dt);
         // Other players glide toward their latest pose.
         let k = crate::util::damp(15.0, dt);
         let mut chops = Vec::new();
@@ -684,77 +666,35 @@ impl Game {
             .min_by(|a, b| a.1.total_cmp(&b.1))
     }
 
-    /// A chat line typed by this player.
+    /// A chat line typed by this player (the server sends it to everyone, this player too).
     pub(super) fn chat_line(&mut self, text: &str) {
-        match &self.net {
-            Some(Net::Client(_)) => self.send(Msg::Chat {
-                text: text.to_string(),
-                color: color_bytes(chat::WHITE),
-            }),
-            None => {
-                let line = format!("<{}> {text}", self.settings.name);
-                self.say(line, chat::WHITE);
-            }
-        }
+        self.send(Msg::Chat {
+            text: text.to_string(),
+            color: color_bytes(chat::WHITE),
+        });
     }
 
-    /// Contents of the block entity at `p` as a message (a LAN player's open crafting table
-    /// uses its live grid).
+    /// Contents of the block entity at `p` as a message (the crafting table open here: its
+    /// live grid).
     fn container_msg(&self, p: IVec3) -> Option<Msg> {
-        let b = self.terrain.world.geti(p);
-        // Whoever has the table open here (host or player) works on the live grid.
-        let table_open = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
-        let (kind, slots) = if is_chest(b) {
-            // A double chest sends both halves (54 slots).
-            self.level.block_entities.chests.get(&p)?;
-            (container::CHEST, self.chest_slots(p))
-        } else if b == CRAFTING_TABLE {
-            let grid = if table_open {
-                self.craft
-            } else {
-                self.level.block_entities
-                    .tables
-                    .get(&p)
-                    .copied()
-                    .unwrap_or([None; 9])
-            };
-            (container::TABLE, grid.to_vec())
-        } else {
-            return None;
-        };
+        let (kind, mut slots) = self.level.block_entities.container(&self.terrain.world, p)?;
+        if matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p) {
+            slots = self.craft.to_vec();
+        }
         Some(Msg::Container { p, kind, slots })
     }
 
-    /// Stores received contents.
+    /// Stores received contents (the crafting table open here: into its live grid).
     fn apply_container(&mut self, p: IVec3, kind: u8, slots: &[Slot]) {
-        let get = |i: usize| slots.get(i).copied().flatten();
-        match kind {
-            container::CHEST => {
-                let n = if self.chest_halves(p).1.is_some() {
-                    54
-                } else {
-                    27
-                };
-                let all: Vec<Slot> = (0..n).map(get).collect();
-                self.set_chest_slots(p, &all);
-            }
-            container::TABLE => {
-                let grid: [Slot; 9] = std::array::from_fn(get);
-                let open_here =
-                    matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
-                if open_here {
-                    self.craft = grid;
-                } else if grid.iter().any(|s| s.is_some()) {
-                    self.level.block_entities.tables.insert(p, grid);
-                } else {
-                    self.level.block_entities.tables.remove(&p);
-                }
-            }
-            _ => {}
+        let open_here = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
+        if kind == container::TABLE && open_here {
+            self.craft = std::array::from_fn(|i| slots.get(i).copied().flatten());
+        } else {
+            self.level.block_entities.apply_container(&self.terrain.world, p, kind, slots);
         }
     }
 
-    /// LAN player: the host's furnace (only for showing it; the host runs it).
+    /// A furnace as the server has it (only for showing it; the server runs it).
     #[allow(clippy::too_many_arguments)]
     fn apply_furnace(
         &mut self,
@@ -776,16 +716,16 @@ impl Game {
         }
     }
 
-    /// LAN player opened a container: the host sends its contents.
+    /// This player opened a container: the server sends its contents.
     pub(super) fn net_container_opened(&mut self, p: IVec3) {
-        if let Some(Net::Client(c)) = &mut self.net {
+        if let Some(c) = &mut self.net {
             c.container_known = None;
             c.conn.send(&Msg::Open { p });
         }
     }
 
     pub(super) fn net_container_closed(&mut self) {
-        if let Some(Net::Client(c)) = &mut self.net {
+        if let Some(c) = &mut self.net {
             c.container_known = None;
             c.conn.send(&Msg::Open {
                 p: IVec3::new(0, CLOSED_Y, 0),
@@ -793,7 +733,7 @@ impl Game {
         }
     }
 
-    /// LAN player: sends the open container if this player changed it.
+    /// Sends the open container if this player changed it.
     pub(super) fn net_container_sync(&mut self) {
         let Screen::Container(c) = self.screen else {
             return;
@@ -805,8 +745,8 @@ impl Game {
             return;
         };
         let bytes = msg.encode();
-        if let Some(Net::Client(c)) = &mut self.net {
-            // Nothing known yet: wait for the host's copy instead of overwriting it.
+        if let Some(c) = &mut self.net {
+            // Nothing known yet: wait for the server's copy instead of overwriting it.
             if c.container_known.as_ref().is_some_and(|k| *k != bytes) {
                 c.conn.send(&msg);
                 c.container_known = Some(bytes);

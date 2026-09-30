@@ -35,14 +35,13 @@ use crate::model::player::{
     build_player, hand_pivot, limb_targets, LimbSmoother, PlayerPose,
 };
 use crate::render::{FrameInfo, FrameUbo, Renderer, SHADOW_SIZE};
-use crate::save::{ChunkSaver, PlayerSave, WorldMeta};
+use crate::save::{PlayerSave, WorldMeta};
 use crate::settings::Settings;
 use crate::sim::clock::TICK_SECS;
 use crate::ui::chat::{self, Chat, ChatInput};
 use crate::ui::screens::{self, Action};
 use crate::ui::{rgba, with_alpha, Color, Ui, WHITE};
 use crate::util::{smoothstep, Rng};
-use crate::world::fluid::Fluids;
 use crate::world::gen::SEA;
 use crate::world::mesh::Vertex;
 use crate::world::terrain::{Terrain, TerrainEvent};
@@ -57,7 +56,6 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Fullscreen, Window};
 
-use crate::sim::DAY_LENGTH;
 const MENU_TIME_OF_DAY: f32 = 0.085;
 const SHADOW_DISTANCE: f32 = 96.0;
 const MAX_HEALTH: f32 = 20.0;
@@ -141,14 +139,11 @@ pub struct Game {
     settings: Settings,
     screen: Screen,
     terrain: Terrain,
-    fluids: Fluids,
     spawn: (i32, i32),
     /// The head of the bed this player last used: where they come back to life.
     bed_spawn: Option<IVec3>,
     /// Lying in a bed.
     sleep: Option<sleep::Sleep>,
-    /// Seconds everyone has been asleep (host and single player).
-    asleep_for: f32,
     pano: Vec3,
     chat: Chat,
 
@@ -159,7 +154,6 @@ pub struct Game {
     /// the options, the resource packs and the title screen's player.
     menus: Menus,
     autosave: f32,
-    saver: ChunkSaver,
 
     // Player state
     player: Player,
@@ -237,9 +231,7 @@ pub struct Game {
     fishing: fishing::Fishing,
     /// The guide book in the hands: its open page, and its pages' textures.
     book: book::Book,
-    /// What is in the world being played besides its blocks: dropped items, falling blocks and
-    /// trees, lying trunks, mobs, saplings, block entities and the animations of things in it.
-    /// Made anew for every world loaded, so nothing of the last one comes along.
+    /// What is in the world being played besides its blocks (`state::Level`).
     level: Level,
     /// A chop with an axe going on (`felling`).
     chop: Option<crate::model::chop_rig::Swing>,
@@ -295,14 +287,14 @@ pub struct Game {
     test_no_blur: bool,
     /// F1: hide the HUD and the hand (for screenshots), like Minecraft.
     hide_hud: bool,
-    /// LAN game: hosting or joined, the other players, and the multiplayer screen state.
-    net: Option<multi::Net>,
+    /// The connection to the world's server (the game's own, or a LAN game's), while in a
+    /// world.
+    net: Option<multi::Client>,
     /// The server this game runs for the world it plays (joined through `net`), and its LAN
     /// address once it is open to the LAN.
     local: Option<crate::sim::server::Local>,
     lan_address: Option<String>,
     remotes: Vec<multi::RemotePlayer>,
-    next_entity_id: u32,
     /// The other player the crosshair is on.
     player_target: Option<u8>,
     /// Spectator mode: the player whose eyes the camera is in.
@@ -385,17 +377,14 @@ impl Game {
             settings,
             screen: Screen::MainMenu,
             terrain,
-            fluids: Fluids::new(),
             spawn,
             bed_spawn: None,
             sleep: None,
-            asleep_for: 0.0,
             pano,
             chat: Chat::new(),
             world_meta: None,
             pending_player: None,
             autosave: AUTOSAVE_SECONDS,
-            saver: ChunkSaver::default(),
             player: Player::default(),
             game_mode: GameMode::Survival,
             cheats: false,
@@ -468,7 +457,6 @@ impl Game {
             local: None,
             lan_address: None,
             remotes: Vec::new(),
-            next_entity_id: 0,
             player_target: None,
             spectating: None,
             view_proj: Mat4::IDENTITY,
@@ -506,7 +494,6 @@ impl Game {
     pub fn on_exit(&mut self) {
         let lan = self.net.is_some();
         self.leave_server(None);
-        self.saver.wait();
         if self.bench.is_none() && self.testbed.is_none() {
             self.settings.save();
         }
@@ -544,10 +531,7 @@ impl Game {
         if self.settings.skin != 4 {
             return self.settings.skin;
         }
-        let id = match &self.net {
-            Some(multi::Net::Client(c)) => c.id,
-            _ => 0,
-        };
+        let id = self.net.as_ref().map_or(0, |c| c.id);
         if id < textures::tex::CUSTOM_SKIN_SLOTS {
             4 + id
         } else {

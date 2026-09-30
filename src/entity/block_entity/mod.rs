@@ -19,6 +19,7 @@ pub use render::{
 };
 
 use crate::item::{Slot, Stack};
+use crate::net::container;
 use crate::world::*;
 use glam::IVec3;
 
@@ -34,6 +35,80 @@ pub struct BlockEntities {
 }
 
 impl BlockEntities {
+    /// A chest's contents: 27 slots, or 54 for a double chest (its left half first).
+    pub fn chest_slots(&self, w: &World, p: IVec3) -> Vec<Slot> {
+        let (a, b) = crate::sim::rules::chest_halves(w, p);
+        let get = |q: IVec3| self.chests.get(&q).map_or([None; 27], |c| **c);
+        let mut out = get(a).to_vec();
+        if let Some(b) = b {
+            out.extend(get(b));
+        }
+        out
+    }
+
+    /// Stores `slots` (as `chest_slots` gives them) into the chest's halves.
+    pub fn set_chest_slots(&mut self, w: &World, p: IVec3, slots: &[Slot]) {
+        let (a, b) = crate::sim::rules::chest_halves(w, p);
+        for (q, part) in std::iter::once(a).chain(b).zip(slots.chunks(27)) {
+            let c = self.chests.entry(q).or_insert_with(|| Box::new([None; 27]));
+            for (s, v) in c.iter_mut().zip(part) {
+                *s = *v;
+            }
+        }
+    }
+
+    /// What is in the chest (both halves of a double one) or crafting table at `p`, as it is
+    /// sent (`Msg::Container`): its kind and its slots.
+    pub fn container(&self, w: &World, p: IVec3) -> Option<(u8, Vec<Slot>)> {
+        let b = w.geti(p);
+        if is_chest(b) {
+            self.chests.get(&p)?;
+            Some((container::CHEST, self.chest_slots(w, p)))
+        } else if b == CRAFTING_TABLE {
+            Some((container::TABLE, self.tables.get(&p).copied().unwrap_or([None; 9]).to_vec()))
+        } else {
+            None
+        }
+    }
+
+    /// Stores what a `Msg::Container` says is in the chest or crafting table at `p`.
+    pub fn apply_container(&mut self, w: &World, p: IVec3, kind: u8, slots: &[Slot]) {
+        let get = |i: usize| slots.get(i).copied().flatten();
+        match kind {
+            container::CHEST => {
+                let n = if crate::sim::rules::chest_halves(w, p).1.is_some() { 54 } else { 27 };
+                let all: Vec<Slot> = (0..n).map(get).collect();
+                self.set_chest_slots(w, p, &all);
+            }
+            container::TABLE => {
+                let grid: [Slot; 9] = std::array::from_fn(get);
+                if grid.iter().any(|s| s.is_some()) {
+                    self.tables.insert(p, grid);
+                } else {
+                    self.tables.remove(&p);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The block at `p` is now `b`: a block entity there of another kind is gone (a furnace,
+    /// chest, table or gun station broken).
+    pub fn forget_unless(&mut self, p: IVec3, b: Block) {
+        if !is_furnace(b) {
+            self.furnaces.remove(&p);
+        }
+        if !is_chest(b) {
+            self.chests.remove(&p);
+        }
+        if b != CRAFTING_TABLE {
+            self.tables.remove(&p);
+        }
+        if !is_gun_bench(b) {
+            self.benches.remove(&p);
+        }
+    }
+
     /// Removes the block entity at `p`, returning its contents.
     pub fn remove(&mut self, p: IVec3) -> Vec<Stack> {
         let mut out = Vec::new();

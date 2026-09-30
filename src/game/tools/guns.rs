@@ -674,7 +674,8 @@ impl Game {
         }
         // The others see the shot too.
         let shot = crate::net::Msg::Shot {
-            id: crate::game::multi::HOST_ID,
+            // (the server puts in who shot)
+            id: 0,
             kind: kind as u8,
             mods,
             eye,
