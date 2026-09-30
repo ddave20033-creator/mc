@@ -42,19 +42,25 @@ fn join(conn: &Conn) -> Vec<Msg> {
 #[test]
 fn a_block_placed_stays_after_the_world_is_left_and_played_again() {
     let meta = scratch_world("place");
-    let at = IVec3::new(3, 90, 3);
+    let at = IVec3::new(3, 150, 3);
     {
         let (mut local, conn) = start(meta.clone());
         let hello = join(&conn);
         assert!(hello.iter().any(|m| matches!(m, Msg::Welcome { seed: 4242, .. })));
         // Standing next to where it goes (a player may only place within reach).
-        let pose = Pose { pos: Vec3::new(3.5, 88.0, 5.5), ..Default::default() };
+        let pose = Pose { pos: Vec3::new(3.5, 148.0, 5.5), held: GLOWSTONE, ..Default::default() };
         conn.send(&Msg::Pose(pose));
-        // (the chunks around the player load first)
-        std::thread::sleep(Duration::from_millis(1500));
-        conn.send(&Msg::Place { p: at, b: GLOWSTONE });
-        let back = wait_for(&conn, |m| matches!(m, Msg::Blocks(list) if list.contains(&(at, GLOWSTONE))));
-        assert!(!back.is_empty());
+        // (asked again until the chunks around the player have loaded and it is placed)
+        let start = Instant::now();
+        let mut placed = false;
+        while !placed && start.elapsed() < Duration::from_secs(30) {
+            conn.send(&Msg::Place { p: at, b: GLOWSTONE });
+            std::thread::sleep(Duration::from_millis(200));
+            let (msgs, open) = conn.poll();
+            assert!(open, "the server closed the connection");
+            placed = msgs.iter().any(|m| matches!(m, Msg::Blocks(list) if list.contains(&(at, GLOWSTONE))));
+        }
+        assert!(placed, "the block was placed");
         conn.send(&Msg::Save(crate::net::PlayerState {
             pos: pose.pos,
             yaw: 0.0,

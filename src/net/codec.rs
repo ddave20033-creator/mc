@@ -13,7 +13,7 @@ use glam::{IVec3, Vec3};
 // message (or the connection, for a frame) is refused rather than allocated.
 
 /// Largest frame read from a connection, in bytes.
-pub(super) const MAX_FRAME: usize = 64 << 20;
+pub(super) const MAX_FRAME: usize = 16 << 20;
 /// Most slots in one list of slots (a container or an inventory).
 const MAX_SLOTS: usize = 1024;
 /// Most entries in any other list (blocks, poses, mobs, items, bench items).
@@ -41,8 +41,10 @@ impl W {
     fn i32(&mut self, v: i32) {
         self.0.extend(v.to_le_bytes());
     }
+    /// (a value that is not a number, or infinite, goes as 0: the other end would refuse the
+    /// whole message)
     fn f32(&mut self, v: f32) {
-        self.0.extend(v.to_le_bytes());
+        self.0.extend(if v.is_finite() { v } else { 0.0 }.to_le_bytes());
     }
     fn bool(&mut self, v: bool) {
         self.u8(v as u8);

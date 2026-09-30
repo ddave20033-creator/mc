@@ -45,10 +45,6 @@ impl Server {
         if self.meta.folder.is_empty() {
             return;
         }
-        // (a tree still going over lands at once: its drops are not lost with it)
-        for t in std::mem::take(&mut self.level.falling_trees) {
-            self.land_now(t);
-        }
         self.save_players();
         let meta = &mut self.meta;
         meta.last_played = save::now_secs();

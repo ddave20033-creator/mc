@@ -230,7 +230,7 @@ impl Server {
             return;
         }
         let _ = std::fs::create_dir_all(self.players_dir());
-        let _ = std::fs::write(self.player_file(name), Msg::Save(state.clone()).encode());
+        crate::save::write(self.player_file(name), &Msg::Save(state.clone()).encode());
     }
 
     /// A player said hello: they get the world (its edited chunks, what lies on its tables...)
@@ -381,8 +381,8 @@ impl Server {
             }
         }
         // The time, once a second.
-        let tick = (self.time / crate::sim::clock::TICK_SECS).round() as u64;
-        if tick % 20 == 0 {
+        self.synced += 1;
+        if self.synced % 20 == 0 {
             self.broadcast(&Msg::Time(self.time_of_day), None);
         }
         let players: Vec<(u8, Option<Pose>, Option<IVec3>)> =
@@ -431,7 +431,7 @@ impl Server {
             .collect();
         let falling: Vec<(Vec3, Block)> =
             self.level.falling.iter().filter(|f| f.pos.distance(at) < ITEM_RANGE).map(|f| (f.pos, f.block)).collect();
-        let now = self.time;
+        let now = self.time as f32;
         if let Some(peer) = self.peer(id) {
             if let Some(msg) = peer.entities.update(now, &mobs, &items, &falling) {
                 peer.conn.send(&msg);
@@ -558,7 +558,7 @@ impl Server {
     /// all): at once when something is put in, taken out, turned, done or burnt; the seconds
     /// ticking on (which the players count themselves) only every second.
     fn sync_furnaces(&mut self) {
-        let now = self.time;
+        let now = self.time as f32;
         let furnaces = &self.level.block_entities.furnaces;
         self.furnaces_sent.retain(|p, _| furnaces.contains_key(p));
         let mut send = Vec::new();

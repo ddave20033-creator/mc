@@ -15,7 +15,6 @@ impl Server {
     pub fn set_block(&mut self, p: IVec3, b: Block) {
         let old = self.world.geti(p);
         if self.world.seti(p, b) {
-            self.world.record_fluid_change(p, old, b, self.time);
             self.fluids.notify(&self.world, p);
             if is_stump_mark(b) && !is_stump_mark(old) {
                 self.stump_marks.entry(World::chunk_pos(p.x, p.z)).or_default().push(p);

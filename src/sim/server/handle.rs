@@ -38,19 +38,27 @@ impl Server {
                 if !known_item(pose.held) {
                     pose.held = crate::item::NONE;
                 }
+                // (inside the world's bounds: far out, positions stop being exact)
+                pose.pos = pose.pos.clamp(glam::Vec3::new(-3.0e7, -64.0, -3.0e7), glam::Vec3::new(3.0e7, 512.0, 3.0e7));
                 if let Some(p) = self.peer(id) {
                     p.pose = Some(pose);
                 }
             }
             Msg::Place { p, b } => {
-                if near_block(p) {
-                    self.place_world(p, valid(b));
+                if !self.world.is_loaded(p.x, p.z) {
+                    return;
+                }
+                if near_block(p) && may_place(self.world.geti(p), b, held) {
+                    self.place_world(p, b);
                 }
                 // The player guessed the result; make sure it matches.
                 let actual = self.world.geti(p);
                 self.send_to(id, &Msg::Blocks(vec![(p, actual)]));
             }
             Msg::Break { p, held, creative } => {
+                if !self.world.is_loaded(p.x, p.z) {
+                    return;
+                }
                 let b = self.world.geti(p);
                 if b != AIR && near_block(p) && known_item(held) {
                     // (mined as in creative, without drops, only by a player in creative)
@@ -64,9 +72,12 @@ impl Server {
             Msg::AttackMob { id: mob, dmg, knock } => {
                 let (melee, bullet) = self.damage_caps(id, held);
                 let Some((dmg, knock)) = checks::clamp_hit(dmg, knock, melee.max(bullet)) else { return };
-                if let Some(m) = self.level.mobs.iter_mut().find(|m| m.id == mob) {
-                    m.hurt(dmg, Some(from), knock);
-                    self.attacked(Foe::Mob(mob), id);
+                // (within reach of the hand, or of the bullets of their last shot)
+                let reach = if bullet > melee { 400.0 } else { 8.0 };
+                if let Some(m) = self.level.mobs.iter_mut().find(|m| m.id == mob && m.pos.distance(from) < reach) {
+                    if m.hurt(dmg, Some(from), knock) {
+                        self.attacked(Foe::Mob(mob), id);
+                    }
                 }
             }
             Msg::AttackPlayer { id: target, dmg, knock, kind } => {
@@ -95,18 +106,21 @@ impl Server {
                 }
             }
             Msg::UseOnMob { id: mob, item } => {
-                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob).filter(|_| known_item(item)) {
+                // (what they hold, near enough to reach)
+                let near = |m: &crate::entity::mob::Mob| m.pos.distance(from) < 8.0;
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob && near(m)).filter(|_| item == held) {
                     self.wolf_used(i, item, id);
                 }
             }
             Msg::BreakDummy { id: mob } => {
                 let creative = pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
-                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob && m.pos.distance(from) < 8.0) {
                     self.break_dummy(i, !creative);
                 }
             }
             Msg::Shear { id: mob } => {
-                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob) {
+                let near = |m: &crate::entity::mob::Mob| m.pos.distance(from) < 8.0;
+                if let Some(i) = self.level.mobs.iter().position(|m| m.id == mob && near(m)).filter(|_| held == crate::item::SHEARS) {
                     self.shear_mob(i);
                 }
             }
@@ -130,12 +144,15 @@ impl Server {
                 }
             }
             Msg::Shot { kind, mods, eye, seed, bullets, .. } => {
-                let Some(gun) = crate::item::GUN_KINDS.get(kind as usize) else { return };
+                // (the gun they hold)
+                let Some(gun) = crate::item::GUN_KINDS.get(kind as usize).filter(|g| crate::item::GunKind::of(held) == Some(**g)) else {
+                    return;
+                };
                 if !near_hand(eye) {
                     return;
                 }
                 // Its bullets may hit for a while (even after the gun is put away).
-                let (damage, until) = (gun.stats().damage, self.time + BULLET_TIME);
+                let (damage, until) = (gun.stats().damage, self.time as f32 + BULLET_TIME);
                 if let Some(p) = self.peer(id) {
                     p.shot_damage = (damage, until);
                 }
@@ -220,6 +237,10 @@ impl Server {
                 if let Some(p) = self.peer(id) {
                     p.paused = on;
                 }
+                // (the owner paused: a good moment to save)
+                if on && owner {
+                    self.save_all();
+                }
             }
             Msg::Skin { png, .. } => {
                 if id < crate::world::textures::tex::CUSTOM_SKIN_SLOTS && crate::world::textures::decode_skin_png(&png).is_ok() {
@@ -234,7 +255,7 @@ impl Server {
     /// The most damage player `id` can deal now: with what they hold (a critical hit, a
     /// bullet of the gun) or with the bullets of their last shot (`melee`, `bullet`).
     fn damage_caps(&mut self, id: u8, held: crate::item::ItemId) -> (f32, f32) {
-        let now = self.time;
+        let now = self.time as f32;
         let shot = self.peer(id).map_or(0.0, |p| if now <= p.shot_damage.1 { p.shot_damage.0 } else { 0.0 });
         (checks::melee_cap(held), checks::gun_cap(held).max(shot))
     }
@@ -309,7 +330,9 @@ impl Server {
             }
             _ => Err(t("cmd.unknown").to_string()),
         };
-        self.broadcast(&Msg::Time(self.time_of_day), None);
+        if answer.is_ok() {
+            self.broadcast(&Msg::Time(self.time_of_day), None);
+        }
         let (text, color) = match answer {
             Ok(text) => (text, WHITE),
             Err(text) => (text, RED),
@@ -329,4 +352,22 @@ fn parse_time(v: &str) -> Option<f32> {
         "sunrise" => 23000.0,
         _ => v.parse::<f32>().ok()?,
     })
+}
+
+/// Whether a player holding `held` may put `b` where `current` is: over something replaceable
+/// (never over a block with things in it), a block of what they hold (a door's, bed's or big
+/// furnace's other part too), a bucket's fluid; or a door opened or closed, a bucket scooping
+/// up a fluid, and the old one-block gun station turned into the two-block one.
+fn may_place(current: Block, b: Block, held: crate::item::ItemId) -> bool {
+    use crate::item::{item_of_block, BUCKET};
+    if is_door(current) && base(current) == base(b) {
+        return true;
+    }
+    if b == AIR {
+        return held == BUCKET && is_fluid(current);
+    }
+    if is_gun_bench(b) {
+        return current == GUN_STATION || is_replaceable(current);
+    }
+    is_replaceable(current) && item_of_block(b) == Some(held)
 }

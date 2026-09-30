@@ -111,11 +111,13 @@ impl Local {
     /// Saves and stops the server, waiting (up to 20 s) until it has.
     pub fn stop(&mut self) {
         let (tx, rx) = channel();
-        if self.control.send(Control::Stop(tx)).is_ok() {
-            let _ = rx.recv_timeout(Duration::from_secs(20));
-        }
+        let stopped = self.control.send(Control::Stop(tx)).is_ok() && rx.recv_timeout(Duration::from_secs(20)).is_ok();
+        // (a server that did not answer in time is left to finish on its own, not waited on
+        // forever; one that is gone already is joined at once)
         if let Some(t) = self.thread.take() {
-            let _ = t.join();
+            if stopped || t.is_finished() {
+                let _ = t.join();
+            }
         }
     }
 }
@@ -136,10 +138,31 @@ pub fn start(meta: WorldMeta) -> (Local, Conn) {
         .spawn(move || {
             let mut server = Server::load(meta);
             server.add_owner(server_end);
-            server.run(controls);
+            // (an error in the world's rules stops the world, but not before it is saved and
+            // everyone is told)
+            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(controls)));
+            if ran.is_err() {
+                server.crashed();
+            }
         })
         .expect("start the server");
     (Local { control, thread: Some(thread) }, game_end)
+}
+
+impl Server {
+    /// After a panic: everyone is told, and what can be saved is.
+    fn crashed(&mut self) {
+        for p in &self.peers {
+            p.conn.send(&Msg::Refuse(crate::lang::t("server.crashed").to_string()));
+        }
+        let saved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.save_all();
+            self.saver.wait();
+        }));
+        if saved.is_err() {
+            eprintln!("the world could not be saved after the error");
+        }
+    }
 }
 
 pub(crate) struct Server {
@@ -153,9 +176,12 @@ pub(crate) struct Server {
     grenades: Vec<crate::sim::grenade::Grenade>,
     /// Stump marks in each loaded chunk (found when it loads, and as they are made).
     pub stump_marks: FastMap<ChunkPos, Vec<IVec3>>,
-    /// Seconds the server has run (its ticks), the time of day (0..1), and how long all the
-    /// players have been asleep.
-    pub time: f32,
+    /// Ticks the world has run and seconds it has run (they stop while it stands still), the
+    /// ticks the players have been told what changed, the time of day (0..1), and how long all
+    /// the players have been asleep.
+    pub ticks: u64,
+    pub time: f64,
+    synced: u64,
     pub time_of_day: f32,
     pub asleep_for: f32,
     pub spawn: (i32, i32),
@@ -191,7 +217,9 @@ impl Server {
             level: Level::new(),
             grenades: Vec::new(),
             stump_marks: FastMap::default(),
+            ticks: 0,
             time: 0.0,
+            synced: 0,
             time_of_day: meta.time_of_day,
             asleep_for: 0.0,
             spawn,
@@ -223,7 +251,17 @@ impl Server {
             }
             self.accept();
             self.receive();
-            if self.stop.is_some() || self.owner_left() {
+            if self.owner_left() {
+                break;
+            }
+            if self.stop.is_some() {
+                // (the owner's last state, sent as they left, may still be on its way: until
+                // their connection is closed, or a moment at most)
+                let until = Instant::now() + Duration::from_secs(2);
+                while !self.owner_left() && Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(5));
+                    self.receive();
+                }
                 break;
             }
             let due = clock.due(Instant::now());
@@ -234,6 +272,14 @@ impl Server {
                 self.sync();
             }
             std::thread::sleep(Duration::from_millis(2));
+        }
+        // (a tree still going over lands at once: its drops are not lost with it)
+        for t in std::mem::take(&mut self.level.falling_trees) {
+            self.land_now(t);
+        }
+        // Anyone else still in is told the world closed.
+        for p in self.peers.iter().filter(|p| !p.owner && p.joined) {
+            p.conn.send(&Msg::Refuse(crate::lang::t("lan.host_left").to_string()));
         }
         self.save_all();
         self.saver.wait();
@@ -268,7 +314,8 @@ impl Server {
     /// A tick of the world.
     fn tick(&mut self) {
         let dt = TICK_SECS;
-        self.time += dt;
+        self.ticks += 1;
+        self.time = self.ticks as f64 * TICK_SECS as f64;
         let centers: Vec<ChunkPos> = self
             .peers
             .iter()
@@ -280,14 +327,13 @@ impl Server {
 
         // Fluids
         let mut changed = Vec::new();
-        self.fluids.update(dt, self.time, &mut self.world, &mut changed);
+        self.fluids.update(dt, self.time as f32, &mut self.world, &mut changed);
         for (p, b) in std::mem::take(&mut self.fluids.broken) {
             let r = self.random();
             for s in crate::item::drops(b, crate::item::NONE, r) {
                 self.spawn_drop(p.as_vec3() + Vec3::splat(0.5), s);
             }
         }
-        self.world.prune_fluid_changes(self.time);
 
         self.update_furnaces(dt);
         self.grow_saplings(dt);

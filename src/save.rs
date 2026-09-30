@@ -66,7 +66,8 @@ pub fn take_save_error() -> Option<String> {
 
 /// Writes a file atomically: into a temp file, on the disk (not only in its cache, so a crash
 /// or a power cut does not leave it empty), then renamed over the old one.
-fn write(path: PathBuf, data: &[u8]) {
+/// Writes a file whole or not at all (a new file, then renamed over the old one).
+pub fn write(path: PathBuf, data: &[u8]) {
     let tmp = path.with_extension("tmp");
     let result = (|| {
         let mut f = fs::File::create(&tmp)?;

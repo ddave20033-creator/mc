@@ -69,14 +69,20 @@ fn read_frame(s: &mut TcpStream) -> io::Result<Vec<u8>> {
             "frame too large",
         ));
     }
-    let mut buf = vec![0; len];
-    s.read_exact(&mut buf)?;
+    // (read as it comes, not allocated whole up front on a length alone)
+    let mut buf = Vec::new();
+    Read::by_ref(s).take(len as u64).read_to_end(&mut buf)?;
+    if buf.len() < len {
+        return Err(io::ErrorKind::UnexpectedEof.into());
+    }
     Ok(buf)
 }
 
 impl Conn {
     pub fn new(stream: TcpStream) -> io::Result<Conn> {
         stream.set_nodelay(true)?;
+        // Nothing heard for this long, the other end is gone (players send many times a second).
+        stream.set_read_timeout(Some(SILENT_LIMIT))?;
         // Unable to send for this long, the other end is gone or stuck (the writer thread ends
         // instead of waiting forever, and the game sees the connection closed).
         stream.set_write_timeout(Some(SILENT_LIMIT))?;
@@ -89,14 +95,12 @@ impl Conn {
         std::thread::Builder::new()
             .name("net-read".into())
             .spawn(move || {
+                // (a message that does not decode is left out; the frames go on)
                 while let Ok(frame) = read_frame(&mut reader) {
-                    match Msg::decode(&frame) {
-                        Some(m) => {
-                            if in_tx.send(m).is_err() {
-                                break;
-                            }
+                    if let Some(m) = Msg::decode(&frame) {
+                        if in_tx.send(m).is_err() {
+                            break;
                         }
-                        None => break,
                     }
                 }
                 flag.store(true, Ordering::Release);
@@ -169,7 +173,8 @@ impl Conn {
         // dropped), both ends count the connection as closed.
         let forward = |from: Receiver<Out>, to: Sender<Msg>, closed: [Arc<AtomicBool>; 2]| {
             move || {
-                let deliver = |f: &Frame| Msg::decode(&f.0[4..]).is_some_and(|m| to.send(m).is_ok());
+                // (a message that does not decode is left out)
+                let deliver = |f: &Frame| Msg::decode(&f.0[4..]).is_none_or(|m| to.send(m).is_ok());
                 'outer: for out in from.iter() {
                     match out {
                         Out::Frame(f) => {

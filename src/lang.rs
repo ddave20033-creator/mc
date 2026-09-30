@@ -301,6 +301,11 @@ const TABLE: &[(&str, &str, &str)] = &[
         "A gazda bezárta a világot",
     ),
     (
+        "server.crashed",
+        "The world stopped because of an error (it was saved)",
+        "A világ egy hiba miatt leállt (el lett mentve)",
+    ),
+    (
         "lan.bad_version",
         "The host runs a different game version",
         "A gazdánál más játékverzió fut",
