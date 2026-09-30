@@ -1,5 +1,6 @@
-//! Block rules: placing and breaking (with drops and block entities), double chests,
-//! support for plants and torches, falling sand and gravel, and growing trees.
+//! Blocks changed here: set in this game's copy of the world, and placing and breaking as
+//! this player does it, shown at once (the other blocks that go with it too, `sim::rules`)
+//! and sent to the server, which has the last word.
 
 use crate::game::*;
 use crate::item::inventory::{self};
@@ -21,7 +22,7 @@ impl Game {
         if self.terrain.world.seti(p, b) {
             // (a cut trunk gone or changed took its cut with it: `World::set`)
             self.terrain.world.record_fluid_change(p, old, b, self.time);
-            // Fluids flow on the host only.
+            // (fluids flow on the server: it sends what they do)
             self.terrain.block_changed(p, true);
         }
     }
@@ -36,30 +37,14 @@ impl Game {
         self.add_item(ItemEntity::new(center, vel, stack, 0.4));
     }
 
-    /// A double chest half placed at `at` turns the single chest it pairs with (facing the
-    /// same way) into the other half. Without one it becomes a single chest.
+    /// A double chest half placed at `at` turns the single chest it pairs with into the other
+    /// half (`rules::chest_join`); what goes at `at`.
     pub(in crate::game) fn join_chest(&mut self, at: IVec3, b: Block) -> Block {
-        let (Some(d), Some(f), Some(other)) =
-            (chest_partner_offset(b), facing(b), chest_other_half(b))
-        else {
-            return b;
-        };
-        if self.terrain.world.geti(at + d) != chest_id(f, 0) {
-            return chest_id(f, 0);
+        let (b, other) = crate::sim::rules::chest_join(&self.terrain.world, at, b);
+        if let Some((q, ob)) = other {
+            self.set_block(q, ob);
         }
-        self.set_block(at + d, other);
         b
-    }
-
-    /// A double chest half is going away: the other half becomes a single chest.
-    pub(in crate::game) fn split_chest(&mut self, p: IVec3, b: Block) {
-        let Some(d) = chest_partner_offset(b) else {
-            return;
-        };
-        let q = self.terrain.world.geti(p + d);
-        if chest_partner_offset(q) == Some(-d) {
-            self.set_block(p + d, chest_id(facing(q).unwrap_or(0), 0));
-        }
     }
 
     /// A chest's halves in inventory order (the left one seen from the front first), and
@@ -94,8 +79,9 @@ impl Game {
         chest_id(facing, 0)
     }
 
-    /// Changes a block for this player: in single player and on the host with the world's
-    /// rules; a LAN player shows it right away and lets the host do the rest.
+    /// Changes a block for this player: shown right away (a chest joining the one beside it
+    /// too), and sent to the server, which does it with the world's rules and puts right
+    /// what was guessed wrong.
     pub(in crate::game) fn edit_block(&mut self, at: IVec3, b: Block) {
         let b = self.join_chest(at, b);
         self.set_block(at, b);
@@ -109,7 +95,6 @@ impl Game {
         let creative = self.creative();
         let tint = self.block_tint(p, b);
         let replacement = crate::sim::rules::left_after_mining(&self.terrain.world, p, b, creative);
-        self.split_chest(p, b);
         self.remove_other_half(p, b);
         self.set_block(p, replacement);
         self.send(crate::net::Msg::Break { p, held, creative });
@@ -129,50 +114,15 @@ impl Game {
         self.action_cooldown = if creative { 0.2 } else { 0.15 };
     }
 
-    /// A door or bed half is going away: the other half goes with it (without a second drop).
-    /// So do the other blocks of a big furnace; what was in it is returned.
-    pub(in crate::game) fn remove_other_half(&mut self, p: IVec3, b: Block) -> Vec<Stack> {
-        if let (Some(base), Some(f)) = (furnace_base(b).filter(|&k| k != FURNACE), facing(b)) {
-            let origin = furnace_origin(p, b);
-            let contents = if origin != p {
-                self.level.block_entities.remove(origin)
-            } else {
-                Vec::new()
-            };
-            for (o, _) in furnace_cells(base, f, false) {
-                let q = origin + o;
-                if q != p && furnace_base(self.terrain.world.geti(q)) == Some(base) {
-                    self.set_block(q, AIR);
-                }
-            }
-            return contents;
+    /// The block `b` at `p` is going away: the blocks that belong with it follow
+    /// (`rules::other_cells`; a big furnace's or gun station's things with them).
+    pub(in crate::game) fn remove_other_half(&mut self, p: IVec3, b: Block) {
+        if let Some(q) = crate::sim::rules::contents_elsewhere(&self.terrain.world, p, b) {
+            self.level.block_entities.remove(q);
         }
-        if is_gun_bench(b) {
-            // Its other blocks go too; what lay on the table (kept by its left block) drops.
-            let w = &self.terrain.world;
-            let Some(main) = bench_main(p, b, |q| w.geti(q)) else { return Vec::new() };
-            // (the left block's id says how wide it is; it is gone already when it was broken)
-            let main_b = if main == p { b } else { w.geti(main) };
-            let contents = if main != p { self.level.block_entities.remove(main) } else { Vec::new() };
-            for q in bench_cells(main, main_b) {
-                if q != p && is_gun_bench(self.terrain.world.geti(q)) {
-                    self.set_block(q, AIR);
-                }
-            }
-            return contents;
+        for (q, nb) in crate::sim::rules::other_cells(&self.terrain.world, p, b) {
+            self.set_block(q, nb);
         }
-        let q = if is_door(b) {
-            p + door_other_half(b)
-        } else if is_bed(b) {
-            p + bed_other_half(b)
-        } else {
-            return Vec::new();
-        };
-        let other = self.terrain.world.geti(q);
-        if (is_door(b) && is_door(other)) || (is_bed(b) && is_bed(other)) {
-            self.set_block(q, AIR);
-        }
-        Vec::new()
     }
 
 }

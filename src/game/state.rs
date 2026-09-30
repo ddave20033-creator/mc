@@ -3,20 +3,17 @@
 
 use super::*;
 
-/// What is in the world being played besides its blocks: dropped items, falling blocks and
-/// trees, lying trunks, mobs, saplings, block entities and the animations of things in it.
-/// Made anew for every world loaded, so nothing of the last one comes along.
+/// What is in the world being played besides its blocks, as the server sent it: dropped
+/// items, falling blocks and trees, lying trunks, mobs, block entities; and the animations of
+/// things in it. Made anew for every world joined, so nothing of the last one comes along.
 pub(super) struct Level {
     pub(super) items: Vec<ItemEntity>,
     pub(super) falling: Vec<FallingBlock>,
     /// Trees felled with an axe, falling over.
     pub(super) falling_trees: Vec<crate::sim::felling::FallingTree>,
-    /// The trunks of felled trees lying on the ground, the last one's id, the one aimed at
-    /// with an axe, and the one (and where) the swing going on will cut.
+    /// The trunks of felled trees lying on the ground.
     pub(super) lying_logs: Vec<crate::sim::felling::LyingLog>,
-    pub(super) next_log_id: u32,
     pub(super) mobs: Vec<Mob>,
-    pub(super) saplings: Vec<(IVec3, f32)>,
     pub(super) block_entities: BlockEntities,
     /// Chest lid animation 0..1 per chest position.
     pub(super) chest_open: crate::world::FastMap<IVec3, f32>,
@@ -41,9 +38,7 @@ impl Level {
             falling: Vec::new(),
             falling_trees: Vec::new(),
             lying_logs: Vec::new(),
-            next_log_id: 0,
             mobs: Vec::new(),
-            saplings: Vec::new(),
             block_entities: BlockEntities::default(),
             chest_open: Default::default(),
             door_swing: Default::default(),

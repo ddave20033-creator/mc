@@ -60,8 +60,6 @@ const TRIES: u8 = 3;
 pub enum TerrainEvent {
     Mesh(MeshData),
     Unload(ChunkPos),
-    /// An edited chunk came back from memory/disk (its fluids may still need to flow).
-    Restored(ChunkPos),
 }
 
 impl Terrain {
@@ -102,16 +100,13 @@ impl Terrain {
         self.settled = None;
     }
 
-    /// Puts chunk `p` into the world (generated, or `restored`: an edited copy back from
-    /// memory, whose fluids may still need to flow). Every way a chunk comes in goes through
+    /// Puts chunk `p` into the world (generated, or an edited copy back from memory, the
+    /// server's). Every way a chunk comes in goes through
     /// here: the changes waiting for it are applied, and it and the chunks round it are meshed
     /// again (its blocks change their borders and their light).
-    fn insert_chunk(&mut self, p: ChunkPos, data: Arc<ChunkData>, restored: bool, out: &mut Vec<TerrainEvent>) {
+    fn insert_chunk(&mut self, p: ChunkPos, data: Arc<ChunkData>) {
         self.world.chunks.insert(p, data);
         self.world.apply_pending(p);
-        if restored {
-            out.push(TerrainEvent::Restored(p));
-        }
         for dz in -1..=1 {
             for dx in -1..=1 {
                 let q = (p.0 + dx, p.1 + dz);
@@ -177,8 +172,8 @@ impl Terrain {
                         // An edited copy (LAN: sent by the host meanwhile) wins over the
                         // generated one.
                         match self.world.saved.remove(&p) {
-                            Some(c) => self.insert_chunk(p, c, true, out),
-                            None => self.insert_chunk(p, Arc::new(*data), false, out),
+                            Some(c) => self.insert_chunk(p, c),
+                            None => self.insert_chunk(p, Arc::new(*data)),
                         }
                     }
                 }
@@ -189,7 +184,7 @@ impl Terrain {
                     if self.give_up(p) && wanted && !self.world.chunks.contains_key(&p) {
                         // (before that it is generated again: the walk round asks for it)
                         eprintln!("chunk {p:?} could not be generated: left empty");
-                        self.insert_chunk(p, Arc::new(ChunkData::new()), false, out);
+                        self.insert_chunk(p, Arc::new(ChunkData::new()));
                     }
                 }
                 Done::Failed(p, Some(ticket)) => {
@@ -278,7 +273,7 @@ impl Terrain {
             }
             if !self.world.chunks.contains_key(&p) && !self.generating.contains(&p) {
                 if let Some(c) = self.world.saved.remove(&p) {
-                    self.insert_chunk(p, c, true, out);
+                    self.insert_chunk(p, c);
                 } else if self.in_flight < cap {
                     self.workers.submit(Job::Generate(p));
                     self.generating.insert(p);
@@ -322,7 +317,7 @@ impl Terrain {
                     continue;
                 }
                 if let Some(data) = self.world.saved.remove(&p) {
-                    self.insert_chunk(p, data, true, out);
+                    self.insert_chunk(p, data);
                 } else if self.in_flight < cap {
                     self.workers.submit(Job::Generate(p));
                     self.generating.insert(p);

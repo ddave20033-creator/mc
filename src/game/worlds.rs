@@ -237,7 +237,6 @@ impl Game {
         let bw = ((fw - 6.0 * s) * 0.5).floor();
         let (fx, by) = ((px + 14.0 * s).round(), (py + ph - 32.0 * s).round());
         if self.ui.button_ex(t("worlds.delete"), fx, by, bw, 22.0 * s, true, ButtonKind::Danger) {
-            self.saver.wait();
             save::delete_world(&self.menus.worlds[i].folder);
             self.open_world_list();
         }
@@ -249,58 +248,25 @@ impl Game {
 
     // ---------------- loading ----------------
 
-    pub(super) fn load_world(&mut self, meta: WorldMeta) {
-        // The previous world may still be writing its chunks (possibly this same world).
-        self.saver.wait();
-        self.renderer.clear_chunks();
-        self.terrain = Terrain::new(meta.seed);
-        for (pos, c) in save::load_chunks(&meta.folder) {
-            self.terrain.world.saved.insert(pos, Arc::new(c));
-            self.terrain.world.modified.insert(pos);
-        }
-        self.fluids = Fluids::new();
-        self.spawn = meta.spawn.unwrap_or_else(|| self.terrain.gen.find_spawn());
-        self.bed_spawn = meta.bed;
+    /// Everything of the world played and of the player in it goes (its things, mobs and
+    /// animations, the player's state and inventory, the other players), all at once: on
+    /// leaving it, and again before the next one's comes (`begin_remote_world`).
+    pub(super) fn forget_world(&mut self) {
+        self.world_meta = None;
+        self.pending_player = None;
+        self.bed_spawn = None;
         self.sleep = None;
-        self.asleep_for = 0.0;
-        self.pano = Self::panorama_pos(&self.terrain, self.spawn);
         self.inventory = Inventory::new();
-        // The inventory, then what is worn.
-        let mut all = [None; crate::item::inventory::SIZE + crate::item::ARMOR_SLOTS];
-        save::load_inventory(&meta.folder, &mut all);
-        let (carried, worn) = all.split_at(crate::item::inventory::SIZE);
-        self.inventory.slots.copy_from_slice(carried);
-        self.inventory.armor.copy_from_slice(worn);
-        // Everything in the last world goes (its things, mobs, animations), all at once.
         self.level = Level::new();
         self.mob_target = None;
-        save::load_entities(
-            &meta.folder,
-            &mut self.level.block_entities,
-            &mut self.level.saplings,
-            &mut self.level.items,
-            &mut self.level.mobs,
-        );
-        // Ids are not saved: every loaded mob and item gets a fresh one (hits, bites and LAN
-        // updates find them by it).
-        for i in 0..self.level.mobs.len() {
-            self.level.mobs[i].id = self.entity_id();
-        }
-        for i in 0..self.level.items.len() {
-            self.level.items[i].id = self.entity_id();
-        }
-        // The cuts in its trunks; nothing of the last world's felling.
-        save::apply_notches(&mut self.terrain.world, &save::load_notches(&meta.folder));
         self.chop = None;
         self.struck = None;
-        self.level.lying_logs = crate::sim::felling::parse_logs(&save::load_logs(&meta.folder));
-        self.level.next_log_id = self.level.lying_logs.len() as u32;
         self.log_aim = None;
         self.log_cut = None;
         self.cursor = None;
         self.craft = [None; 9];
         // Nothing of the last world's shots, grenades, fishing or effects comes along (a grenade
-        // thrown just before leaving would blow up here).
+        // thrown just before leaving would blow up in the next).
         self.guns = Default::default();
         self.grenades = Default::default();
         self.fishing = Default::default();
@@ -321,17 +287,7 @@ impl Game {
         self.air = MAX_AIR;
         self.invuln = 0.0;
         self.spectating = None;
-        self.game_mode = if meta.spectator {
-            GameMode::Spectator
-        } else if meta.creative {
-            GameMode::Creative
-        } else {
-            GameMode::Survival
-        };
-        self.cheats = meta.cheats;
-        self.time_of_day = meta.time_of_day;
         self.player = Player::default();
-        self.pending_player = meta.player.clone();
         self.health = MAX_HEALTH;
         self.needs = Needs::new();
         self.using = None;
@@ -340,8 +296,13 @@ impl Game {
         self.chat = Chat::new();
         self.camera = Default::default();
         self.autosave = AUTOSAVE_SECONDS;
-        self.world_meta = Some(meta);
-        self.screen = Screen::Loading;
+        // The other players, and their skins (this player's own in the first slot again).
+        self.remotes.clear();
+        self.custom_skins.retain(|&id, _| id == 0);
+        self.skin_pngs.retain(|&id, _| id == 0);
+        if let Some(png) = self.local_skin_png.clone() {
+            let _ = self.set_skin_png(0, png);
+        }
     }
 
     /// Where the world is being loaded around (saved player position or spawn).

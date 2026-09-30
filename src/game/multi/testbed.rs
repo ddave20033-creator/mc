@@ -60,7 +60,7 @@ impl Game {
         let mut out = Vec::new();
         let (mobs, items) = (self.level.mobs.len(), self.level.items.len());
         match &self.net {
-            Some(Net::Client(_)) => {
+            Some(_) => {
                 let w = &self.terrain.world;
                 let pending: usize = w.pending.values().map(|v| v.len()).sum();
                 out.push(format!(

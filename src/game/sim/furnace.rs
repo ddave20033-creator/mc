@@ -111,7 +111,7 @@ impl Game {
         if r.used > 0 && !self.creative() {
             inventory::take(&mut self.inventory.slots[slot], r.used);
         }
-        // The host does it for real and sends back what comes out.
+        // The server does it for real and sends back what comes out.
         let offered = held
             .filter(|_| r.used > 0)
             .map(|h| Stack { count: r.used, ..h });
@@ -138,6 +138,11 @@ impl Game {
             if at.distance_squared(near) > 24.0 * 24.0 {
                 continue;
             }
+            // (a furnace broken here, the server not having said so yet: quiet)
+            let b = self.terrain.world.geti(*p);
+            if !is_furnace(b) {
+                continue;
+            }
             let made = f.output.map_or(0, |s| s.count as u32);
             let before = self.level.furnace_heard.insert(*p, made);
             if before.is_some_and(|b| made > b) {
@@ -147,7 +152,7 @@ impl Game {
                 continue;
             }
             let id = (p.x as u64 & 0xfffff) << 40 | (p.y as u64 & 0xfffff) << 20 | (p.z as u64 & 0xfffff);
-            let sound = match furnace_base(self.terrain.world.geti(*p)) {
+            let sound = match furnace_base(b) {
                 Some(FURNACE) | None => Sound::FireCrackle,
                 Some(_) => Sound::BlastRoar,
             };
@@ -169,7 +174,7 @@ impl Game {
                 f.tier = furnace_tier(self.terrain.world.geti(*p));
             }
         }
-        // Between the host's updates (every second, or when something changes) the
+        // Between the server's updates (every second, or when something changes) the
         // furnaces go on here as they do there: flips turn, fuel burns, meat cooks on
         // the side on the fire, smelting goes on.
         for f in self.level.block_entities.furnaces.values_mut() {
@@ -201,6 +206,9 @@ impl Game {
             let heating = f.input.is_some_and(|i| f.smelts(i.item).is_some())
                 && (0.3..0.7).contains(&(f.cook / f.smelt_time()));
             let b = self.terrain.world.geti(*p);
+            if !is_furnace(b) {
+                continue;
+            }
             // Smoke out of a blast furnace's chimney, and the vents on an advanced furnace.
             match (furnace_base(b), facing(b)) {
                 (Some(BLAST_FURNACE), _) if is_chimney(self.terrain.world.geti(*p + IVec3::Y)) => {

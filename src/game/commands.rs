@@ -4,18 +4,6 @@ use super::*;
 use crate::item::{from_key, key, max_stack, Stack};
 use crate::lang::tf;
 
-fn parse_time(v: &str) -> Option<f32> {
-    Some(match v {
-        "day" => 1000.0,
-        "noon" => 6000.0,
-        "sunset" => 12000.0,
-        "night" => 13000.0,
-        "midnight" => 18000.0,
-        "sunrise" => 23000.0,
-        _ => v.parse::<f32>().ok()?,
-    })
-}
-
 /// "x y z" relative to `here` where written with `~` ("~" alone, or "~2"); missing
 /// coordinates stay at `here`.
 fn parse_pos(args: &[&str], here: Vec3) -> Option<Vec3> {
@@ -37,8 +25,8 @@ impl Game {
             return;
         };
         let args: Vec<&str> = cmd.split_whitespace().collect();
-        // LAN player: the time belongs to the host's world.
-        if self.is_client() && args.first() == Some(&"time") && self.cheats {
+        // The time is the world's: its server sets it (and answers).
+        if args.first() == Some(&"time") && self.cheats {
             self.send(crate::net::Msg::Command(line.to_string()));
             return;
         }
@@ -58,24 +46,6 @@ impl Game {
                         self.say(*usage, chat::GRAY);
                     }
                 }
-            }
-            ["time", "set", v] => match parse_time(v) {
-                Some(ticks) => {
-                    self.time_of_day = (ticks / 24000.0).rem_euclid(1.0);
-                    self.say(tf("cmd.time_set", &[&(ticks as i32)]), chat::WHITE);
-                }
-                None => self.say(tf("cmd.bad_time", &[v]), chat::RED),
-            },
-            ["time", "add", v] => match v.parse::<f32>() {
-                Ok(ticks) => {
-                    self.time_of_day = (self.time_of_day + ticks / 24000.0).rem_euclid(1.0);
-                    self.say(tf("cmd.time_add", &[&(ticks as i32)]), chat::WHITE);
-                }
-                Err(_) => self.say(tf("cmd.bad_number", &[v]), chat::RED),
-            },
-            ["time"] | ["time", "query", ..] => {
-                let ticks = (self.time_of_day * 24000.0).round() as i32;
-                self.say(tf("cmd.time_query", &[&ticks]), chat::WHITE);
             }
             ["gamemode" | "gm", m] => {
                 let mode = match *m {

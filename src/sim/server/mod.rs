@@ -28,7 +28,6 @@ use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
 use crate::net::{Conn, Msg};
 use crate::save::{ChunkSaver, WorldMeta};
 use crate::sim::clock::{Clock, TICK_SECS};
-use crate::sim::DAY_LENGTH;
 use crate::util::Rng;
 use crate::world::fluid::Fluids;
 use crate::world::gen::Generator;
@@ -346,7 +345,7 @@ impl Server {
         self.update_falling(dt);
         self.update_grenades(dt);
 
-        self.time_of_day = (self.time_of_day + dt / DAY_LENGTH).fract();
+        self.time_of_day = crate::sim::advance_time(self.time_of_day, dt);
         self.update_sleepers(dt);
         self.autosave -= dt;
         if self.autosave <= 0.0 {

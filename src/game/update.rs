@@ -1,7 +1,8 @@
-//! The player and the world moving on: in ticks (`tick_player`, `tick_world`: movement,
-//! health, fluids, furnaces, saplings, dropped items, mobs, falling blocks, time of day and
-//! autosave), and in frames (`update_player`, `update_world`: looking, aiming, what the hands
-//! do, chest lids, shots, particles and sounds).
+//! The player and what is seen of the world moving on: the player in ticks (`tick_player`:
+//! movement, health, hunger and thirst) and in frames (`update_player`: looking, aiming, what
+//! the hands do), and the world in frames (`update_world`: chest lids, shots, grenades,
+//! furnaces, particles and sounds, and the things the server sent gliding on between its
+//! updates). The world itself runs on the server (`sim::server`).
 
 use super::*;
 use crate::entity::player::{raycast, MoveInput};
@@ -307,7 +308,7 @@ impl Game {
     }
 
     /// The world's frame: chest lids, shots and grenades flying, furnace glow and sounds, torch
-    /// fire (and a LAN player's copy of the host's world following it).
+    /// fire, and this game's copy of the server's world following it.
     pub(super) fn update_world(&mut self, dt: f32) {
         // Chest lids: open chests (this player's and the other LAN players') swing up, the
         // others fall shut.
@@ -337,7 +338,7 @@ impl Game {
         loops.extend(self.grenade_sounds());
         loops.extend(self.fishing_sounds());
         self.audio.set_loops(&loops);
-        // A LAN player's world is run by the host: only follow what it sends.
+        // The world is run by the server: only follow what it sends.
         self.client_world(dt);
         if self.torch_particles {
             self.torch_fire(dt);

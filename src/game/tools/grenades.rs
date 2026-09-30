@@ -6,8 +6,8 @@
 //! bounce and roll. After its fuse a frag grenade explodes, hurting everything around (less behind
 //! cover) and blowing blocks away; a smoke grenade pours out a thick cloud for a while.
 //!
-//! On a LAN everyone flies their own copy of every grenade, but the host's copy decides the
-//! blast: it breaks the blocks, hurts, and tells the others where it went off.
+//! Every player's game flies its own copy of every grenade, but the server's copy decides the
+//! blast: it breaks the blocks, hurts, and tells everyone where it went off.
 
 use crate::game::*;
 use crate::audio::Sound;
@@ -165,7 +165,8 @@ impl Game {
         let seed = ((self.random() * 65536.0) as u32) << 16 | (self.random() * 65536.0) as u32;
         self.spawn_grenade(kind, pos, vel, seed, fuse);
         let msg = Msg::Grenade {
-            id: crate::game::multi::HOST_ID,
+            // (the server puts in who threw it)
+            id: 0,
             kind: kind as u8,
             pos,
             vel,
