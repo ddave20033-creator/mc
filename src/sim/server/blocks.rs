@@ -238,7 +238,6 @@ impl Server {
             pos: Vec3::new(p.x as f32 + 0.5, p.y as f32, p.z as f32 + 0.5),
             vel_y: 0.0,
             block: b,
-            prev: None,
         });
         self.block_updated(p);
     }

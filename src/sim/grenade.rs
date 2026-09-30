@@ -52,9 +52,6 @@ pub struct Grenade {
     pub fuse: f32,
     /// Seconds of smoke left once a smoke grenade went off.
     pub smoke: Option<f32>,
-    /// The copy that decides (host or single player); the others wait to be told where it
-    /// went off.
-    pub real: bool,
     /// The same on every computer: which blocks the blast takes.
     pub seed: u32,
     /// When the next puff of smoke comes out.
@@ -63,9 +60,9 @@ pub struct Grenade {
 
 impl Grenade {
     /// A grenade starting to fly (spinning as its seed says), going off after `fuse` seconds.
-    pub fn new(kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, real: bool, fuse: f32) -> Grenade {
+    pub fn new(kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) -> Grenade {
         let spin = Vec3::new(hash3(IVec3::X, seed) - 0.5, hash3(IVec3::Y, seed) - 0.5, hash3(IVec3::Z, seed) - 0.5) * 18.0;
-        Grenade { kind, pos, vel, rot: Quat::IDENTITY, spin, fuse, smoke: None, real, seed, puff: 0.0 }
+        Grenade { kind, pos, vel, rot: Quat::IDENTITY, spin, fuse, smoke: None, seed, puff: 0.0 }
     }
 }
 

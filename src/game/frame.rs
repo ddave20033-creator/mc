@@ -399,9 +399,6 @@ impl Game {
             if let Some(control) = player {
                 self.tick_player(control);
             }
-            if world {
-                self.tick_world();
-            }
         }
         self.between = self.ticks.between(now);
         if let Some(control) = player {
@@ -1126,11 +1123,11 @@ impl Game {
         let eye = self.player.pos;
         for it in self.level.items.iter().filter(|it| it.pos.distance_squared(eye) < ITEM_SIGHT * ITEM_SIGHT) {
             let (sky, blk) = world.light_estimate(it.pos + Vec3::Y * 0.3);
-            it.build(target, self.time, sky, blk, self.between);
+            it.build(target, self.time, sky, blk);
         }
         for f in self.level.falling.iter().filter(|f| f.pos.distance_squared(eye) < sight * sight) {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
-            f.build(target, sky, blk, self.between);
+            f.build(target, sky, blk);
         }
         self.build_falling_trees(target, eye, sight);
         self.build_lying_logs(target, eye, sight);
@@ -1142,7 +1139,7 @@ impl Game {
                 continue;
             }
             let (sky, blk) = world.light_estimate(m.center());
-            m.build(mob_verts, sky, blk, self.between);
+            m.build(mob_verts, sky, blk);
         }
         // Watching someone through their eyes: their own model would be in the way.
         let inside = self.spectating.filter(|_| !third_person);
@@ -1346,7 +1343,6 @@ impl Game {
             Screen::Paused => {
                 let lan = match (&self.net, &self.lan_address) {
                     (_, Some(address)) => screens::PauseLan::Open(address),
-                    (Some(multi::Net::Host(h)), _) => screens::PauseLan::Open(&h.address),
                     (Some(multi::Net::Client(_)), None) if self.local.is_some() => screens::PauseLan::Available,
                     (Some(multi::Net::Client(_)), None) => screens::PauseLan::Joined,
                     (None, None) => screens::PauseLan::Available,

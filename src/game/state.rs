@@ -11,17 +11,12 @@ pub(super) struct Level {
     pub(super) falling: Vec<FallingBlock>,
     /// Trees felled with an axe, falling over.
     pub(super) falling_trees: Vec<crate::sim::felling::FallingTree>,
-    pub(super) next_tree_id: u32,
     /// The trunks of felled trees lying on the ground, the last one's id, the one aimed at
     /// with an axe, and the one (and where) the swing going on will cut.
     pub(super) lying_logs: Vec<crate::sim::felling::LyingLog>,
     pub(super) next_log_id: u32,
     pub(super) mobs: Vec<Mob>,
-    /// Seconds until the next try to spawn animals near the player.
-    pub(super) mob_spawn_timer: f32,
     pub(super) saplings: Vec<(IVec3, f32)>,
-    /// Seconds until the next look round for stump marks to grow over.
-    pub(super) stump_scan: f32,
     pub(super) block_entities: BlockEntities,
     /// Chest lid animation 0..1 per chest position.
     pub(super) chest_open: crate::world::FastMap<IVec3, f32>,
@@ -29,8 +24,6 @@ pub(super) struct Level {
     pub(super) door_swing: crate::world::FastMap<IVec3, f32>,
     /// How far each gun station's drawer is out (0..1): it slides out while one is used.
     pub(super) bench_drawer: crate::world::FastMap<IVec3, f32>,
-    /// Host: seconds each rifle station's magazine loader has been feeding the next round.
-    pub(super) loader_feed: crate::world::FastMap<IVec3, f32>,
     /// The side each crafting table was last used from (its grid faces that way).
     pub(super) table_sides: crate::world::FastMap<IVec3, u8>,
     pub(super) furnace_heard: std::collections::HashMap<IVec3, u32>,
@@ -47,18 +40,14 @@ impl Level {
             items: Vec::new(),
             falling: Vec::new(),
             falling_trees: Vec::new(),
-            next_tree_id: 0,
             lying_logs: Vec::new(),
             next_log_id: 0,
             mobs: Vec::new(),
-            mob_spawn_timer: 5.0,
             saplings: Vec::new(),
-            stump_scan: 0.0,
             block_entities: BlockEntities::default(),
             chest_open: Default::default(),
             door_swing: Default::default(),
             bench_drawer: Default::default(),
-            loader_feed: Default::default(),
             table_sides: Default::default(),
             furnace_heard: Default::default(),
             bench_anims: Default::default(),

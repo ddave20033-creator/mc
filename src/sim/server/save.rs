@@ -72,6 +72,13 @@ impl Server {
             .filter_map(|p| world.chunks.get(p).or_else(|| world.saved.get(p)).map(|c| (*p, c.clone())))
             .collect();
         self.saver.save(&folder, chunks);
+        // (a save that failed: the last one's chunks are written on a thread)
+        if let Some(e) = save::take_save_error() {
+            let text = crate::lang::tf("save.failed", &[&e]);
+            for p in self.peers.iter().filter(|p| p.owner) {
+                p.conn.send(&crate::net::Msg::Chat { text: text.clone(), color: super::peers::RED });
+            }
+        }
     }
 
     /// The owner's state as the world's files keep it (None: they have not played it yet).

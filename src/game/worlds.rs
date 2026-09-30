@@ -460,108 +460,17 @@ impl Game {
         self.resume();
     }
 
-    /// Writes the current world to disk.
+    /// Saves: the player's things go to the world's server (which keeps them, and the world).
     pub(super) fn save_world(&mut self) {
-        if self.world_meta.is_none() {
-            return;
-        }
-        // (a save that failed since the last: the last one's chunks are written on a thread)
-        if let Some(e) = save::take_save_error() {
-            self.say(tf("save.failed", &[&e]), chat::RED);
-        }
-        if self.is_client() {
-            // A LAN player's things are kept by the host.
-            if self.player.spawned {
-                let state = self.client_state();
-                self.send(crate::net::Msg::Save(state));
-            }
-            return;
-        }
-        self.save_peers();
-
-        // A dead player is saved as respawned at home, so closing the game on the death
-        // screen does not bring them back where they died.
-        let dead = self.screen == Screen::Dead;
-        let player = self.player.spawned.then(|| PlayerSave {
-            pos: if dead {
-                self.home_pos().to_array()
-            } else {
-                self.player.pos.to_array()
-            },
-            yaw: if dead { 0.0 } else { self.yaw },
-            pitch: if dead { 0.0 } else { self.pitch },
-            health: if dead { MAX_HEALTH } else { self.health },
-            flying: self.player.flying && !dead,
-            slot: self.hotbar_slot,
-            needs: Some(if dead {
-                Needs::new().to_array()
-            } else {
-                self.needs.to_array()
-            }),
-        });
-        // An open crafting table keeps its grid; items in the 2x2 grid or on the cursor count
-        // as inventory.
-        self.stash_table(false);
-        let mut slots = self.carried_slots().to_vec();
-        slots.extend(self.inventory.armor);
-        let meta = self.world_meta.as_mut().unwrap();
-        meta.last_played = save::now_secs();
-        meta.time_of_day = self.time_of_day;
-        meta.spawn = Some(self.spawn);
-        meta.bed = self.bed_spawn;
-        meta.creative = self.game_mode == GameMode::Creative;
-        meta.spectator = self.game_mode == GameMode::Spectator;
-        if player.is_some() {
-            meta.player = player;
-        }
-        meta.save();
-        let folder = meta.folder.clone();
-        save::save_inventory(&folder, &slots);
-        save::save_notches(&folder, &save::notches_text(&self.terrain.world));
-        save::save_logs(&folder, &crate::sim::felling::logs_text(&self.level.lying_logs));
-        save::save_entities(
-            &folder,
-            &self.level.block_entities,
-            &self.level.saplings,
-            &self.level.items,
-            &self.level.mobs,
-        );
-        let world = &self.terrain.world;
-        let chunks = world
-            .modified
-            .iter()
-            .filter_map(|p| {
-                world
-                    .chunks
-                    .get(p)
-                    .or_else(|| world.saved.get(p))
-                    .map(|c| (*p, c.clone()))
-            })
-            .collect();
-        self.saver.save(&folder, chunks);
-        if let Some(e) = save::take_save_error() {
-            self.say(tf("save.failed", &[&e]), chat::RED);
+        if self.world_meta.is_some() && self.player.spawned {
+            let state = self.client_state();
+            self.send(crate::net::Msg::Save(state));
         }
     }
 
     pub(super) fn quit_to_title(&mut self) {
-        if self.is_client() {
-            self.leave_server(None);
-            return;
-        }
-        if self.screen == Screen::Dead {
-            self.health = MAX_HEALTH;
-            self.fire = 0.0;
-            self.spawn_at_home(false);
-        }
         self.wake_up();
-        self.land_falling_trees();
-        self.save_world();
-        self.close_lan();
-        self.world_meta = None;
-        self.player.spawned = false;
-        self.screen = Screen::MainMenu;
-        self.set_grab(false);
+        self.leave_server(None);
     }
 }
 

@@ -7,7 +7,6 @@
 
 use crate::game::*;
 use crate::game::felling::Struck;
-use crate::sim::felling::*;
 use crate::item::{tool_of, ToolKind};
 
 /// How far from the eye a lying trunk can be aimed at.
@@ -23,36 +22,6 @@ pub(in crate::game) struct LogAim {
 impl Game {
     fn log_index(&self, id: u32) -> Option<usize> {
         self.level.lying_logs.iter().position(|l| l.id == id)
-    }
-
-    /// A felled trunk comes to lie on the ground: from `start` (the cut's middle, where the
-    /// tree came down) along `dir` (level), as long as its `pieces`, on whatever is under it.
-    /// Pieces that would go into something solid break off there and drop what they are.
-    pub(in crate::game) fn lay_log(&mut self, start: Vec3, dir: Vec3, pieces: Vec<Block>, tool: ItemId, creative: bool) {
-        let Some((base, dir, free)) = log_rest(&self.terrain.world, start, dir, &pieces) else { return };
-        let (lying, broken) = pieces.split_at(free);
-        let lying = lying.to_vec();
-        for (i, &b) in broken.iter().enumerate() {
-            let at = base + dir * ((free + i) as f32 + 0.5);
-            let q = at.floor().as_ivec3();
-            self.particles.burst(&self.terrain.world, q, b, 6, [255; 3]);
-            if !creative {
-                let r = self.random();
-                for s in crate::item::drops(b, tool, r) {
-                    let mut at = at;
-                    while is_solid(self.terrain.world.geti(at.floor().as_ivec3())) && at.y < base.y + 30.0 {
-                        at.y += 1.0;
-                    }
-                    self.spawn_drop(at, s);
-                }
-            }
-        }
-        if !lying.is_empty() {
-            self.level.next_log_id += 1;
-            let id = self.level.next_log_id;
-            let next = 1 + (self.random() * 3.0) as usize;
-            self.level.lying_logs.push(LyingLog { id, base, dir, pieces: lying, next });
-        }
     }
 
     /// The lying trunk aimed at with an axe (before any block further off): it takes the
@@ -106,10 +75,8 @@ impl Game {
     /// worn by the stroke.
     pub(in crate::game) fn cut_log(&mut self, id: u32, from_base: bool) {
         let Some(i) = self.log_index(id) else { return };
-        if self.is_client() {
-            // The server cuts it for real (and drops the logs); here it shows at once.
-            self.send(crate::net::Msg::CutLog { id, from_base });
-        }
+        // The server cuts it for real (and drops the logs); here it shows at once.
+        self.send(crate::net::Msg::CutLog { id, from_base });
         let next = 1 + (self.random() * 3.0) as usize;
         let l = &mut self.level.lying_logs[i];
         let taken = l.taken(from_base);
@@ -201,49 +168,5 @@ fn ring(out: &mut Vec<Vertex>, m: Mat4, radius: f32, wide: f32, layer: u32, ligh
         });
         out.extend_from_slice(&[v[0], v[1], v[2], v[0], v[2], v[3]]);
         out.extend_from_slice(&[v[0], v[2], v[1], v[0], v[3], v[2]]);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The first point stepped along the ray that is in the wood (as the aim used to find it).
-    fn stepped(l: &LyingLog, o: Vec3, d: Vec3, max: f32) -> Option<(f32, f32)> {
-        let mut t = 0.0;
-        while t < max {
-            if let Some(s) = l.contains(o + d * t) {
-                return Some((t, s));
-            }
-            t += 0.002;
-        }
-        None
-    }
-
-    #[test]
-    fn a_ray_meets_a_lying_trunk_where_stepping_along_it_does() {
-        let mut rng = crate::util::Rng::new(7);
-        let mut hits = 0;
-        for k in 0..400 {
-            let dir = Vec3::new(rng.next() - 0.5, (rng.next() - 0.5) * 0.3, rng.next() - 0.5).normalize();
-            let l = LyingLog { id: k, base: Vec3::new(0.3, 64.4, -0.7), dir, pieces: vec![crate::world::OAK_LOG; 1 + (k % 5) as usize], next: 1 };
-            let o = l.base + Vec3::new(rng.next() - 0.5, rng.next() * 0.6 + 0.8, rng.next() - 0.5) * 6.0;
-            let target = l.base + dir * (rng.next() * l.len());
-            let d = (target - o).normalize();
-            let exact = l.ray_hit(o, d, 8.0);
-            let step = stepped(&l, o, d, 8.0);
-            match (exact, step) {
-                (Some((t, s)), Some((ts, ss))) => {
-                    hits += 1;
-                    assert!(t <= ts + 1e-4 && ts - t < 0.003, "{t} {ts}");
-                    assert!((s - ss).abs() < 0.01, "{s} {ss}");
-                }
-                (None, None) => {}
-                // (only a ray grazing the wood between two steps)
-                (Some((t, _)), None) => assert!(l.contains(o + d * (t + 1e-3)).is_none() || t > 7.99),
-                (None, Some(_)) => panic!("stepping found a hit the exact test missed"),
-            }
-        }
-        assert!(hits > 100, "{hits}");
     }
 }

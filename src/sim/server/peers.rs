@@ -133,16 +133,6 @@ impl Server {
         Ok(address)
     }
 
-    /// Stops taking LAN players; the ones in are told the host left.
-    pub(super) fn close_lan(&mut self) {
-        self.lan = None;
-        let others: Vec<u8> = self.peers.iter().filter(|p| !p.owner).map(|p| p.id).collect();
-        for id in others {
-            self.send_to(id, &Msg::Refuse(t("lan.host_left").to_string()));
-            self.peer_left(id);
-        }
-    }
-
     /// New LAN connections.
     pub(super) fn accept(&mut self) {
         let Some(lan) = &self.lan else { return };

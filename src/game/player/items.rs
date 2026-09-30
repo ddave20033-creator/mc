@@ -409,7 +409,7 @@ impl Game {
         if is_solid(b) && (self.player.intersects(at) || self.drawer_room(at)) {
             return;
         }
-        if needs_support(b) && !Self::supported(w, at, b) {
+        if needs_support(b) && !crate::sim::rules::supported(w, at, b) {
             return;
         }
         self.edit_block(at, b);

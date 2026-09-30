@@ -111,89 +111,19 @@ impl Game {
         if r.used > 0 && !self.creative() {
             inventory::take(&mut self.inventory.slots[slot], r.used);
         }
-        if self.is_client() {
-            // The host does it for real and sends back what comes out.
-            let offered = held
-                .filter(|_| r.used > 0)
-                .map(|h| Stack { count: r.used, ..h });
-            self.send(crate::net::Msg::FurnaceUse {
-                p,
-                part: k,
-                take,
-                offered,
-            });
-        } else {
-            for st in r.give {
-                self.give(st);
-            }
-        }
+        // The host does it for real and sends back what comes out.
+        let offered = held
+            .filter(|_| r.used > 0)
+            .map(|h| Stack { count: r.used, ..h });
+        self.send(crate::net::Msg::FurnaceUse {
+            p,
+            part: k,
+            take,
+            offered,
+        });
         self.hand.swing();
         self.action_cooldown = 0.2;
         true
-    }
-
-    /// Host: a LAN player used a furnace. They already took `offered` from their hand;
-    /// what did not go in comes back with whatever they took out.
-    pub(in crate::game) fn remote_use_furnace(
-        &mut self,
-        id: u8,
-        p: IVec3,
-        k: u8,
-        take: bool,
-        offered: Slot,
-    ) {
-        if !is_furnace(self.terrain.world.geti(p)) {
-            if let Some(st) = offered {
-                self.send_to(id, &crate::net::Msg::Give(st));
-            }
-            return;
-        }
-        let tier = furnace_tier(self.terrain.world.geti(p));
-        let f = self.level.block_entities.furnaces.entry(p).or_default();
-        f.tier = tier;
-        let r = f.use_part(k, offered, take);
-        let mut back = r.give;
-        if let Some(o) = offered {
-            if o.count > r.used {
-                back.push(Stack {
-                    count: o.count - r.used,
-                    ..o
-                });
-            }
-        }
-        for st in back {
-            self.send_to(id, &crate::net::Msg::Give(st));
-        }
-        // Their copy may have guessed wrong (someone else was quicker): the real one.
-        if let Some(f) = self.level.block_entities.furnaces.get(&p) {
-            self.send_to(id, &Self::furnace_msg(p, f));
-        }
-    }
-
-    /// Host: furnaces burn, cook and smelt.
-    pub(in crate::game) fn update_furnaces(&mut self, dt: f32) {
-        let mut relight = Vec::new();
-        for (p, f) in self.level.block_entities.furnaces.iter_mut() {
-            let b = self.terrain.world.geti(*p);
-            // (in a chunk not loaded the block reads as air: it keeps the tier it had)
-            if self.terrain.world.is_loaded(p.x, p.z) {
-                f.tier = furnace_tier(b);
-            }
-            let lit = f.update(dt);
-            if let (true, Some(base), Some(fac)) = (is_furnace(b), furnace_base(b), facing(b)) {
-                // All of a big furnace glows while it burns.
-                for (o, want) in furnace_cells(base, fac, lit) {
-                    let q = *p + o;
-                    let cur = self.terrain.world.geti(q);
-                    if cur != want && furnace_base(cur) == Some(base) {
-                        relight.push((q, want));
-                    }
-                }
-            }
-        }
-        for (p, b) in relight {
-            self.set_block(p, b);
-        }
     }
 
     /// What the burning furnaces near the player sound like: a furnace crackles, a blast or
@@ -239,24 +169,22 @@ impl Game {
                 f.tier = furnace_tier(self.terrain.world.geti(*p));
             }
         }
-        if self.is_client() {
-            // Between the host's updates (every second, or when something changes) the
-            // furnaces go on here as they do there: flips turn, fuel burns, meat cooks on
-            // the side on the fire, smelting goes on.
-            for f in self.level.block_entities.furnaces.values_mut() {
+        // Between the host's updates (every second, or when something changes) the
+        // furnaces go on here as they do there: flips turn, fuel burns, meat cooks on
+        // the side on the fire, smelting goes on.
+        for f in self.level.block_entities.furnaces.values_mut() {
+            for g in f.grill.iter_mut().flatten() {
+                g.flip = (g.flip - dt).max(0.0);
+            }
+            if f.burn > 0.0 {
+                f.burn = (f.burn - dt).max(0.0);
                 for g in f.grill.iter_mut().flatten() {
-                    g.flip = (g.flip - dt).max(0.0);
+                    if g.flip <= 0.0 {
+                        g.cook[g.down as usize] += dt;
+                    }
                 }
-                if f.burn > 0.0 {
-                    f.burn = (f.burn - dt).max(0.0);
-                    for g in f.grill.iter_mut().flatten() {
-                        if g.flip <= 0.0 {
-                            g.cook[g.down as usize] += dt;
-                        }
-                    }
-                    if f.input.is_some_and(|i| f.smelts(i.item).is_some()) {
-                        f.cook = (f.cook + dt).min(f.smelt_time());
-                    }
+                if f.input.is_some_and(|i| f.smelts(i.item).is_some()) {
+                    f.cook = (f.cook + dt).min(f.smelt_time());
                 }
             }
         }

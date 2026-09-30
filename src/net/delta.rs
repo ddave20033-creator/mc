@@ -18,18 +18,6 @@ const ANGLE_EPS: f32 = 0.01;
 /// Seconds a dying mob's death time may run apart (the player counts it on itself).
 const DEATH_EPS: f32 = 0.5;
 
-/// Bytes of one mob, dropped item and falling block in `Msg::Entities`.
-const MOB_BYTES: usize = 53;
-const ITEM_BYTES: usize = 27;
-const FALLING_BYTES: usize = 14;
-
-/// The bytes a whole list of these entities took on the wire before changes were sent
-/// (protocol 34: every mob, item and falling block near, 20 times a second), for comparing.
-pub fn full_list_bytes(mobs: usize, items: usize, falling: usize) -> usize {
-    // frame length, tag, the three counts
-    4 + 1 + 3 * 4 + mobs * MOB_BYTES + items * ITEM_BYTES + falling * FALLING_BYTES
-}
-
 /// Whether the player's copy `was` of a mob is too far from `now` to keep.
 pub fn mob_changed(was: &MobNet, now: &MobNet) -> bool {
     let near = |a: f32, b: f32| (a - b).abs() <= ANGLE_EPS;
@@ -264,28 +252,6 @@ mod tests {
         .len();
         let total: usize = sizes.iter().sum();
         assert!(total * 2 < full_size * 400, "{total} vs {}", full_size * 400);
-    }
-
-    #[test]
-    fn entry_sizes() {
-        let size = |m: usize, i: usize, f: usize| {
-            Msg::Entities {
-                full: false,
-                mobs: vec![mob(1, 0.0); m],
-                items: vec![item(1, 0.0, 1); i],
-                gone_mobs: vec![],
-                gone_items: vec![],
-                falling: vec![(Vec3::ZERO, 1); f],
-            }
-            .encode()
-            .len()
-        };
-        let base = size(0, 0, 0);
-        assert_eq!(size(1, 0, 0) - base, MOB_BYTES);
-        assert_eq!(size(0, 1, 0) - base, ITEM_BYTES);
-        assert_eq!(size(0, 0, 1) - base, FALLING_BYTES);
-        // (the new message has the `full` flag and two id lists more)
-        assert_eq!(full_list_bytes(0, 0, 0), 4 + base - 1 - 8);
     }
 
     #[test]

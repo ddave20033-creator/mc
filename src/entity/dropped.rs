@@ -18,9 +18,6 @@ pub struct ItemEntity {
     slosh: crate::model::bucket::Slosh,
     /// Unique id for LAN play.
     pub id: u32,
-    /// Where it was, its age and how far it had flown to whoever picks it up before the last
-    /// tick (drawn between that and now); None where it moves in frames (a LAN player's copy).
-    prev: Option<(Vec3, f32, f32)>,
 }
 
 struct PickupFlight {
@@ -34,8 +31,6 @@ pub struct FallingBlock {
     pub pos: Vec3,
     pub vel_y: f32,
     pub block: Block,
-    /// Where it was before the last tick (see `ItemEntity::prev`).
-    pub prev: Option<Vec3>,
 }
 
 fn solid_at(w: &World, p: Vec3) -> bool {
@@ -53,13 +48,7 @@ impl ItemEntity {
             pickup: None,
             slosh: Default::default(),
             id: 0,
-            prev: None,
         }
-    }
-
-    /// Before a tick: how it is now is where the next frames start from.
-    pub fn start_tick(&mut self) {
-        self.prev = Some((self.pos, self.age, self.pickup.as_ref().map_or(0.0, |f| f.elapsed)));
     }
 
     pub fn is_picking_up(&self) -> bool {
@@ -142,16 +131,10 @@ impl ItemEntity {
         }
     }
 
-    /// Its model, `between` (0..1) of the way from before the last tick to now.
-    pub fn build(&self, out: &mut Vec<Vertex>, time: f32, sky: u8, blk: u8, between: f32) {
+    pub fn build(&self, out: &mut Vec<Vertex>, time: f32, sky: u8, blk: u8) {
         let light = vertex_light(sky, blk);
         let elapsed = self.pickup.as_ref().map_or(0.0, |f| f.elapsed);
-        let (pos, age, elapsed) = match self.prev {
-            Some((p, a, e)) if p.distance_squared(self.pos) < 16.0 => {
-                (p.lerp(self.pos, between), a + (self.age - a) * between, e + (elapsed - e) * between)
-            }
-            _ => (self.pos, self.age, elapsed),
-        };
+        let (pos, age) = (self.pos, self.age);
         let (pos, size) = if self.pickup.is_some() {
             let t = elapsed / PICKUP_TIME;
             (pos, 0.3 * (1.0 - t * t).max(0.01))
@@ -208,11 +191,10 @@ impl FallingBlock {
         false
     }
 
-    /// Its box, `between` (0..1) of the way from before the last tick to now.
-    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8, between: f32) {
+    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8) {
         let light = vertex_light(sky, blk);
         let layers = std::array::from_fn(|f| face_texture(self.block, f));
-        let pos = self.prev.map_or(self.pos, |p| p.lerp(self.pos, between));
+        let pos = self.pos;
         let min = Vec3::new(pos.x - 0.5, pos.y, pos.z - 0.5);
         emit_box(
             out,

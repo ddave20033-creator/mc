@@ -442,3 +442,47 @@ pub fn parse_logs(text: &str) -> Vec<LyingLog> {
     out
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::Vec3;
+
+    /// The first point stepped along the ray that is in the wood (as the aim used to find it).
+    fn stepped(l: &LyingLog, o: Vec3, d: Vec3, max: f32) -> Option<(f32, f32)> {
+        let mut t = 0.0;
+        while t < max {
+            if let Some(s) = l.contains(o + d * t) {
+                return Some((t, s));
+            }
+            t += 0.002;
+        }
+        None
+    }
+
+    #[test]
+    fn a_ray_meets_a_lying_trunk_where_stepping_along_it_does() {
+        let mut rng = crate::util::Rng::new(7);
+        let mut hits = 0;
+        for k in 0..400 {
+            let dir = Vec3::new(rng.next() - 0.5, (rng.next() - 0.5) * 0.3, rng.next() - 0.5).normalize();
+            let l = LyingLog { id: k, base: Vec3::new(0.3, 64.4, -0.7), dir, pieces: vec![crate::world::OAK_LOG; 1 + (k % 5) as usize], next: 1 };
+            let o = l.base + Vec3::new(rng.next() - 0.5, rng.next() * 0.6 + 0.8, rng.next() - 0.5) * 6.0;
+            let target = l.base + dir * (rng.next() * l.len());
+            let d = (target - o).normalize();
+            let exact = l.ray_hit(o, d, 8.0);
+            let step = stepped(&l, o, d, 8.0);
+            match (exact, step) {
+                (Some((t, s)), Some((ts, ss))) => {
+                    hits += 1;
+                    assert!(t <= ts + 1e-4 && ts - t < 0.003, "{t} {ts}");
+                    assert!((s - ss).abs() < 0.01, "{s} {ss}");
+                }
+                (None, None) => {}
+                // (only a ray grazing the wood between two steps)
+                (Some((t, _)), None) => assert!(l.contains(o + d * (t + 1e-3)).is_none() || t > 7.99),
+                (None, Some(_)) => panic!("stepping found a hit the exact test missed"),
+            }
+        }
+        assert!(hits > 100, "{hits}");
+    }
+}

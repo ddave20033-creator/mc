@@ -681,11 +681,7 @@ impl Game {
             seed,
             bullets: sent,
         };
-        if self.is_client() {
-            self.send(shot);
-        } else {
-            self.broadcast(&shot, None);
-        }
+        self.send(shot);
 
         // Recoil: the view kicks up (and a little to the side); most of it comes back.
         let kick = (stats.kick_hip + (stats.kick_aimed - stats.kick_hip) * aim).to_radians();
@@ -864,7 +860,7 @@ impl Game {
                 .filter(|&(_, d)| mob.is_none_or(|(_, md)| d < md));
 
             use crate::net::Msg;
-            let (dmg, knock, from) = (b.damage, b.knockback, b.from);
+            let (dmg, knock, _from) = (b.damage, b.knockback, b.from);
             if b.visual {
                 // Someone else's: it stops at the first mob but does nothing to it (the
                 // shooter's game hits it), and passes the players.
@@ -872,14 +868,8 @@ impl Game {
                     return false;
                 }
             } else if let Some((id, _)) = player {
-                if self.is_client() {
-                    let kind = crate::net::hurt::BULLET;
-                    self.send(Msg::AttackPlayer { id, dmg, knock, kind });
-                } else {
-                    let kind = crate::net::hurt::BULLET;
-                    self.send_to(id, &Msg::Hurt { dmg, from, knock, kind });
-                    self.attacked(crate::entity::mob::Foe::Player(id), crate::game::multi::HOST_ID);
-                }
+                let kind = crate::net::hurt::BULLET;
+                self.send(Msg::AttackPlayer { id, dmg, knock, kind });
                 return false;
             }
             if let Some((i, d)) = mob.filter(|_| !b.visual) {
@@ -887,14 +877,8 @@ impl Game {
                     // Straw flies out of the sack.
                     self.particles.impact(&self.terrain.world, b.pos + dir * d, -dir, WOOL, [224, 196, 118]);
                 }
-                if self.is_client() {
-                    let id = self.level.mobs[i].id;
-                    self.send(Msg::AttackMob { id, dmg, knock });
-                } else {
-                    self.level.mobs[i].hurt(dmg, Some(from), knock);
-                    let foe = crate::entity::mob::Foe::Mob(self.level.mobs[i].id);
-                    self.attacked(foe, crate::game::multi::HOST_ID);
-                }
+                let id = self.level.mobs[i].id;
+                self.send(Msg::AttackMob { id, dmg, knock });
                 return false;
             }
             if let Some((hit, d, normal)) = block {

@@ -244,9 +244,6 @@ pub struct MobPose {
 }
 
 pub struct Mob {
-    /// Its pose before the last tick (drawn between that and now); None where it moves in
-    /// frames (a LAN player's copy follows the host's).
-    prev: Option<MobPose>,
     /// Unique id for LAN play.
     pub id: u32,
     /// LAN player: the latest state from the host, which the mob glides toward.
@@ -423,7 +420,6 @@ impl Mob {
             in_water: false,
             fall_peak: pos.y,
             limb_swing: 0.0,
-            prev: None,
             limb_amount: 0.0,
             target: None,
             target_time: 0.0,
@@ -1302,35 +1298,8 @@ impl Mob {
         }
     }
 
-    /// Before a tick: its pose now is where the next frames start from.
-    pub fn start_tick(&mut self) {
-        self.prev = Some(self.pose());
-    }
-
-    /// Its pose `between` (0..1) of the way from before the last tick to now.
-    pub fn drawn(&self, between: f32) -> MobPose {
-        let now = self.pose();
-        let Some(a) = self.prev.filter(|a| a.pos.distance_squared(now.pos) < 16.0) else {
-            return now;
-        };
-        let turn = |a: f32, b: f32| a + wrap_angle(b - a) * between;
-        let mix = |a: f32, b: f32| a + (b - a) * between;
-        MobPose {
-            pos: a.pos.lerp(now.pos, between),
-            body_yaw: turn(a.body_yaw, now.body_yaw),
-            head_yaw: turn(a.head_yaw, now.head_yaw),
-            pitch: mix(a.pitch, now.pitch),
-            limb_swing: mix(a.limb_swing, now.limb_swing),
-            limb_amount: mix(a.limb_amount, now.limb_amount),
-            death: match (a.death, now.death) {
-                (Some(x), Some(y)) => Some(mix(x, y)),
-                (_, d) => d,
-            },
-        }
-    }
-
-    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8, between: f32) {
-        let p = &self.drawn(between);
+    pub fn build(&self, out: &mut Vec<Vertex>, sky: u8, blk: u8) {
+        let p = &self.pose();
         let light = vertex_light(sky, blk);
         if self.kind == MobKind::Dummy {
             // Its model's front (+Z) toward where it faces.
@@ -1603,7 +1572,7 @@ mod tests {
     fn pig_model_has_all_cubes() {
         let pig = Mob::new(MobKind::Pig, Vec3::ZERO, 0.0, 7);
         let mut out = Vec::new();
-        pig.build(&mut out, 15, 0, 1.0);
+        pig.build(&mut out, 15, 0);
         // Head, snout, body and four legs, 6 faces of 2 triangles each.
         assert_eq!(out.len(), 7 * 6 * 6);
         // It stands on the ground and is about a block tall and long.
@@ -1620,7 +1589,7 @@ mod tests {
     fn sheep_wears_its_wool_until_sheared() {
         let mut sheep = Mob::new(MobKind::Sheep, Vec3::ZERO, 0.0, 7);
         let mut out = Vec::new();
-        sheep.build(&mut out, 15, 0, 1.0);
+        sheep.build(&mut out, 15, 0);
         // Head, body and four legs, each with a wool cube over it.
         assert_eq!(out.len(), 12 * 6 * 6);
         let max_y = out.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
@@ -1628,7 +1597,7 @@ mod tests {
         assert!(sheep.can_shear());
         sheep.sheared = true;
         out.clear();
-        sheep.build(&mut out, 15, 0, 1.0);
+        sheep.build(&mut out, 15, 0);
         assert_eq!(out.len(), 6 * 6 * 6);
         assert!(!sheep.can_shear());
         let net = sheep.to_net();
@@ -1639,14 +1608,14 @@ mod tests {
     fn a_wolf_is_built_and_a_tame_one_wears_its_collar() {
         let mut wolf = Mob::new(MobKind::Wolf, Vec3::ZERO, 0.0, 7);
         let mut out = Vec::new();
-        wolf.build(&mut out, 15, 0, 1.0);
+        wolf.build(&mut out, 15, 0);
         // Head, two ears, snout, body, mane, four legs and the tail.
         assert_eq!(out.len(), 11 * 6 * 6);
         let max_y = out.iter().map(|v| v.pos[1]).fold(f32::MIN, f32::max);
         assert!(max_y > 0.8 && max_y < 1.1, "top at {max_y}");
         wolf.owner = Some("Alby".into());
         out.clear();
-        wolf.build(&mut out, 15, 0, 1.0);
+        wolf.build(&mut out, 15, 0);
         assert_eq!(out.len(), 12 * 6 * 6);
         assert!(out.iter().any(|v| v.layer == tex::WOLF_COLLAR as f32));
         let net = wolf.to_net();

@@ -12,7 +12,7 @@ impl Server {
     /// A player threw a grenade: it flies here too (the one that decides), and the others see
     /// it thrown.
     pub(super) fn thrown_grenade(&mut self, id: u8, kind: u8, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
-        self.grenades.push(Grenade::new(GrenadeKind::from_u8(kind), pos, vel, seed, true, fuse));
+        self.grenades.push(Grenade::new(GrenadeKind::from_u8(kind), pos, vel, seed, fuse));
         self.broadcast(&Msg::Grenade { id, kind, pos, vel, seed, fuse }, Some(id));
     }
 

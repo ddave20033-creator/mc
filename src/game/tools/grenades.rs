@@ -12,7 +12,6 @@
 use crate::game::*;
 use crate::audio::Sound;
 use crate::entity::player::raycast_solid;
-use crate::item::mining::drops;
 use crate::item::inventory::take;
 use crate::item::*;
 use crate::net::Msg;
@@ -164,8 +163,7 @@ impl Game {
         self.audio.play(Sound::SpoonFly, None, 0.6);
         // (two draws: one is only 24 bits, and the seed tells the grenades apart over LAN)
         let seed = ((self.random() * 65536.0) as u32) << 16 | (self.random() * 65536.0) as u32;
-        let real = !self.is_client();
-        self.spawn_grenade(kind, pos, vel, seed, real, fuse);
+        self.spawn_grenade(kind, pos, vel, seed, fuse);
         let msg = Msg::Grenade {
             id: crate::game::multi::HOST_ID,
             kind: kind as u8,
@@ -174,33 +172,24 @@ impl Game {
             seed,
             fuse,
         };
-        if self.is_client() {
-            self.send(msg);
-        } else {
-            self.broadcast(&msg, None);
-        }
+        self.send(msg);
     }
 
-    /// A grenade starts flying (thrown here, or by someone else: `kind` as in the message),
-    /// going off after `fuse` seconds.
-    pub(in crate::game) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, real: bool, fuse: f32) {
-        self.grenades.list.push(Grenade::new(kind, pos, vel, seed, real, fuse));
+    /// This game's copy of a grenade starts flying (thrown here, or by someone else), going off
+    /// after `fuse` seconds: the server's copy decides the blast (`remote_blast`).
+    pub(in crate::game) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
+        self.grenades.list.push(Grenade::new(kind, pos, vel, seed, fuse));
     }
 
-    /// Someone else threw a grenade (host: from player `id`, which goes on to the others).
-    pub(in crate::game) fn remote_grenade(&mut self, id: u8, kind: u8, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
-        let real = self.is_host();
-        self.spawn_grenade(GrenadeKind::from_u8(kind), pos, vel, seed, real, fuse);
-        if real {
-            let msg = Msg::Grenade { id, kind, pos, vel, seed, fuse };
-            self.broadcast(&msg, Some(id));
-        }
+    /// Someone else threw a grenade.
+    pub(in crate::game) fn remote_grenade(&mut self, kind: u8, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
+        self.spawn_grenade(GrenadeKind::from_u8(kind), pos, vel, seed, fuse);
     }
 
-    /// The host says where a grenade went off.
+    /// The server says where a grenade went off.
     pub(in crate::game) fn remote_blast(&mut self, pos: Vec3, seed: u32) {
         self.grenades.list.retain(|g| g.seed != seed);
-        self.explode(pos, seed, false);
+        self.explode(pos, seed);
     }
 
     /// Grenades fly, bounce and go off; smoke pours out.
@@ -219,9 +208,9 @@ impl Game {
             g.fuse -= dt;
             match g.kind {
                 GrenadeKind::Frag => {
-                    // Another's copy waits for the host (a little longer, if the word is lost).
-                    if g.fuse <= 0.0 && (g.real || g.fuse < -2.0) {
-                        blasts.push((g.pos, g.seed, g.real));
+                    // (it waits for the server's word; a little longer, if the word is lost)
+                    if g.fuse < -2.0 {
+                        blasts.push((g.pos, g.seed));
                     }
                 }
                 GrenadeKind::Smoke if g.fuse <= 0.0 => {
@@ -257,11 +246,8 @@ impl Game {
             let (sky, blk) = self.terrain.world.light_estimate(at + Vec3::Y);
             self.particles.smoke_cloud(at, sky, blk);
         }
-        for (pos, seed, real) in blasts {
-            self.explode(pos, seed, real);
-            if real && self.is_host() {
-                self.broadcast(&Msg::Blast { pos, seed }, None);
-            }
+        for (pos, seed) in blasts {
+            self.explode(pos, seed);
         }
     }
 
@@ -276,86 +262,19 @@ impl Game {
     }
 
     /// A frag grenade goes off at `pos`: the bang, fire, smoke and flying debris, the view
-    /// shaking near by; and if this is the copy that decides (`real`), the blocks go and
-    /// everything around gets hurt.
-    fn explode(&mut self, pos: Vec3, seed: u32, real: bool) {
+    /// shaking near by. (The blocks it blows away and who it hurts are the server's.)
+    fn explode(&mut self, pos: Vec3, seed: u32) {
         self.audio.play(Sound::Explosion, Some(pos), 1.0);
         let (sky, blk) = self.terrain.world.light_estimate(pos + Vec3::Y * 0.5);
         self.particles.explosion(pos, sky, blk);
         self.guns.flash_light = (3.0, pos + Vec3::Y * 0.5);
         let near = pos.distance(self.eye());
         self.grenades.shake = self.grenades.shake.max((1.0 - near / 18.0).max(0.0));
-
         let blocks = blast_blocks(&self.terrain.world, pos, seed);
         for q in blocks.iter().take(12) {
             let b = self.terrain.world.geti(*q);
             let tint = self.block_tint(*q, b);
             self.particles.burst(&self.terrain.world, *q, b, 8, tint);
-        }
-        if !real {
-            return;
-        }
-        let pick = tool_id(ToolKind::Pickaxe, Tier::Diamond);
-        for q in &blocks {
-            let b = self.terrain.world.geti(*q);
-            self.set_block(*q, AIR);
-            // About a third of what is blown away drops.
-            if self.random() < 0.3 {
-                let r = self.random();
-                for s in drops(b, pick, r) {
-                    self.spawn_drop(q.as_vec3() + Vec3::splat(0.5), s);
-                }
-            }
-        }
-        for q in &blocks {
-            self.block_updated(*q);
-        }
-        self.blast_hurt(pos);
-    }
-
-    /// Everyone near a blast gets hurt, less the farther and behind cover, and thrown away.
-    fn blast_hurt(&mut self, pos: Vec3) {
-        let world = &self.terrain.world;
-        let hurt = |target: Vec3| -> Option<(f32, f32)> {
-            let d = target.distance(pos);
-            if d >= HURT_RADIUS {
-                return None;
-            }
-            let k = (1.0 - d / HURT_RADIUS).powf(1.4);
-            let dir = (target - pos).normalize_or(Vec3::Y);
-            let covered = raycast_solid(world, pos + dir * 0.3, dir, (d - 0.5).max(0.0)).is_some();
-            let cover = if covered { 0.35 } else { 1.0 };
-            Some((MAX_DAMAGE * k * cover, 1.6 * k * cover))
-        };
-        let me = hurt(self.player.pos + Vec3::Y * 0.9);
-        let mobs: Vec<(usize, f32, f32)> = self
-            .level.mobs
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.alive())
-            .filter_map(|(i, m)| hurt(m.center()).map(|(d, k)| (i, d, k)))
-            .collect();
-        let others: Vec<(u8, f32, f32)> = self
-            .remote_positions()
-            .into_iter()
-            .filter_map(|(id, p)| hurt(p + Vec3::Y * 0.9).map(|(d, k)| (id, d, k)))
-            .collect();
-        if let Some((dmg, knock)) = me {
-            self.blast_hit(dmg, pos, knock);
-        }
-        for (i, dmg, knock) in mobs {
-            self.level.mobs[i].hurt(dmg, Some(pos), knock);
-        }
-        for (id, dmg, knock) in others {
-            self.send_to(
-                id,
-                &Msg::Hurt {
-                    dmg,
-                    from: pos,
-                    knock,
-                    kind: crate::net::hurt::BLAST,
-                },
-            );
         }
     }
 

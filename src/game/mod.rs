@@ -20,7 +20,7 @@ use tools::{fishing, grenades, guns, revolver};
 use state::{BenchUi, FrameClock, Input, InventoryUi, Level, Menus};
 
 use crate::engine::Gpu;
-use crate::entity::mob::{Mob, MobCtx, MobEvent, MobKind};
+use crate::entity::mob::{Mob, MobKind};
 use crate::entity::player::{look_dir, Player};
 use crate::entity::survival::{EffectKind, Needs};
 use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
@@ -505,13 +505,7 @@ impl Game {
     /// Called when the application exits.
     pub fn on_exit(&mut self) {
         let lan = self.net.is_some();
-        if self.is_client() {
-            self.leave_server(None);
-        } else {
-            self.land_falling_trees();
-            self.save_world();
-            self.close_lan();
-        }
+        self.leave_server(None);
         self.saver.wait();
         if self.bench.is_none() && self.testbed.is_none() {
             self.settings.save();

@@ -6,8 +6,6 @@ use crate::lang::tf;
 
 pub use crate::sim::is_night;
 
-/// Seconds everyone has to be asleep before the morning comes (Minecraft: 100 ticks).
-const SKIP_AFTER: f32 = 5.0;
 
 /// Lying in a bed.
 #[derive(Clone, Copy, Debug)]
@@ -106,28 +104,6 @@ impl Game {
         let s = self.sleep?;
         let head = facing_dir(s.facing).as_vec3();
         Some(s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT + 0.3, 0.5) + head * 0.25)
-    }
-
-    /// Host and single player: the night is skipped once everyone has been asleep a while.
-    pub(in crate::game) fn update_sleepers(&mut self, dt: f32) {
-        if self.is_client() {
-            return;
-        }
-        let (remotes, remotes_asleep) = self.remotes_asleep();
-        // A spectator does not need to sleep for the night to pass.
-        let here = self.player.spawned && self.screen != Screen::Dead && !self.spectator();
-        let players = remotes + here as usize;
-        let asleep = remotes_asleep + (here && self.sleep.is_some()) as usize;
-        if players == 0 || asleep < players || !is_night(self.time_of_day) {
-            self.asleep_for = 0.0;
-            return;
-        }
-        self.asleep_for += dt;
-        if self.asleep_for >= SKIP_AFTER {
-            self.asleep_for = 0.0;
-            self.time_of_day = 0.0;
-            self.broadcast(&crate::net::Msg::Time(self.time_of_day), None);
-        }
     }
 
     /// LAN: how many of the players are in bed, while this player waits in one.

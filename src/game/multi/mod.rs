@@ -6,9 +6,7 @@
 //! with the world's rules and sends the result to everyone. A player's inventory, position,
 //! health and hunger are kept by the host between visits (`saves/<world>/players/`).
 
-mod checks;
 mod client;
-mod host;
 mod lan_ui;
 mod testbed;
 
@@ -18,18 +16,13 @@ use crate::item::{armor_code, GunKind};
 use crate::lang::tf;
 use crate::model::player::{hand_pivot, limb_targets};
 use crate::net::{
-    container, pose_flags, Conn, EntitySync, Finder, Frame, ItemNet, Msg, PlayerState, Pose,
-    Server, NO_BLOCK, PROTOCOL,
+    container, pose_flags, Conn, Finder, ItemNet, Msg, PlayerState, Pose, NO_BLOCK, PROTOCOL,
 };
-use crate::save::{rle, unrle};
+use crate::save::unrle;
 use crate::util::lerp_angle;
-use std::path::PathBuf;
 
 /// Seconds between pose and entity updates (20 per second, Minecraft's tick rate).
 const TICK: f32 = 0.05;
-/// How far around a player mobs are sent; items and falling blocks a bit less.
-const MOB_RANGE: f32 = 96.0;
-const ITEM_RANGE: f32 = 64.0;
 /// `Msg::Open` at this height means the player closed their container.
 const CLOSED_Y: i32 = i32::MIN;
 /// How far away other players' names show.
@@ -73,52 +66,6 @@ impl RemotePlayer {
     }
 }
 
-/// A connected player, on the host.
-struct Peer {
-    id: u8,
-    name: String,
-    conn: Conn,
-    joined: bool,
-    /// Latest saved state (inventory, health...) from the player.
-    state: Option<PlayerState>,
-    pose: Option<Pose>,
-    /// Block entity the player has open, and what was last sent of it.
-    open: Option<IVec3>,
-    sent_container: Option<Vec<u8>>,
-    /// Chests others have open (their contents show in them), as this player last got them.
-    seen_chests: FastMap<IVec3, Vec<u8>>,
-    leaving: bool,
-    /// Seconds since it connected: one that never says hello is let go (it would hold a
-    /// player slot for ever).
-    age: f32,
-    /// The player's render distance (chunks): block changes farther away wait in
-    /// `far_chunks` and the chunk goes whole when the player gets near.
-    view: i32,
-    far_chunks: FastSet<ChunkPos>,
-    /// The mobs, items and falling blocks near the player as they last got them.
-    entities: EntitySync,
-    /// Bytes of entity updates sent to this player, and what whole lists would have taken
-    /// (the testbed's report).
-    entity_bytes: [u64; 2],
-    /// The most a bullet of this player's may do, and until when (host time): set by their
-    /// shots (a bullet still flying after they put the gun away).
-    shot_damage: (f32, f32),
-}
-
-pub(super) struct Host {
-    server: Server,
-    peers: Vec<Peer>,
-    tick: f32,
-    time_tick: f32,
-    /// Crafting table grids as the players last got them (items lie on the tables).
-    tables_sent: FastMap<IVec3, [Slot; 9]>,
-    /// Furnaces as the players last got them: what changes at once (`furnace_key`), the
-    /// whole message, and when it was sent.
-    furnaces_sent: FastMap<IVec3, (Vec<u8>, Vec<u8>, f32)>,
-    /// "192.168.1.20:25565", shown in the pause menu.
-    pub address: String,
-}
-
 pub(super) struct Client {
     conn: Conn,
     pub(super) id: u8,
@@ -131,8 +78,8 @@ pub(super) struct Client {
     collecting: FastMap<u32, u8>,
 }
 
+/// The game's connection to the world's server (its own, or a LAN host's).
 pub(super) enum Net {
-    Host(Host),
     Client(Client),
 }
 
@@ -145,14 +92,6 @@ fn color_from(b: [u8; 4]) -> Color {
 }
 
 impl Game {
-    /// The host's state (read only), when hosting.
-    fn host_ref(&self) -> Option<&Host> {
-        match &self.net {
-            Some(Net::Host(h)) => Some(h),
-            _ => None,
-        }
-    }
-
     pub(super) fn is_client(&self) -> bool {
         matches!(self.net, Some(Net::Client(_)))
     }
@@ -180,76 +119,19 @@ impl Game {
         }
     }
 
-    /// Host: sends a message to one player.
-    pub(super) fn send_to(&self, id: u8, m: &Msg) {
-        if let Some(Net::Host(h)) = &self.net {
-            if let Some(p) = h.peers.iter().find(|p| p.id == id && p.joined) {
-                p.conn.send(m);
-            }
-        }
-    }
-
-    /// Host: sends an encoded message to one player.
-    pub(super) fn send_frame_to(&self, id: u8, f: &Frame) {
-        if let Some(Net::Host(h)) = &self.net {
-            if let Some(p) = h.peers.iter().find(|p| p.id == id && p.joined) {
-                p.conn.send_frame(f);
-            }
-        }
-    }
-
-    /// Host: sends a message to every player (but `except`), encoded once.
-    pub(super) fn broadcast(&self, m: &Msg, except: Option<u8>) {
-        let anyone = self
-            .host_ref()
-            .is_some_and(|h| h.peers.iter().any(|p| p.joined && Some(p.id) != except));
-        if anyone {
-            self.broadcast_frame(&Frame::new(m), except);
-        }
-    }
-
-    /// Host: sends an encoded message to every player (but `except`).
-    pub(super) fn broadcast_frame(&self, f: &Frame, except: Option<u8>) {
-        if let Some(Net::Host(h)) = &self.net {
-            for p in h.peers.iter().filter(|p| p.joined && Some(p.id) != except) {
-                p.conn.send_frame(f);
-            }
-        }
-    }
-
     pub(super) fn entity_id(&mut self) -> u32 {
         self.next_entity_id = self.next_entity_id.wrapping_add(1).max(1);
         self.next_entity_id
     }
 
-    /// Adds a dropped item to the world (a LAN player hands it to the host).
-    pub(super) fn add_item(&mut self, mut it: ItemEntity) {
-        if self.is_client() {
-            self.send(Msg::DropItem {
-                pos: it.pos,
-                vel: it.vel,
-                stack: it.stack,
-                delay: it.pickup_delay,
-            });
-            return;
-        }
-        it.id = self.entity_id();
-        self.level.items.push(it);
-    }
-
-    /// Feet of all living players: this one and the others on the LAN.
-    pub(super) fn player_positions(&self) -> Vec<Vec3> {
-        let mut v = Vec::new();
-        if self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
-            v.push(self.player.pos);
-        }
-        v.extend(
-            self.remotes
-                .iter()
-                .filter(|r| r.alive())
-                .map(|r| r.target.pos),
-        );
-        v
+    /// Drops an item into the world (the server puts it there).
+    pub(super) fn add_item(&mut self, it: ItemEntity) {
+        self.send(Msg::DropItem {
+            pos: it.pos,
+            vel: it.vel,
+            stack: it.stack,
+            delay: it.pickup_delay,
+        });
     }
 
     /// Another player is lying in the bed whose head is at `head`.
@@ -269,15 +151,6 @@ impl Game {
             .filter(|r| r.target.flags & pose_flags::SLEEPING != 0)
             .count();
         (alive.count(), asleep)
-    }
-
-    /// The other players who are alive, and where they are.
-    pub(super) fn remote_positions(&self) -> Vec<(u8, Vec3)> {
-        self.remotes
-            .iter()
-            .filter(|r| r.alive())
-            .map(|r| (r.id, r.target.pos))
-            .collect()
     }
 
     pub(super) fn remote_pos(&self, id: u8) -> Option<Vec3> {
@@ -448,7 +321,7 @@ impl Game {
 
     /// Debris from a block broken by someone: shown here if `local`, and the host sends it to
     /// the other players (but `except`, who broke it).
-    pub(super) fn break_fx(&mut self, p: IVec3, block: Block, local: bool, except: Option<u8>) {
+    pub(super) fn break_fx(&mut self, p: IVec3, block: Block, local: bool, _except: Option<u8>) {
         if block == AIR {
             return;
         }
@@ -457,13 +330,6 @@ impl Game {
             self.particles
                 .burst(&self.terrain.world, p, block, 28, tint);
         }
-        if self.is_host() {
-            self.broadcast(&Msg::BreakFx { p, block }, except);
-        }
-    }
-
-    pub(super) fn is_host(&self) -> bool {
-        matches!(self.net, Some(Net::Host(_)))
     }
 
     /// Hit by another player (or blown about by a grenade they threw, or bitten by a wolf):
@@ -491,10 +357,8 @@ impl Game {
     /// Network work for this frame (host or player).
     pub(super) fn net_tick(&mut self, dt: f32) {
         self.poll_joining();
-        match self.net {
-            Some(Net::Host(_)) => self.host_tick(dt),
-            Some(Net::Client(_)) => self.client_tick(dt),
-            None => {}
+        if self.net.is_some() {
+            self.client_tick(dt);
         }
         // Other players glide toward their latest pose.
         let k = crate::util::damp(15.0, dt);
@@ -805,34 +669,11 @@ impl Game {
                 text: text.to_string(),
                 color: color_bytes(chat::WHITE),
             }),
-            Some(Net::Host(_)) => {
-                let line = format!("<{}> {text}", self.settings.name);
-                self.broadcast(
-                    &Msg::Chat {
-                        text: line.clone(),
-                        color: color_bytes(chat::WHITE),
-                    },
-                    None,
-                );
-                self.say(line, chat::WHITE);
-            }
             None => {
                 let line = format!("<{}> {text}", self.settings.name);
                 self.say(line, chat::WHITE);
             }
         }
-    }
-
-    /// Host: a chat message to everyone (and here).
-    fn announce(&mut self, text: String, color: Color) {
-        self.broadcast(
-            &Msg::Chat {
-                text: text.clone(),
-                color: color_bytes(color),
-            },
-            None,
-        );
-        self.say(text, color);
     }
 
     /// Contents of the block entity at `p` as a message (a LAN player's open crafting table
@@ -891,49 +732,6 @@ impl Game {
         }
     }
 
-    /// What of a furnace changes all at once and must reach the players right away: its
-    /// contents, whether it burns, how done each side of the meat is and whether it is being
-    /// turned over. (The seconds in between go out now and then; players count them on.)
-    fn furnace_key(f: &crate::entity::Furnace) -> Vec<u8> {
-        use crate::entity::block_entity::doneness;
-        let contents = crate::entity::Furnace {
-            burn: 0.0,
-            cook: 0.0,
-            grill: [None; 4],
-            ..f.clone()
-        };
-        let mut key = Self::furnace_msg(IVec3::ZERO, &contents).encode();
-        key.push((f.burn > 0.0) as u8);
-        for g in &f.grill {
-            key.push(match g {
-                None => 255,
-                Some(g) => {
-                    let side = |t: f32| doneness(t) as u8;
-                    side(g.cook[0]) * 16 + side(g.cook[1]) * 4 + g.down * 2 + (g.flip > 0.0) as u8
-                }
-            });
-        }
-        key
-    }
-
-    /// A furnace as everyone sees it.
-    pub(super) fn furnace_msg(p: IVec3, f: &crate::entity::Furnace) -> Msg {
-        Msg::Furnace {
-            p,
-            burn: f.burn,
-            cook: f.cook,
-            input: f.input,
-            fuel: f.fuel,
-            output: f.output,
-            grill: f
-                .grill
-                .iter()
-                .enumerate()
-                .filter_map(|(i, g)| g.map(|g| (i as u8, g)))
-                .collect(),
-        }
-    }
-
     /// LAN player: the host's furnace (only for showing it; the host runs it).
     #[allow(clippy::too_many_arguments)]
     fn apply_furnace(
@@ -975,9 +773,6 @@ impl Game {
 
     /// LAN player: sends the open container if this player changed it.
     pub(super) fn net_container_sync(&mut self) {
-        if !self.is_client() {
-            return;
-        }
         let Screen::Container(c) = self.screen else {
             return;
         };

@@ -1429,11 +1429,7 @@ impl Game {
         }
         let msg = crate::net::Msg::Bench { p, bench: b.clone() };
         self.bench_ui.sent = now;
-        if self.is_client() {
-            self.send(msg);
-        } else {
-            self.broadcast(&msg, None);
-        }
+        self.send(msg);
     }
 
     /// Everything lying on every gun station near the camera, its drawer, the brush in it or
@@ -2154,32 +2150,6 @@ impl Game {
             _ => return,
         }
         self.bench_changed(p, None);
-    }
-
-    /// Host, every frame: each loader with a magazine on it that is not full pushes a round
-    /// into it from a box of the rounds it takes, one after another.
-    pub(in crate::game) fn update_loaders(&mut self, dt: f32) {
-        let busy: Vec<(IVec3, usize)> = self
-            .level.block_entities
-            .benches
-            .iter()
-            .filter_map(|(p, b)| b.loader_source().map(|i| (*p, i)))
-            .collect();
-        self.level.loader_feed.retain(|p, _| busy.iter().any(|(q, _)| q == p));
-        for (p, i) in busy {
-            let t = self.level.loader_feed.entry(p).or_insert(0.0);
-            *t += dt;
-            if *t < crate::entity::LOADER_ROUND {
-                continue;
-            }
-            *t -= crate::entity::LOADER_ROUND;
-            let Some(bench) = self.level.block_entities.benches.get_mut(&p) else { continue };
-            let (Some(v), Some(mag)) = (bench.boxes[i], bench.loader_mag.as_mut()) else { continue };
-            bench.boxes[i] = Some(box_without(v, 1));
-            let r = gun_rounds(mag) + 1;
-            set_gun_rounds(mag, r);
-            self.bench_changed(p, None);
-        }
     }
 
     /// The magazine of a gun on the table clicked: it slides out and is laid beside the gun.

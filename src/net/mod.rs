@@ -14,7 +14,7 @@ mod conn;
 mod msg;
 
 pub use conn::{local_ip, Conn, Finder, Frame, Server, DEFAULT_PORT};
-pub use delta::{full_list_bytes, EntitySync};
+pub use delta::EntitySync;
 pub use msg::{ItemNet, MobNet, Msg, PlayerState, Pose, NO_BLOCK};
 
 /// Bumped whenever the messages change; host and players must match.

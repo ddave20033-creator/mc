@@ -22,9 +22,6 @@ impl Game {
             // (a cut trunk gone or changed took its cut with it: `World::set`)
             self.terrain.world.record_fluid_change(p, old, b, self.time);
             // Fluids flow on the host only.
-            if !self.is_client() {
-                self.fluids.notify(&self.terrain.world, p);
-            }
             self.terrain.block_changed(p, true);
         }
     }
@@ -37,51 +34,6 @@ impl Game {
             (self.random() - 0.5) * 2.5,
         );
         self.add_item(ItemEntity::new(center, vel, stack, 0.4));
-    }
-
-    /// What happens to the world when a player mines a block: its drops (unless in creative),
-    /// the contents of a chest/furnace/table, ice turning into water, and the block rules
-    /// around it. On a LAN, the host runs this for everyone.
-    pub(in crate::game) fn break_world(&mut self, p: IVec3, held: ItemId, creative: bool) {
-        let b = self.terrain.world.geti(p);
-        let mut contents = self.level.block_entities.remove(p);
-        self.split_chest(p, b);
-        contents.extend(self.remove_other_half(p, b));
-        let replacement = self.left_after_mining(p, b, creative);
-        self.set_block(p, replacement);
-        self.bare_under_trunk(p, b);
-        let center = p.as_vec3() + Vec3::splat(0.5);
-        if !creative {
-            let r = self.random();
-            for s in drops(b, held, r) {
-                self.spawn_drop(center, s);
-            }
-        }
-        for s in contents {
-            self.spawn_drop(center, s);
-        }
-        self.level.saplings.retain(|(q, _)| *q != p);
-        self.block_updated(p);
-    }
-
-    /// A block placed (or a fluid poured or scooped up) by a player, with the world's rules:
-    /// plants washed away by fluids, block entities, saplings, support and falling blocks.
-    pub(in crate::game) fn place_world(&mut self, at: IVec3, b: Block) {
-        let old = self.terrain.world.geti(at);
-        if fluid_breaks(old) && is_fluid(b) {
-            self.break_naturally(at);
-        }
-        let b = self.join_chest(at, b);
-        self.set_block(at, b);
-        if is_furnace(b) {
-            self.level.block_entities.furnaces.insert(at, Default::default());
-        } else if is_chest(b) {
-            self.level.block_entities.chests.insert(at, Box::new([None; 27]));
-        } else if is_sapling(b) {
-            let t = 60.0 + self.random() * 120.0;
-            self.level.saplings.push((at, t));
-        }
-        self.block_updated(at);
     }
 
     /// A double chest half placed at `at` turns the single chest it pairs with (facing the
@@ -113,18 +65,7 @@ impl Game {
     /// A chest's halves in inventory order (the left one seen from the front first), and
     /// whether it is a double chest.
     pub(in crate::game) fn chest_halves(&self, p: IVec3) -> (IVec3, Option<IVec3>) {
-        let w = &self.terrain.world;
-        let b = w.geti(p);
-        match chest_partner_offset(b) {
-            Some(d) if chest_partner_offset(w.geti(p + d)) == Some(-d) => {
-                if (CHEST_LEFT..CHEST_LEFT + 4).contains(&b) {
-                    (p, Some(p + d))
-                } else {
-                    (p + d, Some(p))
-                }
-            }
-            _ => (p, None),
-        }
+        crate::sim::rules::chest_halves(&self.terrain.world, p)
     }
 
     /// Chest to place at `at` for a player looking toward `facing`, like Minecraft: it joins a
@@ -156,23 +97,9 @@ impl Game {
     /// Changes a block for this player: in single player and on the host with the world's
     /// rules; a LAN player shows it right away and lets the host do the rest.
     pub(in crate::game) fn edit_block(&mut self, at: IVec3, b: Block) {
-        if self.is_client() {
-            let b = self.join_chest(at, b);
-            self.set_block(at, b);
-            self.send(crate::net::Msg::Place { p: at, b });
-        } else {
-            self.place_world(at, b);
-        }
-    }
-
-    /// What a mined block leaves behind: air, or water for ice (Minecraft: unless it was
-    /// floating, or mined in creative).
-    fn left_after_mining(&self, p: IVec3, b: Block, creative: bool) -> Block {
-        if b == ICE && !creative && self.terrain.world.geti(p - IVec3::Y) != AIR {
-            WATER
-        } else {
-            AIR
-        }
+        let b = self.join_chest(at, b);
+        self.set_block(at, b);
+        self.send(crate::net::Msg::Place { p: at, b });
     }
 
     /// Mined by the player.
@@ -181,17 +108,11 @@ impl Game {
         let held = self.held();
         let creative = self.creative();
         let tint = self.block_tint(p, b);
-        if self.is_client() {
-            let replacement = self.left_after_mining(p, b, creative);
-            self.split_chest(p, b);
-            self.remove_other_half(p, b);
-            self.set_block(p, replacement);
-            self.send(crate::net::Msg::Break { p, held, creative });
-        } else {
-            self.break_world(p, held, creative);
-            // The other LAN players see the debris too.
-            self.break_fx(p, b, false, None);
-        }
+        let replacement = crate::sim::rules::left_after_mining(&self.terrain.world, p, b, creative);
+        self.split_chest(p, b);
+        self.remove_other_half(p, b);
+        self.set_block(p, replacement);
+        self.send(crate::net::Msg::Break { p, held, creative });
         if !creative {
             self.needs.exhaust(crate::entity::survival::cost::MINE);
             let wear = wear(held, b);
@@ -254,141 +175,6 @@ impl Game {
         Vec::new()
     }
 
-    /// A trunk cut down off grass leaves its mark on the grass under it: a circle of bare
-    /// soil the grass slowly grows back over (`update_stump_marks`).
-    pub(in crate::game) fn bare_under_trunk(&mut self, p: IVec3, b: Block) {
-        if !is_log(b) || is_branch(b) || log_axis(b) != 1 {
-            return;
-        }
-        let below = p - IVec3::Y;
-        let g = self.terrain.world.geti(below);
-        if matches!(g, GRASS | SNOWY_GRASS) {
-            self.set_block(below, stump_mark(g, 0));
-            self.block_updated(below);
-        }
-    }
-
-    /// The grass growing back over the marks of cut-down trunks near the player, a stage at
-    /// a time (about a minute each), where nothing covers them. Found by looking round, so
-    /// marks in a world just loaded grow back too.
-    pub(in crate::game) fn update_stump_marks(&mut self, dt: f32) {
-        const EVERY: f32 = 2.0;
-        const STAGE_SECS: f32 = 60.0;
-        self.level.stump_scan -= dt;
-        if self.level.stump_scan > 0.0 {
-            return;
-        }
-        self.level.stump_scan = EVERY;
-        let c = self.player.pos.floor().as_ivec3();
-        let w = &self.terrain.world;
-        let found: Vec<(IVec3, Block)> = crate::world::terrain::listed_near(&self.terrain.stump_marks, c, 32, 12)
-            .map(|p| (p, w.geti(p)))
-            .filter(|&(_, b)| is_stump_mark(b))
-            .collect();
-        for (p, b) in found {
-            if self.random() >= EVERY / STAGE_SECS {
-                continue;
-            }
-            let above = self.terrain.world.geti(p + IVec3::Y);
-            if is_opaque(above) || is_log(above) {
-                continue;
-            }
-            let next = if stump_stage(b) + 1 < STUMP_STAGES { b + 1 } else { soil(b) };
-            self.set_block(p, next);
-            self.block_updated(p);
-        }
-    }
-
-    /// Broken by the world (lost support): always drops like a hand-mined block.
-    pub(in crate::game) fn break_naturally(&mut self, p: IVec3) {
-        let b = self.terrain.world.geti(p);
-        let contents = self.remove_other_half(p, b);
-        self.set_block(p, AIR);
-        let r = self.random();
-        for s in drops(b, NONE, r).into_iter().chain(contents) {
-            self.spawn_drop(p.as_vec3() + Vec3::splat(0.5), s);
-        }
-        self.level.saplings.retain(|(q, _)| *q != p);
-        self.block_updated(p);
-    }
-
-    pub(in crate::game) fn supported(w: &World, p: IVec3, b: Block) -> bool {
-        if let Some(offset) = torch_support_offset(b) {
-            return is_opaque(w.geti(p + offset));
-        }
-        let below = w.geti(p - IVec3::Y);
-        match b {
-            _ if is_door(b) => {
-                if door_upper(b) {
-                    is_door(below) && !door_upper(below)
-                } else {
-                    is_solid(below) && !is_door(below)
-                }
-            }
-            CACTUS => matches!(below, SAND | CACTUS),
-            DEAD_BUSH => matches!(soil(below), SAND | DIRT | GRASS),
-            _ if is_plant(b) => matches!(soil(below), GRASS | DIRT | SNOWY_GRASS),
-            _ => true,
-        }
-    }
-
-    /// Block rules after a change at `p`: support for plants/torches and falling sand.
-    pub(in crate::game) fn block_updated(&mut self, p: IVec3) {
-        let above = p + IVec3::Y;
-        for q in [
-            above,
-            p + IVec3::X,
-            p - IVec3::X,
-            p + IVec3::Z,
-            p - IVec3::Z,
-        ] {
-            let b = self.terrain.world.geti(q);
-            if needs_support(b) && !Self::supported(&self.terrain.world, q, b) {
-                self.break_naturally(q);
-            }
-        }
-        let w = &self.terrain.world;
-        if has_gravity(w.geti(above)) && !is_solid(w.geti(p)) {
-            self.start_fall(above);
-        }
-        let w = &self.terrain.world;
-        if p.y > 0 && has_gravity(w.geti(p)) && !is_solid(w.geti(p - IVec3::Y)) {
-            self.start_fall(p);
-        }
-    }
-
-    pub(in crate::game) fn start_fall(&mut self, p: IVec3) {
-        let b = self.terrain.world.geti(p);
-        self.set_block(p, AIR);
-        self.level.falling.push(FallingBlock {
-            pos: Vec3::new(p.x as f32 + 0.5, p.y as f32, p.z as f32 + 0.5),
-            vel_y: 0.0,
-            block: b,
-            prev: None,
-        });
-        self.block_updated(p);
-    }
-
-    /// Grows a sapling into a tree (the generator's shapes). Returns false if there is not
-    /// enough room for its wood.
-    pub(in crate::game) fn grow_tree(&mut self, p: IVec3, sapling: Block) -> bool {
-        let log = log_of_sapling(sapling);
-        let seed = (self.random() * u32::MAX as f32) as u32;
-        let shape = crate::world::trees::tree_shape(log, seed);
-        let w = &self.terrain.world;
-        let free = |b: Block| b == AIR || is_leaves(b) || is_plant(b) || is_sapling(b);
-        if shape.iter().any(|&(d, _, soft)| !soft && !free(w.geti(p + d))) {
-            return false;
-        }
-        for (d, b, soft) in shape {
-            let q = p + d;
-            let cur = self.terrain.world.geti(q);
-            if !soft || cur == AIR || is_plant(cur) {
-                self.set_block(q, b);
-            }
-        }
-        true
-    }
 }
 
 #[cfg(test)]
@@ -411,12 +197,12 @@ mod tests {
         for offset in [IVec3::NEG_Z, IVec3::X, IVec3::Z, IVec3::NEG_X] {
             let torch = wall_torch_for_support(offset).unwrap();
             let at = anchor - offset;
-            assert!(Game::supported(&world, at, torch));
+            assert!(crate::sim::rules::supported(&world, at, torch));
         }
         world.seti(anchor, AIR);
         for offset in [IVec3::NEG_Z, IVec3::X, IVec3::Z, IVec3::NEG_X] {
             let torch = wall_torch_for_support(offset).unwrap();
-            assert!(!Game::supported(&world, anchor - offset, torch));
+            assert!(!crate::sim::rules::supported(&world, anchor - offset, torch));
         }
     }
 }

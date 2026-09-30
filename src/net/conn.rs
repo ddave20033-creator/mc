@@ -227,11 +227,6 @@ impl Conn {
         }
     }
 
-    /// Bytes sent so far with `send` and `send_frame` (not streamed ones).
-    pub fn bytes_sent(&self) -> u64 {
-        self.sent.get()
-    }
-
     /// Frames sent into the returned sender (from any thread) go out here, in the order of
     /// this call: whatever is sent to the connection afterwards waits until the sender is
     /// dropped. (The host encodes a joining player's chunks on a worker thread this way.)

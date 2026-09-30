@@ -184,35 +184,14 @@ impl Game {
     /// drop their logs (the ground under it left bare, the grass to grow back), the axe worn
     /// by the one stroke.
     fn break_stump(&mut self, p: IVec3) {
-        let Some(column) = stump_of(&self.terrain.world, p) else { return };
-        let held = self.held();
-        let creative = self.creative();
-        if self.is_client() {
-            self.send(crate::net::Msg::Stump { p });
-            if !creative {
-                self.wear_axe(crate::entity::survival::cost::MINE, p);
-            }
+        if stump_of(&self.terrain.world, p).is_none() {
             return;
         }
-        for q in column {
-            let b = self.terrain.world.geti(q);
-            self.break_world(q, held, creative);
-            self.break_fx(q, b, false, None);
-        }
+        let creative = self.creative();
+        self.send(crate::net::Msg::Stump { p });
         if !creative {
             self.wear_axe(crate::entity::survival::cost::MINE, p);
         }
-    }
-
-    /// Lets a tree still going over land at once (the world is being left: its drops are
-    /// not lost with it).
-    pub(in crate::game) fn land_falling_trees(&mut self) {
-        for t in std::mem::take(&mut self.level.falling_trees) {
-            self.tree_lands(t);
-        }
-        self.come_apart();
-        self.chop = None;
-        self.log_cut = None;
     }
 
     /// The axe's edge has bitten into the trunk at `p` at `point`: the cut is made there, on
@@ -254,51 +233,11 @@ impl Game {
             self.wear_axe(crate::entity::survival::cost::MINE * 0.5, p);
         }
         let notch = Notch { depth, ..notch };
-        if self.is_client() {
-            // The server fells it (cut through, it answers with the stump and the tree
-            // falling); meanwhile the cut shows.
-            self.terrain.world.set_notch(p, Some(notch));
-            self.send(crate::net::Msg::Notch { p, notch: Some(notch) });
-        } else if depth >= FELL_DEPTH - 1e-3 {
-            self.fell_tree(p, notch);
-        } else {
-            self.terrain.world.set_notch(p, Some(notch));
-        }
+        // The server fells it (cut through, it answers with the stump and the tree
+        // falling); meanwhile the cut shows.
+        self.terrain.world.set_notch(p, Some(notch));
+        self.send(crate::net::Msg::Notch { p, notch: Some(notch) });
         self.terrain.block_changed(p, false);
-    }
-
-    /// The trunk at `p` breaks at the cut: everything of its tree above it comes away and
-    /// falls over (`sim::felling::fell`). Below the cut its stump is left.
-    fn fell_tree(&mut self, p: IVec3, notch: Notch) {
-        let (tool, creative) = (self.held(), self.creative());
-        let leaves = leaves_of(log_base(self.terrain.world.geti(p)));
-        let (mut tree, leaf, wood) = fell(&self.terrain.world, p, notch, tool, creative, |q| self.block_tint(q, leaves));
-        for &q in leaf.iter().chain(&wood) {
-            self.set_block(q, AIR);
-        }
-        for &q in &wood {
-            self.block_updated(q);
-        }
-        self.terrain.world.set_notch(p, Some(Notch { felled: true, ..notch }));
-        self.level.next_tree_id += 1;
-        tree.id = self.level.next_tree_id;
-        self.level.falling_trees.push(tree);
-    }
-
-    /// The falling trees go over (like a pole tipping about its foot) until one of them
-    /// hits something solid (leaves do not stop it) or lies flat; then it breaks up into
-    /// its drops with a crash.
-    pub(in crate::game) fn update_falling_trees(&mut self, dt: f32) {
-        let mut landed = Vec::new();
-        for (i, t) in self.level.falling_trees.iter_mut().enumerate() {
-            if t.step(dt, &self.terrain.world) {
-                landed.push(i);
-            }
-        }
-        for i in landed.into_iter().rev() {
-            let t = self.level.falling_trees.swap_remove(i);
-            self.tree_lands(t);
-        }
     }
 
     /// The server says a falling tree is down: it breaks up in a burst of bark and leaves.
@@ -331,55 +270,6 @@ impl Game {
             }
             t.prev_angle = t.angle;
         }
-    }
-
-    /// A fallen tree breaks up where it lies: its leaves and branches shatter in a burst of
-    /// bark and leaves, leaving little (a sapling or two from the leaves, a few sticks from
-    /// the branches); its trunk stays lying there, to be cut up.
-    fn tree_lands(&mut self, t: FallingTree) {
-        let turn = t.turn();
-        // The trunk from just past the stump, the way it fell (the ground's lie of it).
-        let pieces: Vec<Block> = t.blocks[..t.trunk].iter().map(|&(_, b)| b).collect();
-        let fell = t.fell_toward();
-        self.lay_log(t.stump + fell * 0.5, fell, pieces, t.tool, t.creative);
-        let (mut leaves, mut branches) = (Vec::new(), Vec::new());
-        for (n, &(o, b)) in t.blocks.iter().enumerate().skip(t.trunk) {
-            let mut at = t.at(&turn, o);
-            let q = at.floor().as_ivec3();
-            let tint = if is_leaves(b) { t.leaf_tint } else { [255; 3] };
-            if !is_leaves(b) || n % 3 == 0 {
-                self.particles.burst(&self.terrain.world, q, b, if is_leaves(b) { 3 } else { 6 }, tint);
-            }
-            // (up out of whatever it came down into)
-            while is_solid(self.terrain.world.geti(at.floor().as_ivec3())) && at.y < t.pivot.y + 30.0 {
-                at.y += 1.0;
-            }
-            if is_leaves(b) {
-                leaves.push(at);
-            } else {
-                branches.push(at);
-            }
-        }
-        if t.creative {
-            return;
-        }
-        let sapling = sapling_of(log_base(t.stub.1)) as ItemId;
-        let r = self.random();
-        let saplings = if leaves.is_empty() { 0 } else if r < 0.4 { 0 } else if r < 0.85 { 1 } else { 2 };
-        let r = self.random();
-        let sticks = if branches.is_empty() { (r < 0.5) as usize } else { 1 + (r * 3.0) as usize };
-        let drop = |g: &mut Self, from: &[Vec3], what: ItemId, n: usize| {
-            for _ in 0..n {
-                if from.is_empty() {
-                    return;
-                }
-                let at = from[(g.random() * from.len() as f32) as usize % from.len()];
-                g.spawn_drop(at, crate::item::Stack::one(what));
-            }
-        };
-        drop(self, &leaves, sapling, saplings);
-        let from = if branches.is_empty() { &leaves } else { &branches };
-        drop(self, from, crate::item::STICK, sticks);
     }
 
     /// The falling trees' blocks where they are now: the logs round, the leaves.

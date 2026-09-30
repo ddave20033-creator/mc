@@ -66,16 +66,27 @@ impl Game {
     }
 
     /// Plays the world `meta`: a server for it runs on a thread of its own, and this game joins
-    /// it like any player. (With `RUSTCRAFT_SERVER=0`, for now, the game runs the world
-    /// itself, as it used to.)
+    /// it like any player.
     pub(in crate::game) fn play_world(&mut self, meta: WorldMeta) {
-        if !std::env::var("RUSTCRAFT_SERVER").is_ok_and(|v| v == "0") {
-            let (local, conn) = crate::sim::server::start(meta);
-            self.local = Some(local);
-            self.menus.net_message = t("mp.connecting").to_string();
-            self.join_with(conn);
-        } else {
-            self.load_world(meta);
+        let (local, conn) = crate::sim::server::start(meta);
+        self.local = Some(local);
+        self.menus.net_message = t("mp.connecting").to_string();
+        self.join_with(conn);
+    }
+
+    /// Pause menu: opens this world to the LAN (its server takes the LAN players).
+    pub(in crate::game) fn open_to_lan(&mut self) {
+        let Some(local) = &self.local else { return };
+        if self.lan_address.is_some() {
+            return;
+        }
+        match local.open_lan(&self.settings.name) {
+            Ok(address) => {
+                self.say(tf("lan.opened", &[&address]), chat::YELLOW);
+                self.lan_address = Some(address);
+                self.resume();
+            }
+            Err(e) => self.say(tf("lan.failed", &[&e]), chat::RED),
         }
     }
 
@@ -83,14 +94,12 @@ impl Game {
     pub(in crate::game) fn leave_server(&mut self, message: Option<String>) {
         // (still connecting: given up; the connection, if it is made, is dropped)
         self.menus.joining = None;
-        if self.is_client() {
-            if self.player.spawned {
-                let state = self.client_state();
-                self.send(Msg::Save(state));
-            }
-            if let Some(Net::Client(c)) = &mut self.net {
-                c.conn.close();
-            }
+        if self.player.spawned {
+            let state = self.client_state();
+            self.send(Msg::Save(state));
+        }
+        if let Some(Net::Client(c)) = &mut self.net {
+            c.conn.close();
         }
         self.net = None;
         // (the game's own server saves and stops)
@@ -117,11 +126,13 @@ impl Game {
     /// Everything the host keeps for this player.
     pub(in crate::game) fn client_state(&self) -> PlayerState {
         let slots = self.carried_slots();
+        // A dead player is kept as come back to life at home, so leaving on the death screen
+        // does not bring them back where they died.
         let dead = self.screen == Screen::Dead;
         PlayerState {
-            pos: self.player.pos,
-            yaw: self.yaw,
-            pitch: self.pitch,
+            pos: if dead { self.home_pos() } else { self.player.pos },
+            yaw: if dead { 0.0 } else { self.yaw },
+            pitch: if dead { 0.0 } else { self.pitch },
             health: if dead { MAX_HEALTH } else { self.health },
             needs: if dead {
                 Needs::new().to_array()
@@ -147,7 +158,7 @@ impl Game {
         let (msgs, open) = c.conn.poll();
         for m in msgs {
             self.client_handle(m);
-            if !self.is_client() {
+            if self.net.is_none() {
                 return; // refused
             }
         }
@@ -242,14 +253,7 @@ impl Game {
                 knock,
                 kind,
             } => self.hit_by_player(dmg, from, knock, kind),
-            Msg::Grenade {
-                id,
-                kind,
-                pos,
-                vel,
-                seed,
-                fuse,
-            } => self.remote_grenade(id, kind, pos, vel, seed, fuse),
+            Msg::Grenade { kind, pos, vel, seed, fuse, .. } => self.remote_grenade(kind, pos, vel, seed, fuse),
             Msg::Blast { pos, seed } => self.remote_blast(pos, seed),
             Msg::BreakFx { p, block } => self.break_fx(p, block, true, None),
             Msg::Fx { kind, pos } => self.show_fx(kind, pos),
@@ -495,7 +499,6 @@ impl Game {
                 pos,
                 vel_y: 0.0,
                 block,
-                prev: None,
             })
             .collect();
     }

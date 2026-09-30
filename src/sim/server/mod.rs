@@ -87,8 +87,6 @@ impl Level {
 pub enum Control {
     /// Open the world to the LAN; the answer is the address, or why it could not.
     OpenLan(String, Sender<Result<String, String>>),
-    /// Stop taking LAN players (the ones in are told the host left).
-    CloseLan,
     /// Save everything and stop; the answer comes once it is on disk.
     Stop(Sender<()>),
 }
@@ -108,10 +106,6 @@ impl Local {
             .send(Control::OpenLan(host_name.to_string(), tx))
             .map_err(|_| "server stopped".to_string())?;
         rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "no answer".to_string())?
-    }
-
-    pub fn close_lan(&self) {
-        let _ = self.control.send(Control::CloseLan);
     }
 
     /// Saves and stops the server, waiting (up to 20 s) until it has.
@@ -253,7 +247,6 @@ impl Server {
             Control::OpenLan(host, answer) => {
                 let _ = answer.send(self.open_lan(&host));
             }
-            Control::CloseLan => self.close_lan(),
             Control::Stop(done) => self.stop = Some(done),
         }
     }

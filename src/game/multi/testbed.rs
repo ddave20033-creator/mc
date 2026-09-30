@@ -11,10 +11,9 @@ impl Game {
         match w.as_slice() {
             ["open"] => {
                 self.open_to_lan();
-                match (self.host_ref(), &self.lan_address) {
-                    (Some(h), _) => vec![format!("LAN open at {}", h.address)],
-                    (None, Some(address)) => vec![format!("LAN open at {address}")],
-                    _ => vec!["LAN could not open".into()],
+                match &self.lan_address {
+                    Some(address) => vec![format!("LAN open at {address}")],
+                    None => vec!["LAN could not open".into()],
                 }
             }
             ["join", addr, name] => {
@@ -61,18 +60,6 @@ impl Game {
         let mut out = Vec::new();
         let (mobs, items) = (self.level.mobs.len(), self.level.items.len());
         match &self.net {
-            Some(Net::Host(h)) => {
-                out.push(format!("host: {} player(s), {mobs} mobs, {items} items here", h.peers.len()));
-                for p in &h.peers {
-                    let [sent, whole] = p.entity_bytes;
-                    out.push(format!(
-                        "  {}: {} bytes sent in all; entity updates {sent} bytes (whole lists would have been {whole}); {} chunks waiting to go whole",
-                        p.name,
-                        p.conn.bytes_sent(),
-                        p.far_chunks.len()
-                    ));
-                }
-            }
             Some(Net::Client(_)) => {
                 let w = &self.terrain.world;
                 let pending: usize = w.pending.values().map(|v| v.len()).sum();

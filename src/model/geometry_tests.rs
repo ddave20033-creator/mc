@@ -280,12 +280,12 @@ fn mobs() -> Vec<Vertex> {
     let mut out = Vec::new();
     for kind in [MobKind::Pig, MobKind::Sheep, MobKind::Dummy, MobKind::Wolf] {
         let mut m = Mob::new(kind, Vec3::new(2.0, 70.0, -4.0), 0.8, 11);
-        m.build(&mut out, 12, 3, 1.0);
+        m.build(&mut out, 12, 3);
         m.sheared = true;
         m.owner = Some("x".into());
         m.sitting = true;
         m.collar = 3;
-        m.build(&mut out, 9, 1, 1.0);
+        m.build(&mut out, 9, 1);
     }
     out
 }
