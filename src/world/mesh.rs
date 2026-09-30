@@ -982,10 +982,17 @@ impl Builder {
             }
         };
         let whole = clip(f32::INFINITY);
+        if notch.felled {
+            // A stump: cut flat, and on the far side the hinge the tree broke off at, a ridge
+            // of the wood the cut had not reached, up to the cut's middle.
+            let (flat, hinge) = stump_heights(notch, radius);
+            let c = radius - deep;
+            slice(self, &whole, f32::INFINITY, t0, flat, cap0, true);
+            slice(self, &clip(c), c, flat, hinge, false, true);
+            return;
+        }
         slice(self, &whole, f32::INFINITY, t0, z0, cap0, true);
-        // A stump ends at the cut's middle (its top the rest of the break).
-        let z1 = if notch.felled { h } else { z1 };
-        let n = if notch.felled { SLICES / 2 } else { SLICES };
+        let n = SLICES;
         for k in 0..n {
             let ya = z0 + (z1 - z0) * k as f32 / n as f32;
             let yb = z0 + (z1 - z0) * (k + 1) as f32 / n as f32;
@@ -993,12 +1000,7 @@ impl Builder {
             let c = radius - deep * (1.0 - dy / half).max(0.0);
             slice(self, &clip(c), c, ya, yb, true, true);
         }
-        if notch.felled {
-            // The break across the rest of the trunk.
-            slice(self, &whole, f32::INFINITY, z1 - 0.001, z1, false, true);
-        } else {
-            slice(self, &whole, f32::INFINITY, z1, t1, true, cap1);
-        }
+        slice(self, &whole, f32::INFINITY, z1, t1, true, cap1);
     }
 
     /// Stairs: the filled eighths of the block, without the faces between them or against
@@ -1707,6 +1709,27 @@ static NOTCHES: std::sync::RwLock<Vec<(IVec3, Notch)>> = std::sync::RwLock::new(
 pub fn notch_at(p: IVec3) -> Option<Notch> {
     let list = NOTCHES.read().ok()?;
     list.iter().find(|(q, _)| *q == p).map(|(_, n)| *n)
+}
+
+/// A stump's heights in its block (a trunk `radius` thick): its flat top, and the top of the
+/// hinge left standing on its far side (the cut's middle).
+pub fn stump_heights(notch: Notch, radius: f32) -> (f32, f32) {
+    let h = notch.height.clamp(0.12, 0.88);
+    let deep = notch.depth.clamp(0.0, 1.0) * 2.0 * radius;
+    let low = (h - (deep * 0.8).max(0.08)).max(0.02);
+    ((low + h) * 0.5, h)
+}
+
+/// Every cut there is (for saving).
+pub fn all_notches() -> Vec<(IVec3, Notch)> {
+    NOTCHES.read().map(|l| l.clone()).unwrap_or_default()
+}
+
+/// No cuts any more (another world is loaded).
+pub fn clear_notches() {
+    if let Ok(mut list) = NOTCHES.write() {
+        list.clear();
+    }
 }
 
 /// Puts (or with None, takes away) the cut at `p`; the chunk has to be meshed again.

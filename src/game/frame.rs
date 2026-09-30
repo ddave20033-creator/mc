@@ -762,15 +762,24 @@ impl Game {
         } else {
             *lower = (*lower - 3.0 * dt).max(-0.1);
         }
-        if in_world
+        // Seen from the player's own eyes, its hands shown.
+        let own_view = in_world
             && !third_person
             && !self.hide_hud
-            && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol && !book)))
             && self.screen != Screen::Dead
             && self.sleep.is_none()
             && !self.in_station()
-            && !self.spectator()
-        {
+            && !self.spectator();
+        // Chopping: the arms and the axe where the chop's rig has them in the world (the same
+        // ones the player model shows from outside), however far down the player looks (the
+        // first-person body draws the rest of it).
+        if let (true, Some(swing)) = (own_view, self.chop) {
+            use crate::model::chop_rig::{emit, Parts};
+            let light = crate::util::vertex_light(player_sky, player_blk);
+            let fl = crate::world::mesh::flags::ENTITY;
+            emit(&mut scene.particles, self.chop_world(), &swing.pose(), Parts::Arms, self.held(), self.effective_skin(), light, fl);
+        }
+        if own_view && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol && !book))) {
             let f = look_dir(self.yaw, self.pitch);
             let r = f.cross(Vec3::Y).normalize();
             let u = r.cross(f);
@@ -798,14 +807,6 @@ impl Game {
                 dt,
                 self.effective_skin(),
             );
-            // Chopping: the arms and the axe where the chop's rig has them in the world (the
-            // same ones the player model shows from outside).
-            if let Some(swing) = self.chop {
-                use crate::model::chop_rig::{emit, Parts};
-                let light = crate::util::vertex_light(player_sky, player_blk);
-                let fl = crate::world::mesh::flags::ENTITY;
-                emit(&mut scene.particles, self.chop_world(), &swing.pose(), Parts::Arms, self.held(), self.effective_skin(), light, fl);
-            }
             // The hand is drawn with its own 70 degree view: move its torch tip to where the
             // world's view shows the same spot, so the flame sits on the torch.
             let k = (self.fov_current.to_radians() * 0.5).tan() / 35f32.to_radians().tan();

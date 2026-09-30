@@ -25,6 +25,7 @@ with PIL (resize to ~640x360 each) and reading that one image.
 | `buckets` | buckets held (ahead, down, walking, turning), front view, dropped at night |
 | `trees` | rows of oak/birch/spruce from several seeds, near and from above, flicker + zfight |
 | `blocks` | odd-shaped blocks on the lane from two sides, flicker + zfight |
+| `felling` | a birch chopped down (ahead, looking down with the body), its stump, struck out from above (first and third person) |
 | `checks` | only the checks: zfight around, every item model, textures, flicker |
 
 Write a new script for anything else (copy one); a file anywhere works:

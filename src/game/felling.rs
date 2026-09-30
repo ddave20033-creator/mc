@@ -6,11 +6,16 @@
 //! tree above it (its trunk, branches and leaves) falls over as one, away from the player,
 //! slowly at first and faster as it tips, until it hits the ground and breaks up into what
 //! it drops.
+//!
+//! What is left of a felled tree is its stump (the cut block, and the trunk under it where
+//! it was cut higher up). An axe takes it out in one stroke, whatever the axe: raised over
+//! the head and brought straight down into it (`chop_rig::Kind::Stump`); when the axe is
+//! pulled out again the stump comes apart into its logs.
 
 use super::*;
 use crate::item::{inventory, tool_of, Tier, ToolKind};
-use crate::model::chop_rig::{self, ChopPose, Swing, EDGE, HIT, STROKE};
-use crate::world::mesh::{notch_at, set_notch, Notch};
+use crate::model::chop_rig::{self, ChopPose, Kind, Swing, EDGE};
+use crate::world::mesh::{notch_at, set_notch, stump_heights, Notch};
 
 /// How deep (of the trunk's width) the cut goes before the trunk breaks.
 const FELL_DEPTH: f32 = 0.75;
@@ -87,10 +92,13 @@ fn in_trunk(w: &World, q: Vec3) -> Option<IVec3> {
     if let Some(n) = notch_at(p) {
         let y = q.y - p.y as f32;
         let h = n.height.clamp(0.12, 0.88);
-        if n.felled && y > h {
-            return None;
-        }
         let deep = n.depth.clamp(0.0, 1.0) * 2.0 * r;
+        if n.felled {
+            // A stump: flat, the hinge standing on its far side.
+            let (flat, hinge) = stump_heights(n, r);
+            let far = rel.dot(Vec2::new(n.angle.cos(), n.angle.sin())) <= r - deep;
+            return (y <= flat || (y <= hinge && far)).then_some(p);
+        }
         let half = (deep * 0.8).max(0.08);
         let cut = r - deep * (1.0 - (y - h).abs() / half).max(0.0);
         if rel.dot(Vec2::new(n.angle.cos(), n.angle.sin())) > cut {
@@ -100,37 +108,98 @@ fn in_trunk(w: &World, q: Vec3) -> Option<IVec3> {
     Some(p)
 }
 
+/// The stump that `p` is part of, if it is one: its cut block (left by a felled tree) on top
+/// and the trunk under it down to what it stands on, top first.
+fn stump_of(w: &World, p: IVec3) -> Option<Vec<IVec3>> {
+    let b = w.geti(p);
+    if !is_trunk(b) {
+        return None;
+    }
+    let same = |q: IVec3| is_trunk(w.geti(q)) && log_base(w.geti(q)) == log_base(b);
+    // Up to the cut (a trunk still standing above is no stump).
+    let mut top = p;
+    while !notch_at(top).is_some_and(|n| n.felled) {
+        top += IVec3::Y;
+        if !same(top) || top.y - p.y > 64 {
+            return None;
+        }
+    }
+    let mut column = vec![top];
+    let mut q = top - IVec3::Y;
+    while same(q) && !notch_at(q).is_some() && top.y - q.y < 64 {
+        column.push(q);
+        q -= IVec3::Y;
+    }
+    Some(column)
+}
+
+/// All the cuts in trunks, for saving (`x,y,z,angle,height,depth,felled` a line).
+pub fn notches_text() -> String {
+    crate::world::mesh::all_notches()
+        .iter()
+        .map(|(p, n)| format!("{},{},{},{},{},{},{}\n", p.x, p.y, p.z, n.angle, n.height, n.depth, n.felled as u8))
+        .collect()
+}
+
+/// The cuts saved with a world (any there were before are gone).
+pub fn load_notches(text: &str) {
+    crate::world::mesh::clear_notches();
+    for line in text.lines() {
+        let v: Vec<&str> = line.trim().split(',').collect();
+        if v.len() != 7 {
+            continue;
+        }
+        let i = |k: usize| v[k].parse::<i32>().ok();
+        let f = |k: usize| v[k].parse::<f32>().ok();
+        if let (Some(x), Some(y), Some(z), Some(angle), Some(height), Some(depth)) = (i(0), i(1), i(2), f(3), f(4), f(5)) {
+            set_notch(IVec3::new(x, y, z), Some(Notch { angle, height, depth, felled: v[6] == "1" }));
+        }
+    }
+}
+
 impl Game {
     /// Where the chop's rig is in the world (as the player model draws it).
     pub(super) fn chop_world(&self) -> Mat4 {
         chop_rig::to_world(self.player.pos, self.visual_head_yaw(), self.pitch)
     }
 
-    /// The trunk the player is aiming an axe at, if any: a swing can start (felling is the
-    /// host's; a LAN client mines trunks like any block).
-    fn chop_target(&self) -> Option<IVec3> {
+    /// The trunk the player is aiming an axe at, if any, and the swing it takes: a standing
+    /// trunk is chopped level, a stump struck from above (felling is the host's; a LAN
+    /// client mines trunks like any block).
+    fn chop_target(&self) -> Option<(Kind, IVec3)> {
         chops_needed(self.held())?;
         if self.is_client() {
             return None;
         }
         let (hit, _) = self.target?;
-        // (a stump left is mined like a log)
-        let stump = notch_at(hit).is_some_and(|n| n.felled);
-        (is_trunk(self.terrain.world.geti(hit)) && !stump).then_some(hit)
+        let w = &self.terrain.world;
+        if !is_trunk(w.geti(hit)) {
+            return None;
+        }
+        let kind = if stump_of(w, hit).is_some() { Kind::Stump } else { Kind::Chop };
+        Some((kind, hit))
     }
 
     /// Where the axe's edge first comes into a trunk's wood between the animation's times
-    /// `t0` and `t1`: the time, the trunk and the point.
-    fn edge_contact(&self, t0: f32, t1: f32) -> Option<(f32, IVec3, Vec3)> {
+    /// `t0` and `t1`: the time, the trunk and the point. Struck down, the ground stops it
+    /// too (no trunk then).
+    fn edge_contact(&self, kind: Kind, t0: f32, t1: f32) -> Option<(f32, Option<IVec3>, Vec3)> {
         let world = self.chop_world();
+        let w = &self.terrain.world;
         let steps = ((t1 - t0) / 0.004).ceil().max(1.0) as usize;
         for i in 1..=steps {
             let t = t0 + (t1 - t0) * i as f32 / steps as f32;
-            let axe = world * ChopPose::at(t).axe();
+            let axe = world * ChopPose::at(kind, t).axe();
             for e in EDGE {
                 let q = axe.transform_point3(e);
-                if let Some(p) = in_trunk(&self.terrain.world, q) {
-                    return Some((t, p, q));
+                if let Some(p) = in_trunk(w, q) {
+                    return Some((t, Some(p), q));
+                }
+                if kind == Kind::Stump {
+                    let b = w.geti(q.floor().as_ivec3());
+                    if is_solid(b) && !is_leaves(b) && !is_log(b) {
+                        return Some((t, None, q));
+                    }
                 }
             }
         }
@@ -142,18 +211,34 @@ impl Game {
     /// going on (the normal mining is left out, and the hand is drawn by the rig).
     pub(super) fn update_chopping(&mut self, active: bool, dt: f32) -> bool {
         if let Some(mut sw) = self.chop {
+            let times = sw.kind.times();
             let before = sw.anim_time();
             sw.clock += dt;
             let after = sw.anim_time();
-            if sw.hit.is_none() && after > STROKE && before < HIT {
-                if let Some((t, p, point)) = self.edge_contact(before.max(STROKE), after.min(HIT)) {
+            if sw.hit.is_none() && after > times.stroke && before < times.hit {
+                if let Some((t, p, point)) = self.edge_contact(sw.kind, before.max(times.stroke), after.min(times.hit)) {
                     // Stuck where it bit in.
                     sw.hit = Some(t);
                     sw.clock = t;
-                    self.chop_hit(p, point);
+                    match (sw.kind, p) {
+                        (Kind::Chop, Some(p)) => self.chop_hit(p, point),
+                        (Kind::Stump, Some(p)) => self.stump_hit(p, point),
+                        (_, None) => self.ground_hit(point),
+                    }
+                }
+            }
+            // Pulled out of the stump, it comes apart.
+            if sw.pulling() {
+                if let Some(p) = self.stump_struck.take() {
+                    self.break_stump(p);
                 }
             }
             self.chop = (!sw.done()).then_some(sw);
+        }
+        if self.chop.is_none() {
+            if let Some(p) = self.stump_struck.take() {
+                self.break_stump(p);
+            }
         }
         let target = if active { self.chop_target() } else { None };
         if self.chop.is_none() && (target.is_none() || !self.left_down) {
@@ -161,11 +246,74 @@ impl Game {
             return target.is_some();
         }
         self.mining = None;
-        if self.chop.is_none() {
-            self.chop = Some(Swing::default());
+        if let (None, Some((kind, _))) = (self.chop, target) {
+            self.chop = Some(Swing { kind, ..Swing::default() });
         }
         self.hand.hidden = true;
         true
+    }
+
+    /// Struck down into the stump at `p`: the edge stuck in it, chips flying up; it comes
+    /// apart when the axe is pulled out (`break_stump`).
+    fn stump_hit(&mut self, p: IVec3, point: Vec3) {
+        let b = self.terrain.world.geti(p);
+        self.chips(p, b, point, Vec3::Y);
+        // (a standing trunk in the way only gives chips)
+        if stump_of(&self.terrain.world, p).is_some() {
+            self.stump_struck = Some(p);
+        }
+    }
+
+    /// The edge struck into the ground: a puff of it.
+    fn ground_hit(&mut self, point: Vec3) {
+        let q = point.floor().as_ivec3();
+        let b = self.terrain.world.geti(q);
+        let tint = self.block_tint(q, b);
+        self.particles.impact(&self.terrain.world, point, Vec3::Y, b, tint);
+    }
+
+    /// Chips of the trunk at `p` flying out at `at` (the way `out`).
+    fn chips(&mut self, p: IVec3, b: u8, at: Vec3, out: Vec3) {
+        let tint = self.block_tint(p, b);
+        for _ in 0..3 {
+            self.particles.impact(&self.terrain.world, at, out, b, tint);
+        }
+        let layer = face_texture(b, 2);
+        let (sky, blk) = self.terrain.world.light_estimate(at);
+        self.particles.crumbs(at, layer, 6, sky, blk);
+    }
+
+    /// The stump the axe was struck into comes apart: the cut block and the trunk under it
+    /// drop their logs (the ground under it left bare, the grass to grow back), the axe worn
+    /// by the one stroke.
+    fn break_stump(&mut self, p: IVec3) {
+        let Some(column) = stump_of(&self.terrain.world, p) else { return };
+        let held = self.held();
+        let creative = self.creative();
+        for q in column {
+            let b = self.terrain.world.geti(q);
+            self.break_world(q, held, creative);
+            self.break_fx(q, b, false, None);
+        }
+        if !creative {
+            self.needs.exhaust(crate::entity::survival::cost::MINE);
+            let slot = self.hotbar_slot;
+            if tool_of(held).is_some() && inventory::damage(&mut self.inventory.slots[slot], 1) {
+                self.particles.burst(&self.terrain.world, p, STONE, 12, [255; 3]);
+            }
+        }
+    }
+
+    /// Lets a tree still going over land at once (the world is being left: its drops are
+    /// not lost with it).
+    pub(super) fn land_falling_trees(&mut self) {
+        for t in std::mem::take(&mut self.falling_trees) {
+            self.tree_lands(t);
+        }
+        if let Some(p) = self.stump_struck.take() {
+            self.break_stump(p);
+        }
+        self.chop = None;
     }
 
     /// The axe's edge has bitten into the trunk at `p` at `point`: the cut is made there, on
@@ -174,6 +322,12 @@ impl Game {
     /// by how much is cut already). Chips fly, and cut through far enough the tree falls.
     fn chop_hit(&mut self, p: IVec3, point: Vec3) {
         let b = self.terrain.world.geti(p);
+        if notch_at(p).is_some_and(|n| n.felled) {
+            // (a stump is not chopped level: only chips)
+            let out = Vec2::new(self.player.pos.x - p.x as f32 - 0.5, self.player.pos.z - p.z as f32 - 0.5).normalize_or_zero();
+            self.chips(p, b, point, Vec3::new(out.x, 0.3, out.y));
+            return;
+        }
         let creative = self.creative();
         let chops = if creative { 4.0 } else { chops_needed(self.held()).unwrap_or(10.0) };
         let middle = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
@@ -196,13 +350,7 @@ impl Game {
         let out = Vec3::new(notch.angle.cos(), 0.0, notch.angle.sin());
         let r = log_radius(b) * (1.0 - notch.depth * 1.6).max(0.2);
         let at = middle + out * r + Vec3::Y * notch.height;
-        let tint = self.block_tint(p, b);
-        for _ in 0..3 {
-            self.particles.impact(&self.terrain.world, at, out, b, tint);
-        }
-        let layer = face_texture(b, 2);
-        let (sky, blk) = self.terrain.world.light_estimate(at);
-        self.particles.crumbs(at, layer, 6, sky, blk);
+        self.chips(p, b, at, out);
         if !creative {
             self.needs.exhaust(crate::entity::survival::cost::MINE * 0.5);
             let slot = self.hotbar_slot;

@@ -1,7 +1,7 @@
 //! Chopping a tree with an axe, as made in Blockbench (`tools/blockbench/chop.bbmodel`, from
 //! `gen_chop_anim.py`): the player's rig with the axe in both hands, and its `chop`
 //! animation (drawn back, swung round level into what is in front, stuck a moment, pulled
-//! out). This rig is where the player and the axe really are while chopping: the player
+//! out; and `stump`: raised over the head and brought straight down into a stump). This rig is where the player and the axe really are while chopping: the player
 //! model is drawn from it (third person), the arms and the axe are drawn from it where they
 //! are in the world (first person: the very same arms and axe, seen from the eye), and the
 //! game follows the axe's edge through it to find where it bites into a trunk (`Swing`).
@@ -17,13 +17,39 @@ use super::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, BonePose};
 use crate::world::mesh::Vertex;
 use glam::{Mat4, Vec3};
 
-/// Seconds into the animation: the stroke (where the edge can meet a trunk), the edge at its
-/// furthest (the stroke's end when it meets nothing), and when the axe is pulled out again.
-pub const STROKE: f32 = 0.29;
-pub const HIT: f32 = 0.38;
-pub const PULL: f32 = 0.52;
-/// The whole animation's length.
-pub const LENGTH: f32 = 0.8;
+/// Which swing: the level chop into a standing trunk, or the one straight down into a stump.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Kind {
+    #[default]
+    Chop,
+    Stump,
+}
+
+/// A swing's times (seconds into its animation): the stroke (where the edge can meet the
+/// wood), the edge at its furthest (the stroke's end when it meets nothing), when the axe is
+/// pulled out again, and the whole animation's length.
+pub struct Times {
+    pub stroke: f32,
+    pub hit: f32,
+    pub pull: f32,
+    pub length: f32,
+}
+
+impl Kind {
+    pub fn times(self) -> Times {
+        match self {
+            Kind::Chop => Times { stroke: 0.29, hit: 0.38, pull: 0.52, length: 0.8 },
+            Kind::Stump => Times { stroke: 0.34, hit: 0.42, pull: 0.58, length: 0.9 },
+        }
+    }
+
+    fn anim(self) -> &'static str {
+        match self {
+            Kind::Chop => "chop",
+            Kind::Stump => "stump",
+        }
+    }
+}
 /// Seconds the axe stays stuck in the wood, and how long it takes to come back into the
 /// animation's pull after it.
 const STUCK: f32 = 0.14;
@@ -42,10 +68,11 @@ pub const EDGE: [Vec3; 3] = [
 /// Blocks per model pixel.
 pub const PX: f32 = 1.8 / 32.0;
 
-/// One chop: seconds since it began, and the animation's time when the edge met a trunk
-/// (it stops there, stuck, then is pulled out).
+/// One swing: which, seconds since it began, and the animation's time when the edge met the
+/// wood (it stops there, stuck, then is pulled out).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Swing {
+    pub kind: Kind,
     pub clock: f32,
     pub hit: Option<f32>,
 }
@@ -54,13 +81,14 @@ impl Swing {
     /// Where the animation is: its time, and (after the axe was stuck somewhere short of the
     /// stroke's end) the stuck pose's time with how far it has come back into the pull.
     fn times(&self) -> (f32, Option<(f32, f32)>) {
+        let pull = self.kind.times().pull;
         match self.hit {
             Some(h) if self.clock >= h => {
                 let after = self.clock - h;
                 if after < STUCK {
                     (h, None)
                 } else {
-                    let t = PULL + (after - STUCK);
+                    let t = pull + (after - STUCK);
                     let k = ((after - STUCK) / REJOIN).clamp(0.0, 1.0);
                     (t, (k < 1.0).then_some((h, k * k * (3.0 - 2.0 * k))))
                 }
@@ -75,15 +103,20 @@ impl Swing {
     }
 
     pub fn done(&self) -> bool {
-        self.anim_time() >= LENGTH
+        self.anim_time() >= self.kind.times().length
+    }
+
+    /// Whether the axe has been stuck in the wood long enough to be pulled out.
+    pub fn pulling(&self) -> bool {
+        self.hit.is_some_and(|h| self.clock >= h + STUCK)
     }
 
     /// The rig's pose now.
     pub fn pose(&self) -> ChopPose {
         let (t, from) = self.times();
-        let now = ChopPose::at(t);
+        let now = ChopPose::at(self.kind, t);
         match from {
-            Some((h, k)) => ChopPose::at(h).blend(&now, k),
+            Some((h, k)) => ChopPose::at(self.kind, h).blend(&now, k),
             None => now,
         }
     }
@@ -96,11 +129,11 @@ pub struct ChopPose {
 }
 
 impl ChopPose {
-    pub fn at(t: f32) -> ChopPose {
+    pub fn at(kind: Kind, t: f32) -> ChopPose {
         let bones = data::BONES;
         let mut p = vec![BonePose::default(); bones.len()];
-        if let Some(anim) = find_anim(data::ANIMS, "chop") {
-            add_anim(&mut p, anim, t.clamp(0.0, LENGTH - 1e-4), 1.0, |_| false);
+        if let Some(anim) = find_anim(data::ANIMS, kind.anim()) {
+            add_anim(&mut p, anim, t.clamp(0.0, kind.times().length - 1e-4), 1.0, |_| false);
         }
         ChopPose { mats: bone_matrices(bones, &p, Mat4::IDENTITY).0 }
     }
@@ -148,12 +181,14 @@ pub fn axe_item() -> Mat4 {
         * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_4)
 }
 
-/// Which parts of the player to draw: all of it (seen from outside) or only the arms and
-/// the axe (seen from its own eyes, the rest behind the camera or below it).
+/// Which parts of the player to draw: all of it (seen from outside), only the arms and the
+/// axe (seen from its own eyes, the rest behind the camera or below it), or the body under
+/// them (the first-person body: all but the head, the arms and the axe).
 #[derive(Clone, Copy, PartialEq)]
 pub enum Parts {
     All,
     Arms,
+    Body,
 }
 
 /// The player (its skin's parts: the game's own boxes, the arms and legs in halves at the
@@ -179,10 +214,18 @@ pub fn emit(out: &mut Vec<Vertex>, world: Mat4, pose: &ChopPose, parts: Parts, h
         ("left_foot", v(-3.86, 0.0, -1.96), v(0.06, 6.0, 1.96), LEG, [0.5, 1.0]),
     ];
     for (bone, lo, hi, layers, rows) in boxes {
-        if parts == Parts::Arms && !bone.ends_with("_arm") && !bone.ends_with("_hand") {
-            continue;
+        let arm = bone.ends_with("_arm") || bone.ends_with("_hand");
+        let shown = match parts {
+            Parts::All => true,
+            Parts::Arms => arm,
+            Parts::Body => !arm && bone != "head",
+        };
+        if shown {
+            super::emit_box_rows(out, world * pose.bone(bone), lo, hi, skinned(layers), [[255; 3]; 6], light, fl, rows);
         }
-        super::emit_box_rows(out, world * pose.bone(bone), lo, hi, skinned(layers), [[255; 3]; 6], light, fl, rows);
+    }
+    if parts == Parts::Body {
+        return;
     }
     let st = crate::item::Stack::one(held);
     super::emit_held_data(out, world * pose.axe() * axe_item(), &st, light, fl);
@@ -193,26 +236,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_animation_is_as_long_as_the_game_thinks() {
-        let anim = find_anim(data::ANIMS, "chop").expect("chop animation");
-        assert!((anim.length - LENGTH).abs() < 1e-3);
+    fn the_animations_are_as_long_as_the_game_thinks() {
+        for kind in [Kind::Chop, Kind::Stump] {
+            let anim = find_anim(data::ANIMS, kind.anim()).expect("animation");
+            assert!((anim.length - kind.times().length).abs() < 1e-3);
+        }
     }
 
     #[test]
     fn the_axe_bites_in_ahead_of_the_player() {
-        let edge = ChopPose::at(HIT).axe().transform_point3(EDGE[1]);
+        let edge = ChopPose::at(Kind::Chop, Kind::Chop.times().hit).axe().transform_point3(EDGE[1]);
         assert!(edge.z < -10.0, "{edge}");
     }
 
     #[test]
+    fn the_stump_swing_comes_down_ahead_of_the_feet() {
+        let t = Kind::Stump.times();
+        let up = ChopPose::at(Kind::Stump, 0.3).axe().transform_point3(EDGE[1]);
+        let down = ChopPose::at(Kind::Stump, t.hit).axe().transform_point3(EDGE[1]);
+        assert!(up.y > 30.0, "raised: {up}");
+        assert!(down.y < 4.0 && down.z < -12.0, "down: {down}");
+    }
+
+    #[test]
     fn a_swing_stuck_early_is_pulled_out_smoothly() {
-        let mut s = Swing { clock: 0.0, hit: Some(0.34) };
-        let mut last = s.pose().axe().transform_point3(EDGE[1]);
-        while !s.done() {
-            s.clock += 0.01;
-            let now = s.pose().axe().transform_point3(EDGE[1]);
-            assert!((now - last).length() < 6.0, "jump at {}: {last} -> {now}", s.clock);
-            last = now;
+        for (kind, at) in [(Kind::Chop, 0.34), (Kind::Stump, 0.4)] {
+            // (from the moment it is stuck: the stroke itself may be fast)
+            let mut s = Swing { kind, clock: at, hit: Some(at) };
+            let mut last = s.pose().axe().transform_point3(EDGE[1]);
+            while !s.done() {
+                s.clock += 0.01;
+                let now = s.pose().axe().transform_point3(EDGE[1]);
+                assert!((now - last).length() < 6.0, "jump at {}: {last} -> {now}", s.clock);
+                last = now;
+            }
         }
     }
 }

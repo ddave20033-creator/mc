@@ -284,6 +284,11 @@ impl Game {
             &mut self.mobs,
         );
         self.falling.clear();
+        // The cuts in its trunks; nothing of the last world's felling.
+        felling::load_notches(&save::load_notches(&meta.folder));
+        self.falling_trees.clear();
+        self.chop = None;
+        self.stump_struck = None;
         self.cursor = None;
         self.craft = [None; 9];
         self.bench_anims.clear();
@@ -487,6 +492,7 @@ impl Game {
         meta.save();
         let folder = meta.folder.clone();
         save::save_inventory(&folder, &slots);
+        save::save_notches(&folder, &felling::notches_text());
         save::save_entities(
             &folder,
             &self.block_entities,
@@ -520,6 +526,7 @@ impl Game {
             self.spawn_at_home(false);
         }
         self.wake_up();
+        self.land_falling_trees();
         self.save_world();
         self.close_lan();
         self.world_meta = None;

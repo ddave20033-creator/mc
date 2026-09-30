@@ -308,6 +308,15 @@ pub fn load_inventory(folder: &str, out: &mut [Slot]) {
     }
 }
 
+/// The axe's cuts in trunks and the stumps of felled trees (`game::felling`).
+pub fn save_notches(folder: &str, text: &str) {
+    write(dir(folder).join("notches.txt"), text.as_bytes());
+}
+
+pub fn load_notches(folder: &str) -> String {
+    fs::read_to_string(dir(folder).join("notches.txt")).unwrap_or_default()
+}
+
 /// Block entities, growing saplings (position -> seconds until it grows), dropped items and mobs.
 pub fn save_entities(
     folder: &str,

@@ -315,6 +315,8 @@ pub struct Game {
     falling_trees: Vec<felling::FallingTree>,
     /// A chop with an axe going on (`felling`).
     chop: Option<crate::model::chop_rig::Swing>,
+    /// The stump the axe is stuck in, to come apart when it is pulled out.
+    stump_struck: Option<IVec3>,
     mobs: Vec<Mob>,
     /// Seconds until the next try to spawn animals near the player.
     mob_spawn_timer: f32,
@@ -586,6 +588,7 @@ impl Game {
             falling: Vec::new(),
             falling_trees: Vec::new(),
             chop: None,
+            stump_struck: None,
             mobs: Vec::new(),
             mob_spawn_timer: 5.0,
             mob_target: None,
@@ -691,6 +694,7 @@ impl Game {
         if self.is_client() {
             self.leave_server(None);
         } else {
+            self.land_falling_trees();
             self.save_world();
             self.close_lan();
         }

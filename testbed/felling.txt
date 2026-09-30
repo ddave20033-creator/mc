@@ -1,0 +1,44 @@
+# Felling birches with an axe: chopped from the side (looking ahead, then looking down with
+# the first-person body on), the stump left, struck out from above (first and third person).
+world new 7
+window 1280 720
+empty
+lane
+time 0.3
+tree birch 12 0 1
+hold golden_axe
+set body on
+pos 10.8 0 -0.05
+look 0 -18
+wait 1.5
+shot before
+click left 0.2
+shots chop_ahead 8 0.1
+look 0 -55
+click left 0.2
+shots chop_down 8 0.1
+look 0 -18
+click left 5
+wait 4
+shot stump
+pos 12.5 0.2 3.2
+look -90 -20
+wait 0.3
+shot stump_side
+pos 10.8 0 -0.05
+look 0 -40
+wait 0.3
+click left 0.2
+shots strike 10 0.08
+wait 1
+shot after
+tree birch 12 5 2
+pos 10.8 0 4.95
+look 0 -18
+click left 6
+wait 4
+shot stump2
+camera side
+look 0 -40
+click left 0.2
+shots strike_tp 10 0.08

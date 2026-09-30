@@ -610,11 +610,11 @@ pub fn build_player(out: &mut Vec<Vertex>, glass: &mut Vec<Vertex>, p: &PlayerPo
     let fl = flags::ENTITY;
     if let Some(swing) = p.chop {
         // Chopping: the whole player as the chop's rig has it (seen from its own eyes, the
-        // first-person view draws its arms and the axe from the same rig).
-        if !p.first_person {
-            use super::chop_rig::{emit, to_world, Parts};
-            emit(out, to_world(p.pos, p.head_yaw, p.pitch), &swing.pose(), Parts::All, p.held, p.skin, light, fl);
-        }
+        // body under the arms: the first-person view draws the arms and the axe from the
+        // same rig, where they are in the world).
+        use super::chop_rig::{emit, to_world, Parts};
+        let parts = if p.first_person { Parts::Body } else { Parts::All };
+        emit(out, to_world(p.pos, p.head_yaw, p.pitch), &swing.pose(), parts, p.held, p.skin, light, fl);
         return;
     }
     let root = model_root(p);
