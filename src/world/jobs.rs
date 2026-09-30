@@ -11,6 +11,7 @@ pub enum Job {
         pos: ChunkPos,
         nb: Box<[Arc<ChunkData>; 9]>,
         anim: Vec<(glam::IVec3, u8, f32)>,
+        notches: Vec<(glam::IVec3, super::mesh::Notch)>,
     },
 }
 
@@ -72,8 +73,8 @@ impl Workers {
                             Job::Generate(p) => {
                                 Done::Generated(p, Box::new(gen.generate_chunk(p.0, p.1)))
                             }
-                            Job::Mesh { pos, nb, anim } => {
-                                Done::Meshed(mesh_chunk(pos, &nb, &anim, &gen))
+                            Job::Mesh { pos, nb, anim, notches } => {
+                                Done::Meshed(mesh_chunk(pos, &nb, &anim, &notches, &gen))
                             }
                         };
                         if done_tx.send(out).is_err() {

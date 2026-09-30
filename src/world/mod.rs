@@ -30,6 +30,9 @@ pub struct World {
     pub pending: FastMap<ChunkPos, Vec<(IVec3, u8)>>,
     /// The light of each meshed chunk, as the mesher flood-filled it.
     pub light: FastMap<ChunkPos, ChunkLight>,
+    /// The axe's cuts in trunks and the stumps of felled trees (`game::felling`). A block
+    /// changed takes its cut with it.
+    pub notches: FastMap<IVec3, mesh::Notch>,
 }
 
 /// A chunk's sky and block light per block (sky in the high nibble), up to height `h`
@@ -54,7 +57,33 @@ impl World {
             log: None,
             pending: FastMap::default(),
             light: FastMap::default(),
+            notches: FastMap::default(),
         }
+    }
+
+    /// The cut in the trunk at `p`, if there is one.
+    pub fn notch(&self, p: IVec3) -> Option<mesh::Notch> {
+        self.notches.get(&p).copied()
+    }
+
+    /// Puts (or with None, takes away) the cut at `p`; its chunk has to be meshed again.
+    pub fn set_notch(&mut self, p: IVec3, notch: Option<mesh::Notch>) {
+        match notch {
+            Some(n) => self.notches.insert(p, n),
+            None => self.notches.remove(&p),
+        };
+    }
+
+    /// The cuts in chunk `c` and the chunks round it, for meshing it.
+    pub fn notches_near(&self, c: ChunkPos) -> Vec<(IVec3, mesh::Notch)> {
+        self.notches
+            .iter()
+            .filter(|(p, _)| {
+                let (x, z) = Self::chunk_pos(p.x, p.z);
+                (x - c.0).abs() <= 1 && (z - c.1).abs() <= 1
+            })
+            .map(|(p, n)| (*p, *n))
+            .collect()
     }
 
     pub fn record_fluid_change(&mut self, p: IVec3, old: u8, new: u8, now: f32) {
@@ -130,6 +159,10 @@ impl World {
                     b,
                 );
                 self.modified.insert(pos);
+                if !self.notches.is_empty() {
+                    // (a cut trunk gone or changed takes its cut with it)
+                    self.notches.remove(&IVec3::new(x, y, z));
+                }
                 if let Some(log) = &mut self.log {
                     log.push((IVec3::new(x, y, z), b));
                 }

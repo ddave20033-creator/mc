@@ -19,10 +19,7 @@ impl Game {
     pub(in crate::game) fn set_block(&mut self, p: IVec3, b: u8) {
         let old = self.terrain.world.geti(p);
         if self.terrain.world.seti(p, b) {
-            if crate::world::mesh::notch_at(p).is_some() {
-                // (a cut trunk gone or changed takes its cut with it)
-                crate::world::mesh::set_notch(p, None);
-            }
+            // (a cut trunk gone or changed took its cut with it: `World::set`)
             self.terrain.world.record_fluid_change(p, old, b, self.time);
             // Fluids flow on the host only.
             if !self.is_client() {

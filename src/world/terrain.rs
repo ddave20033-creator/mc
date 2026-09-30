@@ -256,7 +256,8 @@ impl Terrain {
                 if let Some(nb) = self.neighborhood(p) {
                     self.dirty.remove(&p);
                     let anim = self.world.fluid_changes_near(p);
-                    self.workers.submit(Job::Mesh { pos: p, nb, anim });
+                    let notches = self.world.notches_near(p);
+                    self.workers.submit(Job::Mesh { pos: p, nb, anim, notches });
                     self.meshing.insert(p);
                     self.in_flight += 1;
                 }

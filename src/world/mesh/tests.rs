@@ -1,6 +1,9 @@
 use super::shapes::bed_local;
 use super::*;
 
+/// No cuts in any trunk (see `World::notches`).
+const NO_NOTCHES: &[(glam::IVec3, Notch)] = &[];
+
 /// A 3x3 neighbourhood of chunks with a stone floor at y 0, the center chunk from `edit`.
 fn hood(edit: impl Fn(&mut ChunkData)) -> [Arc<ChunkData>; 9] {
     let floor = || {
@@ -32,7 +35,7 @@ fn mesh_speed() {
     let t = std::time::Instant::now();
     let mut vertices = 0;
     for (i, nb) in hoods.iter().enumerate() {
-        let m = mesh_chunk(((i % 3) as i32 + 1, (i / 3) as i32 + 1), nb, &[], &gen);
+        let m = mesh_chunk(((i % 3) as i32 + 1, (i / 3) as i32 + 1), nb, &[], NO_NOTCHES, &gen);
         vertices += m.vertices.len();
     }
     println!("9 chunks meshed in {:?}, {vertices} vertices", t.elapsed());
@@ -70,7 +73,7 @@ fn glass_wall_faces_join_their_neighbours() {
 fn a_just_broken_block_takes_the_light_around_it() {
     // A stone block on the floor, under the open sky.
     let nb = hood(|c| c.set(8, 1, 8, STONE));
-    let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+    let m = mesh_chunk((0, 0), &nb, &[], NO_NOTCHES, &Generator::new(1));
     let mut world = World::new();
     world.chunks.insert((0, 0), nb[4].clone());
     world.light.insert((0, 0), m.light.clone());
@@ -87,7 +90,7 @@ fn chests_are_listed_for_their_lids() {
         c.set(3, 1, 4, crate::world::CHEST);
         c.set(10, 5, 12, crate::world::CHEST + 2);
     });
-    let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+    let m = mesh_chunk((0, 0), &nb, &[], NO_NOTCHES, &Generator::new(1));
     let mut chests = m.chests.clone();
     chests.sort_by_key(|p| p.x);
     assert_eq!(chests, [glam::IVec3::new(3, 1, 4), glam::IVec3::new(10, 5, 12)]);
@@ -107,7 +110,7 @@ fn things_under_a_lintel_get_the_light_around_them() {
         c.set(8, 2, 8, door_id(0, false, true, false));
     });
     let gen = Generator::new(1);
-    let m = mesh_chunk((0, 0), &nb, &[], &gen);
+    let m = mesh_chunk((0, 0), &nb, &[], NO_NOTCHES, &gen);
     let mut world = World::new();
     world.chunks.insert((0, 0), nb[4].clone());
     world.light.insert((0, 0), m.light.clone());
@@ -181,7 +184,7 @@ fn terrain_and_meshes_are_unchanged() {
         }
         // A fluid that just changed, to animate.
         let anim = [(glam::IVec3::new(cx * 16 + 3, SEA_TEST, cz * 16 + 4), AIR, 0.5)];
-        h.mesh(&mesh_chunk((cx, cz), &nb, &anim, &gen));
+        h.mesh(&mesh_chunk((cx, cz), &nb, &anim, NO_NOTCHES, &gen));
         chunks += 1;
     }
     // Every block id on a floor, spaced out, and a few next to each other (stairs
@@ -206,11 +209,11 @@ fn terrain_and_meshes_are_unchanged() {
         c.recompute();
     });
     let (n1, n2) = (glam::IVec3::new(px * 16 + 3, 17, pz * 16 + 3), glam::IVec3::new(px * 16 + 6, 18, pz * 16 + 3));
-    set_notch(n1, Some(Notch { angle: 0.7, height: 0.5, depth: 0.6, felled: false }));
-    set_notch(n2, Some(Notch { angle: 2.1, height: 0.4, depth: 0.8, felled: true }));
-    let m = mesh_chunk((px, pz), &nb, &[], &Generator::new(3));
-    set_notch(n1, None);
-    set_notch(n2, None);
+    let notches = [
+        (n1, Notch { angle: 0.7, height: 0.5, depth: 0.6, felled: false }),
+        (n2, Notch { angle: 2.1, height: 0.4, depth: 0.8, felled: true }),
+    ];
+    let m = mesh_chunk((px, pz), &nb, &[], &notches, &Generator::new(3));
     h.mesh(&m);
     println!("{chunks} generated chunks + all blocks: {}", fingerprint(&h));
     assert_eq!(fingerprint(&h), "8b5c88996fa6e919");
@@ -223,7 +226,7 @@ fn torches_and_stump_marks_are_listed() {
         c.set(3, 1, 4, TORCH);
         c.set(5, 0, 5, stump_mark(GRASS, 0));
     });
-    let m = mesh_chunk((0, 0), &nb, &[], &Generator::new(1));
+    let m = mesh_chunk((0, 0), &nb, &[], NO_NOTCHES, &Generator::new(1));
     assert_eq!(m.torches, vec![glam::IVec3::new(3, 1, 4)]);
     assert_eq!(m.stump_marks, vec![glam::IVec3::new(5, 0, 5)]);
 }

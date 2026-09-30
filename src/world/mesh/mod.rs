@@ -14,7 +14,7 @@ mod tests;
 pub use face::{box_uv, corner_pos, corner_uv, CORNERS, FACE_N, FACE_U, FACE_V};
 pub use fluid::fluid_height;
 pub use log::{stump_heights, LOG_END_RIM};
-pub use notches::{all_notches, clear_notches, notch_at, set_notch, Notch};
+pub use notches::Notch;
 pub use shapes::{chest_open_layer, torch_transform, CHEST_FLOOR, FURNACE_HOLLOWS};
 
 use super::gen::Generator;
@@ -96,9 +96,15 @@ struct Builder {
     max_y: f32,
     ox: i32,
     oz: i32,
+    /// The cuts in trunks round the chunk (see `World::notches`).
+    notches: Vec<(glam::IVec3, Notch)>,
 }
 
 impl Builder {
+    fn notch_at(&self, p: glam::IVec3) -> Option<Notch> {
+        self.notches.iter().find(|(q, _)| *q == p).map(|(_, n)| *n)
+    }
+
     #[inline]
     fn push(&mut self, v: Vertex) {
         self.min_y = self.min_y.min(v.pos[1]);
@@ -111,6 +117,7 @@ pub fn mesh_chunk(
     pos: ChunkPos,
     nb: &[Arc<ChunkData>; 9],
     anim: &[(glam::IVec3, u8, f32)],
+    notches: &[(glam::IVec3, Notch)],
     gen: &Generator,
 ) -> MeshData {
     let mut r = Region::new(nb);
@@ -131,6 +138,7 @@ pub fn mesh_chunk(
     }
 
     let mut m = Builder {
+        notches: notches.to_vec(),
         verts: Vec::with_capacity(16_384),
         opaque: Vec::with_capacity(24_576),
         leaf_inner: Vec::new(),

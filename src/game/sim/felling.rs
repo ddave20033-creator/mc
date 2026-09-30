@@ -15,7 +15,7 @@
 use crate::game::*;
 use crate::item::{inventory, tool_of, Tier, ToolKind};
 use crate::model::chop_rig::{self, ChopPose, Kind, Swing, EDGE};
-use crate::world::mesh::{notch_at, set_notch, stump_heights, Notch};
+use crate::world::mesh::{stump_heights, Notch};
 
 /// How deep (of the trunk's width) the cut goes before the trunk breaks.
 const FELL_DEPTH: f32 = 0.75;
@@ -108,7 +108,7 @@ fn in_trunk(w: &World, q: Vec3) -> Option<IVec3> {
     if rel.length() > r {
         return None;
     }
-    if let Some(n) = notch_at(p) {
+    if let Some(n) = w.notch(p) {
         let y = q.y - p.y as f32;
         let h = n.height.clamp(0.12, 0.88);
         let deep = n.depth.clamp(0.0, 1.0) * 2.0 * r;
@@ -137,7 +137,7 @@ fn stump_of(w: &World, p: IVec3) -> Option<Vec<IVec3>> {
     let same = |q: IVec3| is_trunk(w.geti(q)) && log_base(w.geti(q)) == log_base(b);
     // Up to the cut (a trunk still standing above is no stump).
     let mut top = p;
-    while !notch_at(top).is_some_and(|n| n.felled) {
+    while !w.notch(top).is_some_and(|n| n.felled) {
         top += IVec3::Y;
         if !same(top) || top.y - p.y > 64 {
             return None;
@@ -145,7 +145,7 @@ fn stump_of(w: &World, p: IVec3) -> Option<Vec<IVec3>> {
     }
     let mut column = vec![top];
     let mut q = top - IVec3::Y;
-    while same(q) && !notch_at(q).is_some() && top.y - q.y < 64 {
+    while same(q) && w.notch(q).is_none() && top.y - q.y < 64 {
         column.push(q);
         q -= IVec3::Y;
     }
@@ -153,16 +153,16 @@ fn stump_of(w: &World, p: IVec3) -> Option<Vec<IVec3>> {
 }
 
 /// All the cuts in trunks, for saving (`x,y,z,angle,height,depth,felled` a line).
-pub fn notches_text() -> String {
-    crate::world::mesh::all_notches()
+pub fn notches_text(w: &World) -> String {
+    w.notches
         .iter()
         .map(|(p, n)| format!("{},{},{},{},{},{},{}\n", p.x, p.y, p.z, n.angle, n.height, n.depth, n.felled as u8))
         .collect()
 }
 
 /// The cuts saved with a world (any there were before are gone).
-pub fn load_notches(text: &str) {
-    crate::world::mesh::clear_notches();
+pub fn load_notches(w: &mut World, text: &str) {
+    w.notches.clear();
     for line in text.lines() {
         let v: Vec<&str> = line.trim().split(',').collect();
         if v.len() != 7 {
@@ -171,7 +171,7 @@ pub fn load_notches(text: &str) {
         let i = |k: usize| v[k].parse::<i32>().ok();
         let f = |k: usize| v[k].parse::<f32>().ok();
         if let (Some(x), Some(y), Some(z), Some(angle), Some(height), Some(depth)) = (i(0), i(1), i(2), f(3), f(4), f(5)) {
-            set_notch(IVec3::new(x, y, z), Some(Notch { angle, height, depth, felled: v[6] == "1" }));
+            w.set_notch(IVec3::new(x, y, z), Some(Notch { angle, height, depth, felled: v[6] == "1" }));
         }
     }
 }
@@ -354,7 +354,7 @@ impl Game {
     /// by how much is cut already). Chips fly, and cut through far enough the tree falls.
     fn chop_hit(&mut self, p: IVec3, point: Vec3) {
         let b = self.terrain.world.geti(p);
-        if notch_at(p).is_some_and(|n| n.felled) {
+        if self.terrain.world.notch(p).is_some_and(|n| n.felled) {
             // (a stump is not chopped level: only chips)
             let out = Vec2::new(self.player.pos.x - p.x as f32 - 0.5, self.player.pos.z - p.z as f32 - 0.5).normalize_or_zero();
             self.chips(p, b, point, Vec3::new(out.x, 0.3, out.y));
@@ -369,7 +369,7 @@ impl Game {
         let side = if side.length() > 0.05 { side } else { Vec2::new(self.player.pos.x - middle.x, self.player.pos.z - middle.z) };
         let (angle, height) = (side.y.atan2(side.x), (point.y - p.y as f32).clamp(0.25, 0.75));
         let step = FELL_DEPTH / chops;
-        let notch = match notch_at(p) {
+        let notch = match self.terrain.world.notch(p) {
             Some(n) => {
                 let k = step / (n.depth + step);
                 let turn = (angle - n.angle + PI).rem_euclid(TAU) - PI;
@@ -394,7 +394,7 @@ impl Game {
         if depth >= FELL_DEPTH - 1e-3 {
             self.fell_tree(p, notch);
         } else {
-            set_notch(p, Some(notch));
+            self.terrain.world.set_notch(p, Some(notch));
         }
         self.terrain.block_changed(p, false);
     }
@@ -493,7 +493,7 @@ impl Game {
         for &q in &wood {
             self.block_updated(q);
         }
-        set_notch(p, Some(Notch { felled: true, ..notch }));
+        self.terrain.world.set_notch(p, Some(Notch { felled: true, ..notch }));
         self.level.falling_trees.push(FallingTree {
             pivot,
             axis: Vec3::Y.cross(toward).normalize(),

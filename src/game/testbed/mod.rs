@@ -494,7 +494,8 @@ impl Game {
                     for dx in -radius..=radius {
                         let pos = (c.0 + dx, c.1 + dz);
                         let Some(nb) = self.terrain.neighborhood(pos) else { continue };
-                        let mesh = crate::world::mesh::mesh_chunk(pos, &nb, &[], &self.terrain.gen);
+                        let notches = self.terrain.world.notches_near(pos);
+                        let mesh = crate::world::mesh::mesh_chunk(pos, &nb, &[], &notches, &self.terrain.gen);
                         chunks += 1;
                         let (n, found) = checks::coplanar_overlaps_indexed(&mesh.vertices, &mesh.indices, 1);
                         bad += n;

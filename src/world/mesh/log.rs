@@ -103,7 +103,7 @@ impl Builder {
             b.opaque.extend_from_slice(&idx);
         };
         if axis == 1 && !is_branch(b) {
-            if let Some(notch) = notch_at(IVec3::new(x + self.ox, y, z + self.oz)) {
+            if let Some(notch) = self.notch_at(IVec3::new(x + self.ox, y, z + self.oz)) {
                 self.notched_log(notch, radius, sides, around, (t0, ends[0].1), (t1, ends[1].1), side_layer, end_layer, &emit, &round_n, &at);
                 return;
             }
