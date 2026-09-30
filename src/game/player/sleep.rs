@@ -1,7 +1,7 @@
 //! Beds: using one sets where the player comes back to life, and at night they lie down in
 //! it. When every player is asleep for a few seconds the night is skipped, like Minecraft.
 
-use super::*;
+use crate::game::*;
 use crate::lang::tf;
 
 /// Night, when beds can be slept in (Minecraft: ticks 12542..23459 of 24000).
@@ -14,7 +14,7 @@ const SKIP_AFTER: f32 = 5.0;
 
 /// Lying in a bed.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Sleep {
+pub(in crate::game) struct Sleep {
     /// The bed's head half.
     pub bed: IVec3,
     pub facing: u8,
@@ -24,7 +24,7 @@ pub(super) struct Sleep {
 
 impl Game {
     /// Right click on a bed: it becomes the respawn point, and at night the player lies down.
-    pub(super) fn use_bed(&mut self, hit: IVec3) {
+    pub(in crate::game) fn use_bed(&mut self, hit: IVec3) {
         self.action_cooldown = 0.25;
         let b = self.terrain.world.geti(hit);
         let head = if bed_head(b) {
@@ -58,7 +58,7 @@ impl Game {
 
     /// The player's frame while in bed (instead of moving): they lie still on it until they
     /// sneak, the morning comes or the bed is gone. Health and hunger go on.
-    pub(super) fn update_sleep(&mut self, dt: f32, control: bool) {
+    pub(in crate::game) fn update_sleep(&mut self, dt: f32, control: bool) {
         let Some(s) = self.sleep.as_mut() else {
             return;
         };
@@ -90,7 +90,7 @@ impl Game {
     }
 
     /// Gets out of bed onto a free spot beside it (or on top of it if there is none).
-    pub(super) fn wake_up(&mut self) {
+    pub(in crate::game) fn wake_up(&mut self) {
         let Some(s) = self.sleep.take() else {
             return;
         };
@@ -103,14 +103,14 @@ impl Game {
     }
 
     /// The camera in bed: the eyes of the model lying on the pillow.
-    pub(super) fn sleep_eye(&self) -> Option<Vec3> {
+    pub(in crate::game) fn sleep_eye(&self) -> Option<Vec3> {
         let s = self.sleep?;
         let head = facing_dir(s.facing).as_vec3();
         Some(s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT + 0.3, 0.5) + head * 0.25)
     }
 
     /// Host and single player: the night is skipped once everyone has been asleep a while.
-    pub(super) fn update_sleepers(&mut self, dt: f32) {
+    pub(in crate::game) fn update_sleepers(&mut self, dt: f32) {
         if self.is_client() {
             return;
         }
@@ -132,7 +132,7 @@ impl Game {
     }
 
     /// LAN: how many of the players are in bed, while this player waits in one.
-    pub(super) fn sleep_status(&self) -> Option<String> {
+    pub(in crate::game) fn sleep_status(&self) -> Option<String> {
         self.sleep?;
         let (remotes, asleep) = self.remotes_asleep();
         (remotes > 0).then(|| {
@@ -162,7 +162,7 @@ impl Game {
 
     /// Where to stand beside the bed whose head half is at `head`: a free spot two blocks
     /// high with ground under it, around the foot half first (Minecraft's order is similar).
-    pub(super) fn bed_stand_pos(&self, head: IVec3) -> Option<Vec3> {
+    pub(in crate::game) fn bed_stand_pos(&self, head: IVec3) -> Option<Vec3> {
         let b = self.block_anywhere(head);
         if !is_bed(b) {
             return None;
@@ -204,14 +204,14 @@ impl Game {
     }
 
     /// Where the player comes back to life: beside their bed, else at the world spawn.
-    pub(super) fn home_pos(&self) -> Vec3 {
+    pub(in crate::game) fn home_pos(&self) -> Vec3 {
         self.bed_spawn
             .and_then(|b| self.bed_stand_pos(b))
             .unwrap_or_else(|| self.spawn_pos())
     }
 
     /// Back to life at home. A bed that is gone or blocked is forgotten (with a message).
-    pub(super) fn spawn_at_home(&mut self, tell: bool) {
+    pub(in crate::game) fn spawn_at_home(&mut self, tell: bool) {
         self.spawn_player();
         let Some(bed) = self.bed_spawn else {
             return;

@@ -9,6 +9,9 @@ mod gun_station;
 pub(super) use gun_station::Pick as BenchPick;
 mod jei;
 pub(super) use jei::Jei;
+pub(super) mod hud;
+pub(crate) mod icons;
+pub(super) mod station;
 
 use super::*;
 use crate::item::inventory::{add_to, click, take};

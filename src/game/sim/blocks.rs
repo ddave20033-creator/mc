@@ -1,11 +1,11 @@
 //! Block rules: placing and breaking (with drops and block entities), double chests,
 //! support for plants and torches, falling sand and gravel, and growing trees.
 
-use super::*;
+use crate::game::*;
 use crate::item::inventory::{self};
 use crate::item::*;
 impl Game {
-    pub(super) fn block_tint(&self, p: IVec3, b: u8) -> [u8; 3] {
+    pub(in crate::game) fn block_tint(&self, p: IVec3, b: u8) -> [u8; 3] {
         let (g, f) = self.terrain.gen.tints(p.x, p.z);
         match tint_kind(b, 0) {
             TintKind::Grass => g,
@@ -16,7 +16,7 @@ impl Game {
         }
     }
 
-    pub(super) fn set_block(&mut self, p: IVec3, b: u8) {
+    pub(in crate::game) fn set_block(&mut self, p: IVec3, b: u8) {
         let old = self.terrain.world.geti(p);
         if self.terrain.world.seti(p, b) {
             if crate::world::mesh::notch_at(p).is_some() {
@@ -33,7 +33,7 @@ impl Game {
     }
 
     /// Drops an item entity with a little random pop.
-    pub(super) fn spawn_drop(&mut self, center: Vec3, stack: Stack) {
+    pub(in crate::game) fn spawn_drop(&mut self, center: Vec3, stack: Stack) {
         let vel = Vec3::new(
             (self.random() - 0.5) * 2.5,
             3.0 + self.random(),
@@ -45,7 +45,7 @@ impl Game {
     /// What happens to the world when a player mines a block: its drops (unless in creative),
     /// the contents of a chest/furnace/table, ice turning into water, and the block rules
     /// around it. On a LAN, the host runs this for everyone.
-    pub(super) fn break_world(&mut self, p: IVec3, held: ItemId, creative: bool) {
+    pub(in crate::game) fn break_world(&mut self, p: IVec3, held: ItemId, creative: bool) {
         let b = self.terrain.world.geti(p);
         let mut contents = self.block_entities.remove(p);
         self.split_chest(p, b);
@@ -69,7 +69,7 @@ impl Game {
 
     /// A block placed (or a fluid poured or scooped up) by a player, with the world's rules:
     /// plants washed away by fluids, block entities, saplings, support and falling blocks.
-    pub(super) fn place_world(&mut self, at: IVec3, b: u8) {
+    pub(in crate::game) fn place_world(&mut self, at: IVec3, b: u8) {
         let old = self.terrain.world.geti(at);
         if fluid_breaks(old) && is_fluid(b) {
             self.break_naturally(at);
@@ -89,7 +89,7 @@ impl Game {
 
     /// A double chest half placed at `at` turns the single chest it pairs with (facing the
     /// same way) into the other half. Without one it becomes a single chest.
-    pub(super) fn join_chest(&mut self, at: IVec3, b: u8) -> u8 {
+    pub(in crate::game) fn join_chest(&mut self, at: IVec3, b: u8) -> u8 {
         let (Some(d), Some(f), Some(other)) =
             (chest_partner_offset(b), facing(b), chest_other_half(b))
         else {
@@ -103,7 +103,7 @@ impl Game {
     }
 
     /// A double chest half is going away: the other half becomes a single chest.
-    pub(super) fn split_chest(&mut self, p: IVec3, b: u8) {
+    pub(in crate::game) fn split_chest(&mut self, p: IVec3, b: u8) {
         let Some(d) = chest_partner_offset(b) else {
             return;
         };
@@ -115,7 +115,7 @@ impl Game {
 
     /// A chest's halves in inventory order (the left one seen from the front first), and
     /// whether it is a double chest.
-    pub(super) fn chest_halves(&self, p: IVec3) -> (IVec3, Option<IVec3>) {
+    pub(in crate::game) fn chest_halves(&self, p: IVec3) -> (IVec3, Option<IVec3>) {
         let w = &self.terrain.world;
         let b = w.geti(p);
         match chest_partner_offset(b) {
@@ -133,7 +133,7 @@ impl Game {
     /// Chest to place at `at` for a player looking toward `facing`, like Minecraft: it joins a
     /// single chest beside it that faces the same way. Sneaking places a single chest, or
     /// one joining the chest it was placed against (lined up with it).
-    pub(super) fn chest_to_place(&self, at: IVec3, hit: IVec3, facing: u8, sneaking: bool) -> u8 {
+    pub(in crate::game) fn chest_to_place(&self, at: IVec3, hit: IVec3, facing: u8, sneaking: bool) -> u8 {
         let w = &self.terrain.world;
         let single = |q: IVec3| {
             let b = w.geti(q);
@@ -158,7 +158,7 @@ impl Game {
 
     /// Changes a block for this player: in single player and on the host with the world's
     /// rules; a LAN player shows it right away and lets the host do the rest.
-    pub(super) fn edit_block(&mut self, at: IVec3, b: u8) {
+    pub(in crate::game) fn edit_block(&mut self, at: IVec3, b: u8) {
         if self.is_client() {
             let b = self.join_chest(at, b);
             self.set_block(at, b);
@@ -179,7 +179,7 @@ impl Game {
     }
 
     /// Mined by the player.
-    pub(super) fn break_block(&mut self, p: IVec3) {
+    pub(in crate::game) fn break_block(&mut self, p: IVec3) {
         let b = self.terrain.world.geti(p);
         let held = self.held();
         let creative = self.creative();
@@ -213,7 +213,7 @@ impl Game {
 
     /// A door or bed half is going away: the other half goes with it (without a second drop).
     /// So do the other blocks of a big furnace; what was in it is returned.
-    pub(super) fn remove_other_half(&mut self, p: IVec3, b: u8) -> Vec<Stack> {
+    pub(in crate::game) fn remove_other_half(&mut self, p: IVec3, b: u8) -> Vec<Stack> {
         if let (Some(base), Some(f)) = (furnace_base(b).filter(|&k| k != FURNACE), facing(b)) {
             let origin = furnace_origin(p, b);
             let contents = if origin != p {
@@ -259,7 +259,7 @@ impl Game {
 
     /// A trunk cut down off grass leaves its mark on the grass under it: a circle of bare
     /// soil the grass slowly grows back over (`update_stump_marks`).
-    pub(super) fn bare_under_trunk(&mut self, p: IVec3, b: u8) {
+    pub(in crate::game) fn bare_under_trunk(&mut self, p: IVec3, b: u8) {
         if !is_log(b) || is_branch(b) || log_axis(b) != 1 {
             return;
         }
@@ -274,7 +274,7 @@ impl Game {
     /// The grass growing back over the marks of cut-down trunks near the player, a stage at
     /// a time (about a minute each), where nothing covers them. Found by looking round, so
     /// marks in a world just loaded grow back too.
-    pub(super) fn update_stump_marks(&mut self, dt: f32) {
+    pub(in crate::game) fn update_stump_marks(&mut self, dt: f32) {
         const EVERY: f32 = 2.0;
         const STAGE_SECS: f32 = 60.0;
         self.stump_scan -= dt;
@@ -303,7 +303,7 @@ impl Game {
     }
 
     /// Broken by the world (lost support): always drops like a hand-mined block.
-    pub(super) fn break_naturally(&mut self, p: IVec3) {
+    pub(in crate::game) fn break_naturally(&mut self, p: IVec3) {
         let b = self.terrain.world.geti(p);
         let contents = self.remove_other_half(p, b);
         self.set_block(p, AIR);
@@ -315,7 +315,7 @@ impl Game {
         self.block_updated(p);
     }
 
-    pub(super) fn supported(w: &World, p: IVec3, b: u8) -> bool {
+    pub(in crate::game) fn supported(w: &World, p: IVec3, b: u8) -> bool {
         if let Some(offset) = torch_support_offset(b) {
             return is_opaque(w.geti(p + offset));
         }
@@ -336,7 +336,7 @@ impl Game {
     }
 
     /// Block rules after a change at `p`: support for plants/torches and falling sand.
-    pub(super) fn block_updated(&mut self, p: IVec3) {
+    pub(in crate::game) fn block_updated(&mut self, p: IVec3) {
         let above = p + IVec3::Y;
         for q in [
             above,
@@ -360,7 +360,7 @@ impl Game {
         }
     }
 
-    pub(super) fn start_fall(&mut self, p: IVec3) {
+    pub(in crate::game) fn start_fall(&mut self, p: IVec3) {
         let b = self.terrain.world.geti(p);
         self.set_block(p, AIR);
         self.falling.push(FallingBlock {
@@ -373,7 +373,7 @@ impl Game {
 
     /// Grows a sapling into a tree (the generator's shapes). Returns false if there is not
     /// enough room for its wood.
-    pub(super) fn grow_tree(&mut self, p: IVec3, sapling: u8) -> bool {
+    pub(in crate::game) fn grow_tree(&mut self, p: IVec3, sapling: u8) -> bool {
         let log = match sapling {
             BIRCH_SAPLING => BIRCH_LOG,
             SPRUCE_SAPLING => SPRUCE_LOG,
@@ -402,7 +402,7 @@ mod tests {
     use super::*;
 
     #[test]
-    pub(super) fn wall_torch_needs_its_mounting_block() {
+    pub(in crate::game) fn wall_torch_needs_its_mounting_block() {
         let mut world = World::new();
         let mut chunk = ChunkData::new();
         let anchor = IVec3::new(8, 10, 8);

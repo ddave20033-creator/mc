@@ -9,7 +9,7 @@
 //! On a LAN everyone flies their own copy of every grenade, but the host's copy decides the
 //! blast: it breaks the blocks, hurts, and tells the others where it went off.
 
-use super::*;
+use crate::game::*;
 use crate::audio::Sound;
 use crate::entity::player::raycast_solid;
 use crate::item::mining::{drops, hardness};
@@ -39,13 +39,13 @@ const PIN_OUT: f32 = RAISE_TIME + 0.35;
 const THROW_SPEED: (f32, f32) = (6.0, 21.0);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum GrenadeKind {
+pub(in crate::game) enum GrenadeKind {
     Frag,
     Smoke,
 }
 
 impl GrenadeKind {
-    pub(super) fn of(item: ItemId) -> Option<Self> {
+    pub(in crate::game) fn of(item: ItemId) -> Option<Self> {
         match item {
             FRAG_GRENADE => Some(GrenadeKind::Frag),
             SMOKE_GRENADE => Some(GrenadeKind::Smoke),
@@ -81,25 +81,25 @@ struct Grenade {
 }
 
 #[derive(Default)]
-pub(super) struct Grenades {
+pub(in crate::game) struct Grenades {
     list: Vec<Grenade>,
     /// The view shaking after a blast near by.
-    pub(super) shake: f32,
+    pub(in crate::game) shake: f32,
     /// The grenade in the hand being readied (the right button held).
-    pub(super) hold: Option<Hold>,
+    pub(in crate::game) hold: Option<Hold>,
     /// Where the readied grenade is in the hand: as the first-person hand shows it, and on
     /// the player model (set each frame; thrown from there).
-    pub(super) hand_fp: Option<Vec3>,
-    pub(super) hand_tp: Option<Vec3>,
+    pub(in crate::game) hand_fp: Option<Vec3>,
+    pub(in crate::game) hand_tp: Option<Vec3>,
 }
 
 /// A grenade being readied: which (the hotbar slot and the item), for how long the button
 /// has been held, and whether it has been let go (it is thrown once the pin is out).
 #[derive(Clone, Copy)]
-pub(super) struct Hold {
+pub(in crate::game) struct Hold {
     slot: usize,
     item: ItemId,
-    pub(super) t: f32,
+    pub(in crate::game) t: f32,
     released: bool,
 }
 
@@ -194,7 +194,7 @@ impl Game {
     /// ready, let go throws it (once the pin is out; let go sooner, it is thrown as soon as
     /// the pin comes out). Putting it away, or a menu opening, before it is thrown puts the
     /// pin back.
-    pub(super) fn update_grenade_hold(&mut self, dt: f32, control: bool) {
+    pub(in crate::game) fn update_grenade_hold(&mut self, dt: f32, control: bool) {
         let slot = self.hotbar_slot;
         let item = self.held();
         let kind = GrenadeKind::of(item).filter(|_| !self.spectator());
@@ -306,7 +306,7 @@ impl Game {
         let real = !self.is_client();
         self.spawn_grenade(kind, pos, vel, seed, real, fuse);
         let msg = Msg::Grenade {
-            id: super::multi::HOST_ID,
+            id: crate::game::multi::HOST_ID,
             kind: kind as u8,
             pos,
             vel,
@@ -322,7 +322,7 @@ impl Game {
 
     /// A grenade starts flying (thrown here, or by someone else: `kind` as in the message),
     /// going off after `fuse` seconds.
-    pub(super) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, real: bool, fuse: f32) {
+    pub(in crate::game) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, real: bool, fuse: f32) {
         let spin = Vec3::new(
             hash3(IVec3::X, seed) - 0.5,
             hash3(IVec3::Y, seed) - 0.5,
@@ -343,7 +343,7 @@ impl Game {
     }
 
     /// Someone else threw a grenade (host: from player `id`, which goes on to the others).
-    pub(super) fn remote_grenade(&mut self, id: u8, kind: u8, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
+    pub(in crate::game) fn remote_grenade(&mut self, id: u8, kind: u8, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
         let real = self.is_host();
         self.spawn_grenade(GrenadeKind::from_u8(kind), pos, vel, seed, real, fuse);
         if real {
@@ -353,13 +353,13 @@ impl Game {
     }
 
     /// The host says where a grenade went off.
-    pub(super) fn remote_blast(&mut self, pos: Vec3, seed: u32) {
+    pub(in crate::game) fn remote_blast(&mut self, pos: Vec3, seed: u32) {
         self.grenades.list.retain(|g| g.seed != seed);
         self.explode(pos, seed, false);
     }
 
     /// Grenades fly, bounce and go off; smoke pours out.
-    pub(super) fn update_grenades(&mut self, dt: f32) {
+    pub(in crate::game) fn update_grenades(&mut self, dt: f32) {
         self.grenades.shake = (self.grenades.shake - dt * 2.0).max(0.0);
         let mut list = std::mem::take(&mut self.grenades.list);
         let mut blasts = Vec::new();
@@ -421,7 +421,7 @@ impl Game {
     }
 
     /// The hiss of the smoking grenades (looping sounds, as `furnace_sounds`).
-    pub(super) fn grenade_sounds(&self) -> Vec<(u64, Sound, Vec3, f32)> {
+    pub(in crate::game) fn grenade_sounds(&self) -> Vec<(u64, Sound, Vec3, f32)> {
         self.grenades
             .list
             .iter()
@@ -515,7 +515,7 @@ impl Game {
     }
 
     /// This player is caught in a blast: hurt and thrown away from it.
-    pub(super) fn blast_hit(&mut self, dmg: f32, from: Vec3, knock: f32) {
+    pub(in crate::game) fn blast_hit(&mut self, dmg: f32, from: Vec3, knock: f32) {
         let before = self.health;
         let dmg = self.armor_hit(dmg, crate::net::hurt::BLAST);
         self.damage(dmg, "death.explosion");
@@ -526,7 +526,7 @@ impl Game {
     }
 
     /// The grenades in flight or lying about.
-    pub(super) fn build_grenades(&self, out: &mut Vec<Vertex>) {
+    pub(in crate::game) fn build_grenades(&self, out: &mut Vec<Vertex>) {
         for g in &self.grenades.list {
             let (sky, blk) = self.terrain.world.light_estimate(g.pos);
             let light = vertex_light(sky, blk);

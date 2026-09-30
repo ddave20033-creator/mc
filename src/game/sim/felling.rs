@@ -12,7 +12,7 @@
 //! the head and brought straight down into it (`chop_rig::Kind::Stump`); when the axe is
 //! pulled out again the stump comes apart into its logs.
 
-use super::*;
+use crate::game::*;
 use crate::item::{inventory, tool_of, Tier, ToolKind};
 use crate::model::chop_rig::{self, ChopPose, Kind, Swing, EDGE};
 use crate::world::mesh::{notch_at, set_notch, stump_heights, Notch};
@@ -25,7 +25,7 @@ const MAX_BLOCKS: usize = 900;
 /// What the axe is stuck in, to come apart when it is pulled out: a stump, or a lying trunk
 /// (which, and where it is cut).
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Struck {
+pub(in crate::game) enum Struck {
     Stump(IVec3),
     Log(u32, bool),
 }
@@ -38,7 +38,7 @@ enum Contact {
 }
 
 /// A tree falling over: its blocks turning about the hinge left by the cut.
-pub(super) struct FallingTree {
+pub(in crate::game) struct FallingTree {
     /// Where it turns about (on the trunk's far side from the cut, at the cut's height), and
     /// the axis it turns about (level, across the way it falls).
     pivot: Vec3,
@@ -178,7 +178,7 @@ pub fn load_notches(text: &str) {
 
 impl Game {
     /// Where the chop's rig is in the world (as the player model draws it).
-    pub(super) fn chop_world(&self) -> Mat4 {
+    pub(in crate::game) fn chop_world(&self) -> Mat4 {
         chop_rig::to_world(self.player.pos, self.visual_head_yaw(), self.pitch)
     }
 
@@ -234,7 +234,7 @@ impl Game {
     /// Chopping with an axe, instead of mining: a swing at a time while the button is held,
     /// the edge followed along its path; where it meets a trunk it bites in. True while it is
     /// going on (the normal mining is left out, and the hand is drawn by the rig).
-    pub(super) fn update_chopping(&mut self, active: bool, dt: f32) -> bool {
+    pub(in crate::game) fn update_chopping(&mut self, active: bool, dt: f32) -> bool {
         if let Some(mut sw) = self.chop {
             let times = sw.kind.times();
             let before = sw.anim_time();
@@ -306,7 +306,7 @@ impl Game {
     }
 
     /// Chips of the trunk at `p` flying out at `at` (the way `out`).
-    pub(super) fn chips(&mut self, p: IVec3, b: u8, at: Vec3, out: Vec3) {
+    pub(in crate::game) fn chips(&mut self, p: IVec3, b: u8, at: Vec3, out: Vec3) {
         let tint = self.block_tint(p, b);
         for _ in 0..3 {
             self.particles.impact(&self.terrain.world, at, out, b, tint);
@@ -339,7 +339,7 @@ impl Game {
 
     /// Lets a tree still going over land at once (the world is being left: its drops are
     /// not lost with it).
-    pub(super) fn land_falling_trees(&mut self) {
+    pub(in crate::game) fn land_falling_trees(&mut self) {
         for t in std::mem::take(&mut self.falling_trees) {
             self.tree_lands(t);
         }
@@ -513,7 +513,7 @@ impl Game {
     /// The falling trees go over (like a pole tipping about its foot) until one of them
     /// hits something solid (leaves do not stop it) or lies flat; then it breaks up into
     /// its drops with a crash.
-    pub(super) fn update_falling_trees(&mut self, dt: f32) {
+    pub(in crate::game) fn update_falling_trees(&mut self, dt: f32) {
         const GRAVITY: f32 = 28.0;
         let mut landed = Vec::new();
         for (i, t) in self.falling_trees.iter_mut().enumerate() {
@@ -598,7 +598,7 @@ impl Game {
 
     /// The falling trees' blocks where they are now: the logs round, the leaves.
     /// Those within `sight` of `eye`.
-    pub(super) fn build_falling_trees(&self, out: &mut Vec<Vertex>, eye: Vec3, sight: f32) {
+    pub(in crate::game) fn build_falling_trees(&self, out: &mut Vec<Vertex>, eye: Vec3, sight: f32) {
         use crate::model::{emit_box, emit_item};
         let fl = crate::world::mesh::flags::ENTITY;
         for t in &self.falling_trees {

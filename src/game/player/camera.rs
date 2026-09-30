@@ -12,7 +12,7 @@ const RADIUS: f32 = 0.18;
 /// The camera's F5 view mode (0 first person, 1 behind, 2 in front, 3 and 4 over the right
 /// and left shoulder) and how it eases between positions and around walls.
 #[derive(Default)]
-pub(super) struct Rig {
+pub(in crate::game) struct Rig {
     pub mode: u8,
     /// Offset from the eye in local coordinates (right, up, forward), easing toward the mode's.
     pub local: Vec3,
@@ -95,13 +95,13 @@ impl Rig {
 }
 
 /// Only the two moves involving first person and the shoulder-to-shoulder move glide.
-pub(super) fn animate_switch(from: u8, to: u8) -> bool {
+pub(in crate::game) fn animate_switch(from: u8, to: u8) -> bool {
     matches!((from, to), (0, 1) | (3, 4) | (4, 0))
 }
 
 /// A head cannot follow a camera all the way behind the torso. Ease it back to
 /// forward before the signed angle wraps at 180 degrees, avoiding a side-to-side snap.
-pub(super) fn head_turn(camera_yaw: f32, body_yaw: f32) -> f32 {
+pub(in crate::game) fn head_turn(camera_yaw: f32, body_yaw: f32) -> f32 {
     let turn = wrap_angle(camera_yaw - body_yaw);
     let magnitude = turn.abs();
     let full = 55f32.to_radians();
@@ -126,7 +126,7 @@ pub const SIDE_LEFT: u8 = 7;
 /// player, looking back at it) whichever way the player turns.
 pub const FIXED_FRONT: u8 = 6;
 
-pub(super) fn desired_local(mode: u8) -> Vec3 {
+pub(in crate::game) fn desired_local(mode: u8) -> Vec3 {
     match mode {
         1 => Vec3::new(0.0, 0.0, -4.0),
         2 => Vec3::new(0.0, 0.0, 4.0),
@@ -141,7 +141,7 @@ pub(super) fn desired_local(mode: u8) -> Vec3 {
     }
 }
 
-pub(super) fn world_offset(local: Vec3, forward: Vec3) -> Vec3 {
+pub(in crate::game) fn world_offset(local: Vec3, forward: Vec3) -> Vec3 {
     let right = forward.cross(Vec3::Y).normalize_or_zero();
     let up = right.cross(forward);
     right * local.x + up * local.y + forward * local.z
@@ -168,7 +168,7 @@ fn occupied(world: &World, p: Vec3) -> bool {
 }
 
 /// Available length along the eye-to-camera path, including the camera's radius.
-pub(super) fn clearance(world: &World, eye: Vec3, offset: Vec3) -> f32 {
+pub(in crate::game) fn clearance(world: &World, eye: Vec3, offset: Vec3) -> f32 {
     let distance = offset.length();
     if distance < 1e-5 {
         return 0.0;
@@ -187,7 +187,7 @@ pub(super) fn clearance(world: &World, eye: Vec3, offset: Vec3) -> f32 {
     distance
 }
 
-pub(super) fn clamp_offset(world: &World, eye: Vec3, offset: Vec3) -> Vec3 {
+pub(in crate::game) fn clamp_offset(world: &World, eye: Vec3, offset: Vec3) -> Vec3 {
     let distance = offset.length();
     if distance < 1e-5 {
         Vec3::ZERO
@@ -197,7 +197,7 @@ pub(super) fn clamp_offset(world: &World, eye: Vec3, offset: Vec3) -> Vec3 {
 }
 
 /// Move inward immediately for safety, but glide back out when an obstacle clears.
-pub(super) fn recover_distance(previous: f32, safe: f32, transitioning: bool, dt: f32) -> f32 {
+pub(in crate::game) fn recover_distance(previous: f32, safe: f32, transitioning: bool, dt: f32) -> f32 {
     if transitioning || safe <= previous {
         safe
     } else {
@@ -207,7 +207,7 @@ pub(super) fn recover_distance(previous: f32, safe: f32, transitioning: bool, dt
 
 /// Pick the block under the centre of an over-the-shoulder view, but only when
 /// the player's eye can reach the same block without another block in the way.
-pub(super) fn shoulder_target(
+pub(in crate::game) fn shoulder_target(
     world: &World,
     eye: Vec3,
     dir: Vec3,

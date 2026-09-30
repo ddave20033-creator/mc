@@ -5,7 +5,7 @@
 //! What is smelted stays in the mouth until taken. The corner of the top under the
 //! crosshair is lit up a little.
 
-use super::*;
+use crate::game::*;
 use crate::entity::block_entity::{doneness, grill_box, part, Doneness, BURN_TIME};
 use crate::audio::Sound;
 use crate::entity::Furnace;
@@ -36,7 +36,7 @@ impl Game {
     /// A left click on a furnace part with something in it takes that out instead of
     /// starting to mine the furnace; keeping the button held then does not mine it either
     /// (until it is let go). Returns true while mining is held off.
-    pub(super) fn furnace_left_click(&mut self) -> bool {
+    pub(in crate::game) fn furnace_left_click(&mut self) -> bool {
         if !self.left_down {
             self.furnace_hold = false;
             return false;
@@ -53,7 +53,7 @@ impl Game {
     }
 
     /// Finds the furnace part under the crosshair (after targeting).
-    pub(super) fn aim_furnace(&mut self) {
+    pub(in crate::game) fn aim_furnace(&mut self) {
         self.furnace_part = self
             .target
             .and_then(|(hit, prev)| self.furnace_part_at(hit, prev).map(|k| (hit, k)));
@@ -71,7 +71,7 @@ impl Game {
 
     /// The corner of a furnace's top where the held meat goes (or the meat to take or turn
     /// over lies) is lit up a little. The front's openings show the usual block outline.
-    pub(super) fn furnace_frame(&self) -> Option<[Vec3; 4]> {
+    pub(in crate::game) fn furnace_frame(&self) -> Option<[Vec3; 4]> {
         let (p, k) = self.furnace_part_active()?;
         if k < 4 {
             let (lo, hi) = grill_box(k as usize);
@@ -92,7 +92,7 @@ impl Game {
     /// over; a left click (`take`) takes out (meat off the top; from the mouth what is
     /// smelted first, then what is still to smelt; the fuel). Returns false when it does
     /// nothing there.
-    pub(super) fn use_furnace(&mut self, p: IVec3, k: u8, take: bool) -> bool {
+    pub(in crate::game) fn use_furnace(&mut self, p: IVec3, k: u8, take: bool) -> bool {
         let slot = self.hotbar_slot;
         let held = self.inventory.slots[slot];
         let tier = furnace_tier(self.terrain.world.geti(p));
@@ -134,7 +134,7 @@ impl Game {
 
     /// Host: a LAN player used a furnace. They already took `offered` from their hand;
     /// what did not go in comes back with whatever they took out.
-    pub(super) fn remote_use_furnace(
+    pub(in crate::game) fn remote_use_furnace(
         &mut self,
         id: u8,
         p: IVec3,
@@ -171,7 +171,7 @@ impl Game {
     }
 
     /// Host: furnaces burn, cook and smelt.
-    pub(super) fn update_furnaces(&mut self, dt: f32) {
+    pub(in crate::game) fn update_furnaces(&mut self, dt: f32) {
         let mut relight = Vec::new();
         for (p, f) in self.block_entities.furnaces.iter_mut() {
             let b = self.terrain.world.geti(*p);
@@ -199,7 +199,7 @@ impl Game {
     /// What the burning furnaces near the player sound like: a furnace crackles, a blast or
     /// advanced furnace roars with its bellows (looping sounds: an id, the sound, where, how
     /// loud). A furnace that just finished smelting something dings.
-    pub(super) fn furnace_sounds(&mut self) -> Vec<(u64, Sound, Vec3, f32)> {
+    pub(in crate::game) fn furnace_sounds(&mut self) -> Vec<(u64, Sound, Vec3, f32)> {
         let near = self.player.pos;
         let mut loops = Vec::new();
         let mut dings = Vec::new();
@@ -233,7 +233,7 @@ impl Game {
 
     /// Steam and smoke off the meat on lit furnaces near the player: light while it cooks,
     /// more once the side on the fire is done, dark and thick when it burns.
-    pub(super) fn furnace_fx(&mut self, dt: f32) {
+    pub(in crate::game) fn furnace_fx(&mut self, dt: f32) {
         for (p, f) in self.block_entities.furnaces.iter_mut() {
             if self.terrain.world.is_loaded(p.x, p.z) {
                 f.tier = furnace_tier(self.terrain.world.geti(*p));

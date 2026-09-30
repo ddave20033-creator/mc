@@ -1,10 +1,10 @@
 //! The HUD: hotbar, hearts, hunger and thirst, air, effects, crosshair, item names, hints,
 //! the chat and the F3 debug and performance screens.
 
-use super::*;
+use crate::game::*;
 
 /// Frames shown in the F3 frame time graph.
-pub(super) const FRAME_GRAPH: usize = 240;
+pub(in crate::game) const FRAME_GRAPH: usize = 240;
 /// How far away a dummy's damage can be read (blocks).
 const DUMMY_TAG_RANGE: f32 = 40.0;
 
@@ -289,7 +289,7 @@ impl Game {
     }
 
     /// Next to the inventory window: each effect with its name and time left.
-    pub(super) fn draw_effects_list(&mut self, panel_x: f32, panel_y: f32, panel_w: f32) {
+    pub(in crate::game) fn draw_effects_list(&mut self, panel_x: f32, panel_y: f32, panel_w: f32) {
         let s = self.ui.s;
         let (w, h) = (100.0 * s, 24.0 * s);
         let mut x = panel_x + panel_w + 6.0 * s;
@@ -351,7 +351,7 @@ impl Game {
         }
     }
 
-    pub(super) fn draw_hud(&mut self, underwater: bool, in_lava: bool) {
+    pub(in crate::game) fn draw_hud(&mut self, underwater: bool, in_lava: bool) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let playing = matches!(self.screen, Screen::Playing | Screen::Chat);
         let creative = self.creative();

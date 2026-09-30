@@ -1,13 +1,13 @@
 //! Spectator mode: flying through blocks without touching anything, and watching another
 //! LAN player through their eyes (picked from a menu, like Minecraft's spectator menu).
 
-use super::*;
+use crate::game::*;
 use crate::entity::player::MoveInput;
 use crate::lang::tf;
 
 impl Game {
     /// Switches this player's game mode (the /gamemode command).
-    pub(super) fn set_game_mode(&mut self, mode: GameMode) {
+    pub(in crate::game) fn set_game_mode(&mut self, mode: GameMode) {
         let was = self.game_mode;
         self.game_mode = mode;
         self.spectating = None;
@@ -40,7 +40,7 @@ impl Game {
     }
 
     /// The name of a game mode, for the chat.
-    pub(super) fn mode_name(mode: GameMode) -> &'static str {
+    pub(in crate::game) fn mode_name(mode: GameMode) -> &'static str {
         match mode {
             GameMode::Survival => t("mode.survival_long"),
             GameMode::Creative => t("mode.creative_long"),
@@ -61,21 +61,21 @@ impl Game {
         v
     }
 
-    pub(super) fn open_spectate_menu(&mut self) {
+    pub(in crate::game) fn open_spectate_menu(&mut self) {
         self.screen = Screen::Spectate;
         self.set_grab(false);
         self.keys.clear();
     }
 
     /// The i-th player of the menu (number keys).
-    pub(super) fn spectate_nth(&mut self, i: usize) {
+    pub(in crate::game) fn spectate_nth(&mut self, i: usize) {
         if let Some((id, _)) = self.spectate_candidates().get(i).cloned() {
             self.start_spectating(id);
         }
     }
 
     /// Puts the camera into another player's eyes.
-    pub(super) fn start_spectating(&mut self, id: u8) {
+    pub(in crate::game) fn start_spectating(&mut self, id: u8) {
         let Some(name) = self
             .remotes
             .iter()
@@ -92,7 +92,7 @@ impl Game {
     }
 
     /// Back to flying freely, where the watched player was.
-    pub(super) fn stop_spectating(&mut self) {
+    pub(in crate::game) fn stop_spectating(&mut self) {
         if self.spectating.take().is_some() {
             self.player.vel = Vec3::ZERO;
             self.say(t("spectate.stopped"), chat::GRAY);
@@ -100,7 +100,7 @@ impl Game {
     }
 
     /// The /spectate command: watch a player by name (without a name: stop watching).
-    pub(super) fn spectate_command(&mut self, name: Option<&str>) {
+    pub(in crate::game) fn spectate_command(&mut self, name: Option<&str>) {
         if !self.spectator() {
             self.say(t("spectate.not_spectator"), chat::RED);
             return;
@@ -123,7 +123,7 @@ impl Game {
 
     /// Spectator movement: flying through blocks, or riding along in the watched player's
     /// eyes (sneak lets go of them).
-    pub(super) fn update_spectator(&mut self, dt: f32, control: bool) {
+    pub(in crate::game) fn update_spectator(&mut self, dt: f32, control: bool) {
         self.player.flying = true;
         self.player.noclip = true;
         self.blocking = false;
@@ -186,7 +186,7 @@ impl Game {
     }
 
     /// Instead of the hotbar: what spectator mode is doing and which keys work.
-    pub(super) fn draw_spectator_hud(&mut self) {
+    pub(in crate::game) fn draw_spectator_hud(&mut self) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let watched = self
             .spectating
@@ -214,7 +214,7 @@ impl Game {
     }
 
     /// The spectator menu: a button for every player to watch.
-    pub(super) fn spectate_screen(&mut self) {
+    pub(in crate::game) fn spectate_screen(&mut self) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let players = self.spectate_candidates();
         let ui = &mut self.ui;

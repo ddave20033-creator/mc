@@ -2,7 +2,7 @@
 //! spawning, wolves (taming, their bites, going for whoever their owner attacks), and
 //! updating them (with their loot and sounds).
 
-use super::*;
+use crate::game::*;
 use crate::entity::mob::{Foe, BITE};
 use crate::item::inventory::{self, take};
 use crate::item::*;
@@ -12,7 +12,7 @@ impl Game {
     /// Left click on a mob (index into `mobs`) or another LAN player: damage by the held item
     /// (x1.5 for a critical hit while falling), knockback (more while sprinting), and tool
     /// wear like Minecraft (swords 1, tools 2).
-    pub(super) fn attack(&mut self, mob: Option<usize>, player: Option<u8>) {
+    pub(in crate::game) fn attack(&mut self, mob: Option<usize>, player: Option<u8>) {
         // Sneaking, a hit takes a target dummy down (it drops as an item).
         if let Some(i) = mob.filter(|&i| self.mobs[i].kind == MobKind::Dummy && self.player.sneaking) {
             if self.is_client() {
@@ -47,7 +47,7 @@ impl Game {
             (Some(i), _) => {
                 let hit = self.mobs[i].hurt(dmg, Some(from), knock);
                 let foe = Foe::Mob(self.mobs[i].id);
-                self.attacked(foe, super::multi::HOST_ID);
+                self.attacked(foe, crate::game::multi::HOST_ID);
                 hit
             }
             (None, Some(id)) => {
@@ -57,7 +57,7 @@ impl Game {
                 } else {
                     let kind = crate::net::hurt::MELEE;
                     self.send_to(id, &Msg::Hurt { dmg, from, knock, kind });
-                    self.attacked(Foe::Player(id), super::multi::HOST_ID);
+                    self.attacked(Foe::Player(id), crate::game::multi::HOST_ID);
                 }
                 true
             }
@@ -91,8 +91,8 @@ impl Game {
     }
 
     /// A player's name by their LAN id (the host's own is 0).
-    pub(super) fn player_name(&self, id: u8) -> Option<String> {
-        if id == super::multi::HOST_ID {
+    pub(in crate::game) fn player_name(&self, id: u8) -> Option<String> {
+        if id == crate::game::multi::HOST_ID {
             return Some(self.settings.name.clone());
         }
         self.remotes.iter().find(|r| r.id == id).map(|r| r.name.clone())
@@ -100,7 +100,7 @@ impl Game {
 
     /// Host: player `who` attacked `foe`. A wolf hit turns on them, and so does its wild
     /// pack; `who`'s own tame wolves go for `foe`; a player attacked is defended by theirs.
-    pub(super) fn attacked(&mut self, foe: Foe, who: u8) {
+    pub(in crate::game) fn attacked(&mut self, foe: Foe, who: u8) {
         if self.is_client() {
             return;
         }
@@ -133,7 +133,7 @@ impl Game {
 
     /// Right click on a wolf: a wild one is given a bone (it may take to this player), and a
     /// tame one of theirs sits down or stands up. True if something happened.
-    pub(super) fn use_on_wolf(&mut self, i: usize) -> bool {
+    pub(in crate::game) fn use_on_wolf(&mut self, i: usize) -> bool {
         let held = self.held();
         let m = &self.mobs[i];
         if m.kind != MobKind::Wolf || !m.alive() {
@@ -150,7 +150,7 @@ impl Game {
             if !bone {
                 self.mobs[i].toggle_sit();
             }
-        } else if self.wolf_used(i, held, super::multi::HOST_ID).is_none() {
+        } else if self.wolf_used(i, held, crate::game::multi::HOST_ID).is_none() {
             return false;
         }
         if bone && !self.creative() {
@@ -163,7 +163,7 @@ impl Game {
 
     /// Host: player `who` used `item` on wolf `i` (see `use_on_wolf`). Some(true) if a bone
     /// was given, Some(false) if it sat down or stood up.
-    pub(super) fn wolf_used(&mut self, i: usize, item: ItemId, who: u8) -> Option<bool> {
+    pub(in crate::game) fn wolf_used(&mut self, i: usize, item: ItemId, who: u8) -> Option<bool> {
         let name = self.player_name(who)?;
         let m = &mut self.mobs[i];
         if m.kind != MobKind::Wolf || !m.alive() {
@@ -198,7 +198,7 @@ impl Game {
                     self.mobs[j].hurt(BITE, Some(from), 1.0);
                 }
             }
-            Foe::Player(id) if id == super::multi::HOST_ID => self.hit_by_player(BITE, from, 1.0, hurt::WOLF),
+            Foe::Player(id) if id == crate::game::multi::HOST_ID => self.hit_by_player(BITE, from, 1.0, hurt::WOLF),
             Foe::Player(id) => {
                 let msg = crate::net::Msg::Hurt { dmg: BITE, from, knock: 1.0, kind: hurt::WOLF };
                 self.send_to(id, &msg);
@@ -207,7 +207,7 @@ impl Game {
     }
 
     /// Spawn egg on a block: the mob appears on the clicked face.
-    pub(super) fn use_spawn_egg(&mut self, kind: MobKind) {
+    pub(in crate::game) fn use_spawn_egg(&mut self, kind: MobKind) {
         let Some((hit, prev)) = self.target else {
             return;
         };
@@ -226,7 +226,7 @@ impl Game {
     }
 
     /// Right click on a sheep with shears: 1-3 wool pops off (the host drops it).
-    pub(super) fn shear(&mut self, i: usize) {
+    pub(in crate::game) fn shear(&mut self, i: usize) {
         if !self.mobs[i].can_shear() {
             return;
         }
@@ -246,7 +246,7 @@ impl Game {
     }
 
     /// Host: shears a sheep and drops its wool.
-    pub(super) fn shear_mob(&mut self, i: usize) {
+    pub(in crate::game) fn shear_mob(&mut self, i: usize) {
         let m = &mut self.mobs[i];
         if !m.can_shear() {
             return;
@@ -258,7 +258,7 @@ impl Game {
     }
 
     /// Host: takes a target dummy down, dropping it as an item (`drop`).
-    pub(super) fn break_dummy(&mut self, i: usize, drop: bool) {
+    pub(in crate::game) fn break_dummy(&mut self, i: usize, drop: bool) {
         if self.mobs[i].kind != MobKind::Dummy {
             return;
         }
@@ -271,7 +271,7 @@ impl Game {
         }
     }
 
-    pub(super) fn spawn_mob(&mut self, kind: MobKind, pos: Vec3) {
+    pub(in crate::game) fn spawn_mob(&mut self, kind: MobKind, pos: Vec3) {
         if self.is_client() {
             self.send(crate::net::Msg::SpawnMob {
                 kind: kind as u8,
@@ -297,7 +297,7 @@ impl Game {
     /// Minecraft-like animal spawning: now and then a group of sheep or pigs (Minecraft's
     /// weights: 12 to 10) appears on grass under the open sky, 24-64 blocks from the player
     /// and out of sight, while fewer than 10 animals are around.
-    pub(super) fn spawn_animals(&mut self, dt: f32) {
+    pub(in crate::game) fn spawn_animals(&mut self, dt: f32) {
         self.mob_spawn_timer -= dt;
         if self.mob_spawn_timer > 0.0 {
             return;
@@ -386,10 +386,10 @@ impl Game {
         }
     }
 
-    pub(super) fn update_mobs(&mut self, dt: f32) {
+    pub(in crate::game) fn update_mobs(&mut self, dt: f32) {
         let mut people = Vec::new();
         if self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
-            people.push((super::multi::HOST_ID, self.settings.name.clone(), self.player.pos));
+            people.push((crate::game::multi::HOST_ID, self.settings.name.clone(), self.player.pos));
         }
         for (id, pos) in self.remote_positions() {
             if let Some(name) = self.player_name(id) {

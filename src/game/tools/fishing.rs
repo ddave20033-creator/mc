@@ -15,7 +15,7 @@
 //! Only the angler's own game runs this; the others see the rod, the line and the bobber from
 //! the pose (`net::Pose::rod`).
 
-use super::*;
+use crate::game::*;
 use crate::audio::Sound;
 use crate::item::inventory::damage;
 use crate::item::{rod_gear, set_rod_gear, Stack, FISHING_ROD, RAW_FISH, ROD_GEARS};
@@ -26,7 +26,7 @@ use crate::world::mesh::fluid_height;
 /// Seconds of drawing back for the farthest cast.
 const CHARGE_TIME: f32 = 1.2;
 /// The most line on the reel (m).
-pub(super) const MAX_LINE: f32 = 64.0;
+pub(in crate::game) const MAX_LINE: f32 = 64.0;
 /// How fast the bobber leaves the rod: the weakest and the strongest cast (about 4 and 35 m).
 const CAST_SPEED: (f32, f32) = (7.5, 22.0);
 const GRAVITY: f32 = 14.0;
@@ -35,7 +35,7 @@ const STRIKE_TIME: f32 = 1.7;
 /// A fish this close (m of line) is landed.
 const LAND_DIST: f32 = 2.2;
 /// Line (m) reeled in or let out per notch of the wheel in each gear.
-pub(super) const PER_NOTCH: [f32; ROD_GEARS as usize] = [0.3, 0.45, 0.65, 0.9, 1.2];
+pub(in crate::game) const PER_NOTCH: [f32; ROD_GEARS as usize] = [0.3, 0.45, 0.65, 0.9, 1.2];
 /// How much a pulling fish stops the reel in each gear (a strong low gear keeps winning line
 /// against it, a fast high one only while it rests).
 const STALL: [f32; ROD_GEARS as usize] = [0.0, 0.3, 0.6, 0.85, 1.1];
@@ -45,9 +45,9 @@ const TIGHTEN: [f32; ROD_GEARS as usize] = [0.03, 0.045, 0.06, 0.08, 0.1];
 const EASE: [f32; ROD_GEARS as usize] = [0.035, 0.05, 0.065, 0.085, 0.105];
 /// The tension's zones: the middle (the fish tires fast), too tight (it snaps if it lasts),
 /// too slack (the fish gets away if it lasts); the tension the line snaps at at once.
-pub(super) const GOOD: (f32, f32) = (0.32, 0.7);
-pub(super) const TIGHT: f32 = 0.85;
-pub(super) const SLACK: f32 = 0.2;
+pub(in crate::game) const GOOD: (f32, f32) = (0.32, 0.7);
+pub(in crate::game) const TIGHT: f32 = 0.85;
+pub(in crate::game) const SLACK: f32 = 0.2;
 const BREAK: f32 = 1.3;
 const OVER_TIME: f32 = 1.2;
 const SLACK_TIME: f32 = 3.0;
@@ -74,19 +74,19 @@ const SPECIES: [Species; 6] = [
 
 /// A hooked fish and the line's fight with it (no world in it: `step` is all of it).
 #[derive(Clone, Debug)]
-pub(super) struct Fight {
-    pub(super) species: usize,
-    pub(super) weight: f32,
-    pub(super) stamina: f32,
-    pub(super) max_stamina: f32,
+pub(in crate::game) struct Fight {
+    pub(in crate::game) species: usize,
+    pub(in crate::game) weight: f32,
+    pub(in crate::game) stamina: f32,
+    pub(in crate::game) max_stamina: f32,
     /// How strong its surges are.
     power: f32,
     /// How hard it pulls now (about 0.1 resting .. 2 surging).
-    pub(super) pull: f32,
+    pub(in crate::game) pull: f32,
     /// How taut the line is (see `GOOD`, `TIGHT`, `SLACK`, `BREAK`).
-    pub(super) tension: f32,
+    pub(in crate::game) tension: f32,
     /// Line out to it (m).
-    pub(super) dist: f32,
+    pub(in crate::game) dist: f32,
     /// Notches per second of the wheel, lately (+ in, - out).
     crank_rate: f32,
     /// Line reeled (m, - let out) not yet come in: it comes in smoothly, not a notch at once.
@@ -98,15 +98,15 @@ pub(super) struct Fight {
     drift_to: f32,
     snap: f32,
     /// Seconds (weighted) too tight, and too slack.
-    pub(super) over: f32,
-    pub(super) slack: f32,
+    pub(in crate::game) over: f32,
+    pub(in crate::game) slack: f32,
     /// Which way it swims across (radians per second about the angler) and wants to.
     side: f32,
     side_to: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum FightEnd {
+pub(in crate::game) enum FightEnd {
     Landed,
     Snapped,
     Escaped,
@@ -114,7 +114,7 @@ pub(super) enum FightEnd {
 
 impl Fight {
     /// A fish of a kind chosen by how common they are (`r`: random numbers 0..1), `dist` out.
-    pub(super) fn new(dist: f32, r: &mut dyn FnMut() -> f32) -> Self {
+    pub(in crate::game) fn new(dist: f32, r: &mut dyn FnMut() -> f32) -> Self {
         let total: f32 = SPECIES.iter().map(|s| s.common).sum();
         let mut pick = r() * total;
         let mut species = 0;
@@ -131,7 +131,7 @@ impl Fight {
         Self::of(species, weight, dist)
     }
 
-    pub(super) fn of(species: usize, weight: f32, dist: f32) -> Self {
+    pub(in crate::game) fn of(species: usize, weight: f32, dist: f32) -> Self {
         let sp = &SPECIES[species];
         let big = (weight / sp.kg.1).clamp(0.0, 1.0);
         let stamina = 4.0 + 6.0 * weight.sqrt();
@@ -158,17 +158,17 @@ impl Fight {
     }
 
     /// How much fight it has left (0..1).
-    pub(super) fn fresh(&self) -> f32 {
+    pub(in crate::game) fn fresh(&self) -> f32 {
         (self.stamina / self.max_stamina).clamp(0.0, 1.0)
     }
 
-    pub(super) fn surging(&self) -> bool {
+    pub(in crate::game) fn surging(&self) -> bool {
         self.drift > 0.2
     }
 
     /// `dt` seconds of the fight, the wheel turned `notches` (+ in, - out) in `gear`.
     /// Returns the line reeled in (m, - let out) and how it ended, if it did.
-    pub(super) fn step(&mut self, dt: f32, notches: i32, gear: u8, r: &mut dyn FnMut() -> f32) -> (f32, Option<FightEnd>) {
+    pub(in crate::game) fn step(&mut self, dt: f32, notches: i32, gear: u8, r: &mut dyn FnMut() -> f32) -> (f32, Option<FightEnd>) {
         let g = (gear.clamp(1, ROD_GEARS) - 1) as usize;
         let s = self.fresh();
         // What it does next, move after move, each its own speed and strength (weaker as it
@@ -257,7 +257,7 @@ impl Fight {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Bobber {
+pub(in crate::game) enum Bobber {
     Flying,
     Floating,
     Ground,
@@ -266,21 +266,21 @@ pub(super) enum Bobber {
 /// Waiting for a fish (seconds), nibbles to come (how many more, seconds to the next), the
 /// bite (seconds left to set the hook).
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub(super) enum Bite {
+pub(in crate::game) enum Bite {
     Wait(f32),
     Nibble(u8, f32),
     Strike(f32),
 }
 
 /// The line out and what is on it.
-pub(super) struct Line {
-    pub(super) bobber: Vec3,
+pub(in crate::game) struct Line {
+    pub(in crate::game) bobber: Vec3,
     vel: Vec3,
-    pub(super) state: Bobber,
+    pub(in crate::game) state: Bobber,
     /// Line off the reel (m).
-    pub(super) length: f32,
-    pub(super) bite: Bite,
-    pub(super) fight: Option<Fight>,
+    pub(in crate::game) length: f32,
+    pub(in crate::game) bite: Bite,
+    pub(in crate::game) fight: Option<Fight>,
     /// Reeling it all in (a right click with the line out).
     auto_reel: bool,
     /// How far the bobber is pulled under (m), and where it is drawn.
@@ -291,7 +291,7 @@ pub(super) struct Line {
 }
 
 #[derive(Default)]
-pub(super) struct Fishing {
+pub(in crate::game) struct Fishing {
     /// Drawing the rod back to cast: seconds the button has been held.
     charge: Option<f32>,
     /// The cast's whip playing (seconds), how hard it was, whether the bobber has left.
@@ -299,14 +299,14 @@ pub(super) struct Fishing {
     cast_power: f32,
     /// A landed fish: the rod swung up (seconds).
     lift: Option<f32>,
-    pub(super) line: Option<Line>,
+    pub(in crate::game) line: Option<Line>,
     /// The reel's handle (radians), and the wheel's notches not yet used.
     crank: f32,
     scroll: f32,
     notches: i32,
     /// Where the rod's tip was drawn last frame: by the first-person hand and on the model.
-    pub(super) tip_fp: Option<Vec3>,
-    pub(super) tip_tp: Option<Vec3>,
+    pub(in crate::game) tip_fp: Option<Vec3>,
+    pub(in crate::game) tip_tp: Option<Vec3>,
     /// Fighting (0..1, eased), and the line's tension as shown.
     fight_k: f32,
     tension: f32,
@@ -319,7 +319,7 @@ pub(super) struct Fishing {
     /// The gear digits flash when the gear is changed.
     gear_flash: f32,
     /// A bite not seen to yet (the "!" over the crosshair flashes).
-    pub(super) alarm: f32,
+    pub(in crate::game) alarm: f32,
     /// Where the reel's handle is going (it follows smoothly).
     crank_to: f32,
     /// Where the bobber is drawn: it follows the game's bobber smoothly (the line's length
@@ -433,7 +433,7 @@ impl Game {
     /// The mouse wheel with the rod in hand: Shift shifts the reel's gear; with the line out
     /// (or drawing back to cast) it turns the reel. Returns whether the wheel was used for it
     /// (otherwise it goes through the hotbar).
-    pub(super) fn fishing_scroll(&mut self) -> bool {
+    pub(in crate::game) fn fishing_scroll(&mut self) -> bool {
         if !self.holding_rod() {
             self.fishing.scroll = 0.0;
             return false;
@@ -478,7 +478,7 @@ impl Game {
 
     /// The rod in hand: casting, the bobber, bites and the fight. Putting it away cuts the
     /// line.
-    pub(super) fn update_fishing(&mut self, dt: f32, control: bool) {
+    pub(in crate::game) fn update_fishing(&mut self, dt: f32, control: bool) {
         let notches = std::mem::take(&mut self.fishing.notches);
         {
             let f = &mut self.fishing;
@@ -968,7 +968,7 @@ impl Game {
     }
 
     /// What the held rod is doing, for its animation (and the others).
-    pub(super) fn rod_anim(&self) -> Option<RodAnim> {
+    pub(in crate::game) fn rod_anim(&self) -> Option<RodAnim> {
         if self.held() != FISHING_ROD {
             return None;
         }
@@ -987,7 +987,7 @@ impl Game {
     }
 
     /// The rod creaking under a fish's pull (a looping sound).
-    pub(super) fn fishing_sounds(&self) -> Vec<(u64, Sound, Vec3, f32)> {
+    pub(in crate::game) fn fishing_sounds(&self) -> Vec<(u64, Sound, Vec3, f32)> {
         match &self.fishing.line {
             Some(Line { fight: Some(f), .. }) if f.tension > 0.35 => {
                 vec![(0xf15_4000, Sound::RodCreak, self.rod_tip(), ((f.tension - 0.35) * 1.6).min(1.0))]
@@ -998,7 +998,7 @@ impl Game {
 
     /// The lines from the rods' tips (this player's and the others'), the bobbers, a fish
     /// near the surface on the line or flying out, a line just parted.
-    pub(super) fn build_fishing(&self, out: &mut Vec<Vertex>, cam: Vec3) {
+    pub(in crate::game) fn build_fishing(&self, out: &mut Vec<Vertex>, cam: Vec3) {
         let world = &self.terrain.world;
         let light = |p: Vec3| {
             let (sky, blk) = world.light_estimate(p + Vec3::Y * 0.3);
@@ -1080,7 +1080,7 @@ impl Game {
     /// Bottom right while the bobber is on the water: the reel's handle, its gears (a
     /// highlight sliding to the one it is in) and the line out; under the crosshair the cast's strength while drawing back, and the fight's
     /// tension bar. Everything moves smoothly (`smooth_fishing`).
-    pub(super) fn draw_fishing_hud(&mut self) {
+    pub(in crate::game) fn draw_fishing_hud(&mut self) {
         if !self.holding_rod() {
             return;
         }

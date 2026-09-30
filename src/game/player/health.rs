@@ -1,10 +1,10 @@
 //! The player's health: damage (falls, lava, fire, cactus, suffocation, drowning, the void),
 //! death, and hunger, thirst and effects.
 
-use super::*;
+use crate::game::*;
 use crate::item::*;
 impl Game {
-    pub(super) fn damage(&mut self, amount: f32, cause: &'static str) {
+    pub(in crate::game) fn damage(&mut self, amount: f32, cause: &'static str) {
         if self.creative()
             || self.spectator()
             || self.screen == Screen::Dead || self.health <= 0.0
@@ -42,7 +42,7 @@ impl Game {
 
     /// Armor takes its share of a hit (`kind` as in `net::hurt`) and wears; returns what
     /// gets through.
-    pub(super) fn armor_hit(&mut self, dmg: f32, kind: u8) -> f32 {
+    pub(in crate::game) fn armor_hit(&mut self, dmg: f32, kind: u8) -> f32 {
         use crate::net::hurt;
         if self.creative() || self.spectator() || self.inventory.armor.iter().all(|s| s.is_none())
         {
@@ -69,7 +69,7 @@ impl Game {
         dmg * k
     }
 
-    pub(super) fn die(&mut self, cause: &'static str) {
+    pub(in crate::game) fn die(&mut self, cause: &'static str) {
         self.death_message = t(cause).to_string();
         let msg = self.death_message.clone();
         self.say(msg, chat::WHITE);
@@ -111,7 +111,7 @@ impl Game {
     }
 
     /// Blocks overlapping the player's bounding box (optionally grown a bit).
-    pub(super) fn touching(&self, grow: f32, pred: impl Fn(u8) -> bool) -> bool {
+    pub(in crate::game) fn touching(&self, grow: f32, pred: impl Fn(u8) -> bool) -> bool {
         let p = self.player.pos;
         let min = p - Vec3::new(0.3 + grow, 0.0, 0.3 + grow);
         let max = p + Vec3::new(0.3 + grow, 1.8, 0.3 + grow);
@@ -127,7 +127,7 @@ impl Game {
         false
     }
 
-    pub(super) fn update_health(&mut self, dt: f32, was_on_ground: bool) {
+    pub(in crate::game) fn update_health(&mut self, dt: f32, was_on_ground: bool) {
         self.invuln -= dt;
         self.hurt_time = (self.hurt_time - dt).max(0.0);
         let creative = self.creative();

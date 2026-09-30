@@ -1,13 +1,13 @@
 //! Using items: throwing, placing blocks, buckets, bottles, eating and drinking, and opening
 //! containers.
 
-use super::*;
+use crate::game::*;
 use crate::entity::player::raycast_fluid;
 use crate::item::inventory::take;
 use crate::item::*;
 impl Game {
     /// Q: throw the held item (Ctrl+Q: the whole stack).
-    pub(super) fn drop_held(&mut self, all: bool) {
+    pub(in crate::game) fn drop_held(&mut self, all: bool) {
         let slot = self.hotbar_slot;
         let Some(s) = self.inventory.slots[slot] else {
             return;
@@ -19,7 +19,7 @@ impl Game {
     }
 
     /// Throws a stack in the look direction.
-    pub(super) fn throw(&mut self, stack: Stack) {
+    pub(in crate::game) fn throw(&mut self, stack: Stack) {
         let dir = look_dir(self.yaw, self.pitch);
         let pos = self.player.eye() - Vec3::Y * 0.3 + dir * 0.3;
         self.add_item(ItemEntity::new(pos, dir * 6.0 + Vec3::Y * 1.5, stack, 1.5));
@@ -27,7 +27,7 @@ impl Game {
 
     /// Into the selected hotbar slot if it is empty (a filled bottle or bucket replacing the
     /// used one), otherwise into the inventory.
-    pub(super) fn put_in_hand(&mut self, stack: Stack) {
+    pub(in crate::game) fn put_in_hand(&mut self, stack: Stack) {
         let slot = &mut self.inventory.slots[self.hotbar_slot];
         if slot.is_none() {
             *slot = Some(stack);
@@ -37,14 +37,14 @@ impl Game {
     }
 
     /// The mob the crosshair is on, as an index into `mobs` (if it is still there).
-    pub(super) fn target_mob(&self) -> Option<usize> {
+    pub(in crate::game) fn target_mob(&self) -> Option<usize> {
         let id = self.mob_target?;
         self.mobs.iter().position(|m| m.id == id)
     }
 
     /// The inventory as it is saved: items in the 2x2 grid or on the cursor count as carried
     /// (an open crafting table keeps its own grid).
-    pub(super) fn carried_slots(&self) -> [Slot; crate::item::inventory::SIZE] {
+    pub(in crate::game) fn carried_slots(&self) -> [Slot; crate::item::inventory::SIZE] {
         let at_table = matches!(self.screen, Screen::Container(Container::Crafting(_)));
         let mut slots = self.inventory.slots;
         let grid = if at_table { &[][..] } else { &self.craft[..] };
@@ -58,13 +58,13 @@ impl Game {
     }
 
     /// Puts a stack into the inventory; drops what does not fit.
-    pub(super) fn give(&mut self, stack: Stack) {
+    pub(in crate::game) fn give(&mut self, stack: Stack) {
         if let Some(left) = self.inventory.add(stack) {
             self.throw(left);
         }
     }
 
-    pub(super) fn use_item(&mut self) {
+    pub(in crate::game) fn use_item(&mut self) {
         let held = self.held();
         // The grenade crate on a rifle station: grenades in, or one out.
         if self.right_pressed && self.crate_click() {
@@ -75,7 +75,7 @@ impl Game {
             return;
         }
         // A grenade is readied and thrown by holding the button (`update_grenade_hold`).
-        if super::grenades::GrenadeKind::of(held).is_some() {
+        if crate::game::grenades::GrenadeKind::of(held).is_some() {
             return;
         }
         // A fishing rod casts by holding the button (`update_fishing`), unless there is
@@ -206,7 +206,7 @@ impl Game {
     }
 
     /// Glass bottle on water: fills it (lake water, not safe to drink until boiled).
-    pub(super) fn fill_bottle(&mut self) {
+    pub(in crate::game) fn fill_bottle(&mut self) {
         let dir = look_dir(self.yaw, self.pitch);
         let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.player.eye(), dir, 5.0) else {
             return;
@@ -225,7 +225,7 @@ impl Game {
 
     /// Holding the right mouse button with food or drink: eat or drink it in 1.6 seconds
     /// (not while aiming at a container, which opens instead).
-    pub(super) fn update_using(&mut self, dt: f32, control: bool) {
+    pub(in crate::game) fn update_using(&mut self, dt: f32, control: bool) {
         use crate::entity::survival::USE_TIME;
         let held = self.held();
         let c = consumable(held);
@@ -294,7 +294,7 @@ impl Game {
         self.slot_name_timer = 0.0;
     }
 
-    pub(super) fn fill_bucket(&mut self) {
+    pub(in crate::game) fn fill_bucket(&mut self) {
         let dir = look_dir(self.yaw, self.pitch);
         let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.player.eye(), dir, 5.0) else {
             return;
@@ -324,7 +324,7 @@ impl Game {
         self.action_cooldown = 0.25;
     }
 
-    pub(super) fn empty_bucket(&mut self, held: ItemId) {
+    pub(in crate::game) fn empty_bucket(&mut self, held: ItemId) {
         let Some((hit, prev)) = self.target else {
             return;
         };
@@ -345,7 +345,7 @@ impl Game {
         self.action_cooldown = 0.25;
     }
 
-    pub(super) fn place_block(&mut self, held: ItemId) {
+    pub(in crate::game) fn place_block(&mut self, held: ItemId) {
         let Some((hit, prev)) = self.target else {
             return;
         };
@@ -504,7 +504,7 @@ impl Game {
 
     /// Whether `q` is in front of a gun station, where its drawer slides out (nothing solid
     /// may be put there).
-    pub(super) fn drawer_room(&self, q: IVec3) -> bool {
+    pub(in crate::game) fn drawer_room(&self, q: IVec3) -> bool {
         let w = &self.terrain.world;
         (0..4u8).any(|f| {
             let at = q - facing_dir(f);
@@ -605,7 +605,7 @@ impl Game {
     /// Opens or closes a door (both halves). It always swings away from the player: out
     /// into the next block when opened from the side it closes on (if there is room).
     /// The other door of a double door goes with it.
-    pub(super) fn toggle_door(&mut self, p: IVec3) {
+    pub(in crate::game) fn toggle_door(&mut self, p: IVec3) {
         let w = &self.terrain.world;
         let b = w.geti(p);
         let mut cells = vec![p, p + door_other_half(b)];

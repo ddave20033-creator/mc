@@ -4,7 +4,7 @@
 //! (crosshair, scope, ammo). Guns are put together, taken apart, cleaned and tuned at the gun
 //! station (`gui::gun_station`).
 
-use super::*;
+use crate::game::*;
 use crate::entity::player::{ray_boxes, raycast_solid};
 use crate::item::*;
 use crate::lang::tf;
@@ -41,30 +41,30 @@ struct Bullet {
 }
 
 #[derive(Default)]
-pub(super) struct Guns {
+pub(in crate::game) struct Guns {
     /// Looking the held gun over (the inspect key): seconds so far, and the gun.
-    pub(super) inspect: Option<(f32, ItemId)>,
+    pub(in crate::game) inspect: Option<(f32, ItemId)>,
     /// Seconds after a shot before sprinting is possible again (a shot ends a sprint).
-    pub(super) no_sprint: f32,
+    pub(in crate::game) no_sprint: f32,
     /// Where the held gun's muzzle, ejection port and laser lens were drawn last frame
     /// (first person).
-    pub(super) muzzle: Option<Vec3>,
-    pub(super) eject: Option<Vec3>,
-    pub(super) laser_from: Option<Vec3>,
+    pub(in crate::game) muzzle: Option<Vec3>,
+    pub(in crate::game) eject: Option<Vec3>,
+    pub(in crate::game) laser_from: Option<Vec3>,
     /// Where the held gun's weapon light is (first person; and on the player model).
-    pub(super) light_from: Option<Vec3>,
-    pub(super) light_tp: Option<Vec3>,
+    pub(in crate::game) light_from: Option<Vec3>,
+    pub(in crate::game) light_tp: Option<Vec3>,
     /// Which way the held gun points (first person: its barrel, or its scope's axis): its
     /// shots and its laser go that way, not where the view looks.
-    pub(super) gun_dir: Option<Vec3>,
+    pub(in crate::game) gun_dir: Option<Vec3>,
     /// The same on the player model (third person).
-    pub(super) muzzle_tp: Option<Vec3>,
-    pub(super) eject_tp: Option<Vec3>,
+    pub(in crate::game) muzzle_tp: Option<Vec3>,
+    pub(in crate::game) eject_tp: Option<Vec3>,
     /// The last muzzle flash as the world sees it (third person; the first-person view draws
     /// its own on the gun): how much is left, where, which way, how big, its turn.
     flash: Option<(f32, Vec3, Vec3, f32, f32)>,
     /// The flash's light on the surroundings: how much is left and where.
-    pub(super) flash_light: (f32, Vec3),
+    pub(in crate::game) flash_light: (f32, Vec3),
     /// How hot the barrel is from firing (smoke curls out of it above 1), and when the last
     /// wisp came out.
     heat: f32,
@@ -72,24 +72,24 @@ pub(super) struct Guns {
     /// When the last "jammed" or "no bullets" message was shown.
     last_message: f32,
     /// Aimed down the sights: 0 from the hip .. 1 aimed.
-    pub(super) aim: f32,
+    pub(in crate::game) aim: f32,
     /// Reloading (the R key): seconds so far, and what it does (a revolver's: `cylinder`).
-    pub(super) reload: Option<f32>,
-    pub(super) plan: ReloadPlan,
-    pub(super) cylinder: Option<super::revolver::Cylinder>,
+    pub(in crate::game) reload: Option<f32>,
+    pub(in crate::game) plan: ReloadPlan,
+    pub(in crate::game) cylinder: Option<crate::game::revolver::Cylinder>,
     /// The gun a reload is for (its hotbar slot and item): put away, or another one taken up,
     /// the reload stops (it must not go on with the other gun).
     reload_owner: Option<(usize, ItemId)>,
     /// The held revolver's chambers (first person): the head of what is in each.
-    pub(super) chambers: Option<[Vec3; 6]>,
+    pub(in crate::game) chambers: Option<[Vec3; 6]>,
     /// The reload key was pressed.
-    pub(super) reload_pressed: bool,
+    pub(in crate::game) reload_pressed: bool,
     /// Extra spread from the last shots (degrees), for the aim and the crosshair.
     bloom: f32,
     /// Recoil that has not come back yet (radians of pitch).
     recover: f32,
     bullets: Vec<Bullet>,
-    pub(super) cases: Cases,
+    pub(in crate::game) cases: Cases,
     /// Muzzle flashes of the other players' shots (as `flash`).
     remote_flashes: Vec<(f32, Vec3, Vec3, f32, f32)>,
     /// Holes the bullets left in the blocks.
@@ -101,12 +101,12 @@ pub(super) struct Guns {
 /// magazine coming out is empty, how long it takes, the magazine going in (taken from the
 /// inventory at the start) and which of its steps are done.
 #[derive(Default)]
-pub(super) struct ReloadPlan {
+pub(in crate::game) struct ReloadPlan {
     kind: ReloadKind,
     rack: bool,
     old_empty: bool,
-    pub(super) length: f32,
-    pub(super) new_mag: Option<Stack>,
+    pub(in crate::game) length: f32,
+    pub(in crate::game) new_mag: Option<Stack>,
     out_done: bool,
     in_done: bool,
     rack_done: bool,
@@ -131,7 +131,7 @@ const HOLE_LIFE: f32 = 60.0;
 
 impl Guns {
     /// The light of a muzzle flash going on now: where it is and how bright.
-    pub(super) fn flash_light_pos(&self) -> Option<(Vec3, f32)> {
+    pub(in crate::game) fn flash_light_pos(&self) -> Option<(Vec3, f32)> {
         let (k, pos) = self.flash_light;
         (k > 0.0).then_some((pos, 2.5 * k))
     }
@@ -205,22 +205,22 @@ fn scatter(dir: Vec3, deg: f32, r1: f32, r2: f32) -> Vec3 {
 
 impl Game {
     /// The held gun: its stack and kind.
-    pub(super) fn held_gun(&self) -> Option<(Stack, GunKind)> {
+    pub(in crate::game) fn held_gun(&self) -> Option<(Stack, GunKind)> {
         self.inventory.slots[self.hotbar_slot].and_then(|s| GunKind::of(s.item).map(|k| (s, k)))
     }
 
     /// Holding a gun.
-    pub(super) fn holding_gun(&self) -> bool {
+    pub(in crate::game) fn holding_gun(&self) -> bool {
         self.held_gun().is_some()
     }
 
     /// The held gun's attachments (0 when holding something else).
-    pub(super) fn held_gun_mods(&self) -> u8 {
+    pub(in crate::game) fn held_gun_mods(&self) -> u8 {
         self.held_gun().map_or(0, |(s, _)| gun_mods(&s))
     }
 
     /// Switches the held gun's weapon light on or off (when it has one).
-    pub(super) fn toggle_gun_light(&mut self) {
+    pub(in crate::game) fn toggle_gun_light(&mut self) {
         let slot = self.hotbar_slot;
         let Some(s) = self.inventory.slots[slot].as_mut().filter(|s| GunKind::of(s.item).is_some()) else { return };
         let mods = gun_mods(s);
@@ -232,7 +232,7 @@ impl Game {
     }
 
     /// Where the held gun's weapon light shines from and which way (when it is on).
-    pub(super) fn own_gun_light(&self) -> Option<(Vec3, Vec3)> {
+    pub(in crate::game) fn own_gun_light(&self) -> Option<(Vec3, Vec3)> {
         let (g, _) = self.held_gun()?;
         let mods = gun_mods(&g);
         if mods & gun_mod::LIGHT == 0 || mods & gun_mod::LIGHT_ON == 0 || self.screen == Screen::Dead {
@@ -244,13 +244,13 @@ impl Game {
     }
 
     /// How dirty the held gun looks (`pistol_view::dirt_level`).
-    pub(super) fn held_gun_dirt(&self) -> u8 {
+    pub(in crate::game) fn held_gun_dirt(&self) -> u8 {
         self.held_gun()
             .map_or(0, |(s, _)| crate::model::pistol_view::dirt_level(s.damage, max_damage(s.item)))
     }
 
     /// How much the gun narrows the view now (1 = not at all).
-    pub(super) fn gun_zoom(&self) -> f32 {
+    pub(in crate::game) fn gun_zoom(&self) -> f32 {
         let Some((s, kind)) = self.held_gun() else {
             return 1.0;
         };
@@ -266,7 +266,7 @@ impl Game {
     /// laser, every frame.
     /// What the shots left in the world goes on, whatever the player is doing (dead, asleep,
     /// watching): bullets in flight, falling cases, the other players' flashes, the holes.
-    pub(super) fn update_shots(&mut self, dt: f32) {
+    pub(in crate::game) fn update_shots(&mut self, dt: f32) {
         self.update_bullets(dt);
         for (at, kind, hard) in self.guns.cases.update(dt, &self.terrain.world) {
             self.audio.play(kind.sound(), Some(at), 0.06 + 0.18 * hard);
@@ -283,7 +283,7 @@ impl Game {
         self.guns.flash_light.0 = (self.guns.flash_light.0 - dt / 0.08).max(0.0);
     }
 
-    pub(super) fn update_guns(&mut self, dt: f32, control: bool) {
+    pub(in crate::game) fn update_guns(&mut self, dt: f32, control: bool) {
         // A spectator's hands are empty; the shots, cases and holes around still go on.
         let held = self.held_gun().filter(|_| !self.spectator());
         let mods = held.map_or(0, |(s, _)| gun_mods(&s));
@@ -425,7 +425,7 @@ impl Game {
     }
 
     /// Starts looking the held gun over (again from the start if already).
-    pub(super) fn start_inspect(&mut self) {
+    pub(in crate::game) fn start_inspect(&mut self) {
         let Some((gun, _)) = self.held_gun() else { return };
         if self.guns.reload.is_none() && self.guns.aim < 0.3 {
             self.guns.inspect = Some((0.0, gun.item));
@@ -482,7 +482,7 @@ impl Game {
     }
 
     /// Stops a reload (the gun was put away): the magazine it was bringing goes back.
-    pub(super) fn cancel_reload(&mut self) {
+    pub(in crate::game) fn cancel_reload(&mut self) {
         self.guns.cylinder = None;
         self.guns.reload_owner = None;
         if self.guns.reload.take().is_some() {
@@ -582,7 +582,7 @@ impl Game {
 
     /// Left click with a gun: fires (a dirty gun may jam, an empty one only clicks). A shotgun
     /// being loaded stops loading to fire.
-    pub(super) fn shoot(&mut self) {
+    pub(in crate::game) fn shoot(&mut self) {
         let Some((gun, kind)) = self.held_gun() else { return };
         let stats = kind.stats();
         if self.guns.cylinder.is_some() {
@@ -707,7 +707,7 @@ impl Game {
         }
         // The others see the shot too.
         let shot = crate::net::Msg::Shot {
-            id: super::multi::HOST_ID,
+            id: crate::game::multi::HOST_ID,
             kind: kind as u8,
             mods,
             eye,
@@ -775,7 +775,7 @@ impl Game {
     /// Another player fired (`kind` is the gun's index in GUN_KINDS): their bullets fly
     /// (only to be seen), the muzzle flashes on the gun in their hands and the case comes
     /// out of it.
-    pub(super) fn remote_shot(&mut self, id: u8, kind: u8, mods: u8, eye: Vec3, seed: f32, bullets: &[Vec3]) {
+    pub(in crate::game) fn remote_shot(&mut self, id: u8, kind: u8, mods: u8, eye: Vec3, seed: f32, bullets: &[Vec3]) {
         let Some(&kind) = GUN_KINDS.get(kind as usize) else {
             return;
         };
@@ -899,7 +899,7 @@ impl Game {
                 } else {
                     let kind = crate::net::hurt::BULLET;
                     self.send_to(id, &Msg::Hurt { dmg, from, knock, kind });
-                    self.attacked(crate::entity::mob::Foe::Player(id), super::multi::HOST_ID);
+                    self.attacked(crate::entity::mob::Foe::Player(id), crate::game::multi::HOST_ID);
                 }
                 return false;
             }
@@ -914,7 +914,7 @@ impl Game {
                 } else {
                     self.mobs[i].hurt(dmg, Some(from), knock);
                     let foe = crate::entity::mob::Foe::Mob(self.mobs[i].id);
-                    self.attacked(foe, super::multi::HOST_ID);
+                    self.attacked(foe, crate::game::multi::HOST_ID);
                 }
                 return false;
             }
@@ -955,7 +955,7 @@ impl Game {
     }
 
     /// Tracer streaks of the bullets in flight, the spent cases and the laser's dot.
-    pub(super) fn build_gun_effects(&self, out: &mut Vec<Vertex>, cam: Vec3, right: Vec3, up: Vec3) {
+    pub(in crate::game) fn build_gun_effects(&self, out: &mut Vec<Vertex>, cam: Vec3, right: Vec3, up: Vec3) {
         for b in &self.guns.bullets {
             let dir = b.vel.normalize_or_zero();
             let fade = (1.0 - b.traveled / 8.0).max(0.0);
@@ -993,7 +993,7 @@ impl Game {
     /// The held gun's laser sight, once the gun is where it is drawn this frame (so the dot
     /// does not trail it): zeroed onto where the shot goes (from the eye the way the gun
     /// points, see `shoot`), a small dot there, and the faint beam from the lens (first person).
-    pub(super) fn build_own_laser(&self, out: &mut Vec<Vertex>, cam: Vec3, right: Vec3, up: Vec3) {
+    pub(in crate::game) fn build_own_laser(&self, out: &mut Vec<Vertex>, cam: Vec3, right: Vec3, up: Vec3) {
         let Some((gun, kind)) = self.held_gun() else { return };
         if gun_mods(&gun) & gun_mod::LASER == 0 || self.screen == Screen::Dead {
             return;
@@ -1010,7 +1010,7 @@ impl Game {
     }
 
     /// The bullet holes, multiplied onto the blocks they are in.
-    pub(super) fn build_bullet_holes(&self, out: &mut Vec<Vertex>, cam: Vec3) {
+    pub(in crate::game) fn build_bullet_holes(&self, out: &mut Vec<Vertex>, cam: Vec3) {
         use crate::world::mesh::flags;
         for h in &self.guns.holes {
             if h.pos.distance_squared(cam) > 64.0 * 64.0 {
@@ -1044,7 +1044,7 @@ impl Game {
     /// The gun's part of the HUD while holding one: the scope's picture when aimed through
     /// it, the crosshair (it opens up after shots and fades while aiming), the rounds and the
     /// controls.
-    pub(super) fn draw_gun_hud(&mut self) {
+    pub(in crate::game) fn draw_gun_hud(&mut self) {
         let Some((gun, kind)) = self.held_gun() else { return };
         let stats = kind.stats();
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
@@ -1138,7 +1138,7 @@ impl Game {
     }
 
     /// A message about the gun, at most about once a second.
-    pub(super) fn gun_message(&mut self, text: &str) {
+    pub(in crate::game) fn gun_message(&mut self, text: &str) {
         if self.time - self.guns.last_message > 1.0 {
             self.guns.last_message = self.time;
             self.say(text, rgba(255, 190, 110, 255));

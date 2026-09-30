@@ -5,7 +5,7 @@
 //! ground to be picked up), then it is loaded from a loaded speedloader carried, or one round
 //! at a time from the magnum rounds carried (shooting stops the loading), and swung shut.
 
-use super::*;
+use crate::game::*;
 use crate::audio::Sound;
 use crate::item::*;
 use crate::model::revolver_view::{
@@ -26,7 +26,7 @@ enum Phase {
 
 /// A revolver reload going on.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Cylinder {
+pub(in crate::game) struct Cylinder {
     phase: Phase,
     /// Seconds into the phase (into the round being loaded, loading rounds).
     t: f32,
@@ -46,7 +46,7 @@ pub(super) struct Cylinder {
 
 impl Cylinder {
     /// Where the reload animation is (seconds) and, loading a round, how far into it.
-    pub(super) fn anim(&self) -> (f32, Option<f32>) {
+    pub(in crate::game) fn anim(&self) -> (f32, Option<f32>) {
         match self.phase {
             Phase::Open => (self.t.min(RELOAD_OPEN), None),
             Phase::Loader => ((RELOAD_OPEN + self.t).min(RELOAD_CLOSE), None),
@@ -55,11 +55,11 @@ impl Cylinder {
         }
     }
 
-    pub(super) fn ejects(&self) -> bool {
+    pub(in crate::game) fn ejects(&self) -> bool {
         self.ejects
     }
 
-    pub(super) fn loader(&self) -> u8 {
+    pub(in crate::game) fn loader(&self) -> u8 {
         self.loader
     }
 }
@@ -108,7 +108,7 @@ impl Game {
 
     /// The R key with the revolver: swung out to be emptied (when there are fired cases in it)
     /// and loaded (when there is room and something to load it with).
-    pub(super) fn start_revolver_reload(&mut self) {
+    pub(in crate::game) fn start_revolver_reload(&mut self) {
         let Some(g) = self.held_revolver() else { return };
         if let Some(c) = &mut self.guns.cylinder {
             // Loading already: the key again stops it.
@@ -142,14 +142,14 @@ impl Game {
     }
 
     /// A shot asked for while the cylinder is out: loading stops after the round going in.
-    pub(super) fn revolver_stop_loading(&mut self) {
+    pub(in crate::game) fn revolver_stop_loading(&mut self) {
         if let Some(c) = &mut self.guns.cylinder {
             c.stop = true;
         }
     }
 
     /// The reload goes on: its steps happen with the animation.
-    pub(super) fn update_revolver_reload(&mut self, dt: f32) {
+    pub(in crate::game) fn update_revolver_reload(&mut self, dt: f32) {
         let Some(mut c) = self.guns.cylinder else { return };
         if self.held_revolver().is_none() {
             self.guns.cylinder = None;
@@ -343,7 +343,7 @@ impl Game {
 
     /// The trigger pulled: the next chamber comes under the hammer. Returns whether a round
     /// fired there (otherwise the hammer only clicked on an empty chamber or a fired case).
-    pub(super) fn revolver_pull(&mut self) -> bool {
+    pub(in crate::game) fn revolver_pull(&mut self) -> bool {
         let Some(g) = self.held_revolver_mut() else { return false };
         let k = revolver_next(revolver_index(g));
         set_revolver_index(g, k);

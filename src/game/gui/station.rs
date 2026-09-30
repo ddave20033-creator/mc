@@ -3,8 +3,8 @@
 //! inventory runs along the bottom of the screen. At a table, a click anywhere but on a slot
 //! crafts what the grid makes into its middle. Closing glides the camera back into the head.
 
-use super::gui::SlotRef;
-use super::*;
+use crate::game::gui::SlotRef;
+use crate::game::*;
 use crate::entity::block_entity::{
     chest_cell, chest_cell_at, chest_cell_size, chest_side, table_cell, table_cell_at, CHEST_FLOOR,
     CRAFT_SLIDE, TABLE_CELL,
@@ -26,7 +26,7 @@ const GUN_SWAY: f32 = 0.3;
 const GUN_TURN: f32 = 6.0;
 
 /// The chest or table the view is over, and how far the camera has glided.
-pub(super) struct Station {
+pub(in crate::game) struct Station {
     pub pos: IVec3,
     /// 0 at the player's eye .. 1 over the block.
     pub blend: f32,
@@ -35,14 +35,14 @@ pub(super) struct Station {
 }
 
 /// Where things are on the screen: the view's camera matrix and the window size.
-pub(super) struct Screen2 {
-    pub(super) view_proj: Mat4,
-    pub(super) w: f32,
-    pub(super) h: f32,
+pub(in crate::game) struct Screen2 {
+    pub(in crate::game) view_proj: Mat4,
+    pub(in crate::game) w: f32,
+    pub(in crate::game) h: f32,
 }
 
 impl Screen2 {
-    pub(super) fn to_screen(&self, p: Vec3) -> Option<Vec2> {
+    pub(in crate::game) fn to_screen(&self, p: Vec3) -> Option<Vec2> {
         let c = self.view_proj * p.extend(1.0);
         (c.w > 1e-4).then(|| {
             Vec2::new(
@@ -53,7 +53,7 @@ impl Screen2 {
     }
 
     /// The ray through the screen point `m`.
-    pub(super) fn ray(&self, m: Vec2) -> (Vec3, Vec3) {
+    pub(in crate::game) fn ray(&self, m: Vec2) -> (Vec3, Vec3) {
         let n = Vec2::new(m.x / self.w * 2.0 - 1.0, m.y / self.h * 2.0 - 1.0);
         let inv = self.view_proj.inverse();
         let a = inv.project_point3(Vec3::new(n.x, n.y, 0.0));
@@ -67,7 +67,7 @@ impl Screen2 {
 /// depth about half the height, and it sits in the upper part of the screen, above the
 /// inventory. `pitch` is how steeply it looks down (degrees). Returns (position, look
 /// direction).
-pub(super) fn framing(
+pub(in crate::game) fn framing(
     center: Vec3,
     toward: Vec3,
     (half_w, half_d): (f32, f32),
@@ -88,7 +88,7 @@ pub(super) fn framing(
 /// or looking down into its drawer (out in front of it): all of it in view above the bottom
 /// `strip` of the screen (a fraction of its height), filling as much of the rest as it can.
 /// Returns (position, look direction).
-pub(super) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, half_w: f32, aspect: f32, strip: f32, drawer: bool) -> (Vec3, Vec3) {
+pub(in crate::game) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, half_w: f32, aspect: f32, strip: f32, drawer: bool) -> (Vec3, Vec3) {
     let pitch = if drawer { DRAWER_PITCH } else { GUN_PITCH }.to_radians();
     let fwd = -toward * pitch.cos() - Vec3::Y * pitch.sin();
     let up = right.cross(fwd).normalize();
@@ -132,7 +132,7 @@ pub(super) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, half_w: f32, asp
 }
 
 /// Where the ray meets the horizontal plane at height `y` (in front of it).
-pub(super) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
+pub(in crate::game) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
     if d.y.abs() < 1e-5 {
         return None;
     }
@@ -142,7 +142,7 @@ pub(super) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
 
 impl Game {
     /// Starts gliding over a chest or crafting table.
-    pub(super) fn open_station(&mut self, c: Container) {
+    pub(in crate::game) fn open_station(&mut self, c: Container) {
         let pos = match c {
             Container::Chest(p) => p,
             Container::GunStation(p) => p,
@@ -167,7 +167,7 @@ impl Game {
 
     /// Keeps the chest and table views right: one whose block is gone (mined by someone
     /// else) closes, and a table another player has open faces them, as it does for them.
-    pub(super) fn check_stations(&mut self) {
+    pub(in crate::game) fn check_stations(&mut self) {
         if let Screen::Container(
             c @ (Container::Chest(p) | Container::Crafting(p) | Container::GunStation(p)),
         ) = self.screen
@@ -191,12 +191,12 @@ impl Game {
     }
 
     /// Which way a crafting table's grid faces (toward who last used it).
-    pub(super) fn table_side(&self, p: IVec3) -> u8 {
+    pub(in crate::game) fn table_side(&self, p: IVec3) -> u8 {
         self.table_sides.get(&p).copied().unwrap_or(2)
     }
 
     /// The ingredients slide into the middle of the table.
-    pub(super) fn update_craft_fx(&mut self, dt: f32) {
+    pub(in crate::game) fn update_craft_fx(&mut self, dt: f32) {
         if let Some((t, _)) = &mut self.craft_fx {
             *t += dt;
             if *t > CRAFT_SLIDE + 1.0 {
@@ -234,7 +234,7 @@ impl Game {
             // Moved to one side, it turns a little back toward the middle.
             let fwd = glam::Quat::from_rotation_y(sway * GUN_TURN.to_radians()) * fwd;
             let origin = Vec3::new(center.x, st.pos.y as f32 + 1.45, center.z);
-            let cam = origin + super::camera::clamp_offset(w, origin, want - origin);
+            let cam = origin + crate::game::camera::clamp_offset(w, origin, want - origin);
             return Some((cam, fwd));
         } else {
             let f = facing(b).filter(|_| is_chest(b))?;
@@ -248,13 +248,13 @@ impl Game {
         // Not into a wall or ceiling over the block (checked from high enough above it that
         // the block itself is not in the way).
         let origin = Vec3::new(center.x, st.pos.y as f32 + 1.45, center.z);
-        let cam = origin + super::camera::clamp_offset(w, origin, want - origin);
+        let cam = origin + crate::game::camera::clamp_offset(w, origin, want - origin);
         Some((cam, fwd))
     }
 
     /// The camera for this frame, gliding between the eye (`cam`, `fwd`, `fov` in degrees)
     /// and the open chest or table. Ends the glide once it is back at the eye.
-    pub(super) fn station_camera(
+    pub(in crate::game) fn station_camera(
         &mut self,
         cam: Vec3,
         fwd: Vec3,
@@ -306,14 +306,14 @@ impl Game {
 
     /// The camera is (partly) over a chest or table: the hand and the first-person body are
     /// not drawn.
-    pub(super) fn in_station(&self) -> bool {
+    pub(in crate::game) fn in_station(&self) -> bool {
         self.station.is_some()
     }
 
     /// The chest or table view: the inventory along the bottom, the counts of the stacks lying
     /// in the chest or on the table, and what the mouse points at (in 3D or in the
     /// inventory).
-    pub(super) fn station_screen(&mut self, c: Container) -> Option<SlotRef> {
+    pub(in crate::game) fn station_screen(&mut self, c: Container) -> Option<SlotRef> {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let mut hovered = None;
         // The inventory, on a dark strip along the bottom.

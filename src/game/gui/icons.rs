@@ -6,7 +6,7 @@
 //! longest drawn over first. An icon asked for is drawn the next frame (until then the fixed
 //! one shows).
 
-use super::*;
+use crate::game::*;
 use crate::item::*;
 use crate::world::textures::{tex, TILE};
 use std::cell::RefCell;
@@ -82,7 +82,7 @@ pub fn state_icon(st: &Stack) -> Option<u32> {
 impl Game {
     /// Draws an icon asked for (one a frame), into a layer not in use or not seen for
     /// longest.
-    pub(super) fn update_state_icons(&mut self) {
+    pub(in crate::game) fn update_state_icons(&mut self) {
         let wanted: Vec<(Key, Stack)> = CACHE.with(|c| {
             let mut c = c.borrow_mut();
             c.frame += 1;
@@ -96,7 +96,7 @@ impl Game {
         for (k, st) in wanted {
             let img = crate::world::textures::render_icon(&self.texture_base, &Stack { count: 1, ..st });
             let px: Vec<[u8; 4]> = img.chunks_exact(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
-            let levels = super::book::sheet_levels(&px, TILE, 1, 1);
+            let levels = crate::game::book::sheet_levels(&px, TILE, 1, 1);
             let slot = CACHE.with(|c| {
                 let mut c = c.borrow_mut();
                 let frame = c.frame;
@@ -156,7 +156,7 @@ mod tests {
 
 #[cfg(test)]
 mod timing {
-    use super::*;
+    use crate::game::*;
 
     #[test]
     #[ignore]
