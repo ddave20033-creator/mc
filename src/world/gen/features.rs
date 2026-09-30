@@ -156,6 +156,20 @@ impl Generator {
     pub(super) fn place_trees(&self, c: &mut ChunkData, x0: i32, z0: i32, cols: &[[Option<Column>; 16]; 16]) {
         // (trees standing next to the chunk reach into it)
         let reach = trees::REACH;
+        // The columns round the chunk, each worked out once when first needed (a tree's spot
+        // and the slope there look at the same ones again): those in the chunk are `cols`.
+        let side = (16 + 2 * reach + 2) as usize;
+        let (ox, oz) = (x0 - reach - 1, z0 - reach - 1);
+        let mut around: Vec<Option<Column>> = vec![None; side * side];
+        let mut column = |x: i32, z: i32| -> Column {
+            let (lx, lz) = (x - x0, z - z0);
+            if (0..16).contains(&lx) && (0..16).contains(&lz) {
+                if let Some(c) = cols[lz as usize][lx as usize] {
+                    return c;
+                }
+            }
+            *around[(z - oz) as usize * side + (x - ox) as usize].get_or_insert_with(|| self.column(x, z))
+        };
         for wz in z0 - reach..z0 + 16 + reach {
             for wx in x0 - reach..x0 + 16 + reach {
                 // Cheap rejection first: no biome has a tree chance above MAX_TREE_CHANCE, so
@@ -164,13 +178,7 @@ impl Generator {
                 if tree_roll >= MAX_TREE_CHANCE {
                     continue;
                 }
-                let (lx, lz) = (wx - x0, wz - z0);
-                let inside = (0..16).contains(&lx) && (0..16).contains(&lz);
-                let col = if inside {
-                    cols[lz as usize][lx as usize].unwrap()
-                } else {
-                    self.column(wx, wz)
-                };
+                let col = column(wx, wz);
                 let h = col.height;
                 if h <= SEA || h > 200 {
                     continue;
@@ -219,7 +227,15 @@ impl Generator {
                     continue;
                 }
                 // Only on soil (or sand for cacti): not on cliffs, rock or snow.
-                let top = self.surface_blocks(&col, wx, wz, self.slope_at(wx, wz)).0;
+                // The steepest height difference round it (blocks per block), from its
+                // neighbours.
+                let slope = {
+                    let mut h = |x, z| column(x, z).height;
+                    let dx = (h(wx + 1, wz) - h(wx - 1, wz)).abs();
+                    let dz = (h(wx, wz + 1) - h(wx, wz - 1)).abs();
+                    (dx.max(dz) + 1) / 2
+                };
+                let top = self.surface_blocks(&col, wx, wz, slope).0;
                 let soil = match kind {
                     Tree::Cactus => top == SAND,
                     _ => matches!(top, GRASS | SNOWY_GRASS | DIRT),

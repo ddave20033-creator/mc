@@ -184,12 +184,4 @@ impl Generator {
             _ => (GRASS, DIRT, 3 + (r * 2.0) as i32, STONE, 0),
         }
     }
-
-    /// Steepest height difference around a column (blocks per block), from its neighbours.
-    pub(super) fn slope_at(&self, x: i32, z: i32) -> i32 {
-        let h = |x, z| self.column(x, z).height;
-        let dx = (h(x + 1, z) - h(x - 1, z)).abs();
-        let dz = (h(x, z + 1) - h(x, z - 1)).abs();
-        (dx.max(dz) + 1) / 2
-    }
 }
