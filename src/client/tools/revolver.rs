@@ -313,9 +313,9 @@ impl Game {
         let right = look.cross(Vec3::Y).normalize_or_zero();
         // Where each chamber's head is (the first-person gun, or near the hands).
         let fallback = self.tools.guns.eject.or(self.tools.guns.eject_tp).unwrap_or(eye - Vec3::Y * 0.3 + look * 0.45 - right * 0.1);
-        let heads = self.tools.guns.chambers.filter(|_| self.me.look.camera.mode == 0);
+        let heads = self.tools.guns.chambers.filter(|_| self.me.look.first_person);
         // Out of the back of the cylinder: away from the muzzle.
-        let back = match (heads, self.tools.guns.muzzle.filter(|_| self.me.look.camera.mode == 0)) {
+        let back = match (heads, self.tools.guns.muzzle.filter(|_| self.me.look.first_person)) {
             (Some(h), Some(m)) => (h.iter().copied().sum::<Vec3>() / 6.0 - m).normalize_or(-look),
             _ => -look,
         };

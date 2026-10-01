@@ -121,7 +121,8 @@ impl Game {
         if !fp_body || torch || lantern || pistol || book || down <= 15.0 {
             *lower = (*lower + 8.0 * dt).min(1.0);
         } else if down < 30.0 {
-            *lower = 15.0 / down;
+            // (back up from past 30 degrees it rises to it, not at once)
+            *lower = (*lower + 8.0 * dt).min(15.0 / down);
         } else {
             *lower = (*lower - 3.0 * dt).max(-0.1);
         }
@@ -243,6 +244,7 @@ impl Game {
             self.tools.guns.laser_from = None;
             self.tools.guns.light_from = None;
             self.tools.guns.gun_dir = None;
+            self.tools.grenades.hand_fp = None;
             self.tools.fishing.tip_fp = None;
             self.set_book_hit(None);
         }

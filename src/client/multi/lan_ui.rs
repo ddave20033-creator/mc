@@ -326,8 +326,7 @@ impl Game {
             true,
         ) {
             if self.screen == Screen::Connecting {
-                self.leave_server(None);
-                self.open_multiplayer();
+                self.cancel_connecting();
             } else {
                 self.screen = Screen::MainMenu;
             }

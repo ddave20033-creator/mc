@@ -133,6 +133,18 @@ impl Game {
         }
     }
 
+    /// Gives up connecting: back to the world list (the game's own world) or the multiplayer
+    /// screen (a LAN game).
+    pub(in crate::client) fn cancel_connecting(&mut self) {
+        let own = self.session.local.is_some();
+        self.leave_server(None);
+        if own {
+            self.open_world_list();
+        } else {
+            self.open_multiplayer();
+        }
+    }
+
     /// Everything the server keeps for this player.
     pub(in crate::client) fn client_state(&self) -> PlayerState {
         let slots = self.carried_slots();
@@ -162,6 +174,9 @@ impl Game {
     }
 
     pub(super) fn client_tick(&mut self, dt: f32) {
+        // (a change to the open chest or table goes out before the server's copy of it is
+        // taken in: it would be lost under a copy sent before the server had it)
+        self.net_container_sync();
         let Some(c) = &mut self.session.net else {
             return;
         };

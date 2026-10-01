@@ -1615,7 +1615,7 @@ impl Game {
     }
 
     /// Closing the gun station: the brush goes back into the drawer.
-    pub(super) fn close_gun_station(&mut self) {
+    pub(in crate::client) fn close_gun_station(&mut self) {
         self.bench_ui.hold_at = None;
         // A box of rounds still on the mouse goes back into the drawer (or onto the table).
         if let (Screen::Container(Container::GunStation(p)), Some(st)) = (self.screen, self.me.items.cursor) {

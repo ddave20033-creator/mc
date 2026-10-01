@@ -123,8 +123,12 @@ impl Gfx {
     pub(super) fn forget_other_skins(&mut self) {
         self.skins.custom.retain(|&id, _| id == 0);
         self.skins.pngs.retain(|&id, _| id == 0);
-        if let Some(png) = self.skins.local_png.clone() {
-            let _ = self.set_skin_png(0, png);
+        match self.skins.local_png.clone() {
+            Some(png) => {
+                let _ = self.set_skin_png(0, png);
+            }
+            // (slot 0 had the host's skin in a LAN game)
+            None => self.remove_skin(0),
         }
     }
 }

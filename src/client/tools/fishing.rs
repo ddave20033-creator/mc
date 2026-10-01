@@ -430,7 +430,7 @@ impl Game {
     /// Where the line leaves the rod (as it was drawn last frame, from the eyes or from
     /// outside), or about there.
     fn rod_tip(&self) -> Vec3 {
-        let tip = if self.me.look.camera.mode == 0 { self.tools.fishing.tip_fp } else { self.tools.fishing.tip_tp };
+        let tip = if self.me.look.first_person { self.tools.fishing.tip_fp } else { self.tools.fishing.tip_tp };
         let eye = self.eye();
         tip.or(self.tools.fishing.tip_tp)
             .filter(|t| t.distance(eye) < 4.0)
@@ -509,6 +509,7 @@ impl Game {
             f.fight_k = 0.0;
             f.tension = 0.0;
             f.hud_in = 0.0;
+            f.alarm = 0.0;
             f.hang = None;
             f.hang_tip = None;
             f.bob_draw = None;
@@ -1013,7 +1014,7 @@ impl Game {
         let mut rods: Vec<(Vec3, RodAnim, bool)> = self.remote_rods().into_iter().map(|(t, a)| (t, a, false)).collect();
         let own = self.rod_anim().filter(|_| self.holding_rod());
         if let Some(a) = own {
-            let tip = if self.me.look.camera.mode == 0 { self.tools.fishing.tip_fp } else { self.tools.fishing.tip_tp };
+            let tip = if self.me.look.first_person { self.tools.fishing.tip_fp } else { self.tools.fishing.tip_tp };
             if let Some(tip) = tip {
                 rods.push((tip, a, true));
             }

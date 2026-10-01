@@ -411,6 +411,7 @@ impl Game {
             .me.look.camera
             .update(&self.terrain.world, eye, aim_dir, in_world, dt);
         let third_person = in_world && camera_offset.length() > 0.22;
+        self.me.look.first_person = !third_person;
         let (cam, mut fwd) = if in_world {
             (eye + camera_offset, aim_dir)
         } else {

@@ -695,8 +695,10 @@ impl Game {
 
         // Recoil: the view kicks up (and a little to the side); most of it comes back.
         let kick = (stats.kick_hip + (stats.kick_aimed - stats.kick_hip) * aim).to_radians();
+        let before = self.me.look.pitch;
         self.me.look.pitch = (self.me.look.pitch + kick).min(1.55);
-        self.tools.guns.recover += kick * 0.6;
+        // (looking straight up it cannot go further: nothing to come back)
+        self.tools.guns.recover += (self.me.look.pitch - before) * 0.6;
         self.me.look.yaw += (self.random() - 0.5) * (0.4 + kick.to_degrees() * 0.15).to_radians();
 
         // The spent case flies out of the ejection port (a revolver's when it is reloaded).
@@ -742,7 +744,7 @@ impl Game {
 
     /// Where the held gun's muzzle is now: on the first-person gun, or on the player model.
     fn muzzle_now(&self) -> Option<Vec3> {
-        if self.me.look.camera.mode == 0 {
+        if self.me.look.first_person {
             self.tools.guns.muzzle
         } else {
             self.tools.guns.muzzle_tp
@@ -754,8 +756,8 @@ impl Game {
         let eye = self.eye();
         let look = self.me.look.dir();
         let right = look.cross(Vec3::Y).normalize_or_zero();
-        let port = match (self.me.look.camera.mode, self.tools.guns.eject, self.tools.guns.eject_tp) {
-            (0, Some(p), _) | (_, _, Some(p)) => p,
+        let port = match (self.me.look.first_person, self.tools.guns.eject, self.tools.guns.eject_tp) {
+            (true, Some(p), _) | (_, _, Some(p)) => p,
             _ => eye - Vec3::Y * 0.25 + look * 0.5 + right * 0.25,
         };
         self.throw_case(port, look, self.me.body.vel * 0.8, kind);
@@ -940,7 +942,7 @@ impl Game {
         }
         self.tools.guns.cases.build(out, &self.terrain.world);
         // The first-person view draws the flash on its own gun.
-        if let (Some((k, pos, dir, size, seed)), true) = (self.tools.guns.flash, self.me.look.camera.mode != 0) {
+        if let (Some((k, pos, dir, size, seed)), true) = (self.tools.guns.flash, !self.me.look.first_person) {
             ballistics::emit_muzzle_flash(out, pos, dir, cam, size, seed, k);
         }
         for &(k, pos, dir, size, seed) in &self.tools.guns.remote_flashes {
@@ -977,7 +979,7 @@ impl Game {
         // A small dot near by, still visible far away.
         let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
         ballistics::emit_laser_dot(out, p, right, up, size);
-        if let Some(from) = self.tools.guns.laser_from.filter(|_| self.me.look.camera.mode == 0) {
+        if let Some(from) = self.tools.guns.laser_from.filter(|_| self.me.look.first_person) {
             ballistics::emit_tracer(out, from, p, cam, 0.004, true);
         }
     }

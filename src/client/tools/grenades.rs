@@ -145,7 +145,7 @@ impl Game {
         let eye = self.eye();
         let look = self.me.look.dir();
         let fallback = eye + look * 0.3 - Vec3::Y * 0.1;
-        let hand = if self.me.look.camera.mode == 0 { self.tools.grenades.hand_fp } else { self.tools.grenades.hand_tp };
+        let hand = if self.me.look.first_person { self.tools.grenades.hand_fp } else { self.tools.grenades.hand_tp };
         let Some(hand) = hand.filter(|h| h.distance(eye) < 2.0) else { return fallback };
         let to = hand - eye;
         let d = to.length();

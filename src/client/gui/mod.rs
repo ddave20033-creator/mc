@@ -345,6 +345,10 @@ impl Game {
         hovered_stack: Option<Stack>,
         inside: bool,
     ) {
+        if !self.container_ready(c) {
+            // (the server's copy of the chest or table is still on its way)
+            return;
+        }
         let s = self.ui.s;
         // A stack dragged out of a slot and let go over another slot goes there.
         if let Some(from) = self.inv_ui.press_pick {

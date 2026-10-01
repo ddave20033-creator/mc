@@ -54,6 +54,11 @@ impl Aim {
         self.mining = None;
         self.blocking = false;
         self.using = None;
+        self.furnace_hold = false;
+        self.log_aim = None;
+        self.log_cut = None;
+        self.chop = None;
+        self.struck = None;
     }
 }
 

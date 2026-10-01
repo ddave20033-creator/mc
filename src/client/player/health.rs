@@ -1,7 +1,7 @@
 //! The player's health: damage (falls, lava, fire, cactus, suffocation, drowning, the void),
 //! death, and hunger, thirst and effects.
 
-use crate::client::{Game, MAX_AIR, MAX_HEALTH, Screen};
+use crate::client::{Container, Game, MAX_AIR, MAX_HEALTH, Screen};
 use crate::client::player::sleep;
 use crate::entity::survival::Needs;
 use crate::item::*;
@@ -71,10 +71,10 @@ impl Vitals {
     /// hit before does anything, and the moment of invulnerability does not start again.
     /// Whether it hurt.
     fn hurt(&mut self, amount: f32) -> bool {
+        if !self.lands(amount) {
+            return false;
+        }
         if self.invuln > 0.0 {
-            if amount <= self.last_hit {
-                return false;
-            }
             self.health -= amount - self.last_hit;
             self.last_hit = amount;
         } else {
@@ -85,6 +85,11 @@ impl Vitals {
         }
         self.needs.exhaust(crate::entity::survival::cost::HURT);
         true
+    }
+
+    /// Whether a hit of `amount` would hurt now (`hurt`).
+    fn lands(&self, amount: f32) -> bool {
+        self.invuln <= 0.0 || amount > self.last_hit
     }
 
     /// The tick's part of the moment of invulnerability and of the view's shake.
@@ -154,8 +159,12 @@ impl Game {
             return;
         }
         // Blocking with a sword takes about half of blockable damage, like Minecraft 1.8:
-        // (1 + amount) / 2. Falling, burning, drowning, suffocating and the void go through.
-        let blockable = matches!(cause, "death.lava" | "death.cactus");
+        // (1 + amount) / 2: hits, blasts, lava and cactus. Falling, burning, drowning,
+        // suffocating and the void go through.
+        let blockable = matches!(
+            cause,
+            "death.player" | "death.wolf" | "death.explosion" | "death.lava" | "death.cactus"
+        );
         let amount = if self.me.aim.blocking && blockable {
             (1.0 + amount) * 0.5
         } else {
@@ -180,6 +189,10 @@ impl Game {
         }
         let (bullet, blast) = (kind == hurt::BULLET, kind == hurt::BLAST);
         let k = armor_factor(&self.me.items.inventory.armor, bullet, blast);
+        // (a hit that does nothing, dead or in the moment after a harder one, wears nothing)
+        if self.screen == Screen::Dead || self.me.vitals.health <= 0.0 || !self.me.vitals.lands(dmg * k) {
+            return dmg * k;
+        }
         let wear = (dmg / 4.0).max(1.0) as u16;
         for (i, slot) in self.me.items.inventory.armor.iter_mut().enumerate() {
             let Some(s) = slot else { continue };
@@ -207,6 +220,16 @@ impl Game {
         // magazine being put in goes back among it first.
         self.cancel_reload();
         self.inv_ui.drag = None;
+        if let Screen::Container(c) = self.screen {
+            // (an open chest or table: its last changes go to the server, and it is closed)
+            if Self::container_pos(c).is_some() {
+                self.net_container_sync();
+                self.net_container_closed();
+            }
+            if let Container::GunStation(_) = c {
+                self.close_gun_station();
+            }
+        }
         self.stash_table(true);
         let mut loose: Vec<Stack> = self.me.items.craft.iter_mut().filter_map(|s| s.take()).collect();
         loose.extend(self.me.items.cursor.take());

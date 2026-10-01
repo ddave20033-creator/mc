@@ -18,6 +18,10 @@ pub(in crate::client) struct Look {
     pub(in crate::client) pitch: f32,
     /// F5 view mode and the third-person camera's state.
     pub(in crate::client) camera: Rig,
+    /// The view was from the eyes last frame: where the camera was, not the F5 mode (with no
+    /// room behind, or still gliding in, it is in the eyes in another mode too). The shots,
+    /// the laser and the rod's line leave from the first-person hand then.
+    pub(in crate::client) first_person: bool,
     /// The field of view easing toward the setting's (zoomed, widened while sprinting).
     pub(in crate::client) fov: f32,
     /// Field of view for simplifying detail too small for the screen (setting and zoom only).
@@ -42,12 +46,13 @@ pub(in crate::client) struct Look {
 }
 
 impl Look {
-    /// Looking north, first person; `fov`: the field of view setting.
+    /// Looking east (yaw 0: along +X), level, first person; `fov`: the field of view setting.
     pub(in crate::client) fn new(fov: f32) -> Self {
         Self {
             yaw: 0.0,
             pitch: 0.0,
             camera: Rig::default(),
+            first_person: true,
             fov,
             detail_fov: fov,
             view_bob: Mat4::IDENTITY,

@@ -298,10 +298,7 @@ impl Game {
                 Screen::SelectWorld => self.screen = Screen::MainMenu,
                 Screen::DeleteWorld => self.screen = Screen::SelectWorld,
                 Screen::MainMenu | Screen::Dead => {}
-                Screen::Connecting => {
-                    self.leave_server(None);
-                    self.open_multiplayer();
-                }
+                Screen::Connecting => self.cancel_connecting(),
                 Screen::Disconnected => self.screen = Screen::MainMenu,
                 _ => self.go_back(),
             }

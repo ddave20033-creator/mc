@@ -116,6 +116,8 @@ impl Game {
             // (a swing does not go on after death)
             self.me.aim.chop = None;
             self.me.aim.struck = None;
+            self.me.aim.log_aim = None;
+            self.me.aim.log_cut = None;
             self.me.hand.hidden = false;
             return;
         }

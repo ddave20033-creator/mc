@@ -38,7 +38,7 @@ pub(super) struct Me {
 }
 
 impl Me {
-    /// Out of a world: survival, full health, nothing carried, looking north; `fov`: the
+    /// Out of a world: survival, full health, nothing carried, looking east; `fov`: the
     /// field of view setting (the view eases from it).
     pub(super) fn new(fov: f32) -> Self {
         Self {

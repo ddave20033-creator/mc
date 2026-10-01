@@ -20,8 +20,7 @@ use glam::{IVec3, Mat4, Vec2, Vec3};
 const FOV: f32 = 60.0;
 /// Seconds the camera takes to glide there (and back).
 const GLIDE: f32 = 0.4;
-/// How steeply the camera looks down at the chest or table (less steeply at a gun station,
-/// to see along its long table).
+/// How steeply the camera looks down at the chest or table, and at a gun station.
 const PITCH: f32 = 55.0;
 const GUN_PITCH: f32 = 60.0;
 /// How steeply it looks down into the gun station's drawer.

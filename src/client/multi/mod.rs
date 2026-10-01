@@ -780,6 +780,13 @@ impl Game {
         }
     }
 
+    /// The server's copy of the open chest or crafting table has come (a change made before
+    /// it would be lost under it); the other screens are always ready.
+    pub(super) fn container_ready(&self, c: Container) -> bool {
+        !matches!(c, Container::Chest(_) | Container::Crafting(_))
+            || self.session.net.as_ref().is_none_or(|n| n.container_known.is_some())
+    }
+
     /// Sends the open container if this player changed it.
     pub(super) fn net_container_sync(&mut self) {
         let Screen::Container(c) = self.screen else {
