@@ -19,7 +19,6 @@ from __future__ import annotations
 import colorsys
 
 import numpy as np
-from PIL import Image, ImageDraw
 
 S = 128
 SS = 4  # samples per pixel along each axis
@@ -202,12 +201,19 @@ def capsule(p0, p1, width: float, tile: bool = False, size: int = S):
 
 def poly(points):
     """A filled polygon of (x, y) points (not wrapping; use `tiled` for that)."""
+    pts = [(float(px), float(py)) for px, py in points]
 
     def f(y, x):
-        h, w = y.shape
-        im = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(im).polygon([(px * SS, py * SS) for px, py in points], fill=255)
-        return np.array(im) > 127
+        inside = np.zeros(y.shape, bool)
+        n = len(pts)
+        for i in range(n):
+            (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % n]
+            if y0 == y1:
+                continue
+            crosses = (y0 > y) != (y1 > y)
+            xi = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
+            inside ^= crosses & (x < xi)
+        return inside
 
     return f
 
