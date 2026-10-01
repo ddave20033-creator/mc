@@ -1,11 +1,14 @@
-"""Terrain textures: natural blocks, ores, logs, leaves, fluids and plants.
+"""Terrain textures in the game's own flat style (see BRIEF.md): natural blocks, ores and the
+two fluids.
 
-The look follows Faithful 64x (see BRIEF.md), redrawn at 128x128: flat colors from small
-per-material palettes, 1-2 px detail, light from the top left. Nothing here reads the
-reference images; palettes and layouts were picked by eye.
+Every texture is a few flat colour areas with clean anti-aliased edges, drawn with `flat`:
+rock is low-poly facets (stone, bedrock, obsidian, sandstone top, glowstone, ice), loose
+material is packed raised pebbles (cobblestone, gravel), soft ground is a flat colour with a
+few raised shapes (dirt, grass, snow, sand ripples, clay). Ores are the stone texture with
+clean faceted crystals or nuggets of the mineral on top. The fluids are flat bands from
+periodic functions of space and frame index, so they tile and loop.
 
-Every block texture tiles (all noise wraps, shapes use wrapped distances) and the fluid
-animations loop (fields morph around a circle in time or move by whole tile periods).
+All blocks tile seamlessly (shapes wrap round the edges); all randomness comes from `seed`.
 """
 
 from __future__ import annotations
@@ -13,19 +16,627 @@ from __future__ import annotations
 import zlib
 
 import numpy as np
+from PIL import Image, ImageDraw
 from scipy import ndimage
 
-from common import S, fbm, grid, hexc, noise, pix, rgba, rng
+import flat
+from flat import SS, Canvas, disk, ellipse, hexc, lerp, shift, tones
 
+S = flat.S
 TAU = 2.0 * np.pi
+LIGHT = np.array([-0.7071, -0.7071])  # (x, y): light from the top left
+
+
+def seed_of(path: str) -> int:
+    return zlib.crc32(path.encode()) & 0x7FFFFFFF
+
+
+# ---------------------------------------------------------------------------- helpers
+
+
+def wpoly(points, size: int = S):
+    """A filled polygon of (x, y) texture points that wraps round the tile's edges (drawn
+    once per neighbouring tile copy). Follows the sample grid it is given, so it can be
+    moved (`Canvas.raised`)."""
+    pts = np.asarray(points, np.float32)
+
+    def f(y, x):
+        h, w = y.shape
+        oy = float(y[0, 0]) - 0.5 / SS
+        ox = float(x[0, 0]) - 0.5 / SS
+        im = Image.new("L", (w, h), 0)
+        d = ImageDraw.Draw(im)
+        for ty in (-size, 0, size):
+            for tx in (-size, 0, size):
+                q = (pts + [tx - ox, ty - oy]) * SS
+                if q[:, 0].max() < 0 or q[:, 0].min() > w or q[:, 1].max() < 0 or q[:, 1].min() > h:
+                    continue
+                d.polygon([tuple(p) for p in q], fill=255)
+        return np.array(im) > 127
+
+    return f
+
+
+def roll_s(a: np.ndarray, dy: float, dx: float) -> np.ndarray:
+    """A sample array moved by (dy, dx) texture pixels, wrapping (a tiling canvas)."""
+    return np.roll(a, (int(round(dy * SS)), int(round(dx * SS))), (0, 1))
+
+
+def rounded(mask: np.ndarray, r: float) -> np.ndarray:
+    """`mask` (samples, tiling) with its corners rounded by `r` px (a morphological opening)."""
+    p = int(r * SS) + 2
+    m = np.pad(mask, p, mode="wrap")
+    inner = ndimage.distance_transform_edt(m) > r * SS
+    back = ndimage.distance_transform_edt(~inner) <= r * SS
+    return back[p:-p, p:-p] & mask
+
+
+def raised_cells(c: Canvas, ids: np.ndarray, inside: np.ndarray, base_of, light_of, dark_of,
+                 rim: float = 2.0) -> None:
+    """Raised stones from a cell map: each cell's `inside` part in its base colour, a light
+    rim where its top-left neighbour is outside it and a dark rim on its bottom right."""
+    key = np.where(inside, ids, -1)
+    ul = roll_s(key, rim, rim)
+    dr = roll_s(key, -rim, -rim)
+    c.fill(inside, base_of[ids])
+    c.fill(inside & (ul != key), light_of[ids])
+    c.fill(inside & (dr != key), dark_of[ids])
+
+
+def lwin(c: Canvas, cx: float, cy: float, R: float):
+    """The wrapped sample window of radius `R` px round (cx, cy): cheap small shapes."""
+    iy = np.arange(int(np.floor((cy - R) * SS)), int(np.ceil((cy + R) * SS))) % (c.h * SS)
+    ix = np.arange(int(np.floor((cx - R) * SS)), int(np.ceil((cx + R) * SS))) % (c.w * SS)
+    return np.ix_(iy, ix)
+
+
+def lfill(c: Canvas, win, m: np.ndarray, color) -> None:
+    sub = c.rgb[win]
+    sub[m] = np.asarray(color, np.float32)
+    c.rgb[win] = sub
+    a = c.alpha[win]
+    a[m] = 1.0
+    c.alpha[win] = a
+
+
+def lshape(c: Canvas, cx: float, cy: float, R: float, shape, color) -> None:
+    """Fills a small (wrapping) shape that lies within `R` px of (cx, cy)."""
+    win = lwin(c, cx, cy, R)
+    lfill(c, win, shape(c.y[win], c.x[win]), color)
+
+
+def lraised(c: Canvas, cx: float, cy: float, R: float, shape, base, light, dark,
+            rim: float = 2.0) -> None:
+    """`Canvas.raised` for a small (wrapping) shape within `R` px of (cx, cy)."""
+    win = lwin(c, cx, cy, R + rim + 1)
+    y, x = c.y[win], c.x[win]
+    m = shape(y, x)
+    lfill(c, win, m, base)
+    lfill(c, win, m & ~shape(y - rim, x - rim), light)
+    lfill(c, win, m & ~shape(y + rim, x + rim), dark)
+
+
+def cell_map(seed: int, count: int, jitter: float = 0.9):
+    return flat.voronoi(seed, count, S, S, jitter)
+
+
+def gem(c: Canvas, cx: float, cy: float, r: float, cols, rng, n: int = 6, squash: float = 1.0,
+        angle: float = 0.0, table: float = 0.42, gloss=None, outline=None, ow: float = 1.6,
+        pointy: float = 0.0) -> None:
+    """A low-poly crystal / nugget: a convex polygon cut into flat facets round a raised top
+    (the `table`), each facet one of `cols` (dark .. light) by how it faces the light, a
+    `gloss` spot on the lit side and an `outline` ring of the mineral's darkest tone."""
+    a0 = rng.uniform(0, TAU)
+    ang = a0 + np.arange(n) * TAU / n + rng.uniform(-0.25, 0.25, n) * TAU / n
+    rad = r * rng.uniform(0.82, 1.08, n)
+    if pointy:
+        rad = rad * (1 + pointy * np.abs(np.cos(ang - angle)) ** 4)
+    ca, sa = np.cos(angle), np.sin(angle)
+
+    def place(u, v):
+        v = v * squash
+        return cx + u * ca - v * sa, cy + u * sa + v * ca
+
+    vx, vy = place(np.cos(ang) * rad, np.sin(ang) * rad)
+    verts = np.stack([vx, vy], 1)
+    # the raised top sits towards the light
+    apex = np.array([cx, cy]) + LIGHT * r * 0.18
+    if outline is not None:
+        d = verts - [cx, cy]
+        d = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-6)
+        c.fill(wpoly(verts + d * ow), outline)
+    k = len(cols)
+    for i in range(n):
+        a, b = verts[i], verts[(i + 1) % n]
+        mid = (a + b) * 0.5 - [cx, cy]
+        nrm = mid / max(np.linalg.norm(mid), 1e-6)
+        lit = float(nrm @ LIGHT)  # -1 .. 1
+        lvl = int(np.clip(np.round((lit * 0.5 + 0.5) * (k - 1) * 1.05 - 0.1), 0, k - 1))
+        c.fill(wpoly([apex, a, b]), cols[lvl])
+    if table > 0:
+        top = apex + (verts - apex) * table
+        c.fill(wpoly(top), cols[min(k - 1, max(1, (k * 2) // 3))])
+    if gloss is not None:
+        g = apex + LIGHT * r * 0.42
+        s = max(r * 0.2, 1.5)
+        c.fill(wpoly([(g[0] - s, g[1]), (g[0], g[1] - s * 1.4), (g[0] + s, g[1]),
+                      (g[0], g[1] + s * 0.9)]), gloss)
+
+
+def periodic(seed: int, waves: int, f: float, kmax: int = 3, tmax: int = 0, kxmax=None):
+    """A smooth tiling (and looping over `f` in 0..1) field: a sum of plane waves with whole
+    spatial and temporal frequencies. Returns field(y, x) at sample coordinates."""
+    r = np.random.default_rng(seed)
+    comps = []
+    for _ in range(waves):
+        ky, kx = 0, 0
+        while ky == 0 and kx == 0:
+            kx_ = kmax if kxmax is None else kxmax
+            ky, kx = int(r.integers(-kmax, kmax + 1)), int(r.integers(-kx_, kx_ + 1))
+        kt = int(r.integers(-tmax, tmax + 1)) if tmax else 0
+        comps.append((ky, kx, kt, r.uniform(0, TAU), r.uniform(0.5, 1.0)))
+
+    def field(y, x):
+        # y, x: a canvas's sample grid (rows of y, columns of x): separable, so cheap
+        ys, xs = y[:, 0].astype(np.float64), x[0, :].astype(np.float64)
+        out = np.zeros(y.shape, np.float32)
+        for ky, kx, kt, ph, amp in comps:
+            a = TAU * ky * ys / S
+            b = TAU * kx * xs / S + TAU * kt * f + ph
+            out += (amp * (np.outer(np.cos(a), np.cos(b)) - np.outer(np.sin(a), np.sin(b)))).astype(np.float32)
+        return out
+
+    return field
+
+
+# ---------------------------------------------------------------------------- stone & ores
+
+STONE_T = [hexc("#7f828b"), hexc("#8a8d95"), hexc("#9699a0"), hexc("#a3a5aa")]
+STONE_CREASE = shift(hexc("#8d8f96"), dv=-0.2, ds=0.03)
+STONE_SEED = seed_of("block/stone")
+
+
+def paint_stone(seed):
+    """Low-poly plates: about 14 flat-shaded facets with darker creases between them."""
+    return stone_canvas().finish(opaque=True)
+
+
+_STONE: list = []
+
+
+def stone_canvas() -> Canvas:
+    """A fresh canvas holding the stone texture (the ores draw over it)."""
+    if not _STONE:
+        c = Canvas()
+        c.facets(STONE_SEED, 16, STONE_T, crease=STONE_CREASE, crease_w=1.2)
+        _STONE.append((c.rgb.copy(), c.alpha.copy()))
+    c = Canvas()
+    c.rgb[:], c.alpha[:] = _STONE[0]
+    return c
+
+
+def ore(seed: int, clusters: int, per: tuple, size: tuple, cols, outline, gloss, n=6,
+        squash=(0.75, 1.0), table=0.42, pointy=0.0, min_dist=46.0) -> np.ndarray:
+    """The stone with `clusters` groups of `per` crystals of radius `size` drawn over it."""
+    c = stone_canvas()
+    r = np.random.default_rng(seed)
+    centres = flat.scatter(seed, clusters, min_dist)
+    for cx, cy in centres:
+        k = int(r.integers(per[0], per[1] + 1))
+        base_ang = r.uniform(0, TAU)
+        for j in range(k):
+            rr = r.uniform(*size) * (1.0 if j == 0 else 0.72)
+            off = 0.0 if j == 0 else size[1] * 1.05
+            a = base_ang + j * TAU / max(k, 1) + r.uniform(-0.4, 0.4)
+            gem(c, cx + np.cos(a) * off, cy + np.sin(a) * off, rr, cols, r, n=n,
+                squash=r.uniform(*squash), angle=r.uniform(0, TAU), table=table,
+                gloss=gloss, outline=outline, pointy=pointy)
+    return c.finish(opaque=True)
+
+
+COAL_T = [hexc("#1c1c21"), hexc("#2a2a31"), hexc("#3a3a43"), hexc("#4a4a55")]
+IRON_T = [hexc("#a87f5f"), hexc("#c99d79"), hexc("#d9b38c"), hexc("#ecd2b4")]
+COPPER_T = [hexc("#8f4a24"), hexc("#b15f30"), hexc("#c8743f"), hexc("#e3965e")]
+GOLD_T = [hexc("#b8801c"), hexc("#dca22e"), hexc("#f0c043"), hexc("#ffe07a")]
+DIAMOND_T = [hexc("#1f9c98"), hexc("#35bfb8"), hexc("#4fd8cf"), hexc("#9ff1ea")]
+
+
+def paint_coal_ore(seed):
+    """Angular black coal lumps, matte, with a faint grey glint."""
+    return ore(seed, 4, (2, 4), (10.5, 13.0), COAL_T, hexc("#15151a"), hexc("#7a7a86"), n=5,
+               squash=(0.65, 0.95), table=0.0, min_dist=48.0)
+
+
+def paint_iron_ore(seed):
+    """Warm beige-pink faceted iron nuggets."""
+    return ore(seed, 4, (2, 3), (11.5, 14.0), IRON_T, hexc("#7d5a44"), hexc("#fff6ea"), n=6)
+
+
+def paint_copper_ore(seed):
+    """Orange copper nuggets, some faces turned teal by patina."""
+    c = stone_canvas()
+    r = np.random.default_rng(seed)
+    pat = [hexc("#2f7566"), hexc("#3f8f7c"), hexc("#4fa38f"), hexc("#7cc8b2")]
+    for i, (cx, cy) in enumerate(flat.scatter(seed, 4, 46.0)):
+        k = int(r.integers(2, 4))
+        a0 = r.uniform(0, TAU)
+        for j in range(k):
+            rr = r.uniform(10.5, 13.0) * (1.0 if j == 0 else 0.72)
+            off = 0.0 if j == 0 else 13.5
+            a = a0 + j * TAU / k + r.uniform(-0.4, 0.4)
+            cols = pat if (i + j) % 3 == 2 else COPPER_T
+            gem(c, cx + np.cos(a) * off, cy + np.sin(a) * off, rr, cols, r, n=6,
+                squash=r.uniform(0.75, 1.0), angle=r.uniform(0, TAU),
+                gloss=hexc("#fff0dc"), outline=hexc("#5e2c14"))
+    return c.finish(opaque=True)
+
+
+def paint_gold_ore(seed):
+    """Bright gold nuggets with a white gloss."""
+    return ore(seed, 4, (2, 3), (11.0, 13.5), GOLD_T, hexc("#7a4f10"), hexc("#fffbe8"), n=7)
+
+
+def paint_diamond_ore(seed):
+    """Long pointed cyan crystals with clear cut faces."""
+    return ore(seed, 4, (2, 3), (9.5, 11.5), DIAMOND_T, hexc("#0f5e5e"), hexc("#ffffff"), n=6,
+               squash=(0.5, 0.6), table=0.38, pointy=0.9)
+
+
+# ---------------------------------------------------------------------------- cobblestone & gravel
+
+COBBLE_T = tones("#9c9ea5", 4, spread=0.09)
+COBBLE_GAP = shift(hexc("#8d8f96"), dv=-0.25, ds=0.04)
+
+
+def paint_cobblestone(seed):
+    """Rounded, raised flat stones packed tightly, dark gaps between them; one lit facet cut
+    on some stones."""
+    c = Canvas(bg=COBBLE_GAP)
+    ids, border = cell_map(seed, 13, 0.8)
+    inside = rounded(border > 1.3, 4.0)
+    r = np.random.default_rng(seed + 1)
+    n = ids.max() + 1
+    lvl = r.integers(1, 3, n)  # base tone 1 or 2
+    base = np.stack([COBBLE_T[k] for k in lvl])
+    light = np.stack([lerp(COBBLE_T[k], COBBLE_T[3], 0.75) for k in lvl])
+    dark = np.stack([lerp(COBBLE_T[0], COBBLE_GAP, 0.3) for _ in lvl])
+    raised_cells(c, ids, inside, base, light, dark, rim=2.2)
+    return c.finish(opaque=True)
+
+
+GRAVEL_T = tones("#8a8784", 4, spread=0.1)
+GRAVEL_WARM = tones("#9a8270", 4, spread=0.1)
+GRAVEL_GAP = hexc("#5d5856")
+
+
+def paint_gravel(seed):
+    """Small rounded pebbles of a few greys (and a few warm ones), packed loosely on dark
+    grit, each raised with a light top-left rim."""
+    c = Canvas(bg=GRAVEL_GAP)
+    r = np.random.default_rng(seed)
+    pts = flat.scatter(seed, 140, 9.5)
+    for i, (x, y) in enumerate(pts):
+        warm = r.random() < 0.16
+        T = GRAVEL_WARM if warm else GRAVEL_T
+        k = int(r.integers(1, 3))
+        rad = r.uniform(5.0, 7.5)
+        sh = ellipse(y, x, rad * r.uniform(0.7, 0.92), rad, r.uniform(0, np.pi))
+        lraised(c, x, y, rad, sh, T[k], lerp(T[k], T[3], 0.8), T[0], rim=1.5)
+    return c.finish(opaque=True)
+
+
+# ---------------------------------------------------------------------------- dirt & grass
+
+DIRT_T = tones("#8a5a3c", 4, spread=0.1)
+PEBBLE_T = tones("#9c8a78", 4, spread=0.11)
+
+
+def dirt_canvas(seed: int, pebbles: int = 6) -> Canvas:
+    c = Canvas(bg=DIRT_T[2])
+    r = np.random.default_rng(seed)
+    # soft flat flecks: a few darker and lighter lumps of earth
+    for i, (x, y) in enumerate(flat.scatter(seed + 5, 18, 22.0)):
+        col = DIRT_T[1] if i % 3 else DIRT_T[3]
+        lshape(c, x, y, 7, ellipse(y, x, r.uniform(2.0, 3.0), r.uniform(3.5, 6.0),
+                                   r.uniform(0, np.pi)), col)
+    # raised rounded pebbles
+    for x, y in flat.scatter(seed + 9, pebbles, 34.0):
+        rad = r.uniform(4.2, 6.0)
+        sh = ellipse(y, x, rad * r.uniform(0.72, 0.9), rad, r.uniform(0, np.pi))
+        lraised(c, x, y, rad, sh, PEBBLE_T[2], PEBBLE_T[3], PEBBLE_T[0], rim=1.5)
+    return c
+
+
+def paint_dirt(seed):
+    """Flat warm brown with darker/lighter flat flecks and a few raised round pebbles."""
+    return dirt_canvas(seed).finish(opaque=True)
+
+
+def paint_grass_block_side(seed):
+    """The dirt (the grass fringe is the overlay)."""
+    return dirt_canvas(seed_of("block/dirt")).finish(opaque=True)
+
+
+GRASS_T = [hexc("#8e8e8e"), hexc("#9e9e9e"), hexc("#ababab"), hexc("#bcbcbc"), hexc("#cacaca")]
+
+
+def paint_grass_block_top(seed):
+    """Flat light grey (tinted green by the game): a few big soft patches and clusters of
+    slim tapered blades lying in a few directions, each with a faint shadow; low contrast."""
+    c = Canvas(bg=GRASS_T[2])
+    r = np.random.default_rng(seed)
+    for i, (x, y) in enumerate(flat.scatter(seed + 3, 6, 44.0)):
+        col = lerp(GRASS_T[2], GRASS_T[1] if i % 2 else GRASS_T[3], 0.6)
+        a = r.uniform(0, np.pi)
+        for k in range(3):
+            c.fill(ellipse(y + r.uniform(-7, 7), x + r.uniform(-9, 9), r.uniform(7, 10),
+                           r.uniform(11, 15), a + r.uniform(-0.4, 0.4)), col)
+    # clusters of slim tapered blades lying in a few directions, each with a faint shadow
+    for i, (x, y) in enumerate(flat.scatter(seed, 26, 22.0)):
+        a0 = r.uniform(0, np.pi)
+        light = GRASS_T[3] if i % 3 else lerp(GRASS_T[3], GRASS_T[4], 0.5)
+        for k in range(int(r.integers(4, 7))):
+            bx, by = x + r.uniform(-5, 5), y + r.uniform(-5, 5)
+            a = a0 + r.uniform(-0.45, 0.45)
+            L, w = r.uniform(4.5, 7.0), r.uniform(1.1, 1.5)
+            lshape(c, bx, by, L + 3, ellipse(by + 1.0, bx + 0.8, w, L, a),
+                   lerp(GRASS_T[1], GRASS_T[2], 0.3))
+            lshape(c, bx, by, L + 3, ellipse(by, bx, w, L, a), light)
+    return c.finish(opaque=True)
+
+
+def fringe(seed: int, depth: float, drips: int) -> callable:
+    """The wavy fringe hanging from the top edge: a band with rounded scallops and a few
+    longer round drips (tiles horizontally)."""
+    r = np.random.default_rng(seed)
+    parts = [flat.box(-4, -2, depth - 12, S + 2)]
+    n = 9
+    for i in range(n):
+        x = (i + 0.5 + r.uniform(-0.12, 0.12)) * S / n
+        rr = r.uniform(7.5, 9.0)
+        parts.append(disk(depth - rr + r.uniform(-3.0, 1.0), x, rr))
+    for i in sorted(r.choice(n, drips, replace=False)):
+        x = (i + 1.0) * S / n + r.uniform(-1.5, 1.5)  # between two scallops
+        L = r.uniform(12, 20)
+        w = r.uniform(5.5, 7.0)
+        parts.append(flat.capsule((x, depth - 10), (x, depth - 6 + L), w, tile=True))
+    return flat.union(*parts)
+
+
+def paint_grass_block_side_overlay(seed):
+    """A clean wavy grass fringe on top (rounded scallops and drips), lighter blade tips,
+    a darker under-edge; transparent below (cutout)."""
+    c = Canvas()
+    m = fringe(seed, 34.0, 3)
+    c.fill(m, GRASS_T[2])
+    M = c.mask(m)
+    c.fill(M & ~roll_s(M, -2.4, 0), GRASS_T[0])  # under-edge shadow
+    c.fill(flat.box(-4, -2, 3.0, S + 2), GRASS_T[3])  # lit top edge
+    return c.finish(cutout=True)
+
+
+SNOW_T = [hexc("#b4c3d6"), hexc("#c9d6e6"), hexc("#dfe7f0"), hexc("#eef3f7"), hexc("#fafcfd")]
+
+
+def paint_grass_block_snow(seed):
+    """The dirt side with a thick white snow fringe on top, pale blue shading underneath."""
+    c = dirt_canvas(seed_of("block/dirt"))
+    m = fringe(seed, 38.0, 3)
+    c.fill(m, SNOW_T[3])
+    M = c.mask(m)
+    c.fill(M & ~roll_s(M, -3.4, 0), SNOW_T[1])
+    c.fill(M & ~roll_s(M, -1.4, 0), SNOW_T[0])
+    c.fill(flat.box(-4, -2, 4.0, S + 2), SNOW_T[4])
+    return c.finish(opaque=True)
+
+
+def paint_snow(seed):
+    """Soft wind-blown snow: a few gentle wavy drift crests, each a bright line with a pale
+    blue shadow band under it, and a few sparkles."""
+    c = Canvas(bg=SNOW_T[3])
+    r = np.random.default_rng(seed)
+    n = 3
+    for i in range(n):
+        cy = (i + r.uniform(0.35, 0.65)) * S / n
+        k, ph, amp = 1 + i % 2, r.uniform(0, TAU), r.uniform(4.0, 6.0)
+        c.fill(ripple(cy + 4.0, amp, k, ph, 6.0), SNOW_T[2])
+        c.fill(ripple(cy + 1.8, amp, k, ph, 2.6), SNOW_T[1])
+        c.fill(ripple(cy, amp, k, ph, 2.4), SNOW_T[4])
+    for x, y in flat.scatter(seed + 1, 9, 26.0):
+        s = r.uniform(1.4, 2.1)
+        c.fill(wpoly([(x - s, y), (x, y - s * 1.6), (x + s, y), (x, y + s * 1.6)]), hexc("#ffffff"))
+    return c.finish(opaque=True)
+
+
+# ---------------------------------------------------------------------------- sand, sandstone, clay
+
+SAND_T = tones("#e3cf9b", 4, spread=0.06)
+
+
+def ripple(cy: float, amp: float, k: int, ph: float, w: float):
+    """A wavy horizontal band (tiles: whole waves across the tile)."""
+
+    def f(y, x):
+        c = cy + amp * np.sin(TAU * k * x / S + ph) + amp * 0.25 * np.sin(TAU * (k + 1) * x / S + ph * 1.7)
+        d = (y - c + S / 2) % S - S / 2
+        return np.abs(d) <= w * 0.5
+
+    return f
+
+
+def paint_sand(seed):
+    """Wind ripples: wavy lit crests with a soft shadow below, flat in between, a few grains."""
+    c = Canvas(bg=SAND_T[2])
+    r = np.random.default_rng(seed)
+    n = 5
+    for i in range(n):
+        cy = (i + r.uniform(0.35, 0.65)) * S / n
+        k, ph, amp = 1 + i % 2, r.uniform(0, TAU), r.uniform(3.0, 4.5)
+        c.fill(ripple(cy + 2.6, amp, k, ph, 3.4), SAND_T[1])
+        c.fill(ripple(cy, amp, k, ph, 2.6), SAND_T[3])
+    for i, (x, y) in enumerate(flat.scatter(seed + 2, 14, 22.0)):
+        c.fill(disk(y, x, r.uniform(1.0, 1.5)), SAND_T[0] if i % 2 else SAND_T[3])
+    return c.finish(opaque=True)
+
+
+SANDSTONE_T = tones("#d9bf86", 4, spread=0.07)
+
+
+def paint_sandstone(seed):
+    """Wavy sediment layers: flat bands of sandstone tones, each with a lit top line and a
+    shadow line under it, a few small chipped pits."""
+    c = Canvas(bg=SANDSTONE_T[2])
+    r = np.random.default_rng(seed)
+    bands = [0, 30, 58, 92]
+    for i, y0 in enumerate(bands):
+        ph, k = r.uniform(0, TAU), int(r.integers(1, 3))
+        y1 = bands[(i + 1) % len(bands)] + (S if i == len(bands) - 1 else 0)
+        h = y1 - y0
+        col = [SANDSTONE_T[2], SANDSTONE_T[3], SANDSTONE_T[2], SANDSTONE_T[1]][i]
+        c.fill(ripple(y0 + h / 2, 0, k, ph, h), col)  # straight-ish base band
+        c.fill(ripple(y0, 2.0, k, ph, 3.2), SANDSTONE_T[0])
+        c.fill(ripple(y0 + 2.6, 2.0, k, ph, 2.2), shift(SANDSTONE_T[3], dv=0.04))
+    for x, y in flat.scatter(seed + 3, 7, 30.0):
+        rx = r.uniform(2.5, 4.0)
+        c.fill(ellipse(y, x, rx * 0.55, rx, 0), SANDSTONE_T[0])
+        c.fill(ellipse(y - 0.9, x, rx * 0.4, rx * 0.85, 0), SANDSTONE_T[1])
+    return c.finish(opaque=True)
+
+
+def paint_sandstone_top(seed):
+    """Big pale sandstone plates (low contrast facets) with thin light creases."""
+    c = Canvas()
+    T = [hexc("#cdb079"), hexc("#d6bb83"), hexc("#dfc690"), hexc("#e8d3a2")]
+    c.facets(seed, 8, T, crease=hexc("#b89a63"), crease_w=1.4, jitter=0.7)
+    return c.finish(opaque=True)
+
+
+CLAY_T = tones("#9fa6b5", 4, spread=0.06)
+
+
+def paint_clay(seed):
+    """Smooth wet clay, as if smoothed by hand: long flat glossy smears with a soft shadow
+    edge under them, and a few small round pores."""
+    c = Canvas(bg=CLAY_T[2])
+    r = np.random.default_rng(seed)
+    for i, (x, y) in enumerate(flat.scatter(seed, 7, 36.0)):
+        ry, rx, a = r.uniform(6.0, 8.0), r.uniform(26, 34), r.uniform(-0.2, 0.2)
+        lshape(c, x, y, rx + 4, ellipse(y + 2.2, x + 1.2, ry, rx, a), lerp(CLAY_T[2], CLAY_T[1], 0.7))
+        lshape(c, x, y, rx + 4, ellipse(y, x, ry, rx, a), lerp(CLAY_T[2], CLAY_T[3], 0.6))
+    for x, y in flat.scatter(seed + 2, 6, 34.0):
+        rr = r.uniform(1.3, 1.9)
+        lshape(c, x, y, rr + 2, disk(y, x, rr), CLAY_T[0])
+        lshape(c, x, y, rr + 2, flat.minus(disk(y, x, rr), disk(y - 0.9, x - 0.9, rr)), CLAY_T[1])
+    return c.finish(opaque=True)
+
+
+# ---------------------------------------------------------------------------- ice, bedrock, obsidian, glowstone
+
+
+def paint_ice(seed):
+    """Large clear plates with white cracks between them and two diagonal glints."""
+    c = Canvas()
+    T = tones("#a9d3f0", 4, spread=0.05)
+    c.facets(seed, 7, T, crease=hexc("#e6f4fd"), crease_w=1.4, jitter=0.8)
+    for x, y in ((24.0, 92.0), (88.0, 40.0)):
+        for w, d in ((4.0, 0.0), (1.8, 7.0)):
+            c.fill(flat.tiled(flat.capsule((x + d, y + 14), (x + d + 22, y - 8), w)),
+                   hexc("#e1f1fc"))
+    return c.finish(opaque=True)
+
+
+def paint_bedrock(seed):
+    """Rough, high-contrast small rock facets, nearly black creases."""
+    c = Canvas()
+    T = [hexc("#2e2f35"), hexc("#3d3e45"), hexc("#4a4b52"), hexc("#64656e"), hexc("#7b7c86")]
+    c.facets(seed, 30, T, crease=hexc("#1c1d21"), crease_w=1.6, tilt=1.4)
+    return c.finish(opaque=True)
+
+
+def paint_obsidian(seed):
+    """Glassy deep purple-black facets, a few lit violet ones, faint violet glints."""
+    c = Canvas()
+    T = [hexc("#1a1328"), hexc("#221932"), hexc("#2a1f3d"), hexc("#35274d"), hexc("#4b3570")]
+    ids = c.facets(seed, 18, T, crease=hexc("#120c1d"), crease_w=1.0, tilt=1.2)
+    r = np.random.default_rng(seed)
+    for x, y in flat.scatter(seed + 4, 5, 40.0):
+        L = r.uniform(9, 14)
+        a = r.uniform(-0.3, 0.3) - 0.785
+        c.fill(flat.capsule((x, y), (x + np.cos(a) * L, y + np.sin(a) * L), 2.2, tile=True),
+               hexc("#7b5fb0"))
+    return c.finish(opaque=True)
+
+
+def paint_glowstone(seed):
+    """Warm glowing crystal plates: bright facets with deep amber creases, a small bright
+    core facet on each plate."""
+    c = Canvas()
+    T = [hexc("#d18a33"), hexc("#e8a94a"), hexc("#f5c95c"), hexc("#ffe9a3")]
+    ids, border = cell_map(seed, 14, 0.9)
+    c.facets(seed, 14, T, crease=hexc("#8a5320"), crease_w=2.6)
+    # inner bright facet: the cell's core
+    c.fill(border > 6.5, hexc("#fff4c9"))
+    c.fill((border > 6.5) & (roll_s(border, 1.6, 1.6) <= 6.5), hexc("#ffffff"))
+    return c.finish(opaque=True)
+
+
+# ---------------------------------------------------------------------------- fluids
+
+
+def paint_water_still(seed):
+    """Light grey (the shader tints it blue) with flat lighter and darker wave bands that
+    drift and morph; tiles and loops over 32 frames."""
+    frames = []
+    base, dark, light, top = hexc("#b8b8b8"), hexc("#a6a6a6"), hexc("#cfcfcf"), hexc("#e4e4e4")
+    c = Canvas()
+    every = np.ones(c.alpha.shape, bool)
+    for f in range(32):
+        t = f / 32.0
+        c.fill(every, base)
+        a = periodic(seed, 4, t, kmax=3, tmax=1, kxmax=1)(c.y, c.x)
+        b = periodic(seed + 1, 3, t, kmax=4, tmax=1, kxmax=2)(c.y, c.x)
+        v = a + 0.6 * b
+        c.fill(v < -1.3, dark)
+        c.fill(v > 1.2, light)
+        c.fill(v > 2.1, top)
+        frames.append(c.finish(opaque=True))
+    return frames, 2
+
+
+def paint_lava_still(seed):
+    """Molten orange with flat yellow-hot veins and dark crust plates drifting slowly;
+    tiles and loops over 32 frames."""
+    frames = []
+    crust, crust2 = hexc("#8a2a1a"), hexc("#b23d16")
+    base, hot, white = hexc("#ff7a1a"), hexc("#ffa82a"), hexc("#ffd04a")
+    c = Canvas()
+    every = np.ones(c.alpha.shape, bool)
+    for f in range(32):
+        t = f / 32.0
+        c.fill(every, base)
+        a = periodic(seed, 4, t, kmax=2, tmax=1)(c.y, c.x)
+        b = periodic(seed + 1, 3, t, kmax=3, tmax=1)(c.y, c.x)
+        v = a + 0.5 * b
+        c.fill(v < -1.25, crust2)
+        c.fill(v < -1.9, crust)
+        c.fill(np.abs(v - 0.9) < 0.35, hot)
+        c.fill(np.abs(v - 0.9) < 0.14, white)
+        frames.append(c.finish(opaque=True))
+    return frames, 3
+
+
+# ---------------------------------------------------------------------------- old flora
+# Old flora painters, still imported by flora.py until it is rewritten (the old pixel-art
+# helpers and painters; to be deleted at merge, not used by the terrain painters above).
+
+from common import fbm, grid, noise, pix, rgba, rng  # noqa: E402
+
 YY, XX = grid()
 
 
 # ---------------------------------------------------------------------------- helpers
 
 
-def seed_of(path: str) -> int:
-    return zlib.crc32(path.encode()) & 0x7FFFFFFF
 
 
 def anoise(seed: int, cy: float, cx: float, h: int = S, w: int = S) -> np.ndarray:
@@ -203,589 +814,6 @@ def out_rgb(colors: np.ndarray, idx: np.ndarray) -> np.ndarray:
 
 def opaque_rgba(rgb: np.ndarray) -> np.ndarray:
     return rgba(rgb.astype(np.float32))
-
-
-# ---------------------------------------------------------------------------- stone & ores
-
-STONE_C = pal("#686868", "#747474", "#7f7f7f", "#8f8f8f")
-
-
-def stone_rgb(seed: int) -> np.ndarray:
-    f = streaks(seed, 7, 24, 3) * 0.7 + streaks(seed + 1, 3, 8, 2) * 0.3
-    f = f + (q(pix(seed + 2, 1), 1, 2) - 0.5) * 0.05
-    return out_rgb(STONE_C, levels(f, STONE_C, [7, 33, 42, 18]))
-
-
-STONE_SEED = seed_of("block/stone")
-
-
-def paint_stone(seed):
-    return opaque_rgba(stone_rgb(seed))
-
-
-def ore(seed: int, nuggets, cols, shadow="#5c5c5c", halo="#686868", p=2.0, inner=None,
-        edge_w=1.6, hi=(0.55, 0.8), jitter=0.18, alt=None, blend=None, grain=0.4):
-    """Stone with mineral nuggets. `nuggets`: (cx, cy, w, h[, rot[, alt share]]) in pixels;
-    `cols`: dark rim, mid, bright, highlight. With `alt` (a second 4-color palette) part of
-    each nugget (its alt share, split across a random direction) is the other mineral, with
-    `blend` along the boundary. The interior is mottled with 2 px speckle."""
-    out = stone_rgb(STONE_SEED)
-    C = pal(*cols)
-    A = pal(*alt) if alt is not None else None
-    sh = hexc(shadow)
-    ha = hexc(halo) if halo is not None else None
-    mott = streaks(seed + 7, 3, 6, 2) * (1 - grain) + pix(seed + 8, 2) * grain
-    rr_ = rng(seed + 9)
-    for i, n in enumerate(nuggets):
-        cx, cy, w, h = n[:4]
-        rot = n[4] if len(n) > 4 else 0.0
-        share = n[5] if len(n) > 5 else 0.0
-        rx, ry = w / 2, h / 2
-        rmin = min(rx, ry)
-        r, dx, dy = blob(cx, cy, rx, ry, rot, p, jitter=jitter, jseed=seed + i, jcell=4)
-        br = np.clip((dx / rx + dy / ry) * 0.7 + 0.3, 0, 1)  # bottom-right side
-        ring = (r > 1) & (r <= 1 + (0.8 + 1.8 * br) / rmin)
-        out[ring & (br > 0.35)] = sh
-        if ha is not None:
-            out[ring & (br <= 0.35)] = ha
-        inside = r <= 1
-        light = -(dx / rx + dy / ry) * 0.5
-        t = (1 - r) * 0.6 + light * 0.5 + (mott - 0.5) * 0.7
-        idx = bands(t, [0.2, hi[0], hi[1]]) + 1
-        rim = r > 1 - (edge_w + 2.2 * br) / rmin
-        idx = np.where(rim, 0, idx)
-        col = C[np.clip(idx, 0, len(C) - 1)]
-        if A is not None and share > 0:
-            ang = rr_.uniform(0, TAU)
-            sd = (dx * np.cos(ang) + dy * np.sin(ang)) / max(rx, ry)
-            sd = sd + (noise(seed + 50 + i, 4) - 0.5) * 0.5
-            th = np.quantile(sd[inside], 1 - share) if inside.any() else 9
-            am = sd > th
-            col = np.where(am[..., None], A[np.clip(idx, 0, 3)], col)
-            if blend is not None:
-                bd = np.abs(sd - th) < 0.08
-                col = np.where((bd & ~rim)[..., None], hexc(blend), col)
-        out[inside] = col[inside]
-        if inner is not None:
-            spk = inside & ~rim & (pix(seed + 80 + i, 2) > 0.8) & (idx == 1)
-            out[spk] = hexc(inner)
-    return opaque_rgba(out)
-
-
-def paint_coal_ore(seed):
-    nug = [(64, 28, 44, 24, 0.15), (104, 22, 16, 12), (16, 34, 16, 12), (93, 56, 24, 16),
-           (42, 67, 38, 24, -0.1), (113, 84, 20, 16), (33, 102, 38, 20), (91, 102, 24, 20),
-           (57, 115, 20, 12)]
-    return ore(seed, nug, ("#252525", "#2e2e2e", "#393c36", "#494b3f"), "#5c5c5c", "#5c5c5c",
-               inner="#363636", hi=(0.45, 0.78), jitter=0.3, grain=0.25)
-
-
-def paint_iron_ore(seed):
-    # Slanted flakes rising to the right, tan with pale speckle and a brown lower rim.
-    nug = [(25, 22, 32, 14, -0.3), (95, 12, 30, 13, -0.25), (66, 42, 64, 22, -0.28),
-           (113, 44, 16, 10, -0.3), (35, 75, 38, 18, -0.22), (88, 70, 34, 15, -0.3),
-           (43, 98, 20, 10, -0.3), (18, 111, 26, 11, -0.35), (92, 102, 44, 20, -0.3)]
-    return ore(seed, nug, ("#887455", "#af8e77", "#d8af93", "#e2c0aa"), "#77674f", None,
-               p=1.15, hi=(0.5, 0.78), edge_w=1.2)
-
-
-def paint_copper_ore(seed):
-    # Rhombic chunks of green-teal patina and salmon-orange copper, olive where they meet.
-    nug = [(26, 18, 18, 9, -0.3, 0.0), (96, 20, 16, 9, -0.35, 1.0),
-           (46, 42, 50, 24, -0.25, 0.65), (96, 62, 44, 28, -0.1, 0.4),
-           (28, 76, 38, 22, -0.15, 0.1), (58, 100, 38, 22, -0.2, 0.55),
-           (22, 106, 20, 12, -0.2, 0.0), (110, 104, 20, 12, 0.0, 0.0)]
-    return ore(seed, nug, ("#3a685a", "#3a7663", "#599581", "#4fba98"), "#5c5c5c", "#a2a2a2",
-               p=1.05, hi=(0.35, 0.7), alt=("#c16746", "#e0734d", "#e0734d", "#f38268"),
-               blend="#818058", edge_w=1.4, jitter=0.12)
-
-
-def paint_gold_ore(seed):
-    nug = [(35, 13, 10, 10), (48, 42, 62, 28, -1.05), (108, 29, 24, 22), (112, 60, 16, 8),
-           (25, 73, 24, 16), (92, 94, 46, 30, -0.3), (32, 107, 36, 24, 0.2), (57, 100, 10, 8),
-           (115, 117, 10, 14)]
-    return ore(seed, nug, ("#9c7020", "#eb9d0e", "#fcee4b", "#ffffb5"), "#5c5c5c", "#a2a2a2",
-               p=1.15, hi=(0.55, 0.95))
-
-
-def paint_diamond_ore(seed):
-    nug = [(38, 20, 12, 8), (105, 24, 24, 10, -0.2), (66, 28, 20, 8), (49, 49, 40, 16, -0.15),
-           (92, 47, 18, 14), (19, 67, 20, 12, -0.2), (77, 74, 38, 16, -0.1), (38, 84, 12, 8),
-           (91, 100, 50, 22, -0.25), (36, 108, 24, 8)]
-    return ore(seed, nug, ("#239698", "#1ed0d6", "#77e7d1", "#d5fff6"), "#676767", "#8dadb1",
-               p=1.25, hi=(0.45, 0.8))
-
-
-COBBLE_C = pal("#525252", "#616161", "#6e6d6d", "#888788", "#a6a6a6", "#b5b5b5")
-COBBLES = [(21, 15, 34, 32), (67, 15, 42, 32), (106, 1, 42, 34), (96, 40, 40, 34),
-           (35, 46, 38, 30), (3, 53, 28, 28), (75, 67, 40, 28), (25, 77, 38, 26),
-           (116, 89, 40, 30), (66, 101, 42, 28), (21, 111, 44, 32)]
-
-
-def paint_cobblestone(seed):
-    items = [(cx, cy, w / 2 + 1.5, h / 2 + 1.5) for cx, cy, w, h in COBBLES]
-    H, ids, L, R = bumps(seed, items, jitter=0.12)
-    stone = ids >= 0
-    # Mortar between the stones: mid greys in streaks, dark shadow under/right of stones.
-    mort = streaks(seed + 3, 4, 10, 2)
-    idx = np.where(mort > 0.55, 2, 1)
-    shadow = ~stone & np.roll(np.roll(stone, 2, 0), 2, 1)
-    idx = np.where(shadow, 0, idx)
-    # Stones: bright on the top left, a darker rim on the bottom right, speckled surface.
-    t = L * 0.9 + (1 - R) * 0.5 + (streaks(seed + 4, 3, 6, 2) - 0.5) * 0.5
-    t += (pix(seed + 5, 1) - 0.5) * 0.12
-    sidx = bands(t, [-0.05, 0.32, 0.7]) + 2
-    sidx = np.where((R > 0.86) & (L < 0.1), 2, sidx)
-    idx = np.where(stone, sidx, idx)
-    return opaque_rgba(out_rgb(COBBLE_C, idx))
-
-
-# ---------------------------------------------------------------------------- dirt & grass
-
-DIRT_C = pal("#593d29", "#79553a", "#966c4a", "#b9855c")
-PEBBLE_C = pal("#6c6c6c", "#878787")
-PEBBLES = [(50, 18), (10, 26), (93, 35), (38, 50), (118, 84), (66, 94), (54, 122)]
-
-
-def dirt_rgb(seed: int) -> np.ndarray:
-    r = rng(seed)
-    items = []
-    # Lumpy clods on a jittered grid: 7 x 7 domes of 20-30 px.
-    n = 7
-    for i in range(n):
-        for j in range(n):
-            cx = (j + 0.5 + 0.5 * (i % 2) + (r.random() - 0.5) * 0.6) * S / n
-            cy = (i + 0.5 + (r.random() - 0.5) * 0.6) * S / n
-            rad = r.uniform(10, 13.5)
-            items.append((cx, cy, rad * r.uniform(1.0, 1.25), rad, r.uniform(0.7, 1.0)))
-    H, ids, L, R = bumps(seed, items, jitter=0.2)
-    # Lit on the upper left rim (a light curl), darker below, 2 px speckle.
-    t = L * 0.8 * np.sqrt(np.clip(R, 0, 1)) + (1 - np.clip(R, 0, 1)) * 0.2 + (noise(seed + 2, 8) - 0.5) * 0.35
-    t += (pix(seed + 3, 2) - 0.5) * 0.3 + (pix(seed + 4, 1) - 0.5) * 0.08
-    crev = ((R > 0.84) & (L < 0.1)) | (ids < 0)
-    t = np.where(crev, -9, t)
-    idx = levels(t, DIRT_C, [13, 38, 32, 13])
-    out = out_rgb(DIRT_C, idx)
-    for k, (cx, cy) in enumerate(PEBBLES):
-        pr, dx, dy = blob(cx, cy, 6, 6, jitter=0.25, jseed=seed + 90 + k, jcell=4)
-        m = pr <= 1
-        lit = -(dx + dy) / 12 + (pix(seed + 100 + k, 2) - 0.5) * 0.6
-        col = np.where((lit > 0.1)[..., None], PEBBLE_C[1], PEBBLE_C[0])
-        out[m] = col[m]
-    return out
-
-
-def paint_dirt(seed):
-    return opaque_rgba(dirt_rgb(seed))
-
-
-def paint_grass_block_side(seed):
-    return opaque_rgba(dirt_rgb(seed_of("block/dirt")))
-
-
-GRASS_C = pal("#797979", "#868686", "#939393", "#9c9c9c", "#ababab", "#c0c0c0")
-
-
-def grass_top_idx(seed: int) -> np.ndarray:
-    """Seen from above: mottled grass made of many short blade dashes (2 px wide, mostly
-    diagonal, lying in patches of similar direction) - light blades with the odd pale tip and
-    dark gaps between them."""
-    r = rng(seed)
-    patch = noise(seed + 1, 32) * 0.6 + noise(seed + 4, 16) * 0.4
-    grain = pix(seed + 2, 2)
-    t = patch * 0.7 + grain * 0.3
-    cidx = np.where(t > 0.4, 2, 1).astype(np.int32)
-    dirf = noise(seed + 3, 32)
-    for k in range(1100):
-        x, y = r.random() * S, r.random() * S
-        dsel = dirf[int(y) % S, int(x) % S]
-        a0 = 0.8 if (dsel + r.uniform(-0.45, 0.45)) > 0.5 else -0.8
-        ang = a0 + r.uniform(-0.35, 0.35)
-        ln = r.uniform(5, 10)
-        x1, y1 = x + np.cos(ang) * ln, y + np.sin(ang) * ln
-        idx, m, tt = stroke_mask(x, y, x1, y1, 2.0)
-        light = patch[int(y) % S, int(x) % S] + r.uniform(-0.3, 0.3)
-        u = r.random()
-        if u < 0.28:
-            val = 0 if r.random() < 0.45 else 1  # a dark gap between blades
-        elif light > 0.66:
-            val = np.where(tt > 0.7, 5 if r.random() < 0.3 else 4, 4)
-        else:
-            val = np.where(tt > 0.7, 4, 3)
-        stamp(cidx, idx, m, val)
-    return cidx
-
-
-def paint_grass_block_top(seed):
-    return opaque_rgba(out_rgb(GRASS_C, grass_top_idx(seed)))
-
-
-def paint_grass_block_side_overlay(seed):
-    r = rng(seed)
-    # Fringe: a ragged band ~16 px deep with pointed drips of blades hanging below it, their
-    # edges stepped in 2 px (Faithful's pixel steps at double resolution).
-    h = np.full(S, 15.0, np.float32)
-    h += (np.repeat(r.random(S // 2), 2) - 0.5) * 4
-    x = float(r.integers(0, 6))
-    while x < S:
-        w = r.uniform(3.5, 7.5)
-        ln = r.uniform(3, 16) if r.random() < 0.8 else r.uniform(16, 24)
-        for k in range(-int(w) - 1, int(w) + 2):
-            xi = int(x + k) % S
-            h[xi] = max(h[xi], 14 + ln * max(0.0, 1 - abs(k) / w) ** 0.4)
-        x += r.uniform(6, 13)
-    h = np.round(h / 2) * 2
-    mask = YY < h[None, :]
-    # Inside: vertical blade streaks, lighter at the top, a darker shade line at the bottom.
-    f = anoise(seed + 2, 24, 2) * 0.55 + anoise(seed + 3, 8, 2) * 0.3 + q(pix(seed + 4, 1), 3, 1) * 0.15
-    f = f + np.clip((12 - YY) / 12, 0, 1) * 0.12
-    idx = levels(f, GRASS_C, [10, 22, 27, 25, 16], mask)
-    idx = np.where(mask & (YY > h[None, :] - 3), np.maximum(idx - 1, 0), idx)
-    idx = np.where(mask & (YY > h[None, :] - 5) & (YY < h[None, :] - 2) & (h[None, :] > 20)
-                   & (f > np.quantile(f, 0.5)), idx + 1, idx)
-    out = rgba(out_rgb(GRASS_C, idx), np.where(mask, 255, 0))
-    out[~mask, :3] = 0
-    return out
-
-
-SNOW_C = pal("#b2d5d5", "#d7efef", "#f0fdfd", "#f7fefe", "#ffffff")
-
-
-def snow_field(seed: int) -> np.ndarray:
-    # Soft drifts with faint wind streaks rising to the right.
-    return (streaks(seed, 8, 16, 3) * 0.55 + shear_v(anoise(seed + 2, 4, 32), -1) * 0.35
-            + (pix(seed + 1, 1) - 0.5) * 0.08)
-
-
-def paint_snow(seed):
-    f = snow_field(seed)
-    return opaque_rgba(out_rgb(SNOW_C[2:], levels(f, SNOW_C[2:], [20, 41, 38])))
-
-
-def paint_grass_block_snow(seed):
-    out = dirt_rgb(seed_of("block/dirt"))
-    r = rng(seed)
-    # The dirt's top edge is a row of rounded clod tops; snow fills everything above it.
-    xs = np.arange(S) + 0.5
-    edge = np.full(S, 50.0)
-    x = 0.0
-    while x < S + 20:
-        w = r.uniform(18, 32)
-        pk = r.uniform(7, 14)
-        for k in range(S):
-            d = abs(((xs[k] - x + S / 2) % S) - S / 2)
-            if d < w / 2:
-                edge[k] = min(edge[k], 50 - pk * np.sqrt(1 - (2 * d / w) ** 2))
-        x += w * r.uniform(0.9, 1.3)
-    edge = np.round(edge + (np.repeat(r.random(S // 2), 2) - 0.5) * 2)
-    e = edge[None, :]
-    snow = YY < e
-    f = snow_field(seed_of("block/snow"))
-    sidx = levels(f, SNOW_C[2:], [20, 41, 38], snow) + 2
-    depth = e - YY
-    sidx = np.where(snow & (depth < 12) & (f < np.quantile(f, 0.75)), 1, sidx)
-    sidx = np.where(snow & (depth < 4) & (pix(seed + 3, 1) > 0.3), 1, sidx)
-    sidx = np.where(snow & (depth < 2), 0, sidx)
-    col = SNOW_C[np.clip(sidx, 0, 4)]
-    out[snow] = col[snow]
-    # A thin darker (frozen) line along the dirt's top edge.
-    lip = (YY >= e) & (YY < e + 2)
-    out[lip] = hexc("#78554d")
-    lip2 = (YY >= e + 2) & (YY < e + 4) & (pix(seed + 4, 1) > 0.5)
-    out[lip2] = hexc("#956c5d")
-    return opaque_rgba(out)
-
-
-# ---------------------------------------------------------------------------- sand & co
-
-
-def cells(seed: int, count: int, jitter: float = 0.9, warp: float = 0.0, warp_cell: float = 16):
-    """Tiling Voronoi with a noise warp: (ids, d1, border, dy, dx) where (dy, dx) is the
-    pixel's offset from its cell's point."""
-    r = rng(seed)
-    side = int(np.ceil(np.sqrt(count)))
-    pts = []
-    for i in range(side):
-        for j in range(side):
-            if len(pts) >= count:
-                break
-            pts.append(((i + 0.5 + (r.random() - 0.5) * jitter) * S / side,
-                        (j + 0.5 + (r.random() - 0.5) * jitter) * S / side))
-    yy, xx = YY.copy(), XX.copy()
-    if warp:
-        yy = yy + (noise(seed + 101, warp_cell) - 0.5) * 2 * warp
-        xx = xx + (noise(seed + 102, warp_cell) - 0.5) * 2 * warp
-    best = np.full((S, S), 1e9, np.float32)
-    second = np.full((S, S), 1e9, np.float32)
-    ids = np.zeros((S, S), np.int32)
-    bdy = np.zeros((S, S), np.float32)
-    bdx = np.zeros((S, S), np.float32)
-    for k, (py, px) in enumerate(pts):
-        dy = (yy - py + S / 2) % S - S / 2
-        dx = (xx - px + S / 2) % S - S / 2
-        d = np.hypot(dy, dx)
-        closer = d < best
-        second = np.where(closer, best, np.minimum(second, d))
-        ids = np.where(closer, k, ids)
-        bdy = np.where(closer, dy, bdy)
-        bdx = np.where(closer, dx, bdx)
-        best = np.where(closer, d, best)
-    return ids, best, (second - best) * 0.5, bdy, bdx
-
-
-SAND_C = pal("#d1ba8a", "#d5c496", "#dacfa3", "#e3dbb0", "#e7e4bb", "#edebcb")
-
-
-def sand_field(seed: int) -> np.ndarray:
-    return (pix(seed, 1) * 0.2 + pix(seed + 3, 2) * 0.3 + noise(seed + 1, 4) * 0.25
-            + shear(anoise(seed + 2, 6, 2), 1) * 0.25)
-
-
-def paint_sand(seed):
-    f = sand_field(seed)
-    return opaque_rgba(out_rgb(SAND_C, levels(f, SAND_C, [7, 26, 36, 25, 1, 5])))
-
-
-GRAVEL_GREY = pal("#645b5b", "#726b69", "#817f7f", "#979797", "#b0aeae")
-GRAVEL_WARM = pal("#645b5b", "#726b69", "#89817e", "#968e8e", "#b1a2a2")
-
-
-def paint_gravel(seed):
-    """Rounded pebbles of mixed size packed in a speckled darker matrix: each pebble mid grey
-    with a lighter top-left cap and a dark bottom-right rim, some warm pinkish."""
-    ids, d1, border, dy, dx = cells(seed, 52, jitter=0.95, warp=2.0, warp_cell=16)
-    n = ids.max() + 1
-    r = rng(seed + 1)
-    mr = ndimage.mean(d1 + border, ids, np.arange(n))  # mean radius per cell
-    R = (np.asarray(mr) * r.uniform(1.05, 1.25, n))[ids]
-    wob = (noise(seed + 5, 4) - 0.5) * 2.0
-    nr = (d1 + wob) / np.maximum(R, 1e-3)
-    peb = (nr < 1.0) & (border > 0.7 + (pix(seed + 7, 1) > 0.5))
-    lit = -(dx + dy) / np.maximum(R, 1) / 1.4
-    bright = r.uniform(-0.12, 0.12, n)[ids]
-    t = 0.5 + lit * 0.4 + bright + (pix(seed + 2, 2) - 0.5) * 0.2
-    idx = bands(t, [0.1, 0.3, 0.64, 0.86]).astype(np.int32)
-    idx = np.where(peb & (nr > 0.78) & (dx + dy > 0), np.minimum(idx, 1), idx)
-    # Matrix between pebbles.
-    mt = noise(seed + 3, 8) * 0.5 + pix(seed + 4, 2) * 0.5
-    midx = np.where(mt > 0.55, 2, 1)
-    midx = np.where(mt < 0.2, 0, midx)
-    idx = np.where(peb, idx, midx)
-    warm = (r.random(n) < 0.35)[ids] & peb
-    warm |= ~peb & (noise(seed + 6, 16) > 0.55)
-    out = np.where(warm[..., None], out_rgb(GRAVEL_WARM, idx), out_rgb(GRAVEL_GREY, idx))
-    return opaque_rgba(out)
-
-
-CLAY_C = pal("#9499a4", "#9ca1ac", "#9aa3b3", "#a1a7b1", "#acaebd", "#afb9d6")
-
-
-def scales(seed: int, rows: int = 8, w: float = 18, h: float = 14):
-    """Overlapping fish-scale bumps in offset rows (clay, obsidian)."""
-    r = rng(seed)
-    items = []
-    cols = int(round(S / w))
-    for i in range(rows):
-        for j in range(cols):
-            cx = (j + 0.5 * (i % 2) + (r.random() - 0.5) * 0.4) * S / cols
-            cy = (i + (r.random() - 0.5) * 0.4) * S / rows
-            items.append((cx, cy, w * r.uniform(0.55, 0.7), h * r.uniform(0.6, 0.75),
-                          1 + i * 0.01 + r.random() * 0.2))
-    return bumps(seed, items, jitter=0.15)
-
-
-def paint_clay(seed):
-    """Smooth blue-grey clay: faint overlapping scallops (broken darker arcs along their lower
-    edges), checker-dithered pale patches on their lit sides, bluish mottling and a few
-    bright blue specks."""
-    H, ids, L, R = scales(seed, 11, 15, 12)
-    chk = ((YY.astype(int) // 2 + XX.astype(int) // 2) % 2 == 0)
-    idx = np.full((S, S), 3, np.int32)
-    blue = noise(seed + 1, 16) * 0.6 + pix(seed + 2, 2) * 0.4
-    idx = np.where(blue > 0.62, 2, idx)
-    idx = np.where((blue > 0.55) & (blue <= 0.62) & chk, 2, idx)
-    pale = (L > 0.15) & (R > 0.35) & (R < 0.85) & (noise(seed + 3, 8) > 0.45)
-    idx = np.where(pale & (chk | (pix(seed + 4, 2) > 0.6)), 4, idx)
-    rim = (R > 0.74) & (L < 0.0) & (noise(seed + 5, 8) > 0.3)
-    idx = np.where(rim, np.where(pix(seed + 6, 2) > 0.6, 0, 1), idx)
-    idx = np.where(rim & (R > 0.95), 1, idx)
-    r = rng(seed + 7)
-    for _ in range(12):
-        y, x = int(r.integers(0, S // 2)) * 2, int(r.integers(0, S // 2)) * 2
-        idx[y:y + 2, x:x + 2] = 5
-        if r.random() < 0.5:
-            idx[y, (x + 2) % S] = 4
-    return opaque_rgba(out_rgb(CLAY_C, idx))
-
-
-ICE_C = pal("#7fa7f7", "#86aefd", "#8cb3fe", "#92b9fe", "#a1c3ff", "#bcd4ff", "#c8dcff")
-
-
-def shear_v(a: np.ndarray, k: float) -> np.ndarray:
-    """Column x rolled down by round(k*x) pixels (tiles when k is a whole number)."""
-    out = np.empty_like(a)
-    for x in range(a.shape[1]):
-        out[:, x] = np.roll(a[:, x], int(round(k * x)))
-    return out
-
-
-def paint_ice(seed):
-    r = rng(seed)
-    # Soft broad bands rising to the right, a few pixels of grain.
-    f = shear_v(anoise(seed, 11, 43), -1) * 0.45 + shear_v(anoise(seed + 5, 4, 21.3), -1) * 0.12
-    f = f + noise(seed + 4, 32) * 0.45 + (pix(seed + 1, 1) - 0.5) * 0.04
-    idx = levels(f, ICE_C, [5, 20, 32, 33, 10])
-    # A handful of curved light streaks along the same direction, pale in the middle.
-    for k in range(5):
-        x, y = r.random() * S, r.random() * S
-        ln = r.uniform(28, 56)
-        ang = -0.7 + r.uniform(-0.12, 0.12)
-        bend = r.uniform(-0.025, 0.025)
-        n = int(ln // 3)
-        w = r.uniform(2.0, 3.0)
-        for i in range(n):
-            a0 = ang + bend * i
-            x1, y1 = x + np.cos(a0) * 3, y + np.sin(a0) * 3
-            fpos = (i + 0.5) / n
-            ww = w * (0.6 + 0.8 * np.sin(np.pi * fpos))
-            ix, m, _ = stroke_mask(x, y, x1, y1, ww)
-            stamp(idx, ix, m, 4)
-            if 0.3 < fpos < 0.7:
-                ix, m, _ = stroke_mask(x, y, x1, y1, max(1.0, ww - 1.4))
-                stamp(idx, ix, m, 5 if (k % 3) else 6)
-            x, y = x1, y1
-    return opaque_rgba(out_rgb(ICE_C, idx))
-
-
-BEDROCK_C = pal("#222222", "#333333", "#575757", "#636363", "#979797")
-
-
-def paint_bedrock(seed):
-    f = streaks(seed, 8, 24, 3) * 0.7 + streaks(seed + 1, 3, 10, 2) * 0.3
-    f = f + (q(pix(seed + 2, 1), 2, 4) - 0.5) * 0.1
-    return opaque_rgba(out_rgb(BEDROCK_C, levels(f, BEDROCK_C, [6, 28, 32, 25, 9])))
-
-
-OBSIDIAN_C = pal("#000001", "#06030b", "#100c1c", "#271e3d", "#3b2754")
-
-
-def paint_obsidian(seed):
-    """Glassy black lumps overlapping like twisted rope, each with a purple crescent of light
-    along its curved upper edge."""
-    r = rng(seed)
-    bgn = noise(seed + 1, 16) * 0.7 + pix(seed + 2, 2) * 0.3
-    idx = np.where(bgn > 0.5, 1, 0).astype(np.int32)
-    H = np.full((S, S), -1.0, np.float32)
-    pts = spread(seed + 3, 17)
-    for k, (cx, cy) in enumerate(pts):
-        rx, ry = r.uniform(19, 25), r.uniform(10, 13)
-        rot = r.uniform(-0.55, 0.55)
-        bend = r.uniform(0.45, 0.85)
-        hgt = r.random()
-        dy, dx = wdelta(cy, cx)
-        c, s_ = np.cos(rot), np.sin(rot)
-        u = (dx * c + dy * s_) / rx
-        v = (-dx * s_ + dy * c) / ry + bend * u * u  # ends droop: a banana/crescent lump
-        v = v + (noise(seed + 10 + k, 8) - 0.5) * 0.25
-        rr = u * u + v * v
-        m = (rr < 1) & (hgt > H)
-        if not m.any():
-            continue
-        H = np.where(m, hgt, H)
-        t = np.full((S, S), 2, np.int32)
-        t = np.where((v > 0.3) | ((u > 0.6) & (v > -0.1)), 1, t)  # shaded underside / end
-        t = np.where((v > 0.8) & (u > 0), 0, t)
-        cres = (v < -0.38) & (v > -0.94) & (np.abs(u) < 0.85 - 0.2 * np.abs(v))
-        t = np.where(cres, 3, t)
-        core = (v < -0.56) & (v > -0.86) & (np.abs(u) < 0.6 - 0.3 * np.abs(u))
-        t = np.where(core, 4, t)
-        idx = np.where(m, t, idx)
-    # Dark seam where lumps overlap (top edge of each visible lump part).
-    edge = (H >= 0) & (np.roll(H, 1, 0) > H + 0.001)
-    idx = np.where(edge, 0, idx)
-    return opaque_rgba(out_rgb(OBSIDIAN_C, idx))
-
-
-SANDSTONE_C = pal("#c6ae71", "#d1ba8a", "#d5c496", "#dad2a3", "#e3dbb0", "#e7e4bb", "#edebcb")
-
-
-def paint_sandstone(seed):
-    r = rng(seed)
-    items = []
-    rows = [(42, 3, 0.1), (72, 3, 0.6), (100, 3, 0.2), (126, 3, 0.75)]
-    for cy, n, off in rows:
-        for j in range(n):
-            w = S / n
-            cx = (j + 0.5 + off + (r.random() - 0.5) * 0.3) * w
-            items.append((cx, cy + (r.random() - 0.5) * 8, w * r.uniform(0.55, 0.68),
-                          r.uniform(16, 20), r.uniform(0.8, 1.0)))
-    H, ids, L, R, NX, NY = bumps(seed, items, jitter=0.1, want_xy=True)
-    t = 0.55 + L * 0.35 + (1 - R) * 0.15 + (streaks(seed + 1, 3, 8, 2) - 0.5) * 0.35
-    t += (pix(seed + 2, 1) - 0.5) * 0.1
-    idx = bands(t, [0.4, 0.72, 0.92]) + 2
-    idx = np.where((R > 0.8) & (L < 0.15), 2, idx)
-    idx = np.where((R > 0.9) | (ids < 0), 1, idx)
-    idx = np.where((ids < 0) & (pix(seed + 5, 1) > 0.5), 0, idx)
-    seam = (ids != np.roll(ids, 1, 0)) | (ids != np.roll(ids, 1, 1))
-    seam = seam | np.roll(seam, -1, 0) | np.roll(seam, -1, 1)
-    idx = np.where(seam, 1, idx)
-    # Smooth top band with a darker lower edge.
-    band = YY < 22
-    bt = 0.6 + (streaks(seed + 3, 4, 16, 2) - 0.5) * 0.5 + (pix(seed + 4, 1) - 0.5) * 0.1
-    bidx = bands(bt, [0.35, 0.5, 0.7]) + 2
-    bidx = np.where(YY < 3, bidx + 1, bidx)
-    bidx = np.where(YY >= 19, 2, bidx)
-    idx = np.where(band, bidx, idx)
-    idx = np.where((YY >= 22) & (YY < 25), 0, idx)
-    idx = np.where((YY >= 25) & (YY < 27), 1, idx)
-    return opaque_rgba(out_rgb(SANDSTONE_C, idx))
-
-
-def paint_sandstone_top(seed):
-    wy = (noise(seed, 16) - 0.5) * 22
-    wx = (noise(seed + 1, 16) - 0.5) * 22
-    a = np.abs(np.sin(TAU * (XX + YY + wx) * 5 / (2 * S)))
-    b = np.abs(np.sin(TAU * (XX - YY + wy) * 5 / (2 * S)))
-    lines = np.minimum(a, b)
-    f = 0.6 + (noise(seed + 2, 16) - 0.5) * 0.4 + (pix(seed + 3, 1) - 0.5) * 0.15
-    f = f + (noise(seed + 5, 8) - 0.5) * 0.3
-    f = np.where((lines < 0.14) & (noise(seed + 4, 8) > 0.45), f - 0.2, f)
-    f = np.where((lines >= 0.14) & (lines < 0.3), f - 0.08, f)
-    C = SANDSTONE_C[2:]
-    return opaque_rgba(out_rgb(C, levels(f, C, [2, 12, 32, 50, 3])))
-
-
-GLOW_C = pal("#6f4522", "#734e26", "#855029", "#886839", "#cc8654", "#fbda74", "#fff0da",
-             "#ffffff")
-GLOWS = [(11, 12, 26, 24), (56, 3, 32, 24), (100, 12, 40, 24), (38, 43, 42, 40),
-         (80, 36, 32, 24), (118, 42, 28, 28), (2, 72, 34, 32), (85, 74, 32, 36),
-         (40, 78, 32, 20), (62, 100, 34, 24), (24, 112, 32, 32), (103, 107, 32, 24)]
-
-
-def paint_glowstone(seed):
-    items = [(cx, cy, w / 2 + 1, h / 2 + 1) for cx, cy, w, h in GLOWS]
-    H, ids, L, R, NX, NY = bumps(seed, items, jitter=0.1, want_xy=True)
-    bg = streaks(seed + 1, 6, 10, 2) * 0.8 + pix(seed + 3, 2) * 0.2
-    idx = np.where(bg > 0.5, 1, 0)
-    idx = np.where(bg > 0.66, 3, idx)
-    blobm = ids >= 0
-    # A thin warm glow ring around each nugget, darker brown shadow to its bottom right.
-    halo = ~blobm & wgrow(blobm, 2)
-    idx = np.where(halo, 2, idx)
-    shadow = ~blobm & np.roll(np.roll(blobm, 2, 0), 2, 1)
-    idx = np.where(shadow, 0, idx)
-    br = np.clip(-L * 1.4 + 0.3, 0, 1)
-    rim = blobm & (R > 1 - (0.08 + 0.3 * br))
-    core = blobm & (np.hypot(NX + 0.3, NY + 0.32) < 0.55 + (pix(seed + 2, 2) - 0.5) * 0.12)
-    spot = blobm & (np.hypot(NX + 0.42, NY + 0.42) < 0.2)
-    idx = np.where(blobm, 5, idx)
-    idx = np.where(core, 6, idx)
-    idx = np.where(spot, 7, idx)
-    idx = np.where(rim, 4, idx)
-    return opaque_rgba(out_rgb(GLOW_C, idx))
-
-
-# ---------------------------------------------------------------------------- logs
 
 
 def bark(seed: int, C: np.ndarray, fracs=(3, 12, 29, 46, 9, 2)) -> np.ndarray:
@@ -1518,79 +1546,6 @@ def paint_spruce_sapling(seed):
 
 
 # ---------------------------------------------------------------------------- fluids
-
-
-def loop_field(a: np.ndarray, b: np.ndarray, p: float) -> np.ndarray:
-    """Blend of two fields around a circle in time: loops when p goes 0 -> 1."""
-    return 0.5 + (a - 0.5) * np.cos(TAU * p) + (b - 0.5) * np.sin(TAU * p)
-
-
-WATER_C = pal("#a5a5a5", "#aeaeae", "#c2c2c2", "#d3d3d3", "#ffffff")
-
-
-def paint_water_still(seed):
-    """Two flat greys in long horizontal step-edged ripples drifting sideways, and a few
-    wave crests (lighter bands with a bright core) that swell and fade as they travel."""
-    A1, A2 = anoise(seed, 6, 32), anoise(seed + 1, 6, 32)
-    B1, B2 = anoise(seed + 5, 3, 16), anoise(seed + 6, 3, 16)
-    r = rng(seed + 2)
-    crests = [(r.random() * S, (i + r.uniform(0.2, 0.8)) * S / 5, r.uniform(26, 40),
-               r.uniform(5, 8), r.random(), 1 if i % 2 else -1) for i in range(5)]
-    C1, C2 = anoise(seed + 7, 2.5, 21.3), anoise(seed + 8, 2.5, 21.3)
-    frames = []
-    for f in range(32):
-        p = f / 32.0
-        base = loop_field(A1, A2, p) * 0.75 + loop_field(B1, B2, p) * 0.25
-        base = np.roll(base, 4 * f, 1)
-        # Snap the ripple edges to 2 px steps horizontally (pixel-art ripples).
-        base = q(base, 1, 2)
-        idx = np.where(base > np.quantile(base, 0.47), 1, 0)
-        hi = np.roll(q(loop_field(C1, C2, p), 1, 2), 4 * f, 1)
-        for cx, cy, rx, ry, ph, d in crests:
-            life = np.sin(np.pi * ((p + ph) % 1.0))  # 0 -> 1 -> 0 over the loop
-            if life < 0.1:
-                continue
-            x = cx + d * 4 * f
-            rr, dx, dy = blob(x, cy, rx * (0.6 + 0.4 * life), ry)
-            env = np.clip(1 - rr, 0, 1) ** 0.6 * life  # where this crest is, how strong
-            v = hi + env * 0.9
-            idx = np.where((v > 0.8) & (env > 0), np.maximum(idx, 2), idx)
-            idx = np.where((v > 1.1) & (env > 0), 3, idx)
-            idx = np.where((v > 1.34) & (env > 0), 4, idx)
-        frames.append(opaque_rgba(out_rgb(WATER_C, idx)))
-    return frames, 2
-
-
-LAVA_C = pal("#c73405", "#cc4108", "#d3530d", "#d96415", "#df7c23", "#e59433", "#ebad44",
-             "#f2cd5b")
-
-
-def paint_lava_still(seed):
-    """Blotchy molten surface: glowing blobs (yellow cores stepping out through orange
-    rings) that drift in small circles and swell and dim, over an orange-red body with darker
-    crusting patches that slowly morph. Palette steps are fixed across frames (no flicker)."""
-    A1, A2 = fbm(seed, 32, 3), fbm(seed + 1, 32, 3)
-    C1, C2 = fbm(seed + 4, 16, 2), fbm(seed + 5, 16, 2)
-    r = rng(seed + 3)
-    spots = []
-    for i, (cx, cy) in enumerate(spread(seed + 6, 11)):
-        spots.append((cx, cy, r.uniform(11, 21), r.random(), r.uniform(2, 5), r.random()))
-    fields = []
-    for f in range(32):
-        p = f / 32.0
-        field = loop_field(A1, A2, p) * 0.55 + loop_field(C1, C2, p) * 0.25
-        glow = np.zeros((S, S), np.float32)
-        for k, (cx, cy, rad, ph, orb, ph2) in enumerate(spots):
-            hgt = 0.55 + 0.45 * np.sin(TAU * (p + ph))
-            x = cx + orb * np.cos(TAU * (p + ph2))
-            y = cy + orb * np.sin(TAU * (p + ph2))
-            rr, _, _ = blob(x, y, rad, rad * 0.85, rot=ph * 3, jitter=0.25,
-                            jseed=seed + 40 + k, jcell=8)
-            glow = np.maximum(glow, np.clip(1 - rr, 0, 1) ** 1.1 * hgt)
-        fields.append(field + glow * 0.8)
-    th = np.quantile(fields[0], np.cumsum([3, 15, 31, 17, 17, 10, 5])[:] / 100.0)
-    frames = [opaque_rgba(out_rgb(LAVA_C, np.searchsorted(th, fl))) for fl in fields]
-    return frames, 3
 
 
 # ---------------------------------------------------------------------------- table
