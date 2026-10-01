@@ -1,3 +1,6 @@
+//! Graphics pipelines from a short description (shaders, vertex layout, blending, depth,
+//! culling), and their layouts.
+
 use ash::{vk, Device};
 
 #[derive(Clone, Copy)]

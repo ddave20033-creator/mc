@@ -92,11 +92,11 @@ pub(super) fn draw_page<'a>(font: &'a Font, texture: &'a [u8], lay: &Layout, n: 
     cv
 }
 
-/// Size of the tabs' texture: `model::book::TAB_LAYERS` layers side by side.
+/// Size of the tabs' texture: `model::items::book::TAB_LAYERS` layers side by side.
 pub(super) const TABS_W: usize = 512;
 pub(super) const TABS_H: usize = 128;
 
-/// The chapter tabs, side by side (see `model::book::TABS_PER_HALF`): each a colored tab
+/// The chapter tabs, side by side (see `model::items::book::TABS_PER_HALF`): each a colored tab
 /// with its number over its short name; the chapter open now stands out taller with a gold
 /// edge, the one aimed at is lighter.
 pub(super) fn draw_tabs<'a>(font: &'a Font, texture: &'a [u8], lay: &Layout, open: Option<usize>, hover: Option<usize>, theme: &Theme) -> Canvas<'a> {

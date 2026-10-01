@@ -1,21 +1,32 @@
 //! RustCraft: a Minecraft-like game in Rust on Vulkan.
 //!
+//! - `app`: the program around the game: options, key binds, translations, the start-up
+//!   splash, F3 statistics and the command-line developer tools.
+//! - `client`: the game as played: the window, menus, the player, what they see and do.
+//! - `sim`: the simulation, the same for the server and the players: the clock, the world's
+//!   rules, felling, grenades, and the server that runs a world (`sim::server`).
+//! - `net`: the LAN protocol and connections.
+//! - `content`: every block, item and mob, a line each.
+//! - `world`: blocks, chunks, terrain generation, fluids, meshing, and the world on disk.
+//! - `item`, `entity`: items in use (inventory, crafting, mining, guns); things in the world
+//!   that are not blocks (dropped items, block entities, mobs, the player's body).
+//! - `model`: geometry built on the CPU (entities, held items, the hand, particles), and the
+//!   Blockbench models' data.
+//! - `textures`: the block, item and entity textures, from the procedural ones and the
+//!   resource packs.
 //! - `engine`, `render`: Vulkan setup and the frame's drawing.
-//! - `world`: blocks, chunks, terrain generation, fluids, meshing and textures.
-//! - `item`, `entity`, `model`: items and crafting; things in the world; their geometry.
-//! - `game`: the game itself (state, rules, input, screens, LAN play), built on the rest.
-//! - `ui`, `net`, `save`, `settings`, `lang`: menus and HUD, LAN protocol, files, options,
-//!   translations.
+//! - `ui`, `audio`: the immediate-mode UI and the menu screens; the sounds.
+//! - `util`: small helpers shared by all of it.
 
 // No console window next to the game in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod audio;
+mod client;
 mod content;
 mod engine;
 mod entity;
-mod client;
 mod item;
 mod model;
 mod net;

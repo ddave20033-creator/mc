@@ -1,9 +1,9 @@
 """Entity atlases (chest, player, pig, sheep, wolf) and particles (flame, smoke), in the look of
 Faithful 64x redrawn at our sizes.
 
-Atlases use Minecraft's box UV layout (`ModelPart.Cube`, see `src/entity/mob.rs`) in a 64 unit
+Atlases use Minecraft's box UV layout (`ModelPart.Cube`, see `src/entity/mob/model.rs` and the mobs in `src/content/mobs/`) in a 64 unit
 wide atlas, all at 8 px per unit (chest, player and pig 512 x 512; sheep, its wool and the wolf
-512 x 256; the game cuts the mobs' faces onto several texture layers, `src/entity/skin_pages.rs`).
+512 x 256; the game cuts the mobs' faces onto several texture layers, `src/textures/skin_pages.rs`).
 Faithful's atlases are 4 px per unit, so shapes measured on them ("ref px") are doubled here.
 Faces are painted in atlas orientation (the chest is stored upside down).
 """

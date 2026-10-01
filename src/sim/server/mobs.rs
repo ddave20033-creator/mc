@@ -4,7 +4,8 @@
 
 use super::Server;
 use crate::content::mobs::{Behavior, MobDef, MOBS};
-use crate::entity::mob::{standable, Foe, Mob, MobCtx, MobEvent, MobKind};
+use crate::content::mobs::MobKind;
+use crate::entity::mob::{standable, Foe, Mob, MobCtx, MobEvent};
 use crate::item::*;
 use crate::net::{fx, Msg};
 use crate::world::*;

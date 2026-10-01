@@ -4,7 +4,8 @@
 use super::checks::{self, known_item, valid_slot, valid_stack};
 use super::peers::{CLOSED_Y, RED, WHITE};
 use super::Server;
-use crate::entity::mob::{Foe, MobKind};
+use crate::content::mobs::MobKind;
+use crate::entity::mob::Foe;
 use crate::entity::ItemEntity;
 use crate::net::{hurt, pose_flags, Msg};
 use crate::sim::rules;

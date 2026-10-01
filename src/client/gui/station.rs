@@ -6,11 +6,12 @@
 use crate::client::{Container, Game, Screen};
 use crate::client::gui::SlotRef;
 use crate::entity::block_entity::{
-    CHEST_FLOOR, CRAFT_SLIDE, TABLE_CELL, chest_cell, chest_cell_at, chest_cell_size, chest_side,
+    CRAFT_SLIDE, TABLE_CELL, chest_cell, chest_cell_at, chest_cell_size, chest_side,
     table_cell, table_cell_at,
 };
 use crate::ui::{WHITE, rgba};
 use crate::util::smoothstep;
+use crate::world::mesh::CHEST_FLOOR;
 use crate::world::{
     CRAFTING_TABLE, chest_right, facing, facing_dir, facing_of, is_chest, is_gun_bench,
 };

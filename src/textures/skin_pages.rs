@@ -188,7 +188,7 @@ mod tests {
     /// Every skin's faces fit its pages without overlapping, borders included.
     #[test]
     fn skins_fit_their_pages_without_overlapping() {
-        use crate::entity::mob::{pig_skin, sheep_skin, wolf_skin};
+        use crate::content::mobs::{pig::skin as pig_skin, sheep::skin as sheep_skin, wolf::skin as wolf_skin};
         for skin in [&wolf_skin::SKIN, &pig_skin::SKIN, &sheep_skin::SKIN, &sheep_skin::WOOL] {
             let used = skin.all().map(|p| p.page + 1).max().unwrap_or(0);
             assert!(used <= skin.pages, "needs {used} pages, has {}", skin.pages);
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn a_page_texel_maps_back_to_its_atlas_point() {
-        let skin = &crate::entity::mob::pig_skin::SKIN;
+        let skin = &crate::content::mobs::pig::skin::SKIN;
         let p = skin.pieces(2, 2)[0];
         let (u, v) = skin.atlas_at(p.page, p.x + 4, p.y + 12).unwrap();
         assert!((u - (p.rect.0 + 4.5 / 8.0)).abs() < 1e-4 && (v - (p.rect.1 + 12.5 / 8.0)).abs() < 1e-4);

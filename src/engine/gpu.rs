@@ -1,3 +1,7 @@
+//! The Vulkan instance, device and swapchain, the depth and multisample targets, the frames
+//! in flight (beginning and ending one, the main render pass), one-off command buffers, and
+//! buffers freed only once no frame uses them any more.
+
 use super::resources::{Buffer, Image};
 use ash::ext::debug_utils;
 use ash::khr::{surface, swapchain};

@@ -1,3 +1,5 @@
+//! The fight on the line played out: every fish can be landed, a careless angler loses them.
+
 use super::*;
 
 /// A player who watches the tension bar and turns the wheel to keep it in the middle

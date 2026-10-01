@@ -1,3 +1,9 @@
+//! The world: its blocks (`block`, defined in `content::blocks`), chunks (`chunk`) and all the
+//! loaded ones (`World`, here, with the light the mesher found and the axe's cuts in trunks);
+//! the terrain generated from the seed (`gen`, `noise`, `trees`), fluids flowing (`fluid`),
+//! the chunks meshed (`mesh`) on worker threads (`jobs`) as the player moves (`terrain`), and
+//! the world on disk (`save`).
+
 pub mod block;
 pub mod chunk;
 pub mod fluid;

@@ -1,3 +1,6 @@
+//! A chunk: a 16x256x16 column of blocks stored in 16 sections (an all-air one takes no
+//! memory), with its height map; and the fast hash maps keyed by positions.
+
 use super::block::{attenuates_sky, valid, Block, AIR};
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};

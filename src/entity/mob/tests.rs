@@ -1,3 +1,5 @@
+//! Mobs hurt, dying, getting their own random numbers, stepping up.
+
 use super::*;
 use crate::content::mobs::{pig::PIG, sheep::SHEEP};
 

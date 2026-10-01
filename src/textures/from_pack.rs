@@ -472,7 +472,7 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) -> Vec<bool> {
     // The wolf's, the pig's and the sheep's skins: each box's faces cut out of the atlas (64
     // units wide, at whatever resolution) onto their pages (`textures::skin_pages`).
     {
-        use crate::entity::mob::{pig_skin, sheep_skin, wolf_skin};
+        use crate::content::mobs::{pig::skin as pig_skin, sheep::skin as sheep_skin, wolf::skin as wolf_skin};
         for (base, skin, path) in [
             (tex::WOLF, &wolf_skin::SKIN, "entity/wolf/wolf"),
             (tex::WOLF_TAME, &wolf_skin::SKIN, "entity/wolf/wolf_tame"),

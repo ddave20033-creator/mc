@@ -34,7 +34,7 @@ pub struct Pose {
     /// What the player is busy with (`status`), shown in a bubble above their head.
     pub status: u8,
     /// The attachments on the held gun (`gun_mod` bits), and what it is doing
-    /// (`model::pistol_view::GunAnim::pack`: its slide and magazine, for the others to see).
+    /// (`model::guns::pistol_view::GunAnim::pack`: its slide and magazine, for the others to see).
     pub gun_mods: u8,
     pub gun_state: u16,
     /// What they wear (`item::armor_code`).
@@ -47,7 +47,7 @@ pub struct Pose {
     pub spectator: bool,
     /// Running (0..1, eased in and out: their gun is carried across the chest).
     pub sprint: f32,
-    /// How dirty the held gun is (`model::pistol_view::dirt_level`), for its look.
+    /// How dirty the held gun is (`model::guns::pistol_view::dirt_level`), for its look.
     pub gun_dirt: u8,
     /// At a gun station: the cleaning brush in the hand, where it is; looking into its
     /// drawer (it is out).
@@ -56,7 +56,7 @@ pub struct Pose {
     /// The held stack's `data` (a magazine's rounds, a gun's state: the rounds in its
     /// magazine, a revolver's cylinder).
     pub held_data: u16,
-    /// More of what the held gun is doing (`model::pistol_view::GunAnim::pack_extra`): the
+    /// More of what the held gun is doing (`model::guns::pistol_view::GunAnim::pack_extra`): the
     /// magazine a reload brings, a revolver's round being loaded, its cases thrown out, the
     /// chambers its speedloader fills.
     pub gun_extra: u32,

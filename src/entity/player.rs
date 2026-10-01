@@ -1,3 +1,7 @@
+//! A player's body in the world: walking, sprinting, sneaking, jumping, moving through fluids,
+//! flying (and a spectator's flight through blocks), colliding with blocks and doors; and the
+//! rays cast from the eye to find the block looked at.
+
 use crate::world::block::Block;
 use crate::world::{
     block_boxes, door_closed_side, door_open, door_out, is_door, is_fluid, is_lava, is_solid,

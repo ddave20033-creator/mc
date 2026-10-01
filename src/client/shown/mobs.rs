@@ -2,7 +2,8 @@
 //! eggs. (The server runs them; what a kind does is in its file, `content::mobs`.)
 
 use crate::client::Game;
-use crate::entity::mob::{Mob, MobKind};
+use crate::content::mobs::MobKind;
+use crate::entity::mob::Mob;
 use crate::item::*;
 use crate::item::inventory::take;
 use crate::world::{AIR, STONE, is_solid};

@@ -88,7 +88,7 @@ if Faithful had made a 128x version).
   chest `normal`, `normal_left`, `normal_right` (1.15+ layout, 512x512 = 8 px per unit),
   `player/wide/steve` (64x64 skin layout at 8x = 512x512; an original Steve-like character),
   `pig/pig_temperate` (64x64 layout at 8x = 512x512), `sheep/sheep` and `sheep/sheep_wool`
-  (64x32 layout at 8x = 512x256), `wolf/wolf*` (64x32 layout at 8x = 512x256). See `src/entity/mob.rs` and `src/textures/from_pack.rs`
+  (64x32 layout at 8x = 512x256), `wolf/wolf*` (64x32 layout at 8x = 512x256). See `src/content/mobs/`, `src/textures/skin_pages.rs` and `src/textures/from_pack.rs`
   for the exact UVs the game reads.
 - **Particles**: `flame` (small flame sprite), `generic_0..7` smoke puffs from small to large,
   light grey, transparent background.

@@ -1,3 +1,6 @@
+//! GPU memory: buffers (mapped, written from the CPU), images and sampled textures (texture
+//! arrays with their mip levels), each freed when dropped.
+
 use super::gpu::Gpu;
 use ash::{vk, Device};
 

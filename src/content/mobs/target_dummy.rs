@@ -125,7 +125,7 @@ fn rock(m: &mut Mob, dt: f32, _w: &World, _steering: bool) -> MobEvent {
     MobEvent::None
 }
 
-/// The Blockbench model (`model::dummy`), its front (+Z) toward where it faces.
+/// The Blockbench model (`model::items::dummy`), its front (+Z) toward where it faces.
 fn model(m: &Mob, out: &mut Vec<Vertex>, light: [u8; 4]) {
     let root = Mat4::from_translation(m.pos)
         * Mat4::from_rotation_y(FRAC_PI_2 - m.body_yaw)

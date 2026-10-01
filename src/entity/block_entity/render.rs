@@ -28,7 +28,7 @@ pub const CHEST_ROWS: usize = 3;
 /// are within it.
 const CHEST_RIM: f32 = 2.0 / 16.0;
 /// What is in a chest lies on the floor inside it.
-pub use crate::world::mesh::CHEST_FLOOR;
+use crate::world::mesh::CHEST_FLOOR;
 
 /// Where a chest half's inside is across (0 at its left, as seen from the front, .. 1):
 /// within the frame, which a double chest half has on its outer sides only. `side` is where

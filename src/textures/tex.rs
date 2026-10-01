@@ -257,57 +257,57 @@ pub const BOOK_COVER: u32 = BOOK + 1;
 pub const BOOK_EDGE: u32 = BOOK + 2;
 pub const BOOK_PAGE: u32 = BOOK + 3;
 /// Pages of the guide book open in players' hands, drawn while the game runs
-/// (`client::book`): `BOOK_SHEET_COUNT` pages of `model::book::SHEET_LAYERS` layers each.
+/// (`client::book`): `BOOK_SHEET_COUNT` pages of `model::items::book::SHEET_LAYERS` layers each.
 pub const BOOK_SHEETS: u32 = BOOK_PAGE + 1;
 pub const BOOK_SHEET_COUNT: u32 = 12;
-/// The chapter tabs along the top of this player's guide book (`model::book::TAB_LAYERS`).
+/// The chapter tabs along the top of this player's guide book (`model::items::book::TAB_LAYERS`).
 pub const BOOK_TABS: u32 = BOOK_SHEETS + BOOK_SHEET_COUNT * 6;
 /// A round puff for big smoke clouds (smoke grenades, explosions): Minecraft's smoke
 /// sprites are small pixel blotches that turn into squares when drawn a block wide.
 pub const CLOUD: u32 = BOOK_TABS + 4;
-/// The pistol made in Blockbench: its texture pages (`model::pistol_vm`), clean, then
+/// The pistol made in Blockbench: its texture pages (`model::blockbench::pistol_vm`), clean, then
 /// the same with more and more grime on them (`PISTOL_DIRT_LEVELS` sets in all).
 pub const PISTOL_VIEW: u32 = CLOUD + 1;
 pub const PISTOL_DIRT_LEVELS: u32 = 4;
-/// The gun station block made in Blockbench: its texture pages (`model::gun_station`).
+/// The gun station block made in Blockbench: its texture pages (`model::blockbench::gun_station`).
 pub const GUN_STATION_MODEL: u32 = PISTOL_VIEW + crate::model::blockbench::pistol_vm::PAGES * PISTOL_DIRT_LEVELS;
-/// The grenades made in Blockbench: their texture pages (`model::grenade`).
+/// The grenades made in Blockbench: their texture pages (`model::blockbench::grenade`).
 pub const GRENADE_MODEL: u32 = GUN_STATION_MODEL + crate::model::blockbench::gun_station::PAGES;
-/// The revolver made in Blockbench: its texture pages (`model::revolver_vm`), clean and
+/// The revolver made in Blockbench: its texture pages (`model::blockbench::revolver_vm`), clean and
 /// dirtier, like the pistol's (`PISTOL_DIRT_LEVELS` sets).
 pub const REVOLVER_VIEW: u32 = GRENADE_MODEL + crate::model::blockbench::grenade::PAGES;
-/// The target dummy made in Blockbench: its texture pages (`model::dummy`).
+/// The target dummy made in Blockbench: its texture pages (`model::blockbench::dummy`).
 pub const DUMMY_MODEL: u32 = REVOLVER_VIEW + crate::model::blockbench::revolver_vm::PAGES * PISTOL_DIRT_LEVELS;
 /// Item icons drawn while the game runs for things as they are (a magazine as full as it
 /// is, a gun with its attachments and dirt...: `client::gui::icons`).
-/// The AK-47 made in Blockbench: its texture pages (`model::ak_vm`), clean and dirtier,
+/// The AK-47 made in Blockbench: its texture pages (`model::blockbench::ak_vm`), clean and dirtier,
 /// like the pistol's (`PISTOL_DIRT_LEVELS` sets).
 pub const AK_VIEW: u32 = DUMMY_MODEL + crate::model::blockbench::dummy::PAGES;
-/// The rifle station made in Blockbench: its texture pages (`model::gun_station`).
+/// The rifle station made in Blockbench: its texture pages (`model::blockbench::rifle_station`).
 pub const RIFLE_STATION_MODEL: u32 = AK_VIEW + crate::model::blockbench::ak_vm::PAGES * PISTOL_DIRT_LEVELS;
 pub const STATE_ICONS: u32 = RIFLE_STATION_MODEL + crate::model::blockbench::rifle_station::PAGES;
 pub const STATE_ICON_COUNT: u32 = 64;
 /// The wolf's atlases (wild, tame, angry, and its collar, tinted by the game), a bone and
 /// the wolf spawn egg.
-/// (each `entity::mob::wolf_skin::PAGES` layers, see `textures::skin_pages`)
+/// (each `content::mobs::wolf::skin::PAGES` layers, see `textures::skin_pages`)
 pub const WOLF: u32 = STATE_ICONS + STATE_ICON_COUNT;
-pub const WOLF_TAME: u32 = WOLF + crate::entity::mob::wolf_skin::PAGES;
-pub const WOLF_ANGRY: u32 = WOLF_TAME + crate::entity::mob::wolf_skin::PAGES;
-pub const WOLF_COLLAR: u32 = WOLF_ANGRY + crate::entity::mob::wolf_skin::PAGES;
-pub const BONE: u32 = WOLF_COLLAR + crate::entity::mob::wolf_skin::PAGES;
+pub const WOLF_TAME: u32 = WOLF + crate::content::mobs::wolf::skin::PAGES;
+pub const WOLF_ANGRY: u32 = WOLF_TAME + crate::content::mobs::wolf::skin::PAGES;
+pub const WOLF_COLLAR: u32 = WOLF_ANGRY + crate::content::mobs::wolf::skin::PAGES;
+pub const BONE: u32 = WOLF_COLLAR + crate::content::mobs::wolf::skin::PAGES;
 pub const WOLF_SPAWN_EGG: u32 = BONE + 1;
 /// The pig's skin, the sheep's and its wool coat, on their pages
-/// (`entity::mob::pig_skin`, `entity::mob::sheep_skin`).
+/// (`content::mobs::pig::skin`, `content::mobs::sheep::skin`).
 pub const PIG: u32 = WOLF_SPAWN_EGG + 1;
-pub const SHEEP: u32 = PIG + crate::entity::mob::pig_skin::PAGES;
-pub const SHEEP_WOOL: u32 = SHEEP + crate::entity::mob::sheep_skin::PAGES;
-/// Fishing: the rod made in Blockbench (its texture pages, `model::fishing_rod`), the
+pub const SHEEP: u32 = PIG + crate::content::mobs::pig::skin::PAGES;
+pub const SHEEP_WOOL: u32 = SHEEP + crate::content::mobs::sheep::skin::PAGES;
+/// Fishing: the rod made in Blockbench (its texture pages, `model::blockbench::fishing_rod`), the
 /// rod's icon, and the fish, raw and cooked.
-pub const FISHING_ROD_MODEL: u32 = SHEEP_WOOL + crate::entity::mob::sheep_skin::WOOL_PAGES;
+pub const FISHING_ROD_MODEL: u32 = SHEEP_WOOL + crate::content::mobs::sheep::skin::WOOL_PAGES;
 pub const FISHING_ROD: u32 = FISHING_ROD_MODEL + crate::model::blockbench::fishing_rod::PAGES;
 pub const RAW_FISH: u32 = FISHING_ROD + 1;
 pub const COOKED_FISH: u32 = FISHING_ROD + 2;
-/// The bucket's galvanized steel (`model::bucket`).
+/// The bucket's galvanized steel (`model::items::bucket`).
 pub const BUCKET_METAL: u32 = COOKED_FISH + 1;
 /// The mark of a cut-down trunk on grass, a stage each (`world::STUMP_MARK`): bare soil
 /// in a circle, the rest see-through.

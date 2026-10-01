@@ -1,3 +1,5 @@
+//! Perlin noise (2D and 3D) and fractal sums of it, for the terrain.
+
 /// Classic Perlin gradient noise (2D and 3D) with a seeded permutation table.
 pub struct Perlin {
     perm: [u8; 512],

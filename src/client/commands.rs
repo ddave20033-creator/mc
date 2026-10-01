@@ -2,7 +2,7 @@
 
 use crate::client::Game;
 use crate::client::player::GameMode;
-use crate::entity::mob::MobKind;
+use crate::content::mobs::MobKind;
 use crate::item::{Stack, from_key, key, max_stack};
 use crate::app::lang::{t, tf};
 use crate::ui::chat;

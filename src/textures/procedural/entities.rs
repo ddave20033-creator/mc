@@ -118,7 +118,7 @@ pub(super) fn pig_skin(x: i32, y: i32) -> [u8; 4] {
 /// A page of the pig's skin (`tex::PIG`..): the built-in atlas (`pig_skin`) cut up like a
 /// pack's.
 pub(super) fn pig_page(l: u32, x: i32, y: i32) -> [u8; 4] {
-    match crate::entity::mob::pig_skin::SKIN.atlas_at(l - tex::PIG, x as u32, y as u32) {
+    match crate::content::mobs::pig::skin::SKIN.atlas_at(l - tex::PIG, x as u32, y as u32) {
         Some((u, v)) => pig_skin((u * 2.0) as i32, (v * 2.0) as i32),
         None => [0, 0, 0, 0],
     }
@@ -126,7 +126,7 @@ pub(super) fn pig_page(l: u32, x: i32, y: i32) -> [u8; 4] {
 
 /// A page of the sheep's skin: plain skin colour.
 pub(super) fn sheep_page(l: u32, x: i32, y: i32) -> [u8; 4] {
-    match crate::entity::mob::sheep_skin::SKIN.atlas_at(l - tex::SHEEP, x as u32, y as u32) {
+    match crate::content::mobs::sheep::skin::SKIN.atlas_at(l - tex::SHEEP, x as u32, y as u32) {
         Some(_) => col([214.0, 178.0, 150.0], 0.92 + 0.08 * grain(l, x, y, 562), 255),
         None => [0, 0, 0, 0],
     }
@@ -134,7 +134,7 @@ pub(super) fn sheep_page(l: u32, x: i32, y: i32) -> [u8; 4] {
 
 /// A page of the sheep's wool coat: plain white wool.
 pub(super) fn sheep_wool_page(l: u32, x: i32, y: i32) -> [u8; 4] {
-    match crate::entity::mob::sheep_skin::WOOL.atlas_at(l - tex::SHEEP_WOOL, x as u32, y as u32) {
+    match crate::content::mobs::sheep::skin::WOOL.atlas_at(l - tex::SHEEP_WOOL, x as u32, y as u32) {
         Some(_) => wool(l, x, y),
         None => [0, 0, 0, 0],
     }

@@ -8,7 +8,7 @@ use crate::ui::chat;
 use crate::world::*;
 use glam::{IVec3, Vec3};
 
-pub use crate::sim::is_night;
+use crate::sim::is_night;
 
 /// Lying in a bed.
 #[derive(Clone, Copy, Debug)]

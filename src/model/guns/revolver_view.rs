@@ -27,7 +27,7 @@ pub const LOAD_SEAT: f32 = 0.45;
 pub const LOAD_END: f32 = 0.6;
 
 /// The parts' windows of the strip animation (taken apart at the gun station), in the order of
-/// `model::gun::FRAME` ..: the frame stays; the barrel, the mainspring, the cylinder, the
+/// `model::guns::gun::FRAME` ..: the frame stays; the barrel, the mainspring, the cylinder, the
 /// hammer.
 pub const STRIP: [(f32, f32); 5] = [(0.0, 0.0), (1.8, 2.5), (1.3, 1.8), (0.0, 0.8), (0.8, 1.3)];
 

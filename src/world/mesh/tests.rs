@@ -1,3 +1,5 @@
+//! The mesher's tests.
+
 use super::shapes::bed_local;
 use super::*;
 

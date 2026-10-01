@@ -17,7 +17,7 @@
 //! Here: a mob's state, being hurt and pushed, and what goes over the network; its AI in `ai`,
 //! its moving through the world in `physics`.
 
-use crate::content::mobs::{MobDef, MobState};
+use crate::content::mobs::{MobDef, MobKind, MobState};
 use crate::textures::skin_pages::{face_uv, SkinPages};
 use crate::model::prim::{quad_at, Paint, Sides};
 use crate::util::{ray_box, vertex_light, wrap_angle, Rng};
@@ -32,11 +32,6 @@ mod physics;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use crate::content::mobs::MobKind;
-// (the skins' texture layers are laid out by `textures`)
-pub use crate::content::mobs::pig::skin as pig_skin;
-pub use crate::content::mobs::sheep::skin as sheep_skin;
-pub use crate::content::mobs::wolf::skin as wolf_skin;
 
 const GRAVITY: f32 = 32.0;
 /// Jump speed: clears one block (Minecraft: 0.42 blocks per tick).

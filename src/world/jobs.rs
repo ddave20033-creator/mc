@@ -1,3 +1,5 @@
+//! The worker threads: they generate chunks and mesh them, and send back what they made.
+
 use super::gen::Generator;
 use super::mesh::{mesh_chunk, MeshData};
 use super::{ChunkData, ChunkPos};

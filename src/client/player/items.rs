@@ -3,7 +3,7 @@
 
 use crate::client::{Container, Game, Screen};
 use crate::entity::ItemEntity;
-use crate::entity::mob::MobKind;
+use crate::content::mobs::MobKind;
 use crate::entity::player::{look_dir, raycast_fluid};
 use crate::item::*;
 use crate::item::inventory::{Inventory, take};

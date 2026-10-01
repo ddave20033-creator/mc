@@ -1,3 +1,5 @@
+//! Every message encoded and decoded back the same; chat lines cut.
+
 use super::*;
 use crate::net::{book, container, hurt, mode, pose_flags, status, PROTOCOL};
 

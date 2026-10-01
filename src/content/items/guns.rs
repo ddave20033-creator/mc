@@ -90,7 +90,7 @@ items! {
     PISTOL_SLIDE = ItemDef {
         key: "pistol_slide", en: "Pistol Slide", hu: "Pisztolyszán", ..part(GunKind::Pistol, tex::PISTOL_PARTS + 3)
     };
-    /// The revolver's five parts, in the order of `model::gun::FRAME` ..: the frame (with the
+    /// The revolver's five parts, in the order of `model::guns::gun::FRAME` ..: the frame (with the
     /// grip, trigger and sights), the barrel, the mainspring, the cylinder (on its crane, with
     /// the ejector) and the hammer.
     REVOLVER_FRAME = ItemDef {
@@ -118,7 +118,7 @@ items! {
     AK_COVER = ItemDef { key: "ak_dust_cover", en: "AK Dust Cover", hu: "AK-tokfedél", ..part(GunKind::Ak, tex::AK_PARTS + 3) };
 }
 
-/// Each gun's parts, in the order of `model::gun::FRAME` .. (a magazine-fed gun's last one is
+/// Each gun's parts, in the order of `model::guns::gun::FRAME` .. (a magazine-fed gun's last one is
 /// its magazine).
 pub const PISTOL_PARTS: [ItemId; 5] = [PISTOL_FRAME, PISTOL_BARREL, PISTOL_SPRING, PISTOL_SLIDE, PISTOL_MAGAZINE];
 pub const REVOLVER_PARTS: [ItemId; 5] = [REVOLVER_FRAME, REVOLVER_BARREL, REVOLVER_SPRING, REVOLVER_CYLINDER, REVOLVER_HAMMER];
@@ -221,7 +221,7 @@ pub struct WeaponDef {
     /// The gun's item and the round it fires.
     pub item: ItemId,
     pub ammo: ItemId,
-    /// The parts it goes together from at the gun station, in the order of `model::gun::FRAME`
+    /// The parts it goes together from at the gun station, in the order of `model::guns::gun::FRAME`
     /// .. (a magazine-fed gun's last one is its magazine).
     pub parts: &'static [ItemId],
     /// The attachments (`gun_mod` bits) that can be fitted on it.

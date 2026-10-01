@@ -1,5 +1,7 @@
 //! The game's simulation: it runs in fixed steps (`clock`), 20 ticks a second, whatever the
-//! frame rate.
+//! frame rate. The world's rules that the server applies and the players' games foresee alike
+//! (`rules`), trees felled (`felling`) and grenades flying (`grenade`), the same everywhere;
+//! the server that runs a world and its players (`server`); and the time of day (here).
 
 pub mod clock;
 pub mod felling;

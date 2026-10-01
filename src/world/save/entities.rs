@@ -3,7 +3,8 @@
 //! trunks (`notches.txt`) and the trunks of felled trees lying (`logs.txt`).
 
 use super::{dir, parse_pos, pos_str, write};
-use crate::entity::mob::{Mob, MobKind};
+use crate::content::mobs::MobKind;
+use crate::entity::mob::Mob;
 use crate::entity::{BlockEntities, Furnace, ItemEntity};
 use crate::item::{from_key, key, Slot, Stack};
 use glam::{IVec3, Vec3};

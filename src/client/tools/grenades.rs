@@ -23,7 +23,7 @@ use glam::{Mat4, Vec3};
 
 /// The right button held (seconds): the grenade comes up in front, then the other hand
 /// pulls the pin and it is ready to throw once the pin is out; held until `FULL_POWER`,
-/// it is thrown the farthest (`model::grenade`, as the hands show it). How fast it leaves
+/// it is thrown the farthest (`model::guns::grenade`, as the hands show it). How fast it leaves
 /// the hand, the least and the most.
 const PIN_OUT: f32 = RAISE_TIME + 0.35;
 const THROW_SPEED: (f32, f32) = (6.0, 21.0);

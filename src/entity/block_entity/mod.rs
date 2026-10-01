@@ -15,7 +15,7 @@ pub use gun_bench::{bench_event, BenchEvent, BenchItem, GunBench, LOADER_ROUND};
 pub use render::{
     build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow,
     build_table_items, build_table_made, chest_cell, chest_cell_at, chest_cell_size, chest_side,
-    furnace_flame_spot, table_cell, table_cell_at, CHEST_FLOOR, CRAFT_SLIDE, TABLE_CELL,
+    furnace_flame_spot, table_cell, table_cell_at, CRAFT_SLIDE, TABLE_CELL,
 };
 
 use crate::item::{Slot, Stack};
