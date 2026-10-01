@@ -91,10 +91,6 @@ fn messages_roundtrip() {
         seed: 0.25,
         bullets: vec![Vec3::X * 120.0, Vec3::new(0.1, 0.2, 119.0)],
     });
-    roundtrip(Msg::Skin {
-        id: 2,
-        png: vec![137, 80, 78, 71, 0, 255],
-    });
     roundtrip(Msg::Welcome {
         id: 2,
         seed: 99,

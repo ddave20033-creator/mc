@@ -154,14 +154,6 @@ impl Msg {
                 text: chat_text(r.str()?),
                 color: r.take(4)?.try_into().ok()?,
             },
-            42 => {
-                let id = r.u8()?;
-                let png = r.bytes()?;
-                if png.len() > MAX_SKIN_BYTES {
-                    return None;
-                }
-                Msg::Skin { id, png }
-            }
             45 => Msg::Grenade {
                 id: r.u8()?,
                 kind: r.u8()?,

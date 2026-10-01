@@ -2,7 +2,6 @@
 //! back, and what the buttons of a screen ask for (`apply`).
 
 use crate::client::{Game, Screen};
-use crate::app::lang::t;
 use crate::world::save::WorldMeta;
 use crate::ui::screens;
 use crate::ui::screens::Action;
@@ -30,7 +29,6 @@ pub(super) struct Menus {
     pub(super) options: screens::OptionsState,
     pub(super) pack_screen: screens::PackScreen,
     pub(super) menu_preview: screens::PreviewRotation,
-    pub(super) skin_error: String,
     /// Where the title screen's camera is (over the world last played, or a throwaway one).
     pub(super) pano: Vec3,
 }
@@ -54,7 +52,6 @@ impl Menus {
             options: Default::default(),
             pack_screen: Default::default(),
             menu_preview: Default::default(),
-            skin_error: String::new(),
             pano,
         }
     }
@@ -124,41 +121,7 @@ impl Game {
             Action::None => {}
             Action::Singleplayer => self.open_world_list(),
             Action::Multiplayer => self.open_multiplayer(),
-            Action::SkinMenu => {
-                self.menus.skin_error.clear();
-                self.screen = Screen::Skin;
-            }
-            Action::SelectSkin(skin) => {
-                self.settings.skin = skin;
-                self.settings.save();
-                self.screen = Screen::MainMenu;
-            }
-            Action::UploadSkin => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Minecraft skin PNG", &["png"])
-                    .set_title("Skin PNG kiválasztása")
-                    .set_parent(&*self.gfx.window)
-                    .pick_file()
-                {
-                    let result = std::fs::read(&path)
-                        .map_err(|_| "Nem sikerült beolvasni a fájlt.")
-                        .and_then(|data| self.gfx.set_skin_png(0, data.clone()).map(|_| data));
-                    match result {
-                        Ok(data) => {
-                            let _ = std::fs::create_dir_all("skins");
-                            if std::fs::write("skins/custom.png", data).is_ok() {
-                                self.gfx.skins.local_png = std::fs::read("skins/custom.png").ok();
-                                self.settings.skin = 4;
-                                self.settings.save();
-                                self.screen = Screen::MainMenu;
-                            } else {
-                                self.menus.skin_error = t("skin.save_failed").into();
-                            }
-                        }
-                        Err(msg) => self.menus.skin_error = msg.into(),
-                    }
-                }
-            }
+            Action::SkinMenu => self.screen = Screen::Skin,
             Action::OpenLan => self.open_to_lan(),
             Action::Options => {
                 self.screen = Screen::Options {

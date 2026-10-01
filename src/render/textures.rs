@@ -1,5 +1,5 @@
 //! The block texture array while the game runs: single layers replaced in place (the guide
-//! book's pages, icons, skins) and the whole array swapped (a new texture pack).
+//! book's pages, icons) and the whole array swapped (a new texture pack).
 
 use super::Renderer;
 use crate::engine::{Buffer, Gpu, SamplerKind, Texture};
@@ -7,7 +7,6 @@ use crate::textures::TILE;
 use ash::vk;
 
 impl Renderer {
-    /// Rebuild the shared texture array after a player uploads or receives a skin.
     /// Replaces `count` layers of the block texture from `first` on, next frame. `levels`
     /// holds every mip level of them, as `Texture::new` takes them.
     pub fn queue_layers(&mut self, first: u32, count: u32, levels: Vec<Vec<u8>>) {

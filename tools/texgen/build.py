@@ -28,7 +28,7 @@ import importlib  # noqa: E402
 
 import common  # noqa: E402
 
-MODULES = ["terrain", "crafted", "items", "entities", "furnaces"]
+MODULES = ["terrain", "crafted", "items", "entities", "furnaces", "player"]
 MODULE_OF: dict[str, str] = {}
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -85,8 +85,9 @@ REQUIRED: list[tuple[str, tuple[int, int] | None]] = [
     ("entity/chest/normal", (512, 512)),
     ("entity/chest/normal_left", (512, 512)),
     ("entity/chest/normal_right", (512, 512)),
-    ("entity/player/wide/steve", (512, 512)),
     ("entity/pig/pig_temperate", (512, 512)),
+    # player.py
+    ("entity/player/wide/rustcraft", (512, 512)),
     ("entity/sheep/sheep", (512, 256)),
     ("entity/sheep/sheep_wool", (512, 256)),
     ("entity/wolf/wolf", (512, 256)),

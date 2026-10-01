@@ -35,8 +35,8 @@ impl Server {
         let from = feet.unwrap_or_default();
         match m {
             Msg::Pose(mut pose) => {
-                // (a custom skin is in the player's own slot)
-                pose.skin = if pose.skin >= 4 { 4 + id } else { pose.skin.min(3) };
+                // (one skin for now: the game's own)
+                pose.skin = 0;
                 if !known_item(pose.held) {
                     pose.held = crate::item::NONE;
                 }
@@ -248,12 +248,6 @@ impl Server {
                 // (the owner paused: a good moment to save)
                 if on && owner {
                     self.save_all();
-                }
-            }
-            Msg::Skin { png, .. } => {
-                if id < crate::textures::tex::CUSTOM_SKIN_SLOTS && crate::textures::decode_skin_png(&png).is_ok() {
-                    self.skins.insert(id, png.clone());
-                    self.broadcast(&Msg::Skin { id, png }, Some(id));
                 }
             }
             _ => {}

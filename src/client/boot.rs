@@ -26,13 +26,13 @@ const SHORTEST: f32 = 1.6;
 const LONGEST: f32 = 8.0;
 
 impl Boot {
-    /// Starts making the textures (from the enabled resource packs, with the uploaded skins).
-    pub(super) fn start(packs: Vec<String>, skins: std::collections::HashMap<u8, crate::textures::resource_pack::Image>) -> Self {
+    /// Starts making the textures (from the enabled resource packs).
+    pub(super) fn start(packs: Vec<String>) -> Self {
         let (tx, rx) = channel();
         std::thread::spawn(move || {
             let packs = crate::textures::resource_pack::Packs::load(&packs);
             let base = textures::generate_base(&packs);
-            let levels = textures::with_skins(&base, &skins);
+            let levels = textures::levels(&base);
             let _ = tx.send(BootTextures {
                 base,
                 levels,

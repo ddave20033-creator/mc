@@ -86,7 +86,9 @@ if Faithful had made a 128x version).
   wooden handle from bottom left, head at top right, material colors per tier.
 - **Entity atlases** follow Minecraft's UV layout exactly (64-unit atlas, `units * scale` px):
   chest `normal`, `normal_left`, `normal_right` (1.15+ layout, 512x512 = 8 px per unit),
-  `player/wide/steve` (64x64 skin layout at 8x = 512x512; an original Steve-like character),
+  `player/wide/rustcraft` (64x64 skin layout at 8x = 512x512, wide arms; the game's own
+  character, `player.py` - not any Minecraft character - with its outer layer used for what
+  sits on top: goggles, neckerchief, vest, belt, bracers; the game draws it over the base),
   `pig/pig_temperate` (64x64 layout at 8x = 512x512), `sheep/sheep` and `sheep/sheep_wool`
   (64x32 layout at 8x = 512x256), `wolf/wolf*` (64x32 layout at 8x = 512x256). See `src/content/mobs/`, `src/textures/skin_pages.rs` and `src/textures/from_pack.rs`
   for the exact UVs the game reads.

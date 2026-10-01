@@ -33,6 +33,7 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("mobs", include_str!("../../../testbed/mobs.txt")),
     ("book", include_str!("../../../testbed/book.txt")),
     ("station", include_str!("../../../testbed/station.txt")),
+    ("skin", include_str!("../../../testbed/skin.txt")),
 ];
 
 /// The runs that drive the game themselves (no settings saved, the mouse not grabbed, going
@@ -535,7 +536,7 @@ impl Game {
             "multi" => Screen::Multiplayer,
             "skin" => Screen::Skin,
             "dead" => {
-                self.me.vitals.death_message = "Steve fell from a high place".into();
+                self.me.vitals.death_message = t("death.fall").to_string();
                 Screen::Dead
             }
             "inventory" => Screen::Container(Container::Inventory),

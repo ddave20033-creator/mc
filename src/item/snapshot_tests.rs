@@ -221,5 +221,5 @@ fn item_data_and_crafting_are_unchanged() {
     assert_eq!(got, EXPECTED);
 }
 
-const EXPECTED: [u64; 4] = [0xf775067e0b1760d2, 0x5293f6a520c67988, 0x3dbc3468aa2dc181, 0x8af34cec993be3e4];
+const EXPECTED: [u64; 4] = [0x5c3426ba1a7a84d0, 0x5293f6a520c67988, 0x3dbc3468aa2dc181, 0x8af34cec993be3e4];
 

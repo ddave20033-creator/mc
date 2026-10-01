@@ -22,12 +22,7 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("menu.singleplayer", "Singleplayer", "Egyjátékos"),
     ("menu.multiplayer", "Multiplayer", "Többjátékos"),
     ("menu.skin", "Skin", "Skin"),
-    ("skin.classic", "Classic", "Klasszikus"),
-    ("skin.forest", "Forest", "Erdő"),
-    ("skin.red", "Red", "Piros"),
-    ("skin.night", "Night", "Éjszaka"),
-    ("skin.custom", "Custom", "Saját"),
-    ("skin.upload", "Upload PNG", "PNG feltöltése"),
+    ("skin.soon", "Coming soon", "Hamarosan"),
     ("menu.credits", "Credits", "Készítők"),
     ("menu.options", "Options...", "Beállítások..."),
     ("menu.quit", "Quit Game", "Kilépés"),
@@ -241,6 +236,7 @@ const TABLE: &[(&str, &str, &str)] = &[
     // LAN multiplayer
     ("mp.title", "Play Multiplayer", "Többjátékos"),
     ("mp.name", "Player name:", "Játékosnév:"),
+    ("mp.name_hint", "Player", "Játékos"),
     (
         "mp.lan_games",
         "Games on your network",
@@ -293,8 +289,6 @@ const TABLE: &[(&str, &str, &str)] = &[
         "Nem sikerült megnyitni LAN-ra: {}",
     ),
     ("lan.full", "The LAN game is full", "A LAN játék megtelt"),
-    ("skin.too_many", "Too many LAN players.", "Túl sok LAN játékos."),
-    ("skin.save_failed", "Could not save the skin.", "Nem sikerült menteni a skint."),
     (
         "lan.host_left",
         "The host closed the world",

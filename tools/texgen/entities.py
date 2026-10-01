@@ -1,8 +1,9 @@
-"""Entity atlases (chest, player, pig, sheep, wolf) and particles (flame, smoke), in the look of
-Faithful 64x redrawn at our sizes.
+"""Entity atlases (chest, pig, sheep, wolf) and particles (flame, smoke), in the look of
+Faithful 64x redrawn at our sizes. (The player's skin, the game's own character, is in
+`player.py`.)
 
 Atlases use Minecraft's box UV layout (`ModelPart.Cube`, see `src/entity/mob/model.rs` and the mobs in `src/content/mobs/`) in a 64 unit
-wide atlas, all at 8 px per unit (chest, player and pig 512 x 512; sheep, its wool and the wolf
+wide atlas, all at 8 px per unit (chest and pig 512 x 512; sheep, its wool and the wolf
 512 x 256; the game cuts the mobs' faces onto several texture layers, `src/textures/skin_pages.rs`).
 Faithful's atlases are 4 px per unit, so shapes measured on them ("ref px") are doubled here.
 Faces are painted in atlas orientation (the chest is stored upside down).
@@ -263,23 +264,7 @@ def chest_double(seed: int, left: bool) -> np.ndarray:
     return a
 
 
-# ---------------------------------------------------------------------------- player
-
-HAIR = Ramp("#241808", "#2b1e0d", "#332411", "#3f2a15")
-SK = {  # skin tones, light to dark
-    "hi": "#b7836b", "f": "#b3795e", "e": "#aa7259", "d": "#9b6349", "c": "#94603e",
-    "a": "#90593f", "b": "#8f5e3e", "8": "#815339", "2": "#764b33",
-}
-BEARD = ("#492510", "#421d0a")
-SHIRT = {"hi": "#00cccc", "hi2": "#0abcbc", "5": "#00afaf", "4": "#00a4a4", "2": "#049595",
-         "0": "#058888", "d1": "#037a7a", "d2": "#007f7f", "d3": "#006868"}
-PANTS = {"hi": "#463aa5", "m": "#41359b", "d": "#3a3189"}
-SHOE = {"m": "#363636", "d": "#282828", "hi": "#454545"}
-
-
-def hair(seed, h, w):
-    t = aniso(seed, h, w, 4, 2.2) * 0.5 + pix(seed + 1, 1, h, w) * 0.25 + aniso(seed + 2, h, w, 12, 8) * 0.25
-    return canvas(h, w, HAIR.shade(np.clip((t - 0.2) * 1.6, 0, 1), 0.0))
+# ---------------------------------------------------------------------------- shared
 
 
 def set_(img, mask, color):
@@ -288,252 +273,6 @@ def set_(img, mask, color):
     color = np.asarray(color, np.float32)
     img[mask, :3] = color[mask][..., :3] if color.ndim == 3 else color
     img[mask, 3] = 255
-
-
-def head_front(seed):
-    img = hair(seed, 64, 64)
-    ry, rx = refgrid(64, 64, 2)
-    d = np.abs(rx - 16)
-    top = 8 + np.interp(d, [0, 10, 12, 13, 14, 15, 16], [0, 0, 1, 2, 3, 4, 5])
-    skin = ry >= top
-    right = (rx > 21.5 - np.clip(ry - 12, 0, None) * 0.7) | (ry >= 20)
-    set_(img, skin, SK["f"])
-    set_(img, skin & right, SK["e"])
-    hi = ellipse(21, 26, 4, 7, 64, 64) & (pix(seed + 3, 2, 64, 64) > 0.35) & skin
-    set_(img, hi, SK["hi"])
-    hairm = ~skin
-    side_rim = skin & (np.roll(hairm, 2, 1) | np.roll(hairm, -2, 1) | np.roll(hairm, 3, 0))
-    set_(img, side_rim, SK["d"])
-    set_(img, skin & ((rx < 1) | (rx > 31)) & (ry > 13), SK["d"])
-    # eyes (white outside, iris inside), nose, mouth
-    for x0, x1, c in ((4, 8, "#ffffff"), (8, 12, "#523d89"), (20, 24, "#523d89"), (24, 28, "#ffffff")):
-        set_(img, (rx >= x0) & (rx < x1) & (ry >= 16) & (ry < 20), c)
-    set_(img, (rx >= 8) & (rx < 12) & (ry >= 19) & (ry < 20), "#46337a")
-    set_(img, (rx >= 20) & (rx < 24) & (ry >= 19) & (ry < 20), "#46337a")
-    set_(img, (rx >= 12) & (rx < 20) & (ry >= 20) & (ry < 24), "#6a4030")
-    set_(img, (rx >= 12) & (rx < 20) & (ry >= 23.5) & (ry < 24), "#5e3829")
-    # lower cheeks: mottled darker skin
-    low = (ry >= 26) & ((rx < 8) | (rx >= 24))
-    set_(img, low, pick(seed + 4, 64, 64, (SK["b"], SK["a"], SK["8"], SK["d"], SK["c"]), (4, 3, 2, 2, 1)))
-    set_(img, (ry >= 24) & (ry < 26) & ((rx < 2) | (rx >= 30)), SK["d"])
-    # stubble beard around the mouth
-    beard = ((ry >= 24) & (ry < 26) & (((rx >= 9) & (rx < 12)) | ((rx >= 20) & (rx < 23))))
-    beard |= (ry >= 25) & (((rx >= 8) & (rx < 12)) | ((rx >= 20) & (rx < 24)))
-    beard |= (ry >= 28) & (rx >= 8) & (rx < 24)
-    set_(img, beard, pick(seed + 5, 64, 64, BEARD, (3, 2), 2))
-    set_(img, (rx >= 12) & (rx < 20) & (ry >= 24) & (ry < 28), "#774235")
-    set_(img, (rx >= 12) & (rx < 20) & (ry >= 24) & (ry < 25), "#6a3a2e")
-    return img
-
-
-def head_side(seed):
-    """The right side (back of the head on the left, face on the right)."""
-    img = hair(seed, 64, 64)
-    ry, rx = refgrid(64, 64, 2)
-    L = np.interp(ry, [16, 18, 20, 22, 24, 26, 28, 29, 30], [22, 20, 19, 17, 15, 12, 7, 3, 0])
-    R = np.interp(ry, [16, 17, 18, 19, 20, 21, 21.9, 22], [25, 26, 27, 28, 28, 29, 29, 33])
-    skin = (ry >= 16) & (rx >= L) & (rx < R)
-    set_(img, skin, SK["d"])
-    rim = skin & (np.roll(~skin, 2, 1) | np.roll(~skin, 2, 0))
-    set_(img, rim, pick(seed + 1, 64, 64, (SK["a"], SK["8"]), (2, 1), 1))
-    corner = skin & (rx > 23) & (ry > 26 - (rx - 23) * 0.3)
-    set_(img, corner, pick(seed + 2, 64, 64, (SK["b"], SK["8"], SK["d"]), (3, 2, 1)))
-    return img
-
-
-def head_bottom(seed):
-    ry, rx = refgrid(64, 64, 2)
-    img = canvas(64, 64, pick(seed, 64, 64, (SK["8"],), None))
-    inner = ((np.abs(rx - 16) / 12) ** 4 + (np.abs(ry - 13) / 10) ** 4) < 1
-    set_(img, inner, SK["2"])
-    corners = (ry > 20) & ~inner & (np.abs(rx - 16) > 9)
-    set_(img, corners, SK["a"])
-    low = ry >= 27
-    set_(img, low, pick(seed + 1, 64, 64, (SK["8"], SK["b"], SK["a"]), (3, 2, 1)))
-    beard = (np.abs(rx - 16) < 9) & (ry >= 28)
-    set_(img, beard, BEARD[1])
-    set_(img, (np.abs(rx - 16) < 8) & (ry >= 28.5), BEARD[0])
-    return img
-
-
-def shirt_tex(seed, h, w, base="5", fold="4"):
-    n = aniso(seed, h, w, 18, 3.5)
-    rgb = np.where((n < 0.36)[..., None], hexc(SHIRT[fold]), hexc(SHIRT[base]))
-    fine = aniso(seed + 1, h, w, 5, 1.5) > 0.82
-    rgb[fine] = hexc(SHIRT[fold])
-    return canvas(h, w, rgb)
-
-
-def pants_tex(seed, h, w, lines=True):
-    n = aniso(seed, h, w, 14, 6)
-    rgb = np.where((n > 0.64)[..., None], hexc(PANTS["hi"]), hexc(PANTS["m"]))
-    img = canvas(h, w, rgb)
-    if lines:  # a few vertical folds
-        r = rng(seed + 1)
-        yy, xx = grid(h, w)
-        for _ in range(max(1, w // 14)):
-            x0, y0 = r.uniform(3, w - 3), r.uniform(0, h * 0.5)
-            L, bend = r.uniform(h * 0.25, h * 0.6), r.uniform(-3, 3)
-            t = np.clip((yy - y0) / L, 0, 1)
-            m = (np.abs(xx - (x0 + bend * t * t)) < 1) & (yy >= y0) & (yy < y0 + L)
-            set_(img, m, PANTS["d"])
-    return img
-
-
-def hem(img, seed, y0, tail=None):
-    """Trousers below row `y0`; `tail` = (x0, x1, tip_x, depth): a shirt tail over them."""
-    h, w = img.shape[:2]
-    shirt = img.copy()
-    img[y0:] = pants_tex(seed + 1, h - y0, w, lines=False)
-    img[y0 : y0 + 2, :, :3] = hexc(PANTS["d"])
-    if tail:
-        x0, x1, tx, dep = tail
-        m = polygon([(x0, y0 - 1), (x1, y0 - 1), (x1, y0 + dep * 0.4), (tx, y0 + dep), (x0, y0 + 1)], h, w)
-        img[m] = shirt[np.clip(np.where(m)[0] - 12, 0, None), np.where(m)[1]]
-        edge = m & ~ndimage.binary_erosion(m, np.ones((3, 3), bool)) & (grid(h, w)[0] > y0)
-        set_(img, edge, SHIRT["0"])
-        below = np.roll(m, 2, 0) & ~m & (grid(h, w)[0] > y0)
-        set_(img, below, PANTS["d"])
-
-
-def spikes(img, seed, cy, colors=("0", "d1")):
-    """Faithful's dark zigzag band across the shirt's sides."""
-    h, w = img.shape[:2]
-    r = rng(seed)
-    for layer, c in enumerate(colors):
-        x = -2.0
-        while x < w:
-            bw = r.uniform(3, 6) * (1 - layer * 0.35)
-            up = r.uniform(10, 26) * (1 - layer * 0.4)
-            dn = r.uniform(10, 24) * (1 - layer * 0.4)
-            m = polygon([(x, cy), (x + bw / 2, cy - up), (x + bw, cy), (x + bw / 2, cy + dn)], h, w)
-            set_(img, m, SHIRT[c])
-            x += bw * r.uniform(0.7, 1.1)
-
-
-def body_faces(seed):
-    k = 8
-    f = {}
-    # top: shirt shoulders with the neck opening
-    top = shirt_tex(seed, 32, 64)
-    ry, rx = refgrid(32, 64, 2)
-    hole = ((rx - 16) / 13.0) ** 2 + ((ry - 8) / 9.5) ** 2 < 1
-    set_(top, grow(hole, 2) & ~hole & (rx < 16), SHIRT["hi"])
-    set_(top, hole, SK["d"])
-    set_(top, ((rx - 16) / 9.5) ** 2 + ((ry - 8.5) / 7.5) ** 2 < 1, SK["a"])
-    set_(top, hole & ~(((rx - 16.5) / 12.2) ** 2 + ((ry - 8.5) / 9) ** 2 < 1) & (rx > 16), SK["e"])
-    f["top"] = top
-    # front: V neck, folds, trousers at the bottom
-    fr = shirt_tex(seed + 1, 96, 64)
-    ry, rx = refgrid(96, 64, 2)
-    set_(fr, (rx < 2) | ((rx < 4) & (ry > 30)), SHIRT["2"])
-    hw = np.interp(ry, [0, 4, 6, 8.5], [10, 6, 3, 0])
-    vn = np.abs(rx - 16) < hw
-    set_(fr, grow(vn, 3) & ~vn, SHIRT["2"])
-    set_(fr, grow(vn, 1) & ~vn & (ry > 2), SHIRT["0"])
-    set_(fr, vn, SK["d"])
-    set_(fr, vn & (np.abs(rx - 16) > hw - 1) & (rx > 16), SK["e"])
-    hem(fr, seed + 2, 80, (30, 60, 46, 12))
-    f["front"] = fr
-    for name, s in (("right", 3), ("left", 4)):
-        sd = shirt_tex(seed + s, 96, 32, "2", "0")
-        spikes(sd, seed + s + 10, 49)
-        hem(sd, seed + s + 20, 80)
-        f[name] = sd if name == "right" else sd[:, ::-1].copy()
-    bk = shirt_tex(seed + 5, 96, 64)
-    ry, rx = refgrid(96, 64, 2)
-    set_(bk, rx >= 30, SHIRT["2"])
-    spikes(bk, seed + 15, 49, ("4",))
-    hem(bk, seed + 6, 80, (4, 34, 18, 10))
-    f["back"] = bk
-    f["bottom"] = canvas(32, 64, np.broadcast_to(hexc(PANTS["d"]), (32, 64, 3)).copy())
-    return f
-
-
-def creases(img, seed, n, y_range, color):
-    """Short vertical skin creases, some forking (Faithful's arm lines)."""
-    h, w = img.shape[:2]
-    r = rng(seed)
-    yy, xx = grid(h, w)
-    for _ in range(n):
-        x, y0 = r.uniform(2, w - 2), r.uniform(*y_range)
-        L = r.uniform(8, 22)
-        set_(img, (np.abs(xx - x) < 1) & (yy >= y0) & (yy < min(h - 1, y0 + L)), color)
-        if r.random() < 0.6:
-            d = r.choice([-1, 1])
-            set_(img, thick_line((x, y0 + L * 0.5), (x + d * 4, y0 + L * 0.5 - 6), 2, h, w), color)
-
-
-def arm_faces(seed, inner_face="left"):
-    f = {}
-    for i, name in enumerate(("right", "front", "left", "back")):
-        inner = name == inner_face
-        img = canvas(96, 32, np.broadcast_to(hexc(SK["d"] if inner else SK["e"]), (96, 32, 3)).copy())
-        creases(img, seed + i, 5, (40, 80), SK["a"] if inner else SK["d"])
-        sleeve = shirt_tex(seed + 10 + i, 96, 32, "d2" if inner else "5", "d3" if inner else "4")
-        img[:36] = sleeve[:36]
-        set_(img, (grid(96, 32)[0] >= 33) & (grid(96, 32)[0] < 36), SHIRT["d3"] if inner else SHIRT["2"])
-        set_(img, (grid(96, 32)[0] >= 36) & (grid(96, 32)[0] < 38), SK["a"] if inner else SK["d"])
-        if inner:
-            set_(img, (np.abs(grid(96, 32)[1] - 16) < 7) & (grid(96, 32)[0] > 12) & (grid(96, 32)[0] < 34), SHIRT["d3"])
-        else:
-            for k in range(3):
-                x0 = 4 + k * 9 + i * 2
-                set_(img, thick_line((x0, 26), (x0 + 5, 8), 2, 96, 32), SHIRT["hi2"])
-        f[name] = img
-    top = shirt_tex(seed + 30, 32, 32)
-    set_(top, thick_line((5, 26), (26, 6), 2.5, 32, 32), SHIRT["hi2"])
-    set_(top, thick_line((4, 14), (14, 4), 2, 32, 32), SHIRT["hi2"])
-    f["top"] = top
-    hand = canvas(32, 32, np.broadcast_to(hexc(SK["e"]), (32, 32, 3)).copy())
-    for y in (6, 13, 20):
-        set_(hand, (np.abs(grid(32, 32)[0] - y) < 1) & (grid(32, 32)[1] > 20), SK["d"])
-    f["bottom"] = hand
-    return f
-
-
-def leg_faces(seed):
-    f = {}
-    for i, name in enumerate(("right", "front", "left", "back")):
-        img = pants_tex(seed + i, 96, 32)
-        yy, xx = grid(96, 32)
-        if name == "front":
-            smile = (np.abs(np.hypot((xx - 16) / 1.3, (yy - 30) * 1.0) - 12) < 1) & (yy > 32)
-            set_(img, smile, PANTS["d"])
-        # shoes: bottom 2 units with a rounded top edge
-        top = 80 + 3 * (np.abs(xx - 16) / 16) ** 2
-        sh = yy >= top
-        set_(img, sh, pick(seed + 10 + i, 96, 32, (SHOE["m"], SHOE["hi"]), (12, 1)))
-        set_(img, sh & (yy < top + 2), SHOE["d"])
-        set_(img, sh & (yy >= 94), SHOE["d"])
-        f[name] = img
-    f["top"] = canvas(32, 32, np.broadcast_to(hexc(PANTS["d"]), (32, 32, 3)).copy())
-    sole = canvas(32, 32, np.broadcast_to(hexc(SHOE["m"]), (32, 32, 3)).copy())
-    yy, xx = grid(32, 32)
-    set_(sole, ((yy.astype(int) // 2) % 3 == 0), SHOE["d"])
-    f["bottom"] = sole
-    return f
-
-
-def steve(seed: int) -> np.ndarray:
-    k = 8
-    a = blank(512, 512)
-    hd = box_uv(0, 0, 8, 8, 8)
-    put(a, hair(seed + 1, 64, 64), *hd["top"][:2], k)
-    put(a, hair(seed + 2, 64, 64), *hd["back"][:2], k)
-    put(a, head_front(seed + 3), *hd["front"][:2], k)
-    put(a, head_side(seed + 4), *hd["right"][:2], k)
-    put(a, head_side(seed + 5)[:, ::-1], *hd["left"][:2], k)
-    put(a, head_bottom(seed + 6), *hd["bottom"][:2], k)
-    for name, img in body_faces(seed + 10).items():
-        put(a, img, *box_uv(16, 16, 8, 12, 4)[name][:2], k)
-    for s, (u, v) in enumerate(((40, 16), (32, 48))):
-        for name, img in arm_faces(seed + 40 + s * 50, "left" if s == 0 else "right").items():
-            put(a, img, *box_uv(u, v, 4, 12, 4)[name][:2], k)
-    for s, (u, v) in enumerate(((0, 16), (16, 48))):
-        for name, img in leg_faces(seed + 150 + s * 50).items():
-            put(a, img, *box_uv(u, v, 4, 12, 4)[name][:2], k)
-    return a
 
 
 # ---------------------------------------------------------------------------- pig
@@ -1466,7 +1205,6 @@ TEXTURES = {
     "entity/chest/normal": chest_single,
     "entity/chest/normal_left": lambda s: chest_double(s, True),
     "entity/chest/normal_right": lambda s: chest_double(s, False),
-    "entity/player/wide/steve": steve,
     "entity/pig/pig_temperate": pig,
     "entity/sheep/sheep": sheep,
     "entity/sheep/sheep_wool": sheep_wool,
@@ -1505,8 +1243,6 @@ def _previews():
         "entity/chest/normal": [box_uv(0, 0, 2, 4, 1), box_uv(0, 0, 14, 5, 14), box_uv(0, 19, 14, 10, 14)],
         "entity/chest/normal_left": [box_uv(0, 0, 1, 4, 1), box_uv(0, 0, 15, 5, 14), box_uv(0, 19, 15, 10, 14)],
         "entity/chest/normal_right": [box_uv(0, 0, 1, 4, 1), box_uv(0, 0, 15, 5, 14), box_uv(0, 19, 15, 10, 14)],
-        "entity/player/wide/steve": [box_uv(0, 0, 8, 8, 8), box_uv(16, 16, 8, 12, 4), box_uv(40, 16, 4, 12, 4),
-                                     box_uv(0, 16, 4, 12, 4), box_uv(32, 48, 4, 12, 4), box_uv(16, 48, 4, 12, 4)],
         "entity/pig/pig_temperate": [box_uv(0, 0, 8, 8, 8), box_uv(16, 16, 4, 3, 1), box_uv(28, 8, 10, 16, 8),
                                      box_uv(0, 16, 4, 6, 4)],
         "entity/sheep/sheep": [box_uv(0, 0, 6, 6, 8), box_uv(28, 8, 8, 16, 6), box_uv(0, 16, 4, 12, 4)],

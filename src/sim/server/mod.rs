@@ -42,6 +42,8 @@ use std::time::{Duration, Instant};
 const AUTOSAVE_SECONDS: f32 = 60.0;
 /// Seconds everyone has to be asleep before the morning comes (Minecraft: 100 ticks).
 const SKIP_AFTER: f32 = 5.0;
+/// Most players in a world: the host and up to 15 LAN guests (player ids 0..16).
+const MAX_PLAYERS: u8 = 16;
 
 /// What the world holds besides its blocks, on the server.
 pub(crate) struct Level {
@@ -189,9 +191,8 @@ pub(crate) struct Server {
     saver: ChunkSaver,
     next_entity_id: u32,
     pub rng: Rng,
-    // The players, and their skins (PNGs, by player).
+    // The players.
     peers: Vec<Peer>,
-    skins: FastMap<u8, Vec<u8>>,
     lan: Option<crate::net::Server>,
     /// Crafting table grids and furnaces as the players last got them.
     tables_sent: FastMap<IVec3, [crate::item::Slot; 9]>,
@@ -228,7 +229,6 @@ impl Server {
             next_entity_id: 0,
             rng: Rng::new(crate::world::save::now_secs() as u32 ^ meta.seed),
             peers: Vec::new(),
-            skins: FastMap::default(),
             lan: None,
             tables_sent: FastMap::default(),
             furnaces_sent: FastMap::default(),

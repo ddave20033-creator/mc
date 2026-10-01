@@ -3,10 +3,13 @@
 
 use super::*;
 
-pub(super) const HAIR_C: [f32; 3] = [66.0, 42.0, 24.0];
-pub(super) const SKIN_C: [f32; 3] = [206.0, 150.0, 112.0];
-pub(super) const SHIRT_C: [f32; 3] = [40.0, 150.0, 162.0];
-pub(super) const PANTS_C: [f32; 3] = [56.0, 64.0, 150.0];
+// The game's own character in plain colors (the built-in pack's skin, `tools/texgen/player.py`,
+// draws it in detail): copper hair, a linen shirt, a rust leather vest, olive trousers, boots.
+pub(super) const HAIR_C: [f32; 3] = [118.0, 52.0, 27.0];
+pub(super) const SKIN_C: [f32; 3] = [214.0, 158.0, 124.0];
+pub(super) const SHIRT_C: [f32; 3] = [214.0, 203.0, 168.0];
+pub(super) const PANTS_C: [f32; 3] = [78.0, 83.0, 56.0];
+const VEST_C: [f32; 3] = [140.0, 70.0, 38.0];
 
 /// Character skin textures, drawn on an 8x8 grid of 16-pixel cells like a classic blocky skin.
 pub(super) fn character(l: u32, x: i32, y: i32) -> [u8; 4] {
@@ -18,7 +21,7 @@ pub(super) fn character(l: u32, x: i32, y: i32) -> [u8; 4] {
             (_, 0) | (_, 1) => c(HAIR_C, 1.0),
             (0 | 7, 2) => c(HAIR_C, 0.9),
             (1, 4) | (6, 4) => col([238.0, 238.0, 240.0], 1.0, UNTINTED),
-            (2, 4) | (5, 4) => col([62.0, 84.0, 170.0], 1.0, UNTINTED),
+            (2, 4) | (5, 4) => col([67.0, 121.0, 61.0], 1.0, UNTINTED),
             (3 | 4, 5) => c(SKIN_C, 0.86),
             (3 | 4, 6) => c([120.0, 66.0, 52.0], 1.0),
             _ => c(SKIN_C, 1.0),
@@ -33,11 +36,13 @@ pub(super) fn character(l: u32, x: i32, y: i32) -> [u8; 4] {
         tex::SHIRT_FRONT => {
             if cy == 0 && (3..=4).contains(&cx) {
                 c(SKIN_C, 0.95)
+            } else if !(3..=4).contains(&cx) {
+                c(VEST_C, 1.0)
             } else {
                 c(SHIRT_C, 1.0)
             }
         }
-        tex::SHIRT => c(SHIRT_C, 0.95),
+        tex::SHIRT => c(VEST_C, 0.95),
         tex::ARM => {
             if y < 44 {
                 c(SHIRT_C, 0.95)
@@ -49,7 +54,7 @@ pub(super) fn character(l: u32, x: i32, y: i32) -> [u8; 4] {
             if y < 104 {
                 c(PANTS_C, 1.0)
             } else {
-                c([86.0, 86.0, 92.0], 1.0)
+                c([94.0, 61.0, 38.0], 1.0)
             }
         }
     }

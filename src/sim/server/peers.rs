@@ -141,7 +141,7 @@ impl Server {
         let Some(lan) = &self.lan else { return };
         for stream in lan.accept() {
             let Ok(mut conn) = Conn::new(stream) else { continue };
-            let Some(id) = (0..crate::textures::tex::CUSTOM_SKIN_SLOTS).find(|id| self.peers.iter().all(|p| p.id != *id)) else {
+            let Some(id) = (0..super::MAX_PLAYERS).find(|id| self.peers.iter().all(|p| p.id != *id)) else {
                 conn.send(&Msg::Refuse(t("lan.full").to_string()));
                 conn.close();
                 continue;
@@ -286,7 +286,6 @@ impl Server {
             .filter(|p| p.joined)
             .map(|p| Msg::Join { id: p.id, name: p.name.clone() })
             .collect();
-        others.extend(self.skins.iter().map(|(&id, png)| Msg::Skin { id, png: png.clone() }));
         others.extend(self.level.block_entities.benches.iter().map(|(p, b)| Msg::Bench { p: *p, bench: b.clone() }));
         others.extend(self.level.block_entities.tables.iter().map(|(p, grid)| table_msg(*p, grid)));
         others.extend(self.level.block_entities.furnaces.iter().map(|(p, f)| furnace_msg(*p, f)));
@@ -344,7 +343,6 @@ impl Server {
                 self.save_player(&peer.name, s);
             }
         }
-        self.skins.remove(&id);
         self.broadcast(&Msg::Leave { id }, None);
         if !peer.owner {
             self.announce(tf("lan.left", &[&peer.name]), YELLOW);

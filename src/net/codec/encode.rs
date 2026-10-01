@@ -266,11 +266,6 @@ impl Msg {
                 w.str(text);
                 w.0.extend_from_slice(color);
             }
-            Msg::Skin { id, png } => {
-                w.u8(42);
-                w.u8(*id);
-                w.bytes(png);
-            }
             Msg::Grenade {
                 id,
                 kind,

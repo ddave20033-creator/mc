@@ -33,7 +33,6 @@ pub struct Settings {
     pub resource_packs: Vec<String>,
     /// Player name shown to others in LAN games.
     pub name: String,
-    pub skin: u8,
     pub keys: KeyMap,
     /// Volumes in percent: overall, weapons (guns, grenades), everything else.
     pub volume: f32,
@@ -60,7 +59,6 @@ impl Default for Settings {
             dark_ui: false,
             resource_packs: Vec::new(),
             name: default_name(),
-            skin: 0,
             keys: KeyMap::default(),
             volume: 80.0,
             volume_weapons: 100.0,
@@ -95,7 +93,6 @@ impl Settings {
                     "language" => s.hungarian = v == "hu",
                     "dark_ui" => s.dark_ui = b,
                     "name" if !v.is_empty() => s.name = v.chars().take(16).collect(),
-                    "skin" => s.skin = v.parse().unwrap_or(0),
                     "volume" => s.volume = v.parse().unwrap_or(s.volume),
                     "volume_weapons" => s.volume_weapons = v.parse().unwrap_or(s.volume_weapons),
                     "volume_other" => s.volume_other = v.parse().unwrap_or(s.volume_other),
@@ -133,7 +130,6 @@ impl Settings {
         }
         // Always on: 2x at least.
         s.msaa = [2, 4, 8].into_iter().rfind(|&n| n <= s.msaa).unwrap_or(2);
-        s.skin = s.skin.min(crate::textures::tex::SKIN_COUNT - 1);
         crate::app::lang::set_hungarian(s.hungarian);
         s
     }
@@ -141,7 +137,7 @@ impl Settings {
     pub fn save(&self) {
         let mut text = format!(
             "fov:{}\nsensitivity:{}\nrender_distance:{}\ngui_scale:{}\nfullscreen:{}\nfps_limit:{}\nantialiasing:{}\nshow_fps:{}\n\
-             shadows:{}\nclouds:{}\nview_bobbing:{}\nfirst_person_body:{}\nlanguage:{}\ndark_ui:{}\nresource_packs:{}\nname:{}\nskin:{}\n\
+             shadows:{}\nclouds:{}\nview_bobbing:{}\nfirst_person_body:{}\nlanguage:{}\ndark_ui:{}\nresource_packs:{}\nname:{}\n\
              volume:{}\nvolume_weapons:{}\nvolume_other:{}\n",
             self.fov,
             self.sensitivity,
@@ -159,7 +155,6 @@ impl Settings {
             self.dark_ui,
             self.resource_packs.join("|"),
             self.name,
-            self.skin,
             self.volume,
             self.volume_weapons,
             self.volume_other

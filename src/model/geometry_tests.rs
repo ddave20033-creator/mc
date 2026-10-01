@@ -358,15 +358,15 @@ fn groups() -> Vec<(&'static str, u64)> {
 
 /// The hashes as the models were before their shared pieces were merged into `prim`.
 const EXPECTED: [(&str, u64); 9] = [
-    ("items", 0xfa1c1547f1b81e83),
+    ("items", 0x6ec90930ec33c983),
     ("logs", 0x0660b16dd6a12110),
-    ("players", 0xe3ca5a17bd4b7933),
-    ("hands", 0xc61a12322bfd8c68),
-    ("block_entities", 0xc217f7d52ef0b0e4),
-    ("mobs", 0x1083b750e4ad0fa2),
-    ("lanterns_buckets", 0x0187d9767c083298),
-    ("gun_stations", 0x0d93fe35725e60aa),
-    ("gun_fx", 0xbd26d53969799bed),
+    ("players", 0xdbfa0b0dfd0ac3bb),
+    ("hands", 0x878dd245685b1148),
+    ("block_entities", 0x6b356808ea31f950),
+    ("mobs", 0x91bddad72a1fd33e),
+    ("lanterns_buckets", 0x45576524898178b0),
+    ("gun_stations", 0x2210e6ee1c04734e),
+    ("gun_fx", 0xe3b6502c982d64f1),
 ];
 
 #[test]

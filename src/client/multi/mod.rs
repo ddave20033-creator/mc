@@ -131,11 +131,6 @@ impl Session {
             ..Self::new()
         };
     }
-
-    /// This player's id on the server (0 out of a world).
-    pub(super) fn my_id(&self) -> u8 {
-        self.net.as_ref().map_or(0, |c| c.id)
-    }
 }
 
 fn color_bytes(c: Color) -> [u8; 4] {
@@ -493,10 +488,9 @@ impl Game {
         }
     }
 
-    /// Another player left: their model and skin go.
+    /// Another player left: their model goes.
     fn remove_remote(&mut self, id: u8) {
         self.session.remotes.retain(|r| r.id != id);
-        self.gfx.remove_skin(id);
     }
 
     fn add_remote(&mut self, id: u8, name: String) {

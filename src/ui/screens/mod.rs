@@ -27,8 +27,6 @@ pub enum Action {
     Language,
     Multiplayer,
     SkinMenu,
-    SelectSkin(u8),
-    UploadSkin,
     /// Pause menu: open this world to the LAN.
     OpenLan,
     /// Open a web page in the browser (clicked link).

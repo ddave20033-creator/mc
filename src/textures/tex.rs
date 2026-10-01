@@ -111,18 +111,11 @@ pub const IRON_NUGGET: u32 = SPARE_PIG + 8;
 /// Lantern block texture (Minecraft layout: body, cap, handle), and a chain.
 pub const LANTERN: u32 = SPARE_PIG + 9;
 pub const CHAIN: u32 = SPARE_PIG + 10;
-pub const SKIN_VARIANTS: u32 = CHAIN + 1;
-pub const SKIN_VARIANT_LAYERS: u32 = 5;
-pub const PRESET_SKINS: u8 = 4;
-pub const SKIN_COUNT: u8 = 5; // four outfits and one uploaded skin
-pub const CUSTOM_SKIN_START: u32 = SKIN_VARIANTS + SKIN_VARIANT_LAYERS * 3;
-pub const CUSTOM_SKIN_LAYERS: u32 = 11;
-pub const CUSTOM_SKIN_SLOTS: u8 = 16; // host and up to 15 LAN guests
 /// Double chest faces: CHEST_FRONT, CHEST_SIDE (the back), CHEST_TOP and CHEST_INSIDE
 /// without the frame on the edge where the two halves meet (see
 /// `crate::world::mesh::chest_open_layer`), 4 edges each (right, left, top, bottom of the
 /// texture).
-pub const CHEST_OPEN: u32 = CUSTOM_SKIN_START + CUSTOM_SKIN_LAYERS * CUSTOM_SKIN_SLOTS as u32;
+pub const CHEST_OPEN: u32 = CHAIN + 1;
 pub const DOOR_TOP: u32 = CHEST_OPEN + 16;
 pub const DOOR_BOTTOM: u32 = DOOR_TOP + 1;
 pub const DOOR_ITEM: u32 = DOOR_TOP + 2;

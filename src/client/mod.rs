@@ -22,7 +22,7 @@ mod update;
 mod worlds;
 
 use frame::FrameClock;
-use gfx::{Gfx, Skins};
+use gfx::Gfx;
 use gui::hud::Hud;
 use gui::{station, BenchUi, InventoryUi};
 use input::Input;
@@ -38,7 +38,6 @@ use crate::app::settings::Settings;
 use crate::ui::{Color, Ui};
 use crate::ui::chat::Chat;
 use crate::util::Rng;
-use crate::textures;
 use crate::world::gen::SEA;
 use crate::world::terrain::Terrain;
 use glam::{IVec3, Vec3};
@@ -157,19 +156,15 @@ impl Game {
         test: Option<(String, Option<std::path::PathBuf>)>,
     ) -> Self {
         let bench = bench || shots.is_some();
-        let mut settings = Settings::load();
-        let skins = Skins::load();
-        if settings.skin == 4 && !skins.custom.contains_key(&0) {
-            settings.skin = 0;
-        }
+        let settings = Settings::load();
         if settings.fullscreen && !bench {
             window.set_fullscreen(Some(Fullscreen::Borderless(None)));
         }
         let ui = Ui::new();
         // The textures are made on another thread while the start-up screen shows the logo
         // (the only textures it needs); they replace these when they are ready.
-        let boot = boot::Boot::start(settings.resource_packs.clone(), skins.custom.clone());
-        let gfx = Gfx::new(window, settings.msaa, &ui.font.atlas, skins);
+        let boot = boot::Boot::start(settings.resource_packs.clone());
+        let gfx = Gfx::new(window, settings.msaa, &ui.font.atlas);
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u32)
@@ -265,18 +260,9 @@ impl Game {
         self.me.spectator()
     }
 
-    /// The skin this player is drawn with: the chosen one, or the uploaded one in this
-    /// player's own slot (the default when there are too many players for slots).
+    /// The skin this player is drawn with: the game's own (the skin choice comes later).
     fn effective_skin(&self) -> u8 {
-        if self.settings.skin != 4 {
-            return self.settings.skin;
-        }
-        let id = self.session.my_id();
-        if id < textures::tex::CUSTOM_SKIN_SLOTS {
-            4 + id
-        } else {
-            0
-        }
+        0
     }
 
     /// Remakes the textures from the enabled resource packs (after the pack screen).

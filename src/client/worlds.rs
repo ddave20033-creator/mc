@@ -273,7 +273,6 @@ impl Game {
         self.me = Me::new(self.settings.fov);
         self.tools = Tools::default();
         self.session.forget_world();
-        self.gfx.forget_other_skins();
         self.chat = Chat::new();
         self.station = None;
         self.inv_ui.forget_world();

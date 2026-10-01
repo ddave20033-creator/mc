@@ -2,7 +2,7 @@
 //! the layers). Every layer is drawn procedurally first (`procedural`), then replaced by the
 //! resource packs' texture where they have one (`from_pack`; the packs themselves, zip files
 //! or folders, are read by `resource_pack`); the layers made from others follow (`synth`,
-//! `icons`, `skins`, `logo`), and the mipmaps (`mips`) and the item sprite masks (`masks`)
+//! `icons`, `logo`), and the mipmaps (`mips`) and the item sprite masks (`masks`)
 //! are made from the result. `skin_pages` lays the detailed mob skins out over several
 //! layers (used by `from_pack` and by the mob models).
 
@@ -14,7 +14,6 @@ mod mips;
 mod procedural;
 pub mod resource_pack;
 pub mod skin_pages;
-mod skins;
 mod synth;
 pub mod tex;
 
@@ -24,13 +23,11 @@ use masks::update_item_masks;
 use mips::{is_cutout, mip_chain};
 use procedural::{crack_pattern, pixel};
 use resource_pack::{Image, Packs};
-use skins::{skin_slot_layers, synth_outfits};
 use synth::*;
 
 pub use icons::render_icon;
 pub use logo::{logo_layers, logo_levels};
 pub use masks::{ITEM_MASKS, ITEM_MASKS_VERSION, MASK};
-pub use skins::{decode_skin_png, skin_layer, skin_slot_levels};
 pub use tex::tool_layer;
 
 pub const TILE: usize = 128;
@@ -40,10 +37,16 @@ const UNTINTED: u8 = 153;
 /// Smoke particle sprites, like Minecraft's generic_0..7.
 pub const SMOKE_FRAMES: u32 = 8;
 
-/// The full mip chain without uploaded skins.
+/// The full mip chain.
 #[cfg(test)]
 pub fn generate(packs: &Packs) -> Vec<Vec<u8>> {
-    with_skins(&generate_base(packs), &std::collections::HashMap::new())
+    levels(&generate_base(packs))
+}
+
+/// A layer of the player's skin `skin`. Every player wears the game's own skin for now (the
+/// skin choice comes later; `PlayerPose::skin` and the network's keep its place).
+pub fn skin_layer(layer: u32, _skin: u8) -> u32 {
+    layer
 }
 
 /// How far the textures being made have got (0..1): the layers drawn, then the rest.
@@ -57,9 +60,9 @@ pub fn progress() -> f32 {
     f32::from_bits(PROGRESS.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// Every layer at full size except the uploaded skins: the procedural textures, replaced by
-/// the resource packs' where they have them. This is the slow part; `with_skins` finishes it,
-/// so a new skin does not have to redo it.
+/// Every layer at full size: the procedural textures, replaced by the resource packs' where
+/// they have them, and the layers made from those. This is the slow part; `levels` finishes
+/// it.
 pub fn generate_base(packs: &Packs) -> Vec<u8> {
     let crack = crack_pattern();
     let layers = tex::LAYERS;
@@ -94,8 +97,8 @@ fn procedural_layers(base: &mut [u8], given: &[bool], crack: &[u16]) {
             let batch: Vec<(usize, &mut [u8])> = chunks.drain(..per.min(chunks.len())).collect();
             scope.spawn(move || {
                 for (l, out) in batch {
-                    // Uploaded skins and the double chest faces are filled in later.
-                    if (tex::CUSTOM_SKIN_START..tex::DOOR_TOP).contains(&(l as u32)) || given[l] {
+                    // The double chest faces are filled in later.
+                    if (tex::CHEST_OPEN..tex::DOOR_TOP).contains(&(l as u32)) || given[l] {
                         continue;
                     }
                     for y in 0..TILE {
@@ -148,22 +151,15 @@ fn finish_base(mut base: Vec<u8>) -> Vec<u8> {
     }
     synth_furnace_inside(&mut base);
     synth_fluid_frames(&mut base);
-    synth_outfits(&mut base);
     synth_double_chest(&mut base);
     base
 }
 
-/// The full mip chain (each level holds all layers back to back): `generate_base` with the
-/// uploaded skins (by player slot) filled in.
-pub fn with_skins(base: &[u8], skins: &std::collections::HashMap<u8, Image>) -> Vec<Vec<u8>> {
-    let mut base = base.to_vec();
-    for slot in 0..tex::CUSTOM_SKIN_SLOTS {
-        let (first, layers) = skin_slot_layers(&base, slot, skins.get(&slot));
-        let at = first as usize * TILE * TILE * 4;
-        base[at..at + layers.len()].copy_from_slice(&layers);
-    }
-    update_item_masks(&base);
-    mip_chain(base, 0)
+/// The full mip chain of `generate_base`'s layers (each level holds all layers back to
+/// back); the item sprite masks are made from them too.
+pub fn levels(base: &[u8]) -> Vec<Vec<u8>> {
+    update_item_masks(base);
+    mip_chain(base.to_vec())
 }
 
 #[cfg(test)]
@@ -180,51 +176,6 @@ mod tests {
         procedural_layers(&mut slow, &vec![false; tex::LAYERS], &crack_pattern());
         apply_pack(&packs, &mut slow);
         assert!(fast == finish_base(slow));
-    }
-
-    #[test]
-    fn uploaded_skin_maps_its_face_and_clothes_to_own_slot() {
-        let mut png_data = Vec::new();
-        {
-            let mut encoder = png::Encoder::new(&mut png_data, 64, 64);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder.write_header().unwrap();
-            let mut pixels = vec![0u8; 64 * 64 * 4];
-            for p in pixels.chunks_exact_mut(4) {
-                p.copy_from_slice(&[32, 144, 220, 255]);
-            }
-            writer.write_image_data(&pixels).unwrap();
-        }
-        let skin = decode_skin_png(&png_data).unwrap();
-        let mut skins = std::collections::HashMap::new();
-        skins.insert(2, skin);
-        let levels = with_skins(&generate_base(&Packs::none()), &skins);
-        let offset = skin_layer(tex::FACE, 6) as usize * TILE * TILE * 4;
-        assert_eq!(&levels[0][offset..offset + 4], &[32, 144, 220, 255]);
-        assert_ne!(skin_layer(tex::FACE, 6), skin_layer(tex::FACE, 5));
-    }
-
-    #[test]
-    fn outfits_have_distinct_cloth_and_shared_face() {
-        let levels = generate(&Packs::none());
-        let base = &levels[0];
-        let bytes = TILE * TILE * 4;
-        let pixel = |layer: u32, x: usize, y: usize| {
-            let i = layer as usize * bytes + (y * TILE + x) * 4;
-            &base[i..i + 4]
-        };
-        for skin in 1..tex::PRESET_SKINS {
-            assert_ne!(
-                pixel(tex::SHIRT, 30, 50),
-                pixel(skin_layer(tex::SHIRT, skin), 30, 50)
-            );
-            assert_eq!(skin_layer(tex::FACE, skin), tex::FACE);
-            assert_eq!(
-                pixel(tex::ARM, 30, 100),
-                pixel(skin_layer(tex::ARM, skin), 30, 100)
-            );
-        }
     }
 
     /// Every flat item sprite gets a real outline to extrude: some opaque pixels, not all.

@@ -24,8 +24,6 @@ pub(super) const MAX_FRAME: usize = 16 << 20;
 const MAX_SLOTS: usize = 1024;
 /// Most entries in any other list (blocks, poses, mobs, items, bench items).
 const MAX_LIST: usize = 1 << 20;
-/// Largest custom skin PNG, in bytes.
-const MAX_SKIN_BYTES: usize = 1_000_000;
 /// Most bullets in one shot.
 const MAX_BULLETS: usize = 32;
 /// Longest chat line kept, in characters: a full chat input (256) with room for the "<name> "

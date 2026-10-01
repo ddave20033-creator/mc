@@ -570,18 +570,10 @@ impl Game {
         let menu = !matches!(self.screen, Screen::Playing | Screen::Chat);
         let entrance = if menu { crate::ui::ease_out(self.ui.age / 0.25) } else { 1.0 };
         let before = self.ui.style(entrance, glam::Vec2::ZERO);
+        let skin = self.effective_skin();
         let action = match self.screen {
-            Screen::MainMenu => screens::main_menu(
-                &mut self.ui,
-                self.settings.skin,
-                &mut self.menus.menu_preview,
-            ),
-            Screen::Skin => screens::skin_menu(
-                &mut self.ui,
-                self.settings.skin,
-                self.gfx.skins.custom.contains_key(&0),
-                &self.menus.skin_error,
-            ),
+            Screen::MainMenu => screens::main_menu(&mut self.ui, skin, &mut self.menus.menu_preview),
+            Screen::Skin => screens::skin_menu(&mut self.ui),
             Screen::Options { in_game } => screens::options(
                 &mut self.ui,
                 &mut self.settings,

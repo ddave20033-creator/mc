@@ -338,9 +338,4 @@ pub enum Msg {
         text: String,
         color: [u8; 4],
     },
-    /// One player's custom Minecraft skin PNG; id is assigned by the host.
-    Skin {
-        id: u8,
-        png: Vec<u8>,
-    },
 }

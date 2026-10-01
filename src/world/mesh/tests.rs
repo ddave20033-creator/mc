@@ -194,7 +194,7 @@ fn terrain_and_meshes_are_unchanged() {
     let m = mesh_chunk((px, pz), &nb, &[], &notches, &Generator::new(3));
     h.mesh(&m);
     println!("{chunks} generated chunks + all blocks: {}", fingerprint(&h));
-    assert_eq!(fingerprint(&h), "52a1fe0493e8785e");
+    assert_eq!(fingerprint(&h), "9483e59fd2bf14ce");
 }
 
 /// Every block id on a floor, spaced out, and a few next to each other (stairs bending,

@@ -12,7 +12,6 @@ glam = "0.29"
 font8x8 = "0.3"
 png = "0.17"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-rfd = "0.17.2"
 cpal = "0.15"
 ab_glyph = "0.2"
 

@@ -55,8 +55,8 @@ const float GLASS_LAYER = 13.0;
 const float FURNACE_ANIM_LAYER = 117.0;
 const float FURNACE_FRAMES = 12.0;
 // Water and lava animation frames (tex::WATER_ANIM, tex::LAVA_ANIM).
-const float WATER_ANIM_LAYER = 376.0;
-const float LAVA_ANIM_LAYER = 408.0;
+const float WATER_ANIM_LAYER = 185.0;
+const float LAVA_ANIM_LAYER = 217.0;
 const float FLUID_FRAMES = 32.0;
 
 const vec3 NORMALS[7] = vec3[7](

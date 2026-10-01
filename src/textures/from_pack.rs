@@ -287,6 +287,9 @@ fn round_rings(img: &Image) -> Image {
     out
 }
 
+/// The game's own player skin in the built-in pack (`tools/texgen/player.py`).
+const PLAYER_SKIN: &str = "entity/player/wide/rustcraft";
+
 /// Replaces layers with the textures of the resource packs (anything missing stays procedural).
 /// Returns which layers it gave (whole): those need not be made procedurally at all.
 pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) -> Vec<bool> {
@@ -490,24 +493,35 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) -> Vec<bool> {
         }
     }
 
-    // Player skin (64 unit atlas): each layer is one face of a body part.
-    if let Some(skin) = pack.texture("entity/player/wide/steve|entity/steve")
-    {
-        let parts: [(u32, [u32; 4]); 11] = [
-            (tex::FACE, [8, 8, 8, 8]),
-            (tex::HEAD_SIDE, [0, 8, 8, 8]),
-            (tex::HAIR, [8, 0, 8, 8]),
-            (tex::HEAD_BACK, [24, 8, 8, 8]),
-            (tex::SKIN, [16, 0, 8, 8]),
-            (tex::SHIRT_FRONT, [20, 20, 8, 12]),
-            (tex::SHIRT, [16, 20, 4, 12]),
-            (tex::SHIRT_BACK, [32, 20, 8, 12]),
-            (tex::ARM, [44, 20, 4, 12]),
-            (tex::SLEEVE, [44, 16, 4, 4]),
-            (tex::LEG, [4, 20, 4, 12]),
+    // The player's skin: the game's own (`entity/player/wide/rustcraft`, from the built-in
+    // pack only: a pack's Minecraft skin does not replace it). Each layer is one face of a body
+    // part (64 unit atlas), with the outer layer's face (the hat, jacket, sleeve and trouser
+    // layers: 32 units right of the head's faces, 16 below the others') drawn over it.
+    let mut builtin = pack.0.iter().filter(|p| p.name == crate::textures::resource_pack::BUILTIN);
+    if let Some(skin) = builtin.find_map(|p| p.texture(PLAYER_SKIN)) {
+        let parts: [(u32, [u32; 4], [u32; 2]); 11] = [
+            (tex::FACE, [8, 8, 8, 8], [32, 0]),
+            (tex::HEAD_SIDE, [0, 8, 8, 8], [32, 0]),
+            (tex::HAIR, [8, 0, 8, 8], [32, 0]),
+            (tex::HEAD_BACK, [24, 8, 8, 8], [32, 0]),
+            (tex::SKIN, [16, 0, 8, 8], [32, 0]),
+            (tex::SHIRT_FRONT, [20, 20, 8, 12], [0, 16]),
+            (tex::SHIRT, [16, 20, 4, 12], [0, 16]),
+            (tex::SHIRT_BACK, [32, 20, 8, 12], [0, 16]),
+            (tex::ARM, [44, 20, 4, 12], [0, 16]),
+            (tex::SLEEVE, [44, 16, 4, 4], [0, 16]),
+            (tex::LEG, [4, 20, 4, 12], [0, 16]),
         ];
-        for (layer, [x, y, w, h]) in parts {
-            put(layer, &skin.region(64, x, y, w, h));
+        for (layer, [x, y, w, h], [ox, oy]) in parts {
+            let mut face = skin.region(64, x, y, w, h);
+            let outer = skin.region(64, x + ox, y + oy, w, h);
+            for (b, t) in face.rgba.chunks_exact_mut(4).zip(outer.rgba.chunks_exact(4)) {
+                let a = t[3] as u32;
+                for c in 0..3 {
+                    b[c] = ((t[c] as u32 * a + b[c] as u32 * (255 - a)) / 255) as u8;
+                }
+            }
+            put(layer, &face);
         }
     }
     given

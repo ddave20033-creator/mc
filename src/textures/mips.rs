@@ -95,8 +95,8 @@ pub(super) fn is_cutout(l: u32) -> bool {
         || (tex::WOLF_COLLAR..tex::BONE).contains(&l)
 }
 
-/// The mip levels of layers `first..` (full size and back to back in `base`), down to 1x1.
-pub(super) fn mip_chain(base: Vec<u8>, first: u32) -> Vec<Vec<u8>> {
+/// The mip levels of all the layers (full size and back to back in `base`), down to 1x1.
+pub(super) fn mip_chain(base: Vec<u8>) -> Vec<Vec<u8>> {
     // Mipmaps average in linear light; the sRGB decode of every byte value is looked up.
     let linear: [f32; 256] = std::array::from_fn(|v| (v as f32 / 255.0).powf(2.2));
     let layers = base.len() / (TILE * TILE * 4);
@@ -107,7 +107,7 @@ pub(super) fn mip_chain(base: Vec<u8>, first: u32) -> Vec<Vec<u8>> {
         let ns = size / 2;
         let mut next = vec![0u8; ns * ns * 4 * layers];
         for l in 0..layers {
-            let id = first + l as u32;
+            let id = l as u32;
             let cutout = is_cutout(id);
             for y in 0..ns {
                 for x in 0..ns {
@@ -147,8 +147,8 @@ pub(super) fn mip_chain(base: Vec<u8>, first: u32) -> Vec<Vec<u8>> {
             }
         }
         for layer in [tex::OAK_LEAVES, tex::SPRUCE_LEAVES, tex::BIRCH_LEAVES] {
-            if (first..first + layers as u32).contains(&layer) {
-                preserve_leaf_coverage(&levels[0], &mut next, ns, (layer - first) as usize);
+            if (layer as usize) < layers {
+                preserve_leaf_coverage(&levels[0], &mut next, ns, layer as usize);
             }
         }
         levels.push(next);

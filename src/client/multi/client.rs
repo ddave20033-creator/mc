@@ -222,13 +222,6 @@ impl Game {
                     c.id = id;
                 }
                 self.begin_remote_world(seed, world, time, spawn, creative, cheats, state);
-                if self.settings.skin == 4 {
-                    if let Some(png) = self.gfx.skins.local_png.clone() {
-                        if self.gfx.set_skin_png(id, png.clone()).is_ok() {
-                            self.send(Msg::Skin { id, png });
-                        }
-                    }
-                }
             }
             Msg::Refuse(reason) => self.leave_server(Some(reason)),
             Msg::Chunk { pos, rle } => {
@@ -330,12 +323,6 @@ impl Game {
                 seed,
                 bullets,
             } => self.remote_shot(id, kind, mods, eye, seed, &bullets),
-            Msg::Skin { id, png } => {
-                let own = matches!(&self.session.net, Some(c) if c.id == id);
-                if !own {
-                    let _ = self.gfx.set_skin_png(id, png);
-                }
-            }
             _ => {}
         }
     }

@@ -29,6 +29,7 @@ with PIL (resize to ~640x360 each) and reading that one image.
 | `mobs` | every mob summoned on the lane (front, side), the dummy hit, a sheep sheared |
 | `checks` | only the checks: zfight around, every item model, textures, flicker; then the creative inventory, each items' tab |
 | `station` | a gun station opened: a pistol laid on its table, taken apart and put together, a scope fitted, the drawer; the click maps |
+| `skin` | the game's own player skin: the title screen's preview, the skin screen ("coming soon", hu/en), front/back/sides close and far, walking, evening, the arms in first person |
 | `book` | the guide book read: the cover, the contents and pages of several chapters, in English and Hungarian, light and dark |
 
 Write a new script for anything else (copy one); a file anywhere works:

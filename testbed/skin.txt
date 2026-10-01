@@ -1,0 +1,77 @@
+# The game's own player skin (`tools/texgen/player.py`): the title screen's preview, the skin
+# screen ("coming soon", Hungarian and English), the player from the front, back and both sides
+# (close, at noon and in the evening), walking, and the arms in first person (empty hand, a
+# pickaxe swung, a sword, a torch).
+world new 7
+window 1280 720
+set lang hu
+screen main
+wait 1.4
+shot menu
+screen skin
+wait 1.2
+shot skin_screen
+set lang en
+screen skin
+wait 1.2
+shot skin_screen_en
+screen playing
+empty
+lane
+time 0.3
+pos 0 0 0
+look 0 0
+set hud off
+set fov 55
+camera front
+wait 1
+shot front
+camera back
+wait 0.3
+shot back
+camera side
+wait 0.3
+shot side
+camera side_left
+wait 0.3
+shot side_left
+look 0 35
+camera front
+wait 0.3
+shot front_above
+look 0 -30
+wait 0.3
+shot front_below
+look 0 0
+set fov 70
+camera front
+wait 0.3
+shot front_far
+camera side
+key forward 0.6
+shot walk_side
+time 0.7
+camera front
+wait 0.3
+shot front_evening
+time 0.3
+camera fp
+set fov 70
+set hud on
+wait 0.3
+shot fp_empty
+look 0 -75
+wait 0.3
+shot fp_down_body
+look 0 0
+hold iron_pickaxe
+wait 0.3
+shot fp_pickaxe
+click left 0.15
+shots fp_swing 3 0.08
+hold iron_sword
+wait 0.4
+shot fp_sword
+hold torch
+wait 0.4
+shot fp_torch

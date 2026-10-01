@@ -178,83 +178,20 @@ fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut Preview
     ui.set_clip(None);
 }
 
-pub fn skin_menu(ui: &mut Ui, selected: u8, custom_available: bool, error: &str) -> Action {
+/// The skin screen: the skin choice is coming later, only a note says so for now.
+pub fn skin_menu(ui: &mut Ui) -> Action {
     let (w, h, s) = (ui.w, ui.h, ui.s);
     backdrop(ui, 1.1);
-    let (pw, ph) = (236.0 * s, 188.0 * s);
+    let (pw, ph) = (236.0 * s, 104.0 * s);
     let (x, y) = ((w - pw) * 0.5, (h - ph) * 0.5);
     ui.panel(x, y, pw, ph);
     ui.text_centered(t("menu.skin"), w * 0.5, y + 11.0 * s, 1.3 * s, WHITE, true);
-    if !error.is_empty() {
-        ui.text_centered(
-            error,
-            w * 0.5,
-            y + 25.0 * s,
-            0.65 * s,
-            rgba(255, 135, 125, 255),
-            true,
-        );
-    }
-    let names = [
-        t("skin.classic"),
-        t("skin.forest"),
-        t("skin.red"),
-        t("skin.night"),
-    ];
-    let mut action = Action::None;
-    for (i, name) in names.iter().enumerate() {
-        let label = if selected == i as u8 {
-            format!("> {name}")
-        } else {
-            name.to_string()
-        };
-        if ui.button(
-            &label,
-            x + 14.0 * s,
-            y + (35.0 + i as f32 * 24.0) * s,
-            pw - 28.0 * s,
-            20.0 * s,
-            true,
-        ) {
-            action = Action::SelectSkin(i as u8);
-        }
-    }
-    let custom = if selected == 4 {
-        format!("> {}", t("skin.custom"))
+    ui.text_centered(t("skin.soon"), w * 0.5, y + 46.0 * s, 1.1 * s, rgba(200, 204, 216, 255), true);
+    if ui.button(t("gui.back"), x + 14.0 * s, y + 76.0 * s, pw - 28.0 * s, 20.0 * s, true) {
+        Action::Back
     } else {
-        t("skin.custom").to_string()
-    };
-    if ui.button(
-        &custom,
-        x + 14.0 * s,
-        y + 132.0 * s,
-        (pw - 32.0 * s) * 0.5,
-        20.0 * s,
-        custom_available,
-    ) {
-        action = Action::SelectSkin(4);
+        Action::None
     }
-    if ui.button(
-        t("skin.upload"),
-        x + 18.0 * s + (pw - 32.0 * s) * 0.5,
-        y + 132.0 * s,
-        (pw - 32.0 * s) * 0.5,
-        20.0 * s,
-        true,
-    ) {
-        action = Action::UploadSkin;
-    }
-    if ui.button(
-        t("gui.back"),
-        x + 14.0 * s,
-        y + 160.0 * s,
-        pw - 28.0 * s,
-        20.0 * s,
-        true,
-    ) {
-        action = Action::Back;
-    }
-    action
 }
 
 pub const FAITHFUL_URL: &str = "https://faithfulpack.net";

@@ -166,7 +166,7 @@ impl Game {
             y,
             lw - 90.0 * s,
             20.0 * s,
-            "Steve",
+            t("mp.name_hint"),
             16,
         );
         name.retain(|c| c.is_alphanumeric() || c == '_');
