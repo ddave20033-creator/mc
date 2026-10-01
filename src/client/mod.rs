@@ -44,7 +44,6 @@ use crate::item::{self, ItemId, Slot, NONE};
 use crate::keys::{Bind, HOTBAR};
 use crate::lang::t;
 use crate::model::crack_overlay;
-use crate::model::particles::Particles;
 use crate::model::player::{
     build_player, hand_pivot, limb_targets, LimbSmoother, PlayerPose,
 };

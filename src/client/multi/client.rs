@@ -105,10 +105,8 @@ impl Game {
         if let Some(c) = &mut self.session.net {
             c.conn.close();
         }
-        self.session.net = None;
-        // (the game's own server saves and stops)
-        self.session.local = None;
-        self.session.lan_address = None;
+        // (the connection goes, then the game's own server, which saves and stops)
+        self.session = Session::new();
         self.forget_world();
         self.set_grab(false);
         match message {

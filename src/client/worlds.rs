@@ -249,53 +249,21 @@ impl Game {
     // ---------------- loading ----------------
 
     /// Everything of the world played and of the player in it goes (its things, mobs and
-    /// animations, the player's state and inventory, the other players), all at once: on
-    /// leaving it, and again before the next one's comes (`begin_remote_world`).
+    /// animations, the player and what they carry, their tools' shots and grenades, the other
+    /// players and their skins, the chat), all at once: each part is made anew. On leaving a
+    /// world, and again before the next one's comes (`begin_remote_world`). The terrain stays
+    /// till then (the title screen's panorama shows it), and so does the connection
+    /// (`leave_server` closes it).
     pub(super) fn forget_world(&mut self) {
-        self.level.meta = None;
-        self.me.vitals.bed_spawn = None;
-        self.me.vitals.sleep = None;
-        self.me.items.inventory = Inventory::new();
         self.level = Level::new();
-        self.me.aim.mob_target = None;
-        self.me.aim.chop = None;
-        self.me.aim.struck = None;
-        self.me.aim.log_aim = None;
-        self.me.aim.log_cut = None;
-        self.me.items.cursor = None;
-        self.me.items.craft = [None; 9];
-        // Nothing of the last world's shots, grenades, fishing or effects comes along (a grenade
-        // thrown just before leaving would blow up in the next).
-        self.tools.guns = Default::default();
-        self.tools.grenades = Default::default();
-        self.tools.fishing = Default::default();
-        self.level.particles = Particles::new();
-        self.station = None;
-        self.me.items.craft_out = None;
-        self.me.items.craft_fx = None;
-        self.me.aim.furnace_part = None;
-        self.me.aim.furnace_hold = false;
-        self.me.aim.player_target = None;
-        self.me.aim.blocking = false;
-        self.me.vitals.fall_peak = 0.0;
-        self.me.vitals.fire_tick = 0.0;
-        self.me.vitals.drown_tick = 0.0;
-        self.inv_ui.drag = None;
-        self.me.aim.mining = None;
-        self.me.aim.target = None;
-        self.me.vitals.air = MAX_AIR;
-        self.me.vitals.invuln = 0.0;
-        self.me.body = Player::default();
-        self.me.vitals.health = MAX_HEALTH;
-        self.me.vitals.needs = Needs::new();
-        self.me.aim.using = None;
-        self.me.vitals.fire = 0.0;
-        self.me.vitals.hurt_time = 0.0;
-        self.chat = Chat::new();
-        self.me.look.camera = Default::default();
-        // The other players, and their skins (this player's own in the first slot again).
+        self.me = Me::new(self.settings.fov);
+        self.tools = Tools::default();
         self.session.forget_world();
         self.gfx.forget_other_skins();
+        self.chat = Chat::new();
+        self.station = None;
+        self.inv_ui.forget_world();
+        self.bench_ui = BenchUi::new();
     }
 
     /// Where the world is being loaded around (saved player position or spawn).

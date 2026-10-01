@@ -30,7 +30,6 @@ use crate::item::*;
 use crate::lang::tf;
 use crate::ui::rgba;
 
-/// GUI pixel size of a slot (16 px icon + 1 px border each side).
 /// The inventory screens: the creative tabs, list and search, the JEI panel, dragging and
 /// clicking slots, and what the mouse is on at an open chest or table.
 pub(super) struct InventoryUi {
@@ -80,8 +79,22 @@ impl InventoryUi {
             station_inside: false,
         }
     }
+
+    /// Out of a world: what the mouse was doing at its screens goes (the creative tab, list
+    /// and search, and the JEI panel stay as they were).
+    pub(super) fn forget_world(&mut self) {
+        *self = Self {
+            creative_scroll: self.creative_scroll,
+            creative_scroll_anim: self.creative_scroll_anim,
+            creative_search: std::mem::take(&mut self.creative_search),
+            jei: std::mem::take(&mut self.jei),
+            creative_tab: self.creative_tab,
+            ..Self::new()
+        };
+    }
 }
 
+/// GUI pixel size of a slot (16 px icon + 1 px border each side).
 const SLOT: f32 = 18.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

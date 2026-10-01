@@ -82,6 +82,7 @@ pub(super) struct Client {
 
 /// Playing in a world: the connection to its server (and the server itself when it is the
 /// game's own), the other players in it, and what came from it to wait for the world.
+/// (The fields drop in their order: the connection closes before the server stops.)
 pub(in crate::client) struct Session {
     /// The connection to the world's server (the game's own, or a LAN game's), while in a
     /// world.
