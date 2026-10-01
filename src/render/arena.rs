@@ -1,10 +1,9 @@
-//! Video memory for chunk meshes. A program may only have a limited number of Vulkan memory
-//! allocations (often 4096, fewer than the chunks at a long render distance), and allocating
-//! is slow, so the meshes share big buffers ("pages") split into ranges instead of each
+//! Video memory for chunk meshes. Making a buffer per chunk is slow (and thousands of them
+//! at a long render distance), and the indirect draws can take many chunks at once only from
+//! one buffer, so the meshes share big buffers ("pages") split into ranges instead of each
 //! chunk getting its own.
 
 use crate::engine::{Buffer, Gpu};
-use ash::vk;
 
 /// Size of one page; a mesh bigger than this gets a page of its own.
 const PAGE_SIZE: u64 = 64 << 20;
@@ -14,7 +13,8 @@ const ALIGN: u64 = 256;
 /// The part of a page holding one mesh.
 #[derive(Clone, Copy, Debug)]
 pub struct Range {
-    page: usize,
+    /// The page it is in.
+    pub page: usize,
     pub offset: u64,
     size: u64,
 }
@@ -35,12 +35,9 @@ pub struct Arena {
 }
 
 impl Arena {
-    pub fn buffer(&self, r: Range) -> vk::Buffer {
-        self.pages[r.page]
-            .as_ref()
-            .expect("range of a freed page")
-            .buffer
-            .handle
+    /// Page `page`'s buffer.
+    pub fn buffer(&self, page: usize) -> &wgpu::Buffer {
+        &self.pages[page].as_ref().expect("range of a freed page").buffer.handle
     }
 
     /// A range of at least `size` bytes (first fit, a new page if none has room); None when
@@ -69,12 +66,8 @@ impl Arena {
             buffer: Buffer::try_new(
                 gpu,
                 page_size,
-                vk::BufferUsageFlags::VERTEX_BUFFER
-                    | vk::BufferUsageFlags::INDEX_BUFFER
-                    | vk::BufferUsageFlags::TRANSFER_DST,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            )
-            .ok()?,
+                wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX,
+            )?,
             free: if page_size > size {
                 vec![(size, page_size - size)]
             } else {
@@ -102,7 +95,7 @@ impl Arena {
     /// (pages, bytes in them, bytes used, ranges waiting to be freed)
     pub fn stats(&self) -> (usize, u64, u64, usize) {
         let pages = self.pages.iter().flatten();
-        let (n, total, used) = pages.fold((0, 0, 0), |(n, t, u), p| (n + 1, t + p.buffer.size, u + p.used));
+        let (n, total, used) = pages.fold((0, 0, 0), |(n, t, u), p| (n + 1, t + p.buffer.size(), u + p.used));
         (n, total, used, self.retired.len())
     }
 
@@ -114,19 +107,19 @@ impl Arena {
 
     /// Frees the ranges retired at frame `done` or earlier (every frame before `done` has
     /// finished on the GPU).
-    pub fn collect(&mut self, gpu: &mut Gpu, done: u64) {
+    pub fn collect(&mut self, done: u64) {
         let mut i = 0;
         while i < self.retired.len() {
             if self.retired[i].0 <= done {
                 let (_, r) = self.retired.swap_remove(i);
-                self.free(gpu, r);
+                self.free(r);
             } else {
                 i += 1;
             }
         }
     }
 
-    fn free(&mut self, gpu: &mut Gpu, r: Range) {
+    fn free(&mut self, r: Range) {
         let Some(page) = self.pages[r.page].as_mut() else {
             return;
         };
@@ -141,18 +134,10 @@ impl Arena {
             page.free[k - 1].1 += page.free[k].1;
             page.free.remove(k);
         }
-        // Empty pages go back to the driver (except the first, which is always needed).
+        // Empty pages go back to the driver (except the first, which is always needed; wgpu
+        // frees the buffer once no submitted frame reads it).
         if page.used == 0 && r.page > 0 {
-            if let Some(page) = self.pages[r.page].take() {
-                gpu.defer_destroy(page.buffer);
-            }
+            self.pages[r.page] = None;
         }
-    }
-
-    pub fn destroy(&mut self, device: &ash::Device) {
-        for page in self.pages.drain(..).flatten() {
-            page.buffer.destroy(device);
-        }
-        self.retired.clear();
     }
 }

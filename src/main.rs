@@ -1,4 +1,4 @@
-//! RustCraft: a Minecraft-like game in Rust on Vulkan.
+//! RustCraft: a Minecraft-like game in Rust on wgpu (Vulkan, DirectX 12 or Metal).
 //!
 //! - `app`: the program around the game: options, key binds, translations, the start-up
 //!   splash, F3 statistics and the command-line developer tools.
@@ -14,7 +14,7 @@
 //!   Blockbench models' data.
 //! - `textures`: the block, item and entity textures, from the procedural ones and the
 //!   resource packs.
-//! - `engine`, `render`: Vulkan setup and the frame's drawing.
+//! - `engine`, `render`: the GPU (wgpu) and the frame's drawing.
 //! - `ui`, `audio`: the immediate-mode UI and the menu screens; the sounds.
 //! - `util`: small helpers shared by all of it.
 

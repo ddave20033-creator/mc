@@ -784,7 +784,7 @@ impl Game {
                 pct(st.gpu_total)
             ),
             match self.clock.vram {
-                Some((used, budget)) => format!("VRAM: {} MB / {} MB", mb(used), mb(budget)),
+                Some((used, held)) => format!("VRAM: {} MB ({} MB held)", mb(used), mb(held)),
                 None => "VRAM: n/a".to_string(),
             },
         ];

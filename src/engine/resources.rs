@@ -1,304 +1,69 @@
-//! GPU memory: buffers (mapped, written from the CPU), images and sampled textures (texture
-//! arrays with their mip levels), each freed when dropped.
+//! GPU memory: buffers (written from the CPU through the queue) and sampled textures (texture
+//! arrays with their mip levels). wgpu frees each when it is dropped and no submitted work
+//! uses it any more.
 
-use super::gpu::Gpu;
-use ash::{vk, Device};
+use super::gpu::{block_on, Gpu};
 
-pub fn find_memory_type(
-    props: &vk::PhysicalDeviceMemoryProperties,
-    bits: u32,
-    flags: vk::MemoryPropertyFlags,
-) -> u32 {
-    (0..props.memory_type_count)
-        .find(|&i| {
-            bits & (1 << i) != 0
-                && props.memory_types[i as usize]
-                    .property_flags
-                    .contains(flags)
-        })
-        .expect("no suitable Vulkan memory type")
+/// The bytes of `data`.
+pub fn bytes<T: Copy>(data: &[T]) -> &[u8] {
+    // SAFETY: the types written are plain data (floats, integers and arrays of them).
+    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data)) }
 }
 
-/// Debug builds: whether a GPU resource's `destroy` has run, checked when it is dropped, so a
-/// forgotten destroy (leaked GPU memory) stops a debug run where it happens. Nothing in release
-/// builds (no field, no check).
-#[derive(Default)]
-struct Destroyed {
-    #[cfg(debug_assertions)]
-    done: std::sync::atomic::AtomicBool,
-}
-
-impl Destroyed {
-    #[inline]
-    fn set(&self) {
-        #[cfg(debug_assertions)]
-        {
-            let again = self.done.swap(true, std::sync::atomic::Ordering::Relaxed);
-            debug_assert!(!again, "GPU resource destroyed twice");
-        }
-    }
-
-    #[inline]
-    fn check(&self, _what: &str) {
-        #[cfg(debug_assertions)]
-        if !std::thread::panicking() {
-            debug_assert!(
-                self.done.load(std::sync::atomic::Ordering::Relaxed),
-                "{_what} dropped without destroy() (its GPU memory leaks)"
-            );
-        }
-    }
-}
-
-/// A buffer with its own device memory. Host-visible buffers stay persistently mapped.
+/// A buffer the CPU writes through the queue: the writes reach it before the commands of the
+/// next submission, after the ones already submitted.
 pub struct Buffer {
-    pub handle: vk::Buffer,
-    pub memory: vk::DeviceMemory,
-    pub size: u64,
-    mapped: *mut u8,
-    destroyed: Destroyed,
-}
-
-impl Drop for Buffer {
-    fn drop(&mut self) {
-        self.destroyed.check("Buffer");
-    }
+    pub handle: wgpu::Buffer,
+    queue: wgpu::Queue,
 }
 
 impl Buffer {
-    pub fn new(
-        gpu: &Gpu,
-        size: u64,
-        usage: vk::BufferUsageFlags,
-        flags: vk::MemoryPropertyFlags,
-    ) -> Self {
-        Self::try_new(gpu, size, usage, flags).expect("allocate buffer memory")
+    pub fn new(gpu: &Gpu, size: u64, usage: wgpu::BufferUsages) -> Self {
+        Self::try_new(gpu, size, usage).expect("allocate buffer memory")
     }
 
-    /// As `new`, but the video memory running out is an error to handle (not a crash).
-    pub fn try_new(
-        gpu: &Gpu,
-        size: u64,
-        usage: vk::BufferUsageFlags,
-        flags: vk::MemoryPropertyFlags,
-    ) -> Result<Self, vk::Result> {
-        unsafe {
-            let d = &gpu.device;
-            let handle = d
-                .create_buffer(
-                    &vk::BufferCreateInfo::default()
-                        .size(size)
-                        .usage(usage)
-                        .sharing_mode(vk::SharingMode::EXCLUSIVE),
-                    None,
-                )
-                .expect("create buffer");
-            let req = d.get_buffer_memory_requirements(handle);
-            let memory = match d.allocate_memory(
-                &vk::MemoryAllocateInfo::default()
-                    .allocation_size(req.size)
-                    .memory_type_index(find_memory_type(&gpu.mem_props, req.memory_type_bits, flags)),
-                None,
-            ) {
-                Ok(m) => m,
-                Err(e) => {
-                    d.destroy_buffer(handle, None);
-                    return Err(e);
-                }
-            };
-            d.bind_buffer_memory(handle, memory, 0).unwrap();
-            let mapped = if flags.contains(vk::MemoryPropertyFlags::HOST_VISIBLE) {
-                d.map_memory(memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())
-                    .expect("map memory") as *mut u8
-            } else {
-                std::ptr::null_mut()
-            };
-            Ok(Self {
-                handle,
-                memory,
-                size,
-                mapped,
-                destroyed: Destroyed::default(),
-            })
+    /// As `new`, but the video memory running out is an answer (None), not a crash.
+    pub fn try_new(gpu: &Gpu, size: u64, usage: wgpu::BufferUsages) -> Option<Self> {
+        let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let handle = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size,
+            usage: usage | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        if block_on(scope.pop()).is_some() {
+            return None;
         }
+        Some(Self { handle, queue: gpu.queue.clone() })
     }
 
+    pub fn size(&self) -> u64 {
+        self.handle.size()
+    }
+
+    /// Writes `data` at byte `offset` (both multiples of 4).
     pub fn write<T: Copy>(&self, offset: usize, data: &[T]) {
-        let bytes = std::mem::size_of_val(data);
-        assert!(!self.mapped.is_null(), "buffer is not host visible");
-        assert!(
-            offset + bytes <= self.size as usize,
-            "buffer write out of range"
-        );
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                data.as_ptr() as *const u8,
-                self.mapped.add(offset),
-                bytes,
-            );
-        }
-    }
-
-    /// The contents of a host-visible buffer.
-    pub fn read(&self) -> &[u8] {
-        assert!(!self.mapped.is_null(), "buffer is not host visible");
-        unsafe { std::slice::from_raw_parts(self.mapped, self.size as usize) }
-    }
-
-    pub fn destroy(&self, device: &Device) {
-        self.destroyed.set();
-        unsafe {
-            device.destroy_buffer(self.handle, None);
-            device.free_memory(self.memory, None);
-        }
-    }
-}
-
-pub struct Image {
-    pub handle: vk::Image,
-    pub memory: vk::DeviceMemory,
-    pub view: vk::ImageView,
-    destroyed: Destroyed,
-}
-
-impl Drop for Image {
-    fn drop(&mut self) {
-        self.destroyed.check("Image");
-    }
-}
-
-impl Image {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        device: &Device,
-        mem_props: &vk::PhysicalDeviceMemoryProperties,
-        width: u32,
-        height: u32,
-        mips: u32,
-        layers: u32,
-        format: vk::Format,
-        usage: vk::ImageUsageFlags,
-        aspect: vk::ImageAspectFlags,
-        view_type: vk::ImageViewType,
-    ) -> Self {
-        Self::with_samples(
-            device,
-            mem_props,
-            width,
-            height,
-            mips,
-            layers,
-            format,
-            usage,
-            aspect,
-            view_type,
-            vk::SampleCountFlags::TYPE_1,
-        )
-    }
-
-    /// Like `new`, with several samples per pixel (multisampled render targets).
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_samples(
-        device: &Device,
-        mem_props: &vk::PhysicalDeviceMemoryProperties,
-        width: u32,
-        height: u32,
-        mips: u32,
-        layers: u32,
-        format: vk::Format,
-        usage: vk::ImageUsageFlags,
-        aspect: vk::ImageAspectFlags,
-        view_type: vk::ImageViewType,
-        samples: vk::SampleCountFlags,
-    ) -> Self {
-        unsafe {
-            let handle = device
-                .create_image(
-                    &vk::ImageCreateInfo::default()
-                        .image_type(vk::ImageType::TYPE_2D)
-                        .format(format)
-                        .extent(vk::Extent3D {
-                            width,
-                            height,
-                            depth: 1,
-                        })
-                        .mip_levels(mips)
-                        .array_layers(layers)
-                        .samples(samples)
-                        .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(usage)
-                        .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                        .initial_layout(vk::ImageLayout::UNDEFINED),
-                    None,
-                )
-                .expect("create image");
-            let req = device.get_image_memory_requirements(handle);
-            let memory = device
-                .allocate_memory(
-                    &vk::MemoryAllocateInfo::default()
-                        .allocation_size(req.size)
-                        .memory_type_index(find_memory_type(
-                            mem_props,
-                            req.memory_type_bits,
-                            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                        )),
-                    None,
-                )
-                .expect("allocate image memory");
-            device.bind_image_memory(handle, memory, 0).unwrap();
-            let view = device
-                .create_image_view(
-                    &vk::ImageViewCreateInfo::default()
-                        .image(handle)
-                        .view_type(view_type)
-                        .format(format)
-                        .subresource_range(vk::ImageSubresourceRange {
-                            aspect_mask: aspect,
-                            base_mip_level: 0,
-                            level_count: mips,
-                            base_array_layer: 0,
-                            layer_count: layers,
-                        }),
-                    None,
-                )
-                .expect("create image view");
-            Self {
-                handle,
-                memory,
-                view,
-                destroyed: Destroyed::default(),
-            }
-        }
-    }
-
-    pub fn destroy(&self, device: &Device) {
-        self.destroyed.set();
-        unsafe {
-            device.destroy_image_view(self.view, None);
-            device.destroy_image(self.handle, None);
-            device.free_memory(self.memory, None);
+        let data = bytes(data);
+        assert!(offset + data.len() <= self.size() as usize, "buffer write out of range");
+        if !data.is_empty() {
+            self.queue.write_buffer(&self.handle, offset as u64, data);
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SamplerKind {
-    /// Pixel-art block textures: nearest magnification, mipmapped + anisotropic minification.
+    /// Pixel-art block textures: mipmapped and anisotropic (the shaders read the nearest texel
+    /// themselves when magnified: shaders/blocks.wgsl).
     Blocks,
     /// The font atlas: smoothly filtered (an anti-aliased typeface drawn at any size), clamped.
     Font,
 }
 
 pub struct Texture {
-    pub image: Image,
-    pub sampler: vk::Sampler,
-    destroyed: Destroyed,
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        self.destroyed.check("Texture");
-    }
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler,
 }
 
 impl Texture {
@@ -308,155 +73,74 @@ impl Texture {
         width: u32,
         height: u32,
         layers: u32,
-        format: vk::Format,
+        format: wgpu::TextureFormat,
         levels: &[Vec<u8>],
         kind: SamplerKind,
     ) -> Self {
         let mips = levels.len() as u32;
-        let view_type = match kind {
-            SamplerKind::Blocks => vk::ImageViewType::TYPE_2D_ARRAY,
-            SamplerKind::Font => vk::ImageViewType::TYPE_2D,
-        };
-        let image = Image::new(
-            &gpu.device,
-            &gpu.mem_props,
-            width,
-            height,
-            mips,
-            layers,
+        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(match kind {
+                SamplerKind::Blocks => "blocks",
+                SamplerKind::Font => "font",
+            }),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: layers },
+            mip_level_count: mips,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
             format,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            vk::ImageAspectFlags::COLOR,
-            view_type,
-        );
-
-        let total: usize = levels.iter().map(|l| l.len()).sum();
-        let staging = Buffer::new(
-            gpu,
-            total as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        );
-        let mut regions = Vec::new();
-        let mut offset = 0usize;
-        for (i, level) in levels.iter().enumerate() {
-            staging.write(offset, level.as_slice());
-            regions.push(vk::BufferImageCopy {
-                buffer_offset: offset as u64,
-                buffer_row_length: 0,
-                buffer_image_height: 0,
-                image_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    mip_level: i as u32,
-                    base_array_layer: 0,
-                    layer_count: layers,
-                },
-                image_offset: vk::Offset3D::default(),
-                image_extent: vk::Extent3D {
-                    width: (width >> i).max(1),
-                    height: (height >> i).max(1),
-                    depth: 1,
-                },
-            });
-            offset += level.len();
-        }
-
-        let range = vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: mips,
-            base_array_layer: 0,
-            layer_count: layers,
-        };
-        gpu.immediate(|cmd| unsafe {
-            let d = &gpu.device;
-            let to_dst = vk::ImageMemoryBarrier::default()
-                .old_layout(vk::ImageLayout::UNDEFINED)
-                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(image.handle)
-                .subresource_range(range)
-                .src_access_mask(vk::AccessFlags::empty())
-                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);
-            d.cmd_pipeline_barrier(
-                cmd,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[to_dst],
-            );
-            d.cmd_copy_buffer_to_image(
-                cmd,
-                staging.handle,
-                image.handle,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &regions,
-            );
-            let to_read = vk::ImageMemoryBarrier::default()
-                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(image.handle)
-                .subresource_range(range)
-                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(vk::AccessFlags::SHADER_READ);
-            d.cmd_pipeline_barrier(
-                cmd,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[to_read],
-            );
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         });
-        staging.destroy(&gpu.device);
-
-        let info = match kind {
-            SamplerKind::Blocks => {
-                let mut i = vk::SamplerCreateInfo::default()
-                    .mag_filter(vk::Filter::NEAREST)
-                    .min_filter(vk::Filter::LINEAR)
-                    .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-                    .address_mode_u(vk::SamplerAddressMode::REPEAT)
-                    .address_mode_v(vk::SamplerAddressMode::REPEAT)
-                    .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                    .min_lod(0.0)
-                    .max_lod(mips as f32);
-                if let Some(a) = gpu.max_anisotropy {
-                    i = i.anisotropy_enable(true).max_anisotropy(a);
-                }
-                i
-            }
-            SamplerKind::Font => vk::SamplerCreateInfo::default()
-                .mag_filter(vk::Filter::LINEAR)
-                .min_filter(vk::Filter::LINEAR)
-                .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
-                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .min_lod(0.0)
-                .max_lod(0.0),
-        };
-        let sampler = unsafe {
-            gpu.device
-                .create_sampler(&info, None)
-                .expect("create sampler")
-        };
-        Self {
-            image,
-            sampler,
-            destroyed: Destroyed::default(),
-        }
+        write_layers(gpu, &texture, 0, layers, levels);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(match kind {
+                SamplerKind::Blocks => wgpu::TextureViewDimension::D2Array,
+                SamplerKind::Font => wgpu::TextureViewDimension::D2,
+            }),
+            ..Default::default()
+        });
+        let sampler = gpu.device.create_sampler(&match kind {
+            SamplerKind::Blocks => wgpu::SamplerDescriptor {
+                label: Some("blocks"),
+                address_mode_u: wgpu::AddressMode::Repeat,
+                address_mode_v: wgpu::AddressMode::Repeat,
+                address_mode_w: wgpu::AddressMode::Repeat,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                lod_max_clamp: mips as f32,
+                anisotropy_clamp: if gpu.anisotropy { 16 } else { 1 },
+                ..Default::default()
+            },
+            SamplerKind::Font => wgpu::SamplerDescriptor {
+                label: Some("font"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                lod_max_clamp: 0.0,
+                ..Default::default()
+            },
+        });
+        Self { texture, view, sampler }
     }
+}
 
-    pub fn destroy(&self, device: &Device) {
-        self.destroyed.set();
-        unsafe { device.destroy_sampler(self.sampler, None) };
-        self.image.destroy(device);
+/// Writes `count` array layers of `texture` from `first` on: `levels[i]` holds mip level `i`
+/// of them, layer after layer.
+pub fn write_layers(gpu: &Gpu, texture: &wgpu::Texture, first: u32, count: u32, levels: &[Vec<u8>]) {
+    let texel = texture.format().block_copy_size(None).expect("a plain colour format");
+    for (i, level) in levels.iter().enumerate() {
+        let w = (texture.width() >> i).max(1);
+        let h = (texture.height() >> i).max(1);
+        gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: i as u32,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: first },
+                aspect: wgpu::TextureAspect::All,
+            },
+            level,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * texel), rows_per_image: Some(h) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: count },
+        );
     }
 }

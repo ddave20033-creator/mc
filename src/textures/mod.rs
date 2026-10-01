@@ -238,14 +238,14 @@ mod tests {
         }
     }
 
-    /// The layer numbers `world.frag` keeps its own copies of are the game's.
+    /// The layer numbers `world.wgsl` keeps its own copies of are the game's.
     #[test]
     fn shader_layer_numbers_match() {
-        let src = include_str!("../../shaders/world.frag");
+        let src = include_str!("../../shaders/world.wgsl");
         let value = |name: &str| -> u32 {
             let line = src
                 .lines()
-                .find(|l| l.starts_with(&format!("const float {name} = ")))
+                .find(|l| l.starts_with(&format!("const {name}: f32 = ")))
                 .unwrap_or_else(|| panic!("{name} missing"));
             let v = line.split('=').nth(1).unwrap().trim().trim_end_matches(';');
             v.parse::<f32>().unwrap() as u32

@@ -80,7 +80,7 @@ impl Builder {
             let k = if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 };
             (k * 2 + (n[k] < 0.0) as usize) as u8
         };
-        // A corner of the bark at `a` round: its smooth normal (see world.vert).
+        // A corner of the bark at `a` round: its smooth normal (see world.wgsl).
         let round_n = |a: f32| (16 + axis * 64 + ((a / std::f32::consts::TAU * 64.0).round() as usize % 64)) as u8;
         let emit = |b: &mut Self, ps: [[f32; 3]; 4], uvs: [[f32; 2]; 4], n: [f32; 3], layer: u32, ns: Option<[u8; 4]>| {
             // Wound to face `n`.

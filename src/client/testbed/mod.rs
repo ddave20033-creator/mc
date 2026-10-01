@@ -475,7 +475,7 @@ impl Game {
             Cmd::Stats => {
                 let mb = |b: u64| b / (1 << 20);
                 let (pages, bytes, used, retired) = self.gfx.renderer.mesh_memory();
-                let vram = self.gfx.gpu.vram_usage().map_or("?".into(), |(u, b)| format!("{}/{} MB", mb(u), mb(b)));
+                let vram = self.gfx.gpu.vram_usage().map_or("?".into(), |(u, h)| format!("{} MB ({} MB held)", mb(u), mb(h)));
                 let ram = self.clock.sys_stats.get().ram_game;
                 let w = &self.terrain.world;
                 let blocks: usize = w.chunks.values().map(|c| c.memory()).sum();

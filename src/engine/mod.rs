@@ -1,10 +1,10 @@
-//! Vulkan, below the renderer: the device, the swapchain and the frames in flight (`gpu`),
-//! buffers, images and textures (`resources`), and graphics pipelines (`pipeline`). What is
-//! drawn with them is `render`'s.
+//! The GPU, below the renderer (wgpu: Vulkan, DirectX 12 or Metal): the device, the window's
+//! surface and the frames (`gpu`), buffers and textures (`resources`), and render pipelines
+//! (`pipeline`). What is drawn with them is `render`'s.
 
 pub mod gpu;
 pub mod pipeline;
 pub mod resources;
 
-pub use gpu::{Gpu, FRAMES_IN_FLIGHT};
+pub use gpu::{Frame, Gpu, FRAMES_IN_FLIGHT};
 pub use resources::{Buffer, SamplerKind, Texture};

@@ -12,17 +12,17 @@ pub const SCOPE_SIZE: u32 = 512;
 /// Weapon lights at once (`FrameUbo::spots`).
 pub const MAX_SPOTS: usize = 4;
 /// Each weapon light's shadow map: a square this big in a strip under the sun's in the same
-/// depth image (as frame.glsl's `SHADOW_SPOT_*` reads them), one beside the other.
+/// depth image (as frame.wgsl's `SHADOW_SPOT_*` reads them), one beside the other.
 pub const SPOT_SHADOW: u32 = 1024;
 /// The shadow depth image's height: the sun's square, and the weapon lights' strip under it.
 pub const SHADOW_HEIGHT: u32 = SHADOW_SIZE + SPOT_SHADOW;
 /// How far a weapon light reaches (blocks): its shadow map's far end.
 pub const SPOT_REACH: f32 = 30.0;
 
-/// Must match `heldLights` in frame.glsl.
+/// Must match `heldLights` in frame.wgsl.
 pub const MAX_HELD_LIGHTS: usize = 8;
 
-/// Mirrors `FrameData` in shaders/frame.glsl (std140, all vec4/mat4).
+/// Mirrors `FrameData` in shaders/frame.wgsl (uniform layout, all vec4/mat4).
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FrameUbo {
@@ -39,7 +39,7 @@ pub struct FrameUbo {
     /// Held torches and lanterns (this player's and the other LAN players'): position, intensity.
     pub held_lights: [[f32; 4]; MAX_HELD_LIGHTS],
     /// Weapon lights: pairs of (xyz position, w on) and (xyz direction, w the cosine of the
-    /// cone's edge). Must match `spots` in frame.glsl.
+    /// cone's edge). Must match `spots` in frame.wgsl.
     pub spots: [[f32; 4]; 2 * MAX_SPOTS],
     /// x: how many pixels a block at distance 1 covers (detail too small for the screen is
     /// simplified by it).
@@ -107,12 +107,12 @@ mod shader_tests {
     use crate::world::mesh::flags;
     use crate::textures::tex;
 
-    /// The value of `const <type> <name> = <value>;` in a shader.
+    /// The value of `const <name>: <type> = <value>;` in a shader.
     fn value(src: &str, name: &str) -> f32 {
         let line = src
             .lines()
             .map(str::trim)
-            .find(|l| l.starts_with("const ") && l.split_whitespace().nth(2) == Some(name))
+            .find(|l| l.strip_prefix("const ").is_some_and(|l| l.starts_with(&format!("{name}:"))))
             .unwrap_or_else(|| panic!("{name} missing"));
         let v = line.split('=').nth(1).unwrap().trim().trim_end_matches(';').trim();
         match v.split_once('/') {
@@ -122,10 +122,10 @@ mod shader_tests {
     }
 
     /// The numbers the shaders keep their own copies of are the game's (the rest of
-    /// `world.frag`'s layer numbers: `textures::tests::shader_layer_numbers_match`).
+    /// `world.wgsl`'s layer numbers: `textures::tests::shader_layer_numbers_match`).
     #[test]
     fn shader_copies_of_game_numbers_match() {
-        let flag_file = include_str!("../../shaders/flags.glsl");
+        let flag_file = include_str!("../../shaders/flags.wgsl");
         for (name, flag) in [
             ("F_LEAVES", flags::LEAVES),
             ("F_PLANT", flags::PLANT),
@@ -139,19 +139,19 @@ mod shader_tests {
             assert_eq!(value(flag_file, name) as u8, flag, "{name}");
         }
         assert_eq!(value(flag_file, "PLANT_GONE_PX"), super::super::cull::PLANT_GONE_PX);
-        let world = include_str!("../../shaders/world.frag");
+        let world = include_str!("../../shaders/world.wgsl");
         assert_eq!(value(world, "LAVA_LAYER") as u32, tex::LAVA);
         assert_eq!(value(world, "FURNACE_ANIM_LAYER") as u32, tex::FURNACE_ANIM);
         assert_eq!(value(world, "FURNACE_FRAMES") as u32, tex::FURNACE_FRAMES);
 
-        let frame = include_str!("../../shaders/frame.glsl");
-        assert!(frame.contains(&format!("heldLights[{MAX_HELD_LIGHTS}]")));
+        let frame = include_str!("../../shaders/frame.wgsl");
+        assert!(frame.contains(&format!("heldLights: array<vec4f, {MAX_HELD_LIGHTS}>")));
         assert_eq!(value(frame, "SHADOW_SUN_V"), SHADOW_SIZE as f32 / SHADOW_HEIGHT as f32);
         assert_eq!(value(frame, "SHADOW_SPOT_U"), SPOT_SHADOW as f32 / SHADOW_SIZE as f32);
         assert_eq!(value(frame, "SHADOW_SPOT_V"), SPOT_SHADOW as f32 / SHADOW_HEIGHT as f32);
 
         // The shadow pass lets light through glass (its layer written out there).
-        let shadow = include_str!("../../shaders/shadow.frag");
+        let shadow = include_str!("../../shaders/shadow.wgsl");
         assert_eq!(shadow.matches(&format!("vLayer - {}.0", tex::GLASS)).count(), 2);
     }
 }

@@ -144,7 +144,7 @@ impl Game {
                 sky.light_dir.x,
                 sky.light_dir.y,
                 sky.light_dir.z,
-                if self.gfx.gpu.samples.as_raw() > 1 { 1.0 } else { 0.0 },
+                if self.gfx.gpu.samples > 1 { 1.0 } else { 0.0 },
             ],
             sun_color: [
                 sky.light_tint.x,

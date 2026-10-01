@@ -1,22 +1,23 @@
 // Vertex animation shared by the main and shadow passes so shadows match.
-#include "flags.glsl"
+#include "flags.wgsl"
 
-vec3 displace(vec3 p, vec2 uv, int flags, float t, float layer, vec2 flowEnc) {
+fn displace(p0: vec3f, uv: vec2f, flags: i32, t: f32, layer: f32, flowEnc: vec2f) -> vec3f {
+    var p = p0;
     // Fluids: uv = (previous y, change time). Move to the new shape over exactly one flow
     // step at constant speed, so consecutive steps join into one continuous flow.
     if ((flags & F_FLUID) != 0) {
-        float dur = (flags & F_EMISSIVE) != 0 ? 1.0 : 0.25;
+        let dur = select(0.25, 1.0, (flags & F_EMISSIVE) != 0);
         // Small delay covers the time the updated mesh takes to arrive.
-        float k = clamp((t - uv.y - 0.04) / dur, 0.0, 1.0);
+        let k = clamp((t - uv.y - 0.04) / dur, 0.0, 1.0);
         p.y = mix(uv.x, p.y, k);
         // Leading-edge corners of a newly filled block slide out from the block that fed it.
         if (fract(layer) > 0.1) {
-            vec2 flow = flowEnc * 2.0 - 1.0;
-            p.xz -= flow * (1.0 - k);
+            let flow = flowEnc * 2.0 - 1.0;
+            p = vec3f(p.x - flow.x * (1.0 - k), p.y, p.z - flow.y * (1.0 - k));
         }
     }
     if ((flags & F_LEAVES) != 0) {
-        float s = sin(t * 1.2 + p.x * 0.7 + p.z * 0.5 + p.y * 0.3);
+        let s = sin(t * 1.2 + p.x * 0.7 + p.z * 0.5 + p.y * 0.3);
         p.x += s * 0.012;
         p.z += cos(t * 1.0 + p.x * 0.4 + p.z * 0.8) * 0.01;
     }

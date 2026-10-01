@@ -2,17 +2,17 @@
 //! mesh buffers (`arena`), and given back when replaced or unloaded.
 
 use super::{arena, Renderer};
-use crate::engine::{Buffer, Gpu};
+use crate::engine::resources::bytes;
+use crate::engine::Gpu;
 use crate::world::mesh::{flags, MeshData, Vertex};
 use crate::world::ChunkPos;
-use ash::vk;
 use glam::Vec3;
 use std::mem::size_of;
 
 const MAX_UPLOADS_PER_FRAME: usize = 24;
 
 /// A chunk mesh's vertex on the GPU: the mesher's `Vertex` packed into 20 bytes instead of 32
-/// (shaders/vertex.glsl reads it back). Its position is from its chunk's corner (the corner is
+/// (shaders/vertex.wgsl reads it back). Its position is from its chunk's corner (the corner is
 /// in the mesh's `ChunkHead`): x and z in 1/2048 blocks from -8, y in 1/128 blocks from -32. uv
 /// in 1/4096, signed; a fluid's is its previous y (like a position's) and how long before the
 /// upload it changed (1/1024 s; all ones: long ago). The layer's bit 15 is its 0.25 (the
@@ -91,8 +91,8 @@ fn drop_later(m: MeshData) {
     let _ = bin.send(m);
 }
 
-/// Per-frame staging memory for chunk uploads (reused instead of allocating per chunk).
-pub(super) const STAGING_SIZE: usize = 16 << 20;
+/// Chunk mesh bytes uploaded per frame at most (one mesh bigger than this goes alone).
+const STAGING_SIZE: usize = 16 << 20;
 
 pub(super) struct ChunkGpu {
     /// The head (`ChunkHead`), vertices (from `vertex_offset` on), then (from `index_offset`
@@ -149,12 +149,12 @@ impl Renderer {
         }
     }
 
-    /// Uploads a few waiting meshes; `time` is the frame's (the shaders' `camPos.w`).
-    pub(super) unsafe fn flush_uploads(&mut self, gpu: &mut Gpu, cmd: vk::CommandBuffer, time: f32) {
-        let mut any = false;
-        // This frame slot's staging buffer is free: begin_frame waited for its fence.
-        let ring = &self.staging[gpu.frame_slot];
-        let mut ring_used = 0usize;
+    /// Uploads a few waiting meshes (written through the queue: they arrive before this
+    /// frame's commands); `time` is the frame's (the shaders' `camPos.w`).
+    pub(super) fn flush_uploads(&mut self, gpu: &Gpu, time: f32) {
+        // Bytes written this frame: past STAGING_SIZE the rest waits for the next frames (one
+        // frame taking in a burst of new chunks would stutter).
+        let mut written = 0usize;
         self.uploaded = 0;
         for _ in 0..MAX_UPLOADS_PER_FRAME {
             let Some(mut m) = self.pending.pop_front() else {
@@ -164,14 +164,11 @@ impl Renderer {
                 pack_mesh(&mut m, time);
             }
             // Room for the head, the vertices wherever they line up, and the indices (at
-            // least what `total` below comes to). Whether it goes through the staging buffer is
-            // decided by this, not by `total`: a mesh whose `most` does not fit is never
-            // checked against the room left, so it must not use the staging buffer either.
+            // least what `total` below comes to).
             let vbytes = m.packed.len() * VERTEX;
             let most = HEAD + VERTEX + vbytes + 16 + std::mem::size_of_val(m.indices.as_slice());
-            let staged = most <= STAGING_SIZE;
-            if staged && ring_used + most > STAGING_SIZE {
-                // Out of staging space this frame; upload it next frame.
+            if written > 0 && written + most > STAGING_SIZE {
+                // Enough for this frame; upload it next frame.
                 self.pending.push_front(m);
                 break;
             }
@@ -198,68 +195,29 @@ impl Renderer {
                 let voff = HEAD + (VERTEX - (range.offset as usize + HEAD) % VERTEX) % VERTEX;
                 let ioff = (voff + vbytes + 15) & !15;
                 let total = ioff + std::mem::size_of_val(m.indices.as_slice());
-                let head = ChunkHead { x: m.pos.0 * 16, time: m.packed_time, z: m.pos.1 * 16, _pad: 0 };
-                let packed = m.packed.as_slice();
                 debug_assert!(total <= most);
-                let (src, src_offset) = if staged {
-                    ring.write(ring_used, &[head]);
-                    ring.write(ring_used + voff, packed);
-                    ring.write(ring_used + ioff, m.indices.as_slice());
-                    let at = ring_used;
-                    ring_used = (ring_used + total + 15) & !15;
-                    (ring.handle, at)
-                } else {
-                    // Larger than the whole staging buffer: use a one-off buffer.
-                    let staging = Buffer::new(
-                        gpu,
-                        total as u64,
-                        vk::BufferUsageFlags::TRANSFER_SRC,
-                        vk::MemoryPropertyFlags::HOST_VISIBLE
-                            | vk::MemoryPropertyFlags::HOST_COHERENT,
-                    );
-                    staging.write(0, &[head]);
-                    staging.write(voff, packed);
-                    staging.write(ioff, m.indices.as_slice());
-                    let handle = staging.handle;
-                    gpu.defer_destroy(staging);
-                    (handle, 0)
-                };
-                gpu.device.cmd_copy_buffer(
-                    cmd,
-                    src,
-                    self.arena.buffer(range),
-                    &[vk::BufferCopy {
-                        src_offset: src_offset as u64,
-                        dst_offset: range.offset,
-                        size: total as u64,
-                    }],
-                );
+                let head = ChunkHead { x: m.pos.0 * 16, time: m.packed_time, z: m.pos.1 * 16, _pad: 0 };
+                // (the indices end on a multiple of 4 bytes, as queue writes must)
+                let size = wgpu::BufferSize::new(total as u64).unwrap();
+                let mut view = gpu
+                    .queue
+                    .write_buffer_with(self.arena.buffer(range.page), range.offset, size)
+                    .expect("chunk mesh write");
+                let mut out = view.slice(..);
+                out.slice(..HEAD).copy_from_slice(bytes(&[head]));
+                out.slice(voff..voff + vbytes).copy_from_slice(bytes(&m.packed));
+                out.slice(ioff..total).copy_from_slice(bytes(&m.indices));
+                drop(view);
+                written += total;
                 chunk.mesh = Some(range);
                 chunk.vertex_offset = voff as u64;
                 chunk.index_offset = ioff as u64;
-                any = true;
             }
             self.uploaded += 1;
             if let Some(old) = self.chunks.insert(m.pos, chunk).and_then(|c| c.mesh) {
                 self.arena.retire(old, self.frame);
             }
             drop_later(m);
-        }
-        if any {
-            let barrier = vk::MemoryBarrier::default()
-                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(
-                    vk::AccessFlags::VERTEX_ATTRIBUTE_READ | vk::AccessFlags::INDEX_READ,
-                );
-            gpu.device.cmd_pipeline_barrier(
-                cmd,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::VERTEX_INPUT,
-                vk::DependencyFlags::empty(),
-                &[barrier],
-                &[],
-                &[],
-            );
         }
     }
 }

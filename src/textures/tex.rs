@@ -92,7 +92,7 @@ pub const TORCH_FLAME: u32 = 113;
 pub const TORCH_CHAR: u32 = 114;
 pub const HEAD_BACK: u32 = 115;
 pub const SHIRT_BACK: u32 = 116;
-/// Lit furnace animation frames (resource packs); must match world.frag.
+/// Lit furnace animation frames (resource packs); must match world.wgsl.
 pub const FURNACE_ANIM: u32 = 117;
 pub const FURNACE_FRAMES: u32 = 12;
 /// Torch flame and smoke particle sprites (smoke: small to large).
@@ -141,7 +141,7 @@ pub const COOKED_MUTTON: u32 = SPARE_SHEEP + 4;
 pub const SHEARS: u32 = SPARE_SHEEP + 5;
 pub const SHEEP_SPAWN_EGG: u32 = SPARE_SHEEP + 6;
 /// Water and lava animation frames (from the packs' animated strips; must match
-/// world.frag).
+/// world.wgsl).
 pub const WATER_ANIM: u32 = SHEEP_SPAWN_EGG + 1;
 pub const LAVA_ANIM: u32 = WATER_ANIM + FLUID_FRAMES;
 pub const FLUID_FRAMES: u32 = 32;

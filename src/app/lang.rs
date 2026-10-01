@@ -410,8 +410,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "credits.2",
-        "Custom Vulkan engine in Rust",
-        "Saját Vulkan motor Rustban",
+        "Custom wgpu engine in Rust",
+        "Saját wgpu motor Rustban",
     ),
     (
         "credits.3",

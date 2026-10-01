@@ -1,14 +1,13 @@
 //! Which chunks a view draws, and how much of each: the frustum test, the distance limit and
 //! the detail far chunks leave out.
 
-use super::arena::Arena;
 use super::chunks::ChunkGpu;
 use super::passes::ChunkMesh;
 use crate::world::{ChunkPos, FastMap};
 use glam::{Mat4, Vec3, Vec4};
 
 /// Pixels a block covers below which far chunks leave out grass and flowers (the shaders
-/// have faded them out: `PLANT_GONE_PX` in flags.glsl), and the faces between leaves (closed
+/// have faded them out: `PLANT_GONE_PX` in flags.wgsl), and the faces between leaves (closed
 /// crowns).
 pub(super) const PLANT_GONE_PX: f32 = 5.0;
 const LEAF_INNER_PX: f32 = 1.5;
@@ -112,7 +111,6 @@ pub(super) struct VisibleChunk {
 /// covers in this view.
 pub(super) fn select_chunks(
     chunks: &FastMap<ChunkPos, ChunkGpu>,
-    arena: &Arena,
     view_proj: Mat4,
     cam: Vec3,
     view_distance: f32,
@@ -157,7 +155,7 @@ pub(super) fn select_chunks(
             plain,
             parts,
             drawn,
-            mesh: ChunkMesh::new(arena.buffer(r), r.offset, c.vertex_offset, c.index_offset),
+            mesh: ChunkMesh::new(r.page, r.offset, c.vertex_offset, c.index_offset),
             opaque: c.opaque,
             water: c.water,
             dist2,

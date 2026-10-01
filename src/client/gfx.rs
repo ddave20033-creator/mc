@@ -9,8 +9,8 @@ use winit::window::Window;
 
 /// The window and what draws into it.
 pub(super) struct Gfx {
-    // `renderer` holds GPU resources and is destroyed explicitly in Drop before `gpu`; the
-    // window goes after them (fields drop in this order).
+    // The renderer's GPU resources go before the device, and the window after both (fields
+    // drop in this order).
     pub(super) renderer: Renderer,
     pub(super) gpu: Gpu,
     pub(super) window: Arc<Window>,
@@ -28,7 +28,7 @@ impl Gfx {
     /// The window's GPU and renderer, with only the logo's textures (the start-up screen's)
     /// until the real ones are made (`boot`).
     pub(super) fn new(window: Arc<Window>, msaa: u32, font_atlas: &[u8]) -> Self {
-        let gpu = Gpu::new(&window, false, msaa);
+        let gpu = Gpu::new(window.clone(), false, msaa);
         println!("Your Worlds running on: {}", gpu.device_name);
         let renderer = Renderer::new(&gpu, &textures::logo_levels(), font_atlas);
         Self {
@@ -62,10 +62,4 @@ pub(super) fn torch_particles(packs: &crate::textures::resource_pack::Packs) -> 
 /// (title, description) of the resource pack on top, for the credits (none: the built-in one).
 pub(super) fn pack_credit(packs: &crate::textures::resource_pack::Packs) -> Option<(String, String)> {
     packs.0.last().map(|p| (p.title().to_string(), p.description.clone()))
-}
-
-impl Drop for Gfx {
-    fn drop(&mut self) {
-        self.renderer.destroy(&mut self.gpu);
-    }
 }

@@ -1,10 +1,9 @@
-//! Compiles the GLSL shaders to SPIR-V (with glslc from the Vulkan SDK) into OUT_DIR, where
-//! `render` includes them, and lists the built-in resource pack's files (`builtin/rustcraft`)
-//! for `textures::resource_pack` to embed (made by `tools/texgen/build.py`).
+//! Lists the built-in resource pack's files (`builtin/rustcraft`) for `textures::resource_pack`
+//! to embed (made by `tools/texgen/build.py`). (The WGSL shaders need no build step: wgpu
+//! compiles them when the pipelines are made.)
 
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const BUILTIN_PACK: &str = "builtin/rustcraft";
 
@@ -40,70 +39,7 @@ fn embed_builtin_pack(out: &Path) {
     std::fs::write(out.join("builtin_pack.rs"), code).unwrap();
 }
 
-const SHADERS: &[&str] = &[
-    "world.vert",
-    "world.frag",
-    "shadow.vert",
-    "shadow.frag",
-    "sky.vert",
-    "sky.frag",
-    "ui.vert",
-    "ui.frag",
-    "lens.frag",
-    "blur.frag",
-];
-/// Shaders compiled once more with a define: (source, output name, define).
-const VARIANTS: &[(&str, &str, &str)] = &[
-    // Without alpha tests (`discard`), for faces with no see-through texels: the depth test
-    // then runs before the fragment shader.
-    ("world.frag", "world_plain.frag", "NO_DISCARD"),
-    ("shadow.frag", "shadow_plain.frag", "NO_DISCARD"),
-    // Chunk meshes' packed vertices (`render::chunks::ChunkVertex`).
-    ("world.vert", "world_chunk.vert", "CHUNK"),
-    ("shadow.vert", "shadow_chunk.vert", "CHUNK"),
-    // The menus' backdrop blurred across first (the second half is blur.frag itself).
-    ("blur.frag", "blur_across.frag", "ACROSS"),
-];
-const INCLUDES: &[&str] = &["frame.glsl", "common.glsl", "wave.glsl", "fire.glsl", "vertex.glsl", "flags.glsl"];
-
-fn glslc_path() -> PathBuf {
-    if let Ok(sdk) = env::var("VULKAN_SDK") {
-        for dir in ["Bin", "bin"] {
-            let exe = if cfg!(windows) { "glslc.exe" } else { "glslc" };
-            let p = PathBuf::from(&sdk).join(dir).join(exe);
-            if p.exists() {
-                return p;
-            }
-        }
-    }
-    PathBuf::from("glslc")
-}
-
 fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     embed_builtin_pack(&out);
-    let glslc = glslc_path();
-    println!("cargo:rerun-if-changed=shaders");
-    for inc in INCLUDES {
-        println!("cargo:rerun-if-changed=shaders/{inc}");
-    }
-    let jobs = SHADERS
-        .iter()
-        .map(|&name| (name, name, None))
-        .chain(VARIANTS.iter().map(|&(src, name, def)| (src, name, Some(def))));
-    for (src, name, define) in jobs {
-        println!("cargo:rerun-if-changed=shaders/{src}");
-        let mut cmd = Command::new(&glslc);
-        cmd.arg(format!("shaders/{src}"));
-        if let Some(def) = define {
-            cmd.arg(format!("-D{def}"));
-        }
-        let status = cmd
-            .arg("-O")
-            .arg("-o")
-            .arg(out.join(format!("{name}.spv")))
-            .status()
-            .expect("failed to run glslc - install the Vulkan SDK");
-        assert!(status.success(), "shader compilation failed: {name}");
-    }
 }
