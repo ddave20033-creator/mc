@@ -511,11 +511,16 @@ impl Game {
         }
         let at: FastMap<u32, usize> = self.level.items.iter().enumerate().map(|(i, it)| (it.id, i)).collect();
         for s in &items {
-            c.item_targets.insert(s.id, s.pos);
+            c.item_targets.insert(s.id, (s.pos, Default::default()));
             match at.get(&s.id).map(|&i| &mut self.level.items[i]) {
                 Some(it) => {
                     it.stack = s.stack;
-                    it.age = s.age;
+                    // (its age runs on here between the updates: put right only when it is
+                    // off, not snapped back and forth by the updates' few milliseconds, which
+                    // would make its bobbing and turning shiver)
+                    if (it.age - s.age).abs() > 0.25 {
+                        it.age = s.age;
+                    }
                 }
                 None => {
                     let mut it = ItemEntity::new(s.pos, Vec3::ZERO, s.stack, 0.0);
@@ -579,8 +584,8 @@ impl Game {
                     }
                     continue;
                 }
-                if let Some(&target) = c.item_targets.get(&it.id) {
-                    it.pos = it.pos.lerp(target, k);
+                if let Some((target, glide)) = c.item_targets.get_mut(&it.id) {
+                    it.pos = it.pos.lerp(*target, glide.step(dt));
                 }
                 it.age += dt;
             }

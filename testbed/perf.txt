@@ -1,0 +1,72 @@
+# Performance and smoothness: walking and sprinting straight and in circles on a flat floor in
+# the air, mobs wandering about, then flying fast over new terrain (chunks streaming in), each
+# followed by `stats` (frame times, slow frames, where the time went, ticks a frame, chunk
+# uploads, how evenly the camera, the walk and the first mob moved); then bursts of pictures
+# of walking and sprinting.
+world new 4242
+window 1280 720
+set debug on
+set hud off
+fill -30 40 -30 30 40 30 stone
+fill -30 41 -30 30 44 30 air
+pos -26 41 0
+look 0 0
+wait 3
+stats
+echo walking straight
+key forward 6
+wait 6
+stats
+echo sprinting straight
+pos -26 41 0
+key forward 6
+key sprint 6
+wait 6
+stats
+echo walking in a circle
+pos 0 41 -8
+look 0 0
+key forward 8
+turn 30 8
+wait 8
+stats
+echo sprinting in a circle
+pos 0 41 -10
+look 0 0
+key forward 8
+key sprint 8
+turn 30 8
+wait 8
+stats
+echo mobs wandering about (standing still, looking down at them)
+pos 0 41 0
+look 0 -60
+cmd summon pig ~3 ~ ~
+cmd summon sheep ~-3 ~ ~
+cmd summon wolf ~ ~ ~3
+wait 10
+stats
+echo flying fast over new terrain
+pos 0 90 0
+fly on
+look 30 -10
+key forward 12
+key sprint 12
+wait 12
+stats
+echo flying slowly, turning
+key forward 8
+turn 40 8
+wait 8
+stats
+echo pictures: walking, then sprinting
+fly off
+pos -26 41 0
+look 0 0
+key forward 6
+wait 1
+shots walk 6 0.05
+key sprint 3
+wait 1
+shots sprint 6 0.05
+stats

@@ -30,6 +30,7 @@ with PIL (resize to ~640x360 each) and reading that one image.
 | `checks` | only the checks: zfight around, every item model, textures, flicker; then the creative inventory, each items' tab |
 | `station` | a gun station opened: a pistol laid on its table, taken apart and put together, a scope fitted, the drawer; the click maps |
 | `book` | the guide book read: the cover, the contents and pages of several chapters, in English and Hungarian, light and dark |
+| `perf` | performance and smoothness: walking and sprinting (straight, in circles), mobs wandering, flying fast over new terrain, each followed by `stats`; read the `frames`, `phases` and `steps` lines (below) |
 
 Write a new script for anything else (copy one); a file anywhere works:
 `--test my_test.txt`. Add it to `BUILT_IN` in `src/client/testbed/mod.rs` to keep it.
@@ -97,6 +98,13 @@ start after `lane`) unless `abs` follows the command.
   script, started together.
 - `stats`: a line with where the player is, the frame rate, chunks (loaded, meshed, waiting), the chunk meshes'
   video memory, all video memory and the game's RAM (`set debug on` first, for the RAM).
+  Then, for the frames since the last `stats`: `frames` (how many, the average and worst frame
+  time, how many over 25 and 50 ms, how many ticks ran in a frame, chunk meshes uploaded),
+  `phases` (each part of a frame in ms, average / longest / in the worst frame: net, chunks,
+  ticks, update, camera, scene, ui, uploads, draw, gpu wait), and `steps` lines for the
+  camera, the walk (the view bobbing's clock) and the first mob: their speed each frame while
+  moving and how much it changes from one frame to the next (a smooth glide is under 1 %; a
+  stutter shows as a higher average and many steps over 20 %).
 - `echo <text>`: a note in the steps. · `quit`: stop here.
 
 ## Known findings (as of writing)

@@ -254,7 +254,7 @@ impl Game {
         // The player model (shadow only in first person); a spectator has no body.
         // Running eases the gun across the chest (and back) on the player model.
         let run = if self.me.body.sprinting { 1.0 } else { 0.0 };
-        self.me.look.tp_sprint += (run - self.me.look.tp_sprint) * (crate::util::damp(dt, 8.0));
+        self.me.look.tp_sprint += (run - self.me.look.tp_sprint) * (crate::util::damp(8.0, dt));
         if in_world && self.me.body.spawned && self.screen != Screen::Dead && !self.spectator() {
             // In bed: built standing, then laid down on it.
             let bed = self.me.vitals.sleep.map(|s| {
@@ -272,7 +272,7 @@ impl Game {
                 limb_swing: self.me.look.limb_swing,
                 limb_amount: self.me.look.limb_amount,
                 attack: self.me.hand.attack(),
-                crouch: self.me.body.crouch,
+                crouch: self.me.body.drawn_crouch(self.clock.between),
                 sprint: self.me.look.tp_sprint,
                 held: self.held(),
                 skin: self.effective_skin(),
@@ -349,7 +349,7 @@ impl Game {
             // 0.25 blocks behind the camera (0.27 while sneaking), so looking down shows the
             // chest, legs and feet instead of the top of the shoulders.
             if fp_body {
-                let back = 0.25 + 0.02 * self.me.body.crouch;
+                let back = 0.25 + 0.02 * self.me.body.drawn_crouch(self.clock.between);
                 let body_fwd = look_dir(self.me.look.body_yaw, 0.0);
                 let fp = PlayerPose {
                     pos: pose.pos - body_fwd * back,

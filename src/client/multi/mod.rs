@@ -37,6 +37,8 @@ pub(super) struct RemotePlayer {
     /// Smoothed pose that is drawn, and the latest one received.
     pub pose: Pose,
     target: Pose,
+    /// The glide from the pose drawn to the latest (an even pace from one to the next).
+    glide: crate::util::Glide,
     has_pose: bool,
     limbs: LimbSmoother,
     /// Swing of a lantern in their hand.
@@ -71,7 +73,7 @@ pub(super) struct Client {
     id: u8,
     tick: f32,
     /// Where the server says each dropped item is; they glide there.
-    item_targets: FastMap<u32, Vec3>,
+    item_targets: FastMap<u32, (Vec3, crate::util::Glide)>,
     /// The open container as last sent to or received from the server.
     container_known: Option<Vec<u8>>,
     /// Dropped items flying to whoever picked them up (item, player).
@@ -234,14 +236,16 @@ impl Game {
             flags |= pose_flags::SHOWING;
         }
         Pose {
-            pos: self.me.body.pos,
+            // (where it is drawn, as its limbs are: sent 20 times a second from frames, the
+            // place after the last tick would move on in uneven steps)
+            pos: self.me.body.between_pos(self.clock.between),
             yaw: self.me.look.visual_head_yaw(),
             pitch: self.me.look.pitch,
             body_yaw: self.me.look.body_yaw,
             limb_swing: self.me.look.limb_swing,
             limb_amount: self.me.look.limb_amount,
             attack: self.me.hand.attack(),
-            crouch: self.me.body.crouch,
+            crouch: self.me.body.drawn_crouch(self.clock.between),
             held: self.held(),
             skin: self.effective_skin(),
             flags,
@@ -404,10 +408,12 @@ impl Game {
     pub(super) fn net_tick(&mut self, dt: f32) {
         self.poll_joining();
         self.client_tick(dt);
-        // Other players glide toward their latest pose.
+        // Other players glide toward their latest pose (the rod's fight and the like still
+        // ease toward theirs).
         let k = crate::util::damp(15.0, dt);
         let mut chops = Vec::new();
         for r in &mut self.session.remotes {
+            let g = r.glide.step(dt);
             let (p, t) = (&mut r.pose, r.target);
             // (their axe biting in: heard where it is, about an arm ahead of them)
             if let (Some(None), Some(Some(_))) = (p.chop.map(|s| s.hit), t.chop.map(|s| s.hit)) {
@@ -417,14 +423,14 @@ impl Game {
             p.pos = if p.pos.distance_squared(t.pos) > 64.0 {
                 t.pos
             } else {
-                p.pos.lerp(t.pos, k)
+                p.pos.lerp(t.pos, g)
             };
-            p.yaw = lerp_angle(p.yaw, t.yaw, k);
-            p.body_yaw = lerp_angle(p.body_yaw, t.body_yaw, k);
-            p.pitch += (t.pitch - p.pitch) * k;
-            p.limb_swing += (t.limb_swing - p.limb_swing) * k;
-            p.limb_amount += (t.limb_amount - p.limb_amount) * k;
-            p.crouch += (t.crouch - p.crouch) * k;
+            p.yaw = lerp_angle(p.yaw, t.yaw, g);
+            p.body_yaw = lerp_angle(p.body_yaw, t.body_yaw, g);
+            p.pitch += (t.pitch - p.pitch) * g;
+            p.limb_swing += (t.limb_swing - p.limb_swing) * g;
+            p.limb_amount += (t.limb_amount - p.limb_amount) * g;
+            p.crouch += (t.crouch - p.crouch) * g;
             p.attack = t.attack;
             p.held = t.held;
             p.flags = t.flags;
@@ -488,6 +494,12 @@ impl Game {
             if !r.has_pose {
                 r.pose = pose;
             }
+            // (the server passes on the latest pose every tick, whether it changed or not: the
+            // same again does not start the glide over, which would slow it)
+            let t = &r.target;
+            if pose.pos != t.pos || pose.yaw != t.yaw || pose.body_yaw != t.body_yaw || pose.pitch != t.pitch || pose.limb_swing != t.limb_swing {
+                r.glide.restart();
+            }
             r.target = pose;
             r.has_pose = true;
         }
@@ -506,6 +518,7 @@ impl Game {
             name,
             pose: Pose::default(),
             target: Pose::default(),
+            glide: Default::default(),
             has_pose: false,
             limbs: LimbSmoother::default(),
             lantern: Default::default(),

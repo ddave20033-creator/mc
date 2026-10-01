@@ -121,7 +121,7 @@ impl Game {
             self.me.hand.hidden = false;
             return;
         }
-        let speed = self.me.body.horizontal_speed();
+        let speed = self.me.body.drawn_speed(self.clock.between);
 
         self.update_aim(control);
         self.me.aim.action_cooldown -= dt;

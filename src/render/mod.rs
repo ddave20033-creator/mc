@@ -93,6 +93,8 @@ pub struct Renderer {
     /// Last frame's recording split in ms: buffers written, shadow pass, visible chunks
     /// picked, world draws, the rest (for --bench).
     pub rec_detail: [f32; 5],
+    /// Chunk meshes uploaded last frame.
+    pub uploaded: u32,
 }
 
 /// One host-visible buffer of `size` bytes per frame slot.
@@ -188,6 +190,7 @@ impl Renderer {
                 gpu_ms: None,
                 cpu_detail: [0.0; 3],
                 rec_detail: [0.0; 5],
+                uploaded: 0,
             }
         }
     }

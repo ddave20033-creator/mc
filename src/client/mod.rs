@@ -13,6 +13,7 @@ mod input;
 mod lighting;
 mod menus;
 mod multi;
+mod perf;
 mod player;
 mod scene;
 mod shown;

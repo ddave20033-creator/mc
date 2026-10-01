@@ -67,6 +67,30 @@ pub fn pack_vertex(v: &Vertex, x0: f32, z0: f32, time: f32) -> ChunkVertex {
         tint: v.tint,
     }
 }
+/// Packs a mesh's vertices for the GPU (on the worker thread that made it: a frame taking in
+/// a burst of new chunks only copies them), the fluids' change times kept relative to `time`
+/// (which its `ChunkHead` then gets). Its `vertices` are given up.
+pub fn pack_mesh(m: &mut MeshData, time: f32) {
+    let (x0, z0) = ((m.pos.0 * 16) as f32, (m.pos.1 * 16) as f32);
+    m.packed = m.vertices.iter().map(|v| pack_vertex(v, x0, z0, time)).collect();
+    m.packed_time = time;
+    m.vertices = Vec::new();
+}
+
+/// Gives a mesh's memory back on another thread: freeing a chunk's few megabytes takes the
+/// system a millisecond or more, a stutter when a burst of new chunks comes in.
+fn drop_later(m: MeshData) {
+    use std::sync::{mpsc, OnceLock};
+    static BIN: OnceLock<mpsc::Sender<MeshData>> = OnceLock::new();
+    let bin = BIN.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<MeshData>();
+        // (without the thread the channel is closed, and the mesh is freed here after all)
+        let _ = std::thread::Builder::new().name("mesh-free".into()).spawn(move || rx.into_iter().for_each(drop));
+        tx
+    });
+    let _ = bin.send(m);
+}
+
 /// Per-frame staging memory for chunk uploads (reused instead of allocating per chunk).
 pub(super) const STAGING_SIZE: usize = 16 << 20;
 
@@ -131,15 +155,19 @@ impl Renderer {
         // This frame slot's staging buffer is free: begin_frame waited for its fence.
         let ring = &self.staging[gpu.frame_slot];
         let mut ring_used = 0usize;
+        self.uploaded = 0;
         for _ in 0..MAX_UPLOADS_PER_FRAME {
-            let Some(m) = self.pending.pop_front() else {
+            let Some(mut m) = self.pending.pop_front() else {
                 break;
             };
+            if m.packed.is_empty() && !m.vertices.is_empty() {
+                pack_mesh(&mut m, time);
+            }
             // Room for the head, the vertices wherever they line up, and the indices (at
             // least what `total` below comes to). Whether it goes through the staging buffer is
             // decided by this, not by `total`: a mesh whose `most` does not fit is never
             // checked against the room left, so it must not use the staging buffer either.
-            let vbytes = m.vertices.len() * VERTEX;
+            let vbytes = m.packed.len() * VERTEX;
             let most = HEAD + VERTEX + vbytes + 16 + std::mem::size_of_val(m.indices.as_slice());
             let staged = most <= STAGING_SIZE;
             if staged && ring_used + most > STAGING_SIZE {
@@ -161,7 +189,7 @@ impl Renderer {
                 min: Vec3::new(x0 - 1.0, m.min_y - 1.0, z0 - 1.0),
                 max: Vec3::new(x0 + 17.0, m.max_y + 1.0, z0 + 17.0),
             };
-            if !m.vertices.is_empty() {
+            if !m.packed.is_empty() {
                 let Some(range) = self.arena.alloc(gpu, most as u64) else {
                     // The video memory is full: it waits (till far chunks go and free some).
                     self.pending.push_front(m);
@@ -170,12 +198,12 @@ impl Renderer {
                 let voff = HEAD + (VERTEX - (range.offset as usize + HEAD) % VERTEX) % VERTEX;
                 let ioff = (voff + vbytes + 15) & !15;
                 let total = ioff + std::mem::size_of_val(m.indices.as_slice());
-                let head = ChunkHead { x: m.pos.0 * 16, time, z: m.pos.1 * 16, _pad: 0 };
-                let packed: Vec<ChunkVertex> = m.vertices.iter().map(|v| pack_vertex(v, x0, z0, time)).collect();
+                let head = ChunkHead { x: m.pos.0 * 16, time: m.packed_time, z: m.pos.1 * 16, _pad: 0 };
+                let packed = m.packed.as_slice();
                 debug_assert!(total <= most);
                 let (src, src_offset) = if staged {
                     ring.write(ring_used, &[head]);
-                    ring.write(ring_used + voff, packed.as_slice());
+                    ring.write(ring_used + voff, packed);
                     ring.write(ring_used + ioff, m.indices.as_slice());
                     let at = ring_used;
                     ring_used = (ring_used + total + 15) & !15;
@@ -190,7 +218,7 @@ impl Renderer {
                             | vk::MemoryPropertyFlags::HOST_COHERENT,
                     );
                     staging.write(0, &[head]);
-                    staging.write(voff, packed.as_slice());
+                    staging.write(voff, packed);
                     staging.write(ioff, m.indices.as_slice());
                     let handle = staging.handle;
                     gpu.defer_destroy(staging);
@@ -211,9 +239,11 @@ impl Renderer {
                 chunk.index_offset = ioff as u64;
                 any = true;
             }
+            self.uploaded += 1;
             if let Some(old) = self.chunks.insert(m.pos, chunk).and_then(|c| c.mesh) {
                 self.arena.retire(old, self.frame);
             }
+            drop_later(m);
         }
         if any {
             let barrier = vk::MemoryBarrier::default()

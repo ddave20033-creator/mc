@@ -49,6 +49,14 @@ pub struct Player {
     /// then.
     pub prev_pos: Vec3,
     pub prev_crouch: f32,
+    /// Its speed before the last tick (the speed drawn goes from it to `vel`, as the place
+    /// does: what moves with the walk, the view bobbing and the limbs, does not change in
+    /// steps 20 times a second).
+    pub prev_vel: Vec3,
+    /// How far below where it is it is still drawn after stepping up onto something (a stair,
+    /// a slab): the rise is shown as a quick glide, not a jump in one tick. It settles by
+    /// frames (`settle`).
+    pub step_lag: f32,
 }
 
 pub fn look_dir(yaw: f32, pitch: f32) -> Vec3 {
@@ -158,21 +166,54 @@ impl Player {
     pub fn start_tick(&mut self) {
         self.prev_pos = self.pos;
         self.prev_crouch = self.crouch;
+        self.prev_vel = self.vel;
     }
 
     /// Where it is drawn, `between` (0..1) of the way from before the last tick to now (not
-    /// across a jump of more than a few blocks: a teleport).
+    /// across a jump of more than a few blocks: a teleport), lower by what is left of a step up.
     pub fn drawn_pos(&self, between: f32) -> Vec3 {
+        if self.prev_pos.distance_squared(self.pos) > 16.0 {
+            return self.pos;
+        }
+        self.between_pos(between) - Vec3::Y * self.step_lag
+    }
+
+    /// `between` of the way from before the last tick to now (not across a teleport), without
+    /// the step up's glide.
+    pub fn between_pos(&self, between: f32) -> Vec3 {
         if self.prev_pos.distance_squared(self.pos) > 16.0 {
             return self.pos;
         }
         self.prev_pos.lerp(self.pos, between)
     }
 
+    /// Its speed over the ground as drawn (see `prev_vel`).
+    pub fn drawn_speed(&self, between: f32) -> f32 {
+        let v = self.drawn_vel(between);
+        Vec3::new(v.x, 0.0, v.z).length()
+    }
+
+    /// Its velocity as drawn (see `prev_vel`).
+    pub fn drawn_vel(&self, between: f32) -> Vec3 {
+        self.prev_vel.lerp(self.vel, between)
+    }
+
+    /// A frame: what is left of a step up settles (most of it in a tenth of a second).
+    pub fn settle(&mut self, dt: f32) {
+        self.step_lag *= (-dt * 22.0).exp();
+        if self.step_lag < 1e-3 {
+            self.step_lag = 0.0;
+        }
+    }
+
     /// Its eye, drawn (see `drawn_pos`).
     pub fn drawn_eye(&self, between: f32) -> Vec3 {
-        let crouch = self.prev_crouch + (self.crouch - self.prev_crouch) * between;
-        self.drawn_pos(between) + Vec3::Y * (EYE_HEIGHT - crouch * SNEAK_DROP)
+        self.drawn_pos(between) + Vec3::Y * (EYE_HEIGHT - self.drawn_crouch(between) * SNEAK_DROP)
+    }
+
+    /// How far it is crouched, drawn (between the last two ticks).
+    pub fn drawn_crouch(&self, between: f32) -> f32 {
+        self.prev_crouch + (self.crouch - self.prev_crouch) * between
     }
 
     pub fn intersects(&self, b: IVec3) -> bool {
@@ -352,6 +393,11 @@ impl Player {
                 let gain = |p: Vec3| (p.x - start.x).powi(2) + (p.z - start.z).powi(2);
                 if gain(self.pos) > gain(flat) + 1e-6 {
                     (bx, bz) = (sx, sz);
+                    // (drawn rising from where it was: the tick's glide leaves the rise out,
+                    // `step_lag` brings it in smoothly)
+                    let rise = (self.pos.y - start.y).max(0.0);
+                    self.prev_pos.y += rise;
+                    self.step_lag += rise;
                 } else {
                     self.pos = flat;
                 }

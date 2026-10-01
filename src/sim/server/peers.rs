@@ -397,9 +397,14 @@ impl Server {
         let players: Vec<(u8, Option<Pose>, Option<IVec3>)> =
             self.peers.iter().filter(|p| p.joined).map(|p| (p.id, p.pose, p.open)).collect();
         let poses: Vec<(u8, Pose)> = players.iter().filter_map(|(id, p, _)| p.map(|p| (*id, p))).collect();
+        // (each pose goes on to the others as it comes, see `handle`; all of them again once a
+        // second, for whoever has missed one)
+        let all_poses = self.synced % 20 == 0;
         for (id, pose, open) in &players {
-            let others: Vec<(u8, Pose)> = poses.iter().filter(|(i, _)| i != id).copied().collect();
-            self.send_to(*id, &Msg::Poses(others));
+            if all_poses {
+                let others: Vec<(u8, Pose)> = poses.iter().filter(|(i, _)| i != id).copied().collect();
+                self.send_to(*id, &Msg::Poses(others));
+            }
             if let Some(pose) = pose {
                 self.send_entities(*id, pose.pos);
             }
