@@ -1,0 +1,43 @@
+"""Trees and plants (to be redrawn in the flat style: see BRIEF.md)."""
+
+from terrain import (  # noqa: F401
+    paint_oak_log,
+    paint_oak_log_top,
+    paint_spruce_log,
+    paint_spruce_log_top,
+    paint_birch_log,
+    paint_birch_log_top,
+    paint_oak_leaves,
+    paint_spruce_leaves,
+    paint_birch_leaves,
+    paint_cactus_side,
+    paint_cactus_top,
+    paint_short_grass,
+    paint_poppy,
+    paint_dandelion,
+    paint_dead_bush,
+    paint_oak_sapling,
+    paint_birch_sapling,
+    paint_spruce_sapling,
+)
+
+TEXTURES = {
+    "block/oak_log": paint_oak_log,
+    "block/oak_log_top": paint_oak_log_top,
+    "block/spruce_log": paint_spruce_log,
+    "block/spruce_log_top": paint_spruce_log_top,
+    "block/birch_log": paint_birch_log,
+    "block/birch_log_top": paint_birch_log_top,
+    "block/oak_leaves": paint_oak_leaves,
+    "block/spruce_leaves": paint_spruce_leaves,
+    "block/birch_leaves": paint_birch_leaves,
+    "block/cactus_side": paint_cactus_side,
+    "block/cactus_top": paint_cactus_top,
+    "block/short_grass": paint_short_grass,
+    "block/poppy": paint_poppy,
+    "block/dandelion": paint_dandelion,
+    "block/dead_bush": paint_dead_bush,
+    "block/oak_sapling": paint_oak_sapling,
+    "block/birch_sapling": paint_birch_sapling,
+    "block/spruce_sapling": paint_spruce_sapling,
+}

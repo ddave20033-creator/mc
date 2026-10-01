@@ -28,7 +28,7 @@ import importlib  # noqa: E402
 
 import common  # noqa: E402
 
-MODULES = ["terrain", "crafted", "items", "entities", "furnaces", "player"]
+MODULES = ["terrain", "flora", "crafted", "items", "entities", "furnaces", "player"]
 MODULE_OF: dict[str, str] = {}
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -168,12 +168,14 @@ def sheet(rendered: dict) -> Image.Image:
     return img
 
 
-REFERENCE = Path(__file__).parent / "reference"
+# The textures as the pack has them now (a filtered build does not write the pack): the
+# comparison shows them next to the new ones.
+REFERENCE = TEXTURES
 
 
 def compare(rendered: dict) -> Image.Image:
-    """Each texture next to its Faithful reference (left: reference scaled to 128 with nearest
-    neighbour, right: ours), 4 pairs per row, for judging how close the look is."""
+    """Each texture next to the one the pack has now (left: before, right: new), 4 pairs per
+    row."""
     names = sorted(rendered)
     cols, cw, ch = 4, 290, 150
     rows = (len(names) + cols - 1) // cols
