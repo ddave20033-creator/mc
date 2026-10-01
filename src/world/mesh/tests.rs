@@ -149,7 +149,7 @@ impl Fnv {
         for c in [m.opaque_count, m.solid_count, m.leaf_inner_count] {
             self.u32(c);
         }
-        m.dir_counts.iter().chain(&m.cut_dir_counts).for_each(|&c| self.u32(c));
+        m.dir_counts.iter().chain(&m.cut_dir_counts).chain(&m.log_counts).for_each(|&c| self.u32(c));
         self.f32(m.min_y);
         self.f32(m.max_y);
         for p in m.doors.iter().chain(&m.chests).chain(&m.gun_stations).chain(&m.torches).chain(&m.stump_marks) {
@@ -194,7 +194,7 @@ fn terrain_and_meshes_are_unchanged() {
     let m = mesh_chunk((px, pz), &nb, &[], &notches, &Generator::new(3));
     h.mesh(&m);
     println!("{chunks} generated chunks + all blocks: {}", fingerprint(&h));
-    assert_eq!(fingerprint(&h), "9483e59fd2bf14ce");
+    assert_eq!(fingerprint(&h), "6e198286ef784885");
 }
 
 /// Every block id on a floor, spaced out, and a few next to each other (stairs bending,
@@ -312,3 +312,4 @@ fn chunk_vertices_pack_without_loss() {
         check(&mesh_chunk((c * 5, 0), &nb, &anim, NO_NOTCHES, &gen));
     }
 }
+

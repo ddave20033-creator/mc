@@ -7,10 +7,14 @@ use crate::world::{ChunkPos, FastMap};
 use glam::{Mat4, Vec3, Vec4};
 
 /// Pixels a block covers below which far chunks leave out grass and flowers (the shaders
-/// have faded them out: `PLANT_GONE_PX` in flags.wgsl), and the faces between leaves (closed
-/// crowns).
+/// have faded them out: `PLANT_GONE_PX` in flags.wgsl).
 pub(super) const PLANT_GONE_PX: f32 = 5.0;
-const LEAF_INNER_PX: f32 = 1.5;
+/// ... and the faces between leaves (only seen up close, through the gaps of a crown; the
+/// many of them in a forest cost much): about 70 blocks away on a 1080p screen.
+const LEAF_INNER_PX: f32 = 11.0;
+/// ... and below which round logs and branches are drawn four-sided (`MeshData::log_counts`):
+/// about 60 blocks away on a 1080p screen.
+const ROUND_LOG_PX: f32 = 13.0;
 
 pub(super) struct Frustum([Vec4; 6]);
 
@@ -35,7 +39,7 @@ impl Frustum {
 /// A few index ranges of a chunk's mesh to draw, next ones joined.
 #[derive(Clone, Copy, Default)]
 pub(super) struct Parts {
-    ranges: [(u32, u32); 4],
+    ranges: [(u32, u32); 8],
     n: usize,
 }
 
@@ -66,8 +70,8 @@ impl Parts {
 impl ChunkGpu {
     /// The solid indices to draw when only the whole-block faces turned toward `facing`
     /// directions (see `FACE_N`) show: the plain faces (drawn without alpha testing), and the
-    /// rest (the other solid ones and the cut-out faces).
-    pub fn solid_parts(&self, facing: [bool; 6]) -> (Parts, Parts) {
+    /// rest (the round logs, near or `far`, the other solid ones and the cut-out faces).
+    pub fn solid_parts(&self, facing: [bool; 6], far: bool) -> (Parts, Parts) {
         let (mut plain, mut rest) = (Parts::default(), Parts::default());
         let mut at = 0;
         for (d, &count) in self.dirs.iter().enumerate() {
@@ -76,6 +80,13 @@ impl ChunkGpu {
             }
             at += count;
         }
+        let [near_logs, far_logs] = self.logs;
+        if far {
+            rest.push(at + near_logs, far_logs);
+        } else {
+            rest.push(at, near_logs);
+        }
+        at += near_logs + far_logs;
         let cut_total: u32 = self.cut_dirs.iter().sum();
         let mut cut_at = self.solid - cut_total;
         rest.push(at, cut_at - at);
@@ -132,13 +143,8 @@ pub(super) fn select_chunks(
         // faces between leaves.
         let near = cam.clamp(c.min, c.max);
         let block_px = detail_px / near.distance(cam).max(1e-3);
-        let drawn = if block_px >= PLANT_GONE_PX {
-            c.opaque
-        } else if block_px >= LEAF_INNER_PX {
-            c.solid + c.leaf_inner
-        } else {
-            c.solid
-        };
+        // (the scope's view draws from the start: the faces between leaves with the plants)
+        let drawn = if block_px >= PLANT_GONE_PX { c.opaque } else { c.solid };
         // Whole-block faces turned away from the camera are left out by direction:
         // +X faces only show from the +X side of the chunk's west edge, and so on.
         let facing = [
@@ -149,8 +155,14 @@ pub(super) fn select_chunks(
             cam.z > c.min.z,
             cam.z < c.max.z,
         ];
-        let (plain, mut parts) = c.solid_parts(facing);
-        parts.push(c.solid, drawn - c.solid);
+        let (plain, mut parts) = c.solid_parts(facing, block_px < ROUND_LOG_PX);
+        if block_px >= LEAF_INNER_PX {
+            parts.push(c.solid, c.leaf_inner);
+        }
+        if block_px >= PLANT_GONE_PX {
+            let plants = c.solid + c.leaf_inner;
+            parts.push(plants, c.opaque - plants);
+        }
         visible.push(VisibleChunk {
             plain,
             parts,

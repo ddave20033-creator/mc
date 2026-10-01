@@ -19,11 +19,15 @@ impl Builder {
     /// A log or a branch, round: a many-sided cylinder along its axis (logs thick, branches
     /// thin), its bark around it. An end joining the same kind of log goes on into it; one
     /// meeting a log across (a branch out of a trunk, a branch turning up) reaches on into
-    /// its middle, so the joint is closed; a free end is capped with the rings.
-    pub(super) fn round_log(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block) {
+    /// its middle, so the joint is closed; a free end is capped with the rings. `far`: the
+    /// version far chunks draw instead, four-sided (inside the near one, which the scope's
+    /// view draws together with it). Returns false for a trunk with an axe's cut in it: it
+    /// has one shape for all distances (a stump must stay short), made when `far` is false.
+    pub(super) fn round_log(&mut self, r: &Region, x: i32, y: i32, z: i32, b: Block, far: bool) -> bool {
         let axis = log_axis(b);
         let radius = log_radius(b);
-        let sides = if is_branch(b) { 8 } else { 12 };
+        let near_sides = if is_branch(b) { 6 } else { 8 };
+        let sides = if far { 4 } else { near_sides };
         // Block-local position from (along the axis, u, v across it).
         let (u_axis, v_axis) = match axis {
             0 => (2, 1),
@@ -70,8 +74,10 @@ impl Builder {
         let end_layer = face_texture(b, if axis == 1 { 2 } else { 0 });
         let (t0, t1) = (ends[0].0, ends[1].0);
         // (no side faces straight along an axis: two logs crossing never have sides in the
-        // same plane, which would flicker)
-        let angle = |i: usize| i as f32 / sides as f32 * std::f32::consts::TAU;
+        // same plane, which would flicker; with an odd number of sides in a half turn the
+        // ring is turned by a quarter of a side for that)
+        let turn = if (sides / 2) % 2 == 1 { 0.25 } else { 0.0 };
+        let angle = |i: usize| (i as f32 + turn) / sides as f32 * std::f32::consts::TAU;
         let around = if is_branch(b) { 1.0 } else { 3.0 };
         let (wx, wz) = ((x + self.ox) as f32, (z + self.oz) as f32);
         let world = move |p: [f32; 3]| [wx + p[0], y as f32 + p[1], wz + p[2]];
@@ -104,8 +110,11 @@ impl Builder {
         };
         if axis == 1 && !is_branch(b) {
             if let Some(notch) = self.notch_at(IVec3::new(x + self.ox, y, z + self.oz)) {
-                self.notched_log(notch, radius, sides, around, (t0, ends[0].1), (t1, ends[1].1), side_layer, end_layer, &emit, &round_n, &at);
-                return;
+                if far {
+                    return false;
+                }
+                self.notched_log(notch, radius, near_sides, around, (t0, ends[0].1), (t1, ends[1].1), side_layer, end_layer, &emit, &round_n, &at);
+                return false;
             }
         }
         for i in 0..sides {
@@ -115,7 +124,7 @@ impl Builder {
             let mut n = [0.0f32; 3];
             n[u_axis] = mid.cos();
             n[v_axis] = mid.sin();
-            let (u0, u1) = (i as f32 / sides as f32 * around, (i + 1) as f32 / sides as f32 * around);
+            let (u0, u1) = (a0 / std::f32::consts::TAU * around, a1 / std::f32::consts::TAU * around);
             emit(
                 self,
                 [at(t0, c0, s0), at(t0, c1, s1), at(t1, c1, s1), at(t1, c0, s0)],
@@ -144,6 +153,7 @@ impl Builder {
                 );
             }
         }
+        true
     }
 
     /// An upright trunk with an axe's cut in it (`Notch`): a wedge taken out of its side,

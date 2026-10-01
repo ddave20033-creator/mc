@@ -57,14 +57,17 @@ pub struct MeshData {
     /// Opaque indices without the faces between leaves and the plants. They are, in order:
     /// faces of whole blocks with no see-through texels grouped by direction (see `FACE_N`;
     /// drawn without alpha testing, so the depth test runs before their fragment shader),
-    /// the other solid ones (stairs, chests, torches...), then the faces of whole blocks
-    /// with cut-out texels (glass, the outside of leaves, stump marks, furnace fronts) grouped
-    /// by direction.
+    /// the round logs (near, then far: `log_counts`), the other solid ones (stairs, chests,
+    /// torches...), then the faces of whole blocks with cut-out texels (glass, the outside of
+    /// leaves, stump marks, furnace fronts) grouped by direction.
     pub solid_count: u32,
     /// Counts of the plain whole-block faces by direction (from index 0 on).
     pub dir_counts: [u32; 6],
     /// Counts of the cut-out whole-block faces by direction (ending the solid indices).
     pub cut_dir_counts: [u32; 6],
+    /// Counts of the round logs' indices right after the plain faces: as near chunks draw
+    /// them, then the simpler version far chunks draw instead.
+    pub log_counts: [u32; 2],
     /// Indices of the faces between leaves (after the solid ones).
     pub leaf_inner_count: u32,
     pub min_y: f32,
@@ -98,6 +101,8 @@ struct Builder {
     /// leave them out.
     leaf_inner: Vec<u32>,
     plants: Vec<u32>,
+    /// Round logs and branches: as near chunks draw them, and the simpler far version.
+    logs: [Vec<u32>; 2],
     /// Faces of whole blocks by direction: a chunk's faces turned away from the camera can be
     /// left out as a group. Plain ones, and ones with cut-out texels (see `MeshData`).
     dirs: [Vec<u32>; 6],
@@ -182,6 +187,7 @@ pub fn mesh_chunk(
         opaque: Vec::with_capacity(24_576),
         leaf_inner: Vec::new(),
         plants: Vec::new(),
+        logs: Default::default(),
         dirs: Default::default(),
         cut_dirs: Default::default(),
         water: Vec::new(),
@@ -256,7 +262,16 @@ pub fn mesh_chunk(
                         continue;
                     }
                     Model::Log => {
-                        m.round_log(&r, x, y, z, b);
+                        // (a trunk with a cut in it stays with the other solid faces: one
+                        // shape for all distances)
+                        let from = m.opaque.len();
+                        if m.round_log(&r, x, y, z, b, false) {
+                            let near: Vec<u32> = m.opaque.drain(from..).collect();
+                            m.logs[0].extend(near);
+                            m.round_log(&r, x, y, z, b, true);
+                            let far: Vec<u32> = m.opaque.drain(from..).collect();
+                            m.logs[1].extend(far);
+                        }
                         continue;
                     }
                     Model::Bed => {
@@ -334,7 +349,10 @@ pub fn mesh_chunk(
 
     let dir_counts = std::array::from_fn(|d| m.dirs[d].len() as u32);
     let cut_dir_counts = std::array::from_fn(|d| m.cut_dirs[d].len() as u32);
+    let log_counts = m.logs.each_ref().map(|l| l.len() as u32);
     let mut indices: Vec<u32> = m.dirs.concat();
+    indices.extend_from_slice(&m.logs[0]);
+    indices.extend_from_slice(&m.logs[1]);
     indices.extend_from_slice(&m.opaque);
     for d in &m.cut_dirs {
         indices.extend_from_slice(d);
@@ -353,6 +371,7 @@ pub fn mesh_chunk(
         solid_count,
         dir_counts,
         cut_dir_counts,
+        log_counts,
         leaf_inner_count,
         min_y: m.min_y,
         max_y: m.max_y,

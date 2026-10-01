@@ -108,6 +108,8 @@ pub(super) struct ChunkGpu {
     /// cut-out ones at their end (see `MeshData`).
     pub dirs: [u32; 6],
     pub cut_dirs: [u32; 6],
+    /// Round logs right after the plain faces: near, then far (see `MeshData`).
+    pub logs: [u32; 2],
     pub leaf_inner: u32,
     pub water: u32,
     pub min: Vec3,
@@ -181,6 +183,7 @@ impl Renderer {
                 solid: m.solid_count,
                 dirs: m.dir_counts,
                 cut_dirs: m.cut_dir_counts,
+                logs: m.log_counts,
                 leaf_inner: m.leaf_inner_count,
                 water: m.indices.len() as u32 - m.opaque_count,
                 min: Vec3::new(x0 - 1.0, m.min_y - 1.0, z0 - 1.0),

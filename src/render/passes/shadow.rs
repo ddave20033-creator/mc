@@ -54,7 +54,7 @@ impl Renderer {
                 }
                 let mesh = ChunkMesh::new(m.page, m.offset, c.vertex_offset, c.index_offset);
                 shadow_chunks.push((mesh, c.opaque));
-                let (plain, rest) = c.solid_parts(lit);
+                let (plain, rest) = c.solid_parts(lit, false);
                 plain_draws.extend(plain.iter().map(|(first, n)| chunk_draw(&mesh, first, n)));
                 draws.extend(rest.iter().map(|(first, n)| chunk_draw(&mesh, first, n)));
                 let plants = c.solid + c.leaf_inner;
