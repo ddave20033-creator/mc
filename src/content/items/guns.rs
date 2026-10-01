@@ -8,10 +8,10 @@
 
 use super::*;
 use crate::audio::Sound;
-use crate::model::gun::Spec;
-use crate::model::pistol_view::{self, Rig};
-use crate::model::tp_rig::{ak as tp_ak, pistol as tp_pistol, revolver as tp_revolver};
-use crate::model::viewmodel::{Anim, Bone};
+use crate::model::guns::gun::Spec;
+use crate::model::guns::pistol_view::{self, Rig};
+use crate::model::blockbench::{tp_ak, tp_pistol, tp_revolver};
+use crate::model::rig::viewmodel::{Anim, Bone};
 use glam::Vec3;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -525,7 +525,7 @@ mod tests {
             assert!(k.magazine_size(gun_mod::EXTENDED_MAGAZINE) < 64);
             assert!(GunKind::of(k.ammo()).is_none() && max_stack(k.ammo()) == 64);
             // Its parts are items, its own, one each; they get dirty with it.
-            assert_eq!(d.parts.len(), crate::model::gun::PARTS, "{k:?}");
+            assert_eq!(d.parts.len(), crate::model::guns::gun::PARTS, "{k:?}");
             for (p, &item) in d.parts.iter().enumerate() {
                 assert!(!name(item).is_empty(), "{k:?} part {p}");
                 assert_eq!(d.parts.iter().filter(|&&i| i == item).count(), 1);
@@ -543,7 +543,7 @@ mod tests {
                     assert_eq!(magazine_gun(m.item), Some(k));
                     assert_eq!(magazine_capacity(m.item), Some(d.stats.magazine));
                     assert_eq!(max_stack(m.item), 1);
-                    assert_eq!(d.parts[crate::model::gun::MAGAZINE], m.item);
+                    assert_eq!(d.parts[crate::model::guns::gun::MAGAZINE], m.item);
                     if let Some((ext, n)) = m.extended {
                         assert_eq!(magazine_gun(ext), Some(k));
                         assert_eq!(magazine_capacity(ext), Some(n));
@@ -559,7 +559,7 @@ mod tests {
             }
             // Its round is its own, and its third-person rig has a gun in it.
             assert!(WEAPONS.iter().filter(|w| w.ammo == d.ammo).count() == 1);
-            assert!(crate::model::viewmodel::find_bone(d.tp_bones, "gun").is_some());
+            assert!(crate::model::rig::viewmodel::find_bone(d.tp_bones, "gun").is_some());
         }
         assert!(GunKind::Pistol.fits(gun_mod::SCOPE));
         assert!(!GunKind::Revolver.fits(gun_mod::SCOPE));

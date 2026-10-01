@@ -11,7 +11,7 @@ use crate::entity::block_entity::{
 use crate::entity::player::look_dir;
 use crate::item::ItemId;
 use crate::model::crack_overlay;
-use crate::model::player::{PlayerPose, build_player, hand_pivot, limb_targets};
+use crate::model::players::player::{PlayerPose, build_player, hand_pivot, limb_targets};
 use crate::world::*;
 use crate::world::mesh::Vertex;
 use crate::textures::tex;
@@ -110,7 +110,7 @@ impl Game {
         // so is a pistol (the body's arm would point it at the ground when looking down), and
         // a grenade being readied (both hands on it).
         // (and so is a bucket, hanging from the fist by its handle)
-        let lantern = self.held() == LANTERN as ItemId || crate::model::bucket::is_bucket(self.held());
+        let lantern = self.held() == LANTERN as ItemId || crate::model::items::bucket::is_bucket(self.held());
         // (and so is a fishing rod: both hands on it)
         let rod = self.held() == crate::item::FISHING_ROD;
         let pistol = self.holding_gun() || self.tools.grenades.hold.is_some() || rod;
@@ -138,7 +138,7 @@ impl Game {
         // ones the player model shows from outside), however far down the player looks (the
         // first-person body draws the rest of it).
         if let (true, Some(swing)) = (own_view, self.me.aim.chop) {
-            use crate::model::chop_rig::{emit, Parts};
+            use crate::model::players::chop_rig::{emit, Parts};
             let light = crate::util::vertex_light(player_sky, player_blk);
             let fl = crate::world::mesh::flags::ENTITY;
             emit(&mut scene.particles, self.chop_world(), &swing.pose().aimed(self.chop_aim()), Parts::Arms, self.held(), self.effective_skin(), [255; 3], 0, 0.0, light, fl);
@@ -258,7 +258,7 @@ impl Game {
         if in_world && self.me.body.spawned && self.screen != Screen::Dead && !self.spectator() {
             // In bed: built standing, then laid down on it.
             let bed = self.me.vitals.sleep.map(|s| {
-                crate::model::player::lying(self.me.body.drawn_pos(self.clock.between), facing_dir(s.facing).as_vec3())
+                crate::model::players::player::lying(self.me.body.drawn_pos(self.clock.between), facing_dir(s.facing).as_vec3())
             });
             let (pos, head_yaw, pitch) = match bed {
                 Some((feet, yaw, _)) => (feet, yaw, 0.0),
@@ -297,8 +297,8 @@ impl Game {
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {
                 let mods = pose.gun_mods;
-                use crate::model::gun_view::{eject, light, muzzle, rest_point_in_gun_space};
-                let point = |q| crate::model::player::gun_point(&pose, kind, rest_point_in_gun_space(kind, q));
+                use crate::model::guns::gun_view::{eject, light, muzzle, rest_point_in_gun_space};
+                let point = |q| crate::model::players::player::gun_point(&pose, kind, rest_point_in_gun_space(kind, q));
                 self.tools.guns.muzzle_tp = Some(point(muzzle(kind, mods)));
                 self.tools.guns.eject_tp = Some(point(eject(kind)));
                 self.tools.guns.light_tp = Some(point(light(kind)));
@@ -314,15 +314,15 @@ impl Game {
             let limbs = self.me.look.limbs.update(target, dt);
             // Where a readied grenade is in the model's hand (thrown from there, seen from
             // outside).
-            self.tools.grenades.hand_tp = pose.grenade.map(|_| crate::model::player::held_center(&pose, &limbs));
+            self.tools.grenades.hand_tp = pose.grenade.map(|_| crate::model::players::player::held_center(&pose, &limbs));
             // Where the fishing rod's tip is on the model (the line leaves from there).
-            self.tools.fishing.tip_tp = crate::model::player::rod_tip(&pose);
+            self.tools.fishing.tip_tp = crate::model::players::player::rod_tip(&pose);
             // A held lantern swings from the hand.
-            let lantern_dir = if crate::model::player::hangs(pose.held) {
+            let lantern_dir = if crate::model::players::player::hangs(pose.held) {
                 let pivot = hand_pivot(&pose, &limbs);
                 Some(
                     self.me.look.lantern_swing
-                        .update(crate::model::lantern::ON_MODEL, pivot, dt),
+                        .update(crate::model::items::lantern::ON_MODEL, pivot, dt),
                 )
             } else {
                 self.me.look.lantern_swing = Default::default();
@@ -338,11 +338,11 @@ impl Game {
             let glass = if third_person { &mut scene.translucent } else { &mut hidden_glass };
             build_player(&mut scene.entity, glass, &pose, &limbs, player_sky, player_blk);
             if let Some((feet, _, turn)) = bed {
-                crate::model::player::lay_down(&mut scene.entity[start..], feet, turn);
+                crate::model::players::player::lay_down(&mut scene.entity[start..], feet, turn);
             }
             scene.player_vertex_count = scene.entity.len();
             if torch && third_person {
-                held_torch_tip = Some(crate::model::player::held_torch_tip(&pose, &limbs));
+                held_torch_tip = Some(crate::model::players::player::held_torch_tip(&pose, &limbs));
             }
             // First-person body: a headless copy drawn with the particles (which cast no shadow;
             // the full model above already does). Like the First Person Model mod, it sits
@@ -361,7 +361,7 @@ impl Game {
                 };
                 build_player(&mut scene.particles, &mut scene.translucent, &fp, &limbs, player_sky, player_blk);
                 if torch {
-                    held_torch_tip = Some(crate::model::player::held_torch_tip(&fp, &limbs));
+                    held_torch_tip = Some(crate::model::players::player::held_torch_tip(&fp, &limbs));
                 }
             }
         }

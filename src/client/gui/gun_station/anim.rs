@@ -7,12 +7,12 @@ use super::pieces::{Piece, first_piece, lying_pieces, lying_root, part_bones, ri
 use super::table::Table;
 use crate::entity::{BenchEvent, BenchItem, GunBench, bench_event};
 use crate::item::*;
-use crate::model::gun::{MAGAZINE, PARTS};
-use crate::model::gun_view;
-use crate::model::pistol_view::bench::self as rig;
-use crate::model::pistol_view::self as pv;
-use crate::model::pistol_view::stack_dirt;
-use crate::model::viewmodel::{BonePose, find_bone};
+use crate::model::guns::gun::{MAGAZINE, PARTS};
+use crate::model::guns::gun_view;
+use crate::model::guns::pistol_view::bench::self as rig;
+use crate::model::guns::pistol_view::self as pv;
+use crate::model::guns::pistol_view::stack_dirt;
+use crate::model::rig::viewmodel::{BonePose, find_bone};
 use crate::util::smoothstep;
 use glam::{IVec3, Mat4, Vec3};
 use std::f32::consts::PI;

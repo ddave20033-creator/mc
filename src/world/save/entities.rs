@@ -268,7 +268,7 @@ pub fn load_entities(
                 bench.loader = parts.get(4) == Some(&"1");
                 bench.loader_mag = parts.get(5).and_then(|s| parse_slot(s));
                 if let Some(g) = parts.get(6) {
-                    let max = crate::model::gun_station::CRATE_MAX;
+                    let max = crate::model::guns::gun_station::CRATE_MAX;
                     for (i, n) in g.split(',').take(2).enumerate() {
                         bench.grenades[i] = n.parse::<u8>().unwrap_or(0).min(max);
                     }

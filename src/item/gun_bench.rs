@@ -4,7 +4,7 @@
 //! long cleaning takes. What lies on a station is its block entity (`entity::GunBench`).
 
 use super::*;
-use crate::model::gun::{BARREL, FRAME, MAGAZINE, SLIDE, SPRING};
+use crate::model::guns::gun::{BARREL, FRAME, MAGAZINE, SLIDE, SPRING};
 
 /// What something is on the gun station's table (how it lies there and what clicks on it do).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

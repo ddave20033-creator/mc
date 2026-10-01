@@ -9,4 +9,6 @@ __pycache__/
 tools/texgen/out/
 tools/texgen/reference/
 tools/status_icons/out/
+# gen_tp_anim.py: a player with a gun to pose in Blockbench (nothing in the game reads it)
+tools/blockbench/tp_*_anim.bbmodel
 /.claude/

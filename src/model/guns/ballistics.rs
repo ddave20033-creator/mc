@@ -18,7 +18,7 @@ const CASE_SCALE: f32 = 0.04;
 
 /// Half the size of a gun's spent case (a case lies along x), from the guns' model of it.
 fn case_look(kind: GunKind) -> Vec3 {
-    let (len, wide) = crate::model::gun_view::round_size(kind.ammo(), true);
+    let (len, wide) = crate::model::guns::gun_view::round_size(kind.ammo(), true);
     Vec3::new(len, wide, wide) * CASE_SCALE * 0.5
 }
 
@@ -125,7 +125,7 @@ impl Cases {
                 * Mat4::from_translation(-Vec3::Y * half.x)
                 * Mat4::from_scale(Vec3::splat(CASE_SCALE));
             let light = vertex_light(sky, blk);
-            crate::model::gun_view::emit_round(out, c.kind.ammo(), true, m, light, flags::ENTITY);
+            crate::model::guns::gun_view::emit_round(out, c.kind.ammo(), true, m, light, flags::ENTITY);
         }
     }
 }

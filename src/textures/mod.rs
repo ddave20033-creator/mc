@@ -116,7 +116,7 @@ fn procedural_layers(base: &mut [u8], given: &[bool], crack: &[u16]) {
 /// `generate_base` after the pack and procedural layers: the synthesized ones.
 fn finish_base(mut base: Vec<u8>) -> Vec<u8> {
     let layer_bytes = TILE * TILE * 4;
-    use crate::model::{ak_vm, gun_station, pistol_vm, revolver_vm};
+    use crate::model::blockbench::{ak_vm, gun_station, pistol_vm, revolver_vm, rifle_station};
     synth_model_pages(&mut base, pistol_vm::PNG, pistol_vm::PAGES, tex::PISTOL_VIEW);
     synth_model_pages(&mut base, revolver_vm::PNG, revolver_vm::PAGES, tex::REVOLVER_VIEW);
     synth_model_pages(&mut base, ak_vm::PNG, ak_vm::PAGES, tex::AK_VIEW);
@@ -126,10 +126,10 @@ fn finish_base(mut base: Vec<u8>) -> Vec<u8> {
         synth_grime(&mut base, tex::AK_VIEW, ak_vm::PAGES, level);
     }
     synth_model_pages(&mut base, gun_station::PNG, gun_station::PAGES, tex::GUN_STATION_MODEL);
-    synth_model_pages(&mut base, gun_station::RIFLE_PNG, gun_station::RIFLE_PAGES, tex::RIFLE_STATION_MODEL);
-    synth_model_pages(&mut base, crate::model::grenade::PNG, crate::model::grenade::PAGES, tex::GRENADE_MODEL);
-    synth_model_pages(&mut base, crate::model::dummy::PNG, crate::model::dummy::PAGES, tex::DUMMY_MODEL);
-    synth_model_pages(&mut base, crate::model::fishing_rod::PNG, crate::model::fishing_rod::PAGES, tex::FISHING_ROD_MODEL);
+    synth_model_pages(&mut base, rifle_station::PNG, rifle_station::PAGES, tex::RIFLE_STATION_MODEL);
+    synth_model_pages(&mut base, crate::model::blockbench::grenade::PNG, crate::model::blockbench::grenade::PAGES, tex::GRENADE_MODEL);
+    synth_model_pages(&mut base, crate::model::blockbench::dummy::PNG, crate::model::blockbench::dummy::PAGES, tex::DUMMY_MODEL);
+    synth_model_pages(&mut base, crate::model::blockbench::fishing_rod::PNG, crate::model::blockbench::fishing_rod::PAGES, tex::FISHING_ROD_MODEL);
     render_item_icons(&mut base);
     let logo = logo_layers();
     let at = tex::LOGO as usize * layer_bytes;

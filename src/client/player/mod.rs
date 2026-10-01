@@ -10,7 +10,7 @@ pub(super) mod sleep;
 pub(super) mod spectate;
 
 use crate::entity::player::Player;
-use crate::model::hand::HandAnim;
+use crate::model::players::hand::HandAnim;
 
 /// The player's game mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -4,9 +4,9 @@
 //! a fired case, nothing), the reload (swung out, the cases thrown out, loaded one round at a
 //! time or from a speedloader, swung shut), and drawing it.
 
-use crate::model::pistol_view::GunAnim;
-use crate::model::revolver_vm as vm;
-use crate::model::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, Anim, BonePose};
+use crate::model::guns::pistol_view::GunAnim;
+use crate::model::blockbench::revolver_vm as vm;
+use crate::model::rig::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, Anim, BonePose};
 use crate::item::{chamber, revolver_next};
 use crate::world::mesh::Vertex;
 use crate::textures::tex;
@@ -75,7 +75,7 @@ pub const FULL: u16 = 0b0101_0101_0101;
 /// With `parts_only` the arms and what holds the revolver are left still (the player model
 /// holds it with its own arms).
 pub fn add_gun_anims(pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
-    let holding = crate::model::gun_view::holding(vm::BONES, parts_only);
+    let holding = crate::model::guns::gun_view::holding(vm::BONES, parts_only);
     let hold = |b: usize| holding.contains(&b);
     // What is in each chamber: nothing, a live round, or a fired case (its primer dented).
     for k in 0..6 {
@@ -140,7 +140,7 @@ pub fn add_gun_anims(pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
 /// The first texture layer of the revolver's pages as dirty as `dirt`
 /// (`pistol_view::dirt_level`).
 pub fn layers(dirt: u8) -> u32 {
-    crate::model::gun_view::dirty_layer(tex::REVOLVER_VIEW, vm::PAGES, dirt)
+    crate::model::guns::gun_view::dirty_layer(tex::REVOLVER_VIEW, vm::PAGES, dirt)
 }
 
 /// The revolver's cubes.
@@ -190,14 +190,14 @@ pub fn sight_point() -> Vec3 {
 
 /// The revolver at the gun station: which bones each of its parts is.
 pub mod bench {
-    use crate::model::gun::{BARREL, FRAME, PARTS};
-    use crate::model::viewmodel::{add_anim, find_anim, BonePose};
+    use crate::model::guns::gun::{BARREL, FRAME, PARTS};
+    use crate::model::rig::viewmodel::{add_anim, find_anim, BonePose};
     use super::{bone, vm, STRIP};
 
     pub type Bones = u64;
 
     fn subtree(name: &str) -> Bones {
-        crate::model::gun_view::subtree(vm::BONES, name)
+        crate::model::guns::gun_view::subtree(vm::BONES, name)
     }
 
     /// The bones a part is (`gun::FRAME` ..: frame, barrel, mainspring, cylinder, hammer).
@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn the_revolver_sits_like_the_pistol() {
-        let m = crate::model::gun_view::rest_point_in_gun_space(crate::item::GunKind::Revolver, muzzle());
+        let m = crate::model::guns::gun_view::rest_point_in_gun_space(crate::item::GunKind::Revolver, muzzle());
         assert!((m - Vec3::new(8.6, 3.0, 0.0)).length() < 4.0, "{m}");
     }
 }

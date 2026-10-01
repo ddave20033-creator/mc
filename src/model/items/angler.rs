@@ -2,7 +2,7 @@
 //! first-person view and on the player model) while casting, waiting, fighting a fish and
 //! landing it; the line from its tip to the bobber; and a fish on the end of the line.
 
-use crate::model::fishing_rod::{self, RodPoints, RodPose, LENGTH};
+use crate::model::items::fishing_rod::{self, RodPoints, RodPose, LENGTH};
 use crate::world::mesh::{flags, Vertex};
 use crate::textures::tex;
 use glam::{Mat4, Vec3};

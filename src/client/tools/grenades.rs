@@ -14,7 +14,7 @@ use crate::client::Game;
 use crate::entity::player::raycast_solid;
 use crate::item::*;
 use crate::item::inventory::take;
-use crate::model::grenade::{RAISE_TIME, power};
+use crate::model::guns::grenade::{RAISE_TIME, power};
 use crate::net::Msg;
 use crate::sim::grenade::*;
 use crate::util::vertex_light;
@@ -301,7 +301,7 @@ impl Game {
             let fl = crate::world::mesh::flags::ENTITY;
             // The Blockbench grenades, as big as the old ones were.
             let smoke = matches!(g.kind, GrenadeKind::Smoke);
-            use crate::model::grenade::{emit, sized, Look};
+            use crate::model::guns::grenade::{emit, sized, Look};
             emit(out, smoke, sized(smoke, m, 0.2), Look::THROWN, light, fl);
         }
     }

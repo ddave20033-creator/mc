@@ -14,7 +14,7 @@ use crate::client::{AUTOSAVE_SECONDS, Container, Game, Screen};
 use crate::entity::ItemEntity;
 use crate::entity::player::look_dir;
 use crate::item::{GunKind, ItemId, Slot, armor_code};
-use crate::model::player::{LimbSmoother, PlayerPose, build_player, hand_pivot, limb_targets};
+use crate::model::players::player::{LimbSmoother, PlayerPose, build_player, hand_pivot, limb_targets};
 use crate::net::{Conn, Msg, NO_BLOCK, Pose, container, pose_flags};
 use crate::world::save::PlayerSave;
 use crate::ui::{Color, chat};
@@ -40,10 +40,10 @@ pub(super) struct RemotePlayer {
     has_pose: bool,
     limbs: LimbSmoother,
     /// Swing of a lantern in their hand.
-    lantern: crate::model::lantern::SmoothSwing,
+    lantern: crate::model::items::lantern::SmoothSwing,
     /// The guide book in their hands: its page turning, and how it is shown here.
-    pub(super) book: crate::model::book::TurnAnim,
-    pub(super) book_view: Option<crate::model::book::BookView>,
+    pub(super) book: crate::model::items::book::TurnAnim,
+    pub(super) book_view: Option<crate::model::items::book::BookView>,
     /// When they last fired (game time), for their gun's slide.
     pub(super) shot_at: Option<f32>,
 }
@@ -351,7 +351,7 @@ impl Game {
         self.session.remotes
             .iter()
             .filter(|r| r.shown())
-            .filter(|r| crate::model::player::gives_light(r.pose.held))
+            .filter(|r| crate::model::players::player::gives_light(r.pose.held))
             .map(|r| {
                 // Like this player's own: just below the eyes, where the hand holds it up.
                 let eye = 1.62 - 0.35 * r.pose.crouch;
@@ -519,8 +519,8 @@ impl Game {
 /// What another player's held gun is doing, as they sent it: its slide, reload and aim
 /// (`Pose::gun_state`, `gun_extra`), and from the gun itself (`held_data`) the rounds in its
 /// magazine or what is in each chamber of its cylinder.
-fn remote_gun(p: &Pose, time: f32, shot_at: Option<f32>) -> crate::model::pistol_view::GunAnim {
-    let mut g = crate::model::pistol_view::GunAnim::unpack(
+fn remote_gun(p: &Pose, time: f32, shot_at: Option<f32>) -> crate::model::guns::pistol_view::GunAnim {
+    let mut g = crate::model::guns::pistol_view::GunAnim::unpack(
         p.gun_state,
         shot_at.map(|at| time - at).filter(|&t| (0.0..1.0).contains(&t)),
     );
@@ -597,22 +597,22 @@ impl Game {
     pub(super) fn remote_gun_point(&self, id: u8, kind: GunKind, point: (usize, Vec3)) -> Option<Vec3> {
         let r = self.session.remotes.iter().find(|r| r.id == id && r.shown())?;
         let pose = standing_pose(&r.pose, self.clock.time, r.shot_at);
-        let point = crate::model::gun_view::rest_point_in_gun_space(kind, point);
-        Some(crate::model::player::gun_point(&pose, kind, point))
+        let point = crate::model::guns::gun_view::rest_point_in_gun_space(kind, point);
+        Some(crate::model::players::player::gun_point(&pose, kind, point))
     }
 }
 
 impl Game {
     /// The other players fishing: where the tip of their rod is and what it is doing (for
     /// their line and bobber).
-    pub(super) fn remote_rods(&self) -> Vec<(Vec3, crate::model::angler::RodAnim)> {
+    pub(super) fn remote_rods(&self) -> Vec<(Vec3, crate::model::items::angler::RodAnim)> {
         self.session.remotes
             .iter()
             .filter(|r| r.shown() && r.pose.flags & pose_flags::SLEEPING == 0)
             .filter_map(|r| {
                 let rod = r.pose.rod.filter(|_| r.pose.held == crate::item::FISHING_ROD)?;
                 let pose = standing_pose(&r.pose, self.clock.time, r.shot_at);
-                Some((crate::model::player::rod_tip(&pose)?, rod))
+                Some((crate::model::players::player::rod_tip(&pose)?, rod))
             })
             .collect()
     }
@@ -639,7 +639,7 @@ pub(super) fn build_remote_players(
             let bed = (p.flags & pose_flags::SLEEPING != 0).then(|| {
                 let d = -look_dir(p.body_yaw, 0.0);
                 let head = facing_dir(facing_of(d.x, d.z)).as_vec3();
-                crate::model::player::lying(p.pos, head)
+                crate::model::players::player::lying(p.pos, head)
             });
             let standing = standing_pose(&p, time, r.shot_at);
             let pose = match bed {
@@ -659,9 +659,9 @@ pub(super) fn build_remote_players(
                 ..pose
             };
             let limbs = r.limbs.update(limb_targets(&pose), dt);
-            let lantern = if crate::model::player::hangs(pose.held) {
+            let lantern = if crate::model::players::player::hangs(pose.held) {
                 Some(r.lantern.update(
-                    crate::model::lantern::ON_MODEL,
+                    crate::model::items::lantern::ON_MODEL,
                     hand_pivot(&pose, &limbs),
                     dt,
                 ))
@@ -681,7 +681,7 @@ pub(super) fn build_remote_players(
                 world.block_light_estimate(c),
             );
             if let Some((feet, _, turn)) = bed {
-                crate::model::player::lay_down(&mut out[start..], feet, turn);
+                crate::model::players::player::lay_down(&mut out[start..], feet, turn);
             }
         }
     }

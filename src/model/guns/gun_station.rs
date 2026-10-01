@@ -9,28 +9,13 @@
 //! station to 40): its left block (seen from the front) is the one around the origin. Its
 //! front (the drawer) faces +Z.
 
-#[allow(unused_imports, dead_code)]
-mod small {
-    include!("gun_station_data.rs");
-}
-#[allow(unused_imports, dead_code)]
-mod big {
-    include!("rifle_station_data.rs");
-}
-pub use small::PAGES;
+use crate::model::blockbench::{gun_station as small, rifle_station as big};
 use small::{BONES, CUBES};
 
-use crate::model::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, Anim, Bone, BonePose, Cube};
+use crate::model::rig::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, Anim, Bone, BonePose, Cube};
 use crate::world::mesh::Vertex;
 use crate::textures::tex;
 use glam::{IVec3, Mat4, Vec3};
-
-/// The texture pages (`PAGES` of 128x128, one under the other), loaded into the texture
-/// layers from `tex::GUN_STATION_MODEL`, and the rifle station's (`RIFLE_PAGES`, from
-/// `tex::RIFLE_STATION_MODEL`).
-pub static PNG: &[u8] = include_bytes!("gun_station.png");
-pub static RIFLE_PNG: &[u8] = include_bytes!("rifle_station.png");
-pub const RIFLE_PAGES: u32 = big::PAGES;
 
 /// A station's model: its bones, cubes, animations and first texture layer.
 struct Model {
@@ -89,7 +74,7 @@ fn emit_box_rounds(out: &mut Vec<Vertex>, m: Mat4, floor: &Cube, v: u16, light: 
         let (row, col) = (k / BOX_ACROSS, k % BOX_ACROSS);
         let at = Vec3::new(x0 + dx * (col as f32 + 0.5), hi.y, z0 + dz * (row as f32 + 0.5));
         let r = m * Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(ROUND_PX));
-        crate::model::gun_view::emit_round(out, ammo, false, r, light, fl);
+        crate::model::guns::gun_view::emit_round(out, ammo, false, r, light, fl);
     }
 }
 /// The count stencilled on a box: pale yellow, on a box of magnum rounds red.
@@ -343,7 +328,7 @@ pub fn emit_crate(out: &mut Vec<Vertex>, p: IVec3, toward: Vec3, n: [u8; 2], lig
             let at = Vec3::new(x0 + dx * (col as f32 + 0.5), CRATE_FLOOR + CRATE_GRENADE * 0.5, CRATE_Z.0 + dz * (row as f32 + 0.5));
             // (each turned a little its own way)
             let turn = Mat4::from_rotation_y(((k * 47 + half * 13) % 360) as f32 * 0.35_f32.to_radians() * 7.0);
-            crate::model::grenade::emit_sized(out, half == 1, m * Mat4::from_translation(at) * turn, CRATE_GRENADE, light, fl);
+            crate::model::guns::grenade::emit_sized(out, half == 1, m * Mat4::from_translation(at) * turn, CRATE_GRENADE, light, fl);
         }
         let name = format!("crate_front_{half}");
         if let Some(c) = RIFLE.cubes.iter().find(|c| c.name == name) {
@@ -491,8 +476,8 @@ mod ammo_box_tests {
     /// The rounds drawn in a box: vertices on the revolver's texture pages (magnum rounds),
     /// and on the pistol's (9 mm).
     fn rounds(out: &[Vertex]) -> (usize, usize) {
-        let revolver = tex::REVOLVER_VIEW as f32..(tex::REVOLVER_VIEW + crate::model::revolver_vm::PAGES) as f32;
-        let pistol = tex::PISTOL_VIEW as f32..(tex::PISTOL_VIEW + crate::model::pistol_vm::PAGES) as f32;
+        let revolver = tex::REVOLVER_VIEW as f32..(tex::REVOLVER_VIEW + crate::model::blockbench::revolver_vm::PAGES) as f32;
+        let pistol = tex::PISTOL_VIEW as f32..(tex::PISTOL_VIEW + crate::model::blockbench::pistol_vm::PAGES) as f32;
         (out.iter().filter(|v| revolver.contains(&v.layer)).count(), out.iter().filter(|v| pistol.contains(&v.layer)).count())
     }
 

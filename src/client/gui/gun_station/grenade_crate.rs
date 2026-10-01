@@ -5,7 +5,7 @@ use super::table::Table;
 use crate::client::Game;
 use crate::item::inventory::take;
 use crate::item::{FRAG_GRENADE, SMOKE_GRENADE, Stack};
-use crate::model::gun_station::{CRATE_MAX, crate_halves};
+use crate::model::guns::gun_station::{CRATE_MAX, crate_halves};
 use crate::util::ray_box;
 use crate::world::bench_main;
 use glam::IVec3;

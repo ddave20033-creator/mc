@@ -207,7 +207,7 @@ impl Game {
                 .into_iter()
                 .filter(|&(_, _, mods, _, _)| mods & crate::item::gun_mod::LIGHT != 0 && mods & crate::item::gun_mod::LIGHT_ON != 0)
                 .map(|(id, kind, _, eye, look)| {
-                    let from = self.remote_gun_point(id, kind, crate::model::gun_view::light(kind)).unwrap_or(eye);
+                    let from = self.remote_gun_point(id, kind, crate::model::guns::gun_view::light(kind)).unwrap_or(eye);
                     (from, look)
                 })
                 .collect();
@@ -246,7 +246,7 @@ impl Game {
             && self.me.body.spawned
             && self.screen != Screen::Dead
             && !self.spectator()
-            && crate::model::player::gives_light(self.held())
+            && crate::model::players::player::gives_light(self.held())
         {
             let p = self.eye() - Vec3::Y * 0.35;
             lights.push((p, intensity(self.held(), 0.0)));
@@ -263,7 +263,7 @@ impl Game {
             let mut dropped: Vec<(Vec3, f32)> = self
                 .level.items
                 .iter()
-                .filter(|it| !it.is_picking_up() && crate::model::player::gives_light(it.stack.item))
+                .filter(|it| !it.is_picking_up() && crate::model::players::player::gives_light(it.stack.item))
                 .filter(|it| it.pos.distance(cam) < 48.0)
                 .map(|it| (it.pos + Vec3::Y * 0.35, intensity(it.stack.item, it.id as f32 * 1.9 + it.age)))
                 .collect();

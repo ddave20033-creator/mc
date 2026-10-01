@@ -327,8 +327,8 @@ impl R<'_> {
             chop: self.swing()?,
         })
     }
-    fn swing(&mut self) -> Option<Option<crate::model::chop_rig::Swing>> {
-        use crate::model::chop_rig::{Kind, Swing};
+    fn swing(&mut self) -> Option<Option<crate::model::players::chop_rig::Swing>> {
+        use crate::model::players::chop_rig::{Kind, Swing};
         let kind = match self.u8()? {
             0 => return Some(None),
             1 => Kind::Chop,
@@ -338,9 +338,9 @@ impl R<'_> {
         let hit = self.f32()?;
         Some(Some(Swing { kind, clock, hit: (hit >= 0.0).then_some(hit) }))
     }
-    fn rod(&mut self) -> Option<crate::model::angler::RodAnim> {
+    fn rod(&mut self) -> Option<crate::model::items::angler::RodAnim> {
         let time = |v: f32| (v >= 0.0).then_some(v);
-        Some(crate::model::angler::RodAnim {
+        Some(crate::model::items::angler::RodAnim {
             charge: self.f32()?,
             cast: time(self.f32()?),
             fight: self.f32()?,
@@ -1094,7 +1094,7 @@ mod tests {
             book_page: book::HUNGARIAN | 7,
             spectator: true,
             sprint: 0.5,
-            rod: Some(crate::model::angler::RodAnim {
+            rod: Some(crate::model::items::angler::RodAnim {
                 charge: 0.25,
                 cast: Some(0.1),
                 out: true,
@@ -1104,7 +1104,7 @@ mod tests {
                 lift: None,
                 bobber: Some(Vec3::new(3.0, 60.5, -8.0)),
             }),
-            chop: Some(crate::model::chop_rig::Swing { kind: crate::model::chop_rig::Kind::Stump, clock: 0.4, hit: Some(0.38) }),
+            chop: Some(crate::model::players::chop_rig::Swing { kind: crate::model::players::chop_rig::Kind::Stump, clock: 0.4, hit: Some(0.38) }),
             ..Default::default()
         }));
         roundtrip(Msg::Grenade {

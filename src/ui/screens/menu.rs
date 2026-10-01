@@ -77,7 +77,7 @@ pub fn main_menu(ui: &mut Ui, skin: u8, preview: &mut PreviewRotation) -> Action
 /// Projects the same textured model used in the world into the menu's UI layer.
 /// Painter sorting and backface removal keep it clean without touching the world depth buffer.
 fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut PreviewRotation) {
-    use crate::model::player::{build_player, limb_targets, PlayerPose};
+    use crate::model::players::player::{build_player, limb_targets, PlayerPose};
     use crate::world::mesh::Vertex;
     use std::f32::consts::PI;
 

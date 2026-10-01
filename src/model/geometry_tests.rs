@@ -51,7 +51,7 @@ fn is_log_item(item: ItemId) -> bool {
 
 /// A bucket with a liquid in it drawn in the world animates it by the clock: left out.
 fn clocked(item: ItemId, fl: u8) -> bool {
-    fl != 0 && crate::model::bucket::Fill::of(item).is_some_and(|f| f != crate::model::bucket::Fill::Empty)
+    fl != 0 && crate::model::items::bucket::Fill::of(item).is_some_and(|f| f != crate::model::items::bucket::Fill::Empty)
 }
 
 fn items() -> Vec<Vertex> {
@@ -98,8 +98,8 @@ fn logs() -> Vec<Vertex> {
     out
 }
 
-fn player_pose() -> crate::model::player::PlayerPose {
-    crate::model::player::PlayerPose {
+fn player_pose() -> crate::model::players::player::PlayerPose {
+    crate::model::players::player::PlayerPose {
         pos: Vec3::new(1.5, 2.0, -3.0),
         body_yaw: 0.4,
         head_yaw: 0.6,
@@ -132,7 +132,7 @@ fn player_pose() -> crate::model::player::PlayerPose {
 }
 
 fn players() -> Vec<Vertex> {
-    use crate::model::player::{build_player, limb_targets, PlayerPose};
+    use crate::model::players::player::{build_player, limb_targets, PlayerPose};
     let mut out = Vec::new();
     let mut glass = Vec::new();
     let variants: Vec<Box<dyn Fn(&mut PlayerPose)>> = vec![
@@ -172,11 +172,11 @@ fn players() -> Vec<Vertex> {
             p.rod = Some(Default::default());
         }),
         Box::new(|p| {
-            p.chop = Some(crate::model::chop_rig::Swing { kind: crate::model::chop_rig::Kind::Chop, clock: 0.3, hit: None });
+            p.chop = Some(crate::model::players::chop_rig::Swing { kind: crate::model::players::chop_rig::Kind::Chop, clock: 0.3, hit: None });
             p.armor = 0x0fff;
         }),
         Box::new(|p| {
-            p.chop = Some(crate::model::chop_rig::Swing { kind: crate::model::chop_rig::Kind::Stump, clock: 0.5, hit: Some(0.4) });
+            p.chop = Some(crate::model::players::chop_rig::Swing { kind: crate::model::players::chop_rig::Kind::Stump, clock: 0.5, hit: Some(0.4) });
             p.first_person = true;
             p.burning = true;
         }),
@@ -188,12 +188,12 @@ fn players() -> Vec<Vertex> {
         build_player(&mut out, &mut glass, &p, &limbs, 12, 3);
     }
     // First-person chop arms.
-    let swing = crate::model::chop_rig::Swing { kind: crate::model::chop_rig::Kind::Chop, clock: 0.35, hit: None };
-    crate::model::chop_rig::emit(
+    let swing = crate::model::players::chop_rig::Swing { kind: crate::model::players::chop_rig::Kind::Chop, clock: 0.35, hit: None };
+    crate::model::players::chop_rig::emit(
         &mut out,
         somewhere(),
         &swing.pose(),
-        crate::model::chop_rig::Parts::Arms,
+        crate::model::players::chop_rig::Parts::Arms,
         crate::item::NONE,
         0,
         [255; 3],
@@ -207,7 +207,7 @@ fn players() -> Vec<Vertex> {
 }
 
 fn hands() -> Vec<Vertex> {
-    use crate::model::hand::HandAnim;
+    use crate::model::players::hand::HandAnim;
     let mut all = Vec::new();
     let setups: Vec<(ItemId, Box<dyn Fn(&mut HandAnim, usize)>)> = vec![
         (crate::item::NONE, Box::new(|h, i| if i == 5 { h.swing() })),
@@ -299,8 +299,8 @@ fn mobs() -> Vec<Vertex> {
 }
 
 fn lanterns_and_buckets() -> Vec<Vertex> {
-    use crate::model::bucket;
-    use crate::model::lantern::{emit_held_lantern, emit_lantern, LanternKind, FIRST_PERSON, ON_MODEL};
+    use crate::model::items::bucket;
+    use crate::model::items::lantern::{emit_held_lantern, emit_lantern, LanternKind, FIRST_PERSON, ON_MODEL};
     let mut out = Vec::new();
     for kind in [LanternKind::Standing, LanternKind::Hanging, LanternKind::Held(1.5)] {
         emit_lantern(&mut out, somewhere(), LIGHT, flags::ENTITY, kind);
@@ -317,7 +317,7 @@ fn lanterns_and_buckets() -> Vec<Vertex> {
 }
 
 fn gun_stations() -> Vec<Vertex> {
-    use crate::model::gun_station::{emit_block, emit_crate, emit_item, Loader};
+    use crate::model::guns::gun_station::{emit_block, emit_crate, emit_item, Loader};
     let mut out = Vec::new();
     let p = IVec3::new(3, 60, 8);
     for rifle in [false, true] {
@@ -329,7 +329,7 @@ fn gun_stations() -> Vec<Vertex> {
 }
 
 fn gun_fx() -> Vec<Vertex> {
-    use crate::model::ballistics::{emit_laser_dot, emit_muzzle_flash, emit_tracer};
+    use crate::model::guns::ballistics::{emit_laser_dot, emit_muzzle_flash, emit_tracer};
     let mut out = Vec::new();
     let cam = Vec3::new(0.5, 1.7, 2.0);
     for laser in [false, true] {

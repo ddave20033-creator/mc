@@ -6,9 +6,9 @@
 //! either (`Rig`). The first-person hand (`hand`) adds the arms' animations on top; the player
 //! model (`player`) holds them in its hands.
 
-use crate::model::gun::PARTS;
-use crate::model::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, sample, Anim, Bone, BonePose, Cube};
-use crate::model::{ak_vm, pistol_vm};
+use crate::model::guns::gun::PARTS;
+use crate::model::rig::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, sample, Anim, Bone, BonePose, Cube};
+use crate::model::blockbench::{ak_vm, pistol_vm};
 use crate::item::{gun_mod, GunKind};
 use crate::world::mesh::Vertex;
 use crate::textures::tex;
@@ -231,7 +231,7 @@ impl GunAnim {
     /// the chambers its speedloader fills (bits 16-21).
     pub fn pack_extra(&self) -> u32 {
         let mag = self.new_mag.map_or(0, |(n, cap)| (n as u32 + 1).min(63) | ((cap > 12) as u32) << 6);
-        let load = self.load.map_or(0, |t| 1 + (t / crate::model::revolver_view::LOAD_END * 62.0).round().clamp(0.0, 62.0) as u32);
+        let load = self.load.map_or(0, |t| 1 + (t / crate::model::guns::revolver_view::LOAD_END * 62.0).round().clamp(0.0, 62.0) as u32);
         mag | load << 7 | (self.ejects as u32) << 13 | (self.loader as u32 & 0x3f) << 16
     }
 
@@ -240,7 +240,7 @@ impl GunAnim {
         let mag = e & 0x3f;
         self.new_mag = (mag > 0).then(|| ((mag - 1) as u8, if e & 1 << 6 != 0 { 20 } else { 12 }));
         let load = e >> 7 & 0x3f;
-        self.load = (load > 0).then(|| (load - 1) as f32 / 62.0 * crate::model::revolver_view::LOAD_END);
+        self.load = (load > 0).then(|| (load - 1) as f32 / 62.0 * crate::model::guns::revolver_view::LOAD_END);
         self.ejects = e & 1 << 13 != 0;
         self.loader = (e >> 16 & 0x3f) as u8;
     }
@@ -291,7 +291,7 @@ impl GunAnim {
             chambered: b & 1 << 12 == 0,
             aim: (b >> 13) as f32 / 7.0,
             // A revolver's chambers are not sent: full while it has rounds.
-            cyl: if b & 1 << 12 == 0 { crate::model::revolver_view::FULL } else { 0 },
+            cyl: if b & 1 << 12 == 0 { crate::model::guns::revolver_view::FULL } else { 0 },
             ejects: true,
             ..Default::default()
         }
@@ -329,7 +329,7 @@ pub fn rest_pose(r: &Rig) -> Vec<BonePose> {
 /// magazine missing as the gun is. With `parts_only` the arms and what holds the pistol are
 /// left still (the player model holds it with its own arms).
 pub fn add_gun_anims(r: &Rig, pose: &mut [BonePose], g: &GunAnim, parts_only: bool) {
-    let holding = crate::model::gun_view::holding(r.bones, parts_only);
+    let holding = crate::model::guns::gun_view::holding(r.bones, parts_only);
     let slide = r.bone("slide");
     let chamber = r.bone("chambered_round");
     let rounds = r.bone("magazine_rounds");
@@ -422,7 +422,7 @@ pub fn stack_dirt(st: &crate::item::Stack) -> u8 {
 
 /// The first texture layer of the gun's pages as dirty as `dirt` (`dirt_level`).
 pub fn layers(r: &Rig, dirt: u8) -> u32 {
-    crate::model::gun_view::dirty_layer(r.view, r.pages, dirt)
+    crate::model::guns::gun_view::dirty_layer(r.view, r.pages, dirt)
 }
 
 /// The rear sight's notch (or the scope's eyepiece, with one), model space.
@@ -503,8 +503,8 @@ pub fn eyepiece(r: &Rig, mats: &[Mat4], shown: &[bool]) -> Option<(Vec3, Vec3, V
 /// The pistol on the gun station's table, taken apart ("strip") and with attachments going on
 /// ("fit_*"): which bones each part is, and the part's window of the strip animation.
 pub mod bench {
-    use crate::model::gun::{FRAME, MAGAZINE, PARTS};
-    use crate::model::viewmodel::{add_anim, find_anim, BonePose};
+    use crate::model::guns::gun::{FRAME, MAGAZINE, PARTS};
+    use crate::model::rig::viewmodel::{add_anim, find_anim, BonePose};
     use super::Rig;
     use crate::item::{attachments_on, gun_mod};
 
@@ -512,7 +512,7 @@ pub mod bench {
     pub type Bones = u64;
 
     fn subtree(r: &Rig, name: &str) -> Bones {
-        crate::model::gun_view::subtree(r.bones, name)
+        crate::model::guns::gun_view::subtree(r.bones, name)
     }
 
     /// The bones an attachment is (`gun_mod` bit; several bits: all of them).
@@ -629,7 +629,7 @@ pub mod bench {
     }
 
     /// An attachment's own animation onto the gun ("fit_scope" ..) and its length.
-    pub fn fit_anim(r: &Rig, bit: u8) -> Option<&'static crate::model::viewmodel::Anim> {
+    pub fn fit_anim(r: &Rig, bit: u8) -> Option<&'static crate::model::rig::viewmodel::Anim> {
         let name = match bit {
             gun_mod::SCOPE => "fit_scope",
             gun_mod::SILENCER => "fit_silencer",
@@ -752,7 +752,7 @@ mod tests {
             let g = GunAnim { chambered: true, mag, ..Default::default() };
             let mut pose = rest_pose(&PISTOL);
             add_gun_anims(&PISTOL, &mut pose, &g, false);
-            let (mats, shown) = crate::model::viewmodel::bone_matrices(PISTOL.bones, &pose, Mat4::IDENTITY);
+            let (mats, shown) = crate::model::rig::viewmodel::bone_matrices(PISTOL.bones, &pose, Mat4::IDENTITY);
             let mut out = Vec::new();
             emit_pistol(&PISTOL, &mut out, None, &mats, &shown, false, 0, false, shown_mag(&g), [255; 4], 0);
             out.len()
@@ -776,7 +776,7 @@ mod tests {
     }
 
     fn rest_point_in_gun_space(r: &Rig, point: (usize, Vec3)) -> Vec3 {
-        crate::model::gun_view::rest_point_in_gun_space(r.kind, point)
+        crate::model::guns::gun_view::rest_point_in_gun_space(r.kind, point)
     }
 
     #[test]

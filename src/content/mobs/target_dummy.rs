@@ -131,7 +131,7 @@ fn model(m: &Mob, out: &mut Vec<Vertex>, light: [u8; 4]) {
         * Mat4::from_rotation_y(FRAC_PI_2 - m.body_yaw)
         * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
     let tilt = m.tally().map_or(Vec2::ZERO, |t| t.tilt);
-    crate::model::dummy::emit(out, root, tilt, light, 0);
+    crate::model::items::dummy::emit(out, root, tilt, light, 0);
 }
 
 #[cfg(test)]

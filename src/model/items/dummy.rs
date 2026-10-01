@@ -6,21 +6,13 @@
 //! Model space: Blockbench pixels, standing on the origin, up +Y, its front toward +Z. The
 //! `body` bone rocks on its origin (the top of the feet) when the dummy is hit.
 
-#[allow(unused_imports, dead_code)]
-mod data {
-    include!("dummy_data.rs");
-}
+use crate::model::blockbench::dummy as data;
 use data::{BONES, CUBES};
-pub use data::PAGES;
 
-use crate::model::viewmodel::{cube_matrix, emit_cube, find_bone};
+use crate::model::rig::viewmodel::{cube_matrix, emit_cube, find_bone};
 use crate::world::mesh::Vertex;
 use crate::textures::tex;
 use glam::{Mat4, Quat, Vec2, Vec3};
-
-/// The texture pages (`PAGES` of 128x128, one under the other), loaded into the texture
-/// layers from `tex::DUMMY_MODEL`.
-pub static PNG: &[u8] = include_bytes!("dummy.png");
 
 /// How tall the model is (Blockbench pixels).
 pub const HEIGHT: f32 = 31.0;

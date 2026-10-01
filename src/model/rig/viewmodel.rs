@@ -1,6 +1,6 @@
 //! A view model made in Blockbench (`tools/blockbench/`): bones, cubes with their own piece of
 //! texture on every face, and keyframe animations. `bbmodel_to_rust.py` turns the .bbmodel
-//! into data (`pistol_vm_data.rs`, `pistol_vm.png`); this poses and draws it the way the
+//! into data (`model::blockbench`: `pistol_vm.rs`, `pistol_vm.png`); this poses and draws it the way the
 //! Blockbench preview does, so what is animated there is what the game shows.
 //!
 //! Model space is Blockbench's: pixels, the first-person camera at the origin looking -Z. A

@@ -14,8 +14,8 @@
 
 use crate::client::Game;
 use crate::item::{inventory, tool_of};
-use crate::model::chop_rig;
-use crate::model::chop_rig::{Aim, ChopPose, EDGE, Kind, Swing};
+use crate::model::players::chop_rig;
+use crate::model::players::chop_rig::{Aim, ChopPose, EDGE, Kind, Swing};
 use crate::sim::felling::*;
 use crate::world::{Block, STONE, face_texture, is_leaves, is_log, is_solid, log_radius};
 use crate::world::mesh::Vertex;

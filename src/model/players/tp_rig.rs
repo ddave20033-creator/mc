@@ -7,21 +7,8 @@
 //!
 //! Model space: the player model's pixels, standing on the origin, facing -Z.
 
-#[allow(unused_imports, dead_code)]
-pub(crate) mod pistol {
-    include!("tp_pistol_data.rs");
-}
-#[allow(unused_imports, dead_code)]
-pub(crate) mod revolver {
-    include!("tp_revolver_data.rs");
-}
-#[allow(unused_imports, dead_code)]
-pub(crate) mod ak {
-    include!("tp_ak_data.rs");
-}
-
-use crate::model::player::{PlayerPose, LIMB_SWING_SCALE};
-use crate::model::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, Anim, Bone, BonePose};
+use crate::model::players::player::{PlayerPose, LIMB_SWING_SCALE};
+use crate::model::rig::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, Anim, Bone, BonePose};
 use crate::item::GunKind;
 use glam::{Mat4, Vec3};
 
@@ -107,7 +94,7 @@ fn pose_held(kind: GunKind, p: &PlayerPose) -> Held {
     }
     if let Some(an) = find_anim(anims, "crouch") {
         // The rig lowers the gun with shoulders sunk 3.2 pixels; the model's sink less now.
-        play("crouch", an.length, p.crouch.clamp(0.0, 1.0) * crate::model::player::SNEAK_DROP / 3.2);
+        play("crouch", an.length, p.crouch.clamp(0.0, 1.0) * crate::model::players::player::SNEAK_DROP / 3.2);
     }
     if let Some(an) = find_anim(anims, "aim") {
         play("aim", aim * an.length, 1.0);

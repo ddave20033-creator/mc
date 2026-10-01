@@ -111,7 +111,7 @@ pub(super) fn draw_tabs<'a>(font: &'a Font, texture: &'a [u8], lay: &Layout, ope
         rgba(120, 70, 130, 255),
         rgba(110, 96, 80, 255),
     ];
-    let bottom = crate::model::book::TAB_PX;
+    let bottom = crate::model::items::book::TAB_PX;
     let w = TABS_W as f32 / 8.0;
     for (i, short) in lay.shorts.iter().enumerate().take(8) {
         let x = i as f32 * w;

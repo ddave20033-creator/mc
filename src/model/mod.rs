@@ -1,27 +1,30 @@
 //! Geometry built on the CPU every frame (entities, held items, the hand, particles), in
-//! world-space vertices: the shared pieces (boxes, items, torches, crack overlays) and the
-//! models made of them.
+//! world-space vertices: the shared pieces here (boxes, items, torches, crack overlays) and
+//! the models made of them, by kind:
 //!
-//! The models live in subfolders: `rig` (the Blockbench bone/animation sampler, springs),
-//! `guns`, `players`, `items` and `fx`. Each module is re-exported here under its old path
-//! (`crate::model::pistol_view`, `crate::model::player`...), so code elsewhere need not know
-//! which subfolder it is in.
+//! - `prim`: quads, boxes and their texture coordinates, what everything is built of.
+//! - `rig`: what a Blockbench model is made of and how it moves (`viewmodel`), and springs.
+//! - `blockbench`: the Blockbench models' data and textures, generated from
+//!   `tools/blockbench/` (not edited by hand).
+//! - `guns`: the guns in the hand and in the world, the gun stations and the grenades.
+//! - `items`: other held and placed things with a model of their own (lantern, bucket, book,
+//!   fishing rod, the target dummy).
+//! - `players`: the player model, the first-person hand, and the third-person rigs.
+//! - `particles`: the particles.
 
-mod fx;
-mod guns;
-mod items;
-mod players;
+pub mod blockbench;
+pub mod guns;
+pub mod items;
+pub mod particles;
+pub mod players;
 pub mod prim;
-mod rig;
+pub mod rig;
 #[cfg(test)]
 mod geometry_tests;
 
-pub use fx::particles;
-pub use guns::{ak_vm, ballistics, grenade, gun, gun_station, gun_view, pistol_view, pistol_vm, revolver_view, revolver_vm};
-pub use items::{angler, book, bucket, dummy, fishing_rod, lantern};
-pub use players::{chop_rig, hand, player, tp_rig};
-pub use rig::{spring, viewmodel};
-
+use guns::{grenade, gun, gun_station, gun_view, pistol_view};
+use items::{bucket, dummy, lantern};
+use rig::viewmodel;
 use crate::item::{icon, Icon, ItemId};
 use crate::world::mesh::{flags, Vertex};
 use prim::{quad, quad_at, tri_at, BoxUv, Paint, Sides};
@@ -32,6 +35,7 @@ use crate::world::{
     TintKind, TORCH,
 };
 use glam::{Mat4, Vec3};
+
 /// Whether an item is drawn as a 3D model of its own (the pistol's parts, attachments,
 /// magazines and rounds, the grenades) rather than as a flat icon.
 pub fn is_model_item(item: ItemId) -> bool {

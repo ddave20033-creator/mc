@@ -102,12 +102,12 @@ impl Builder {
             (z + self.oz) as f32 + 0.5,
         )) * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
         let kind = if b == LANTERN_HANGING {
-            crate::model::lantern::LanternKind::Hanging
+            crate::model::items::lantern::LanternKind::Hanging
         } else {
-            crate::model::lantern::LanternKind::Standing
+            crate::model::items::lantern::LanternKind::Standing
         };
         let base = self.verts.len() as u32;
-        crate::model::lantern::emit_lantern(
+        crate::model::items::lantern::emit_lantern(
             &mut self.verts,
             m,
             [255, (s * 17) as u8, (bl * 17) as u8, 0],

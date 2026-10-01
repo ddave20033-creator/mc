@@ -56,7 +56,7 @@ thread_local! {
 
 /// How dirty something looks (as drawn).
 fn dirt(st: &Stack) -> u16 {
-    crate::model::pistol_view::stack_dirt(st) as u16
+    crate::model::guns::pistol_view::stack_dirt(st) as u16
 }
 
 /// The state of a stack its icon shows, when that is not the fixed icon's (None: the fixed
@@ -209,7 +209,7 @@ mod timing {
         let mut out = Vec::new();
         for _ in 0..10 {
             out.clear();
-            crate::model::gun_station::emit_ammo_box(&mut out, glam::Mat4::IDENTITY, 128 | BOX_MAGNUM, [255; 4], 0);
+            crate::model::guns::gun_station::emit_ammo_box(&mut out, glam::Mat4::IDENTITY, 128 | BOX_MAGNUM, [255; 4], 0);
         }
         println!("full magnum box: {:?} each, {} vertices", t.elapsed() / 10, out.len());
     }

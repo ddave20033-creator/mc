@@ -9,8 +9,8 @@ use crate::client::Game;
 use crate::client::gui::station::{Screen2, hit_plane_t};
 use crate::entity::{BenchItem, GunBench};
 use crate::item::AMMO_BOX;
-use crate::model::gun_station as station_model;
-use crate::model::viewmodel::{Cube, cube_matrix};
+use crate::model::guns::gun_station as station_model;
+use crate::model::rig::viewmodel::{Cube, cube_matrix};
 use crate::util::ray_box;
 use glam::{IVec3, Mat4, Vec2, Vec3};
 

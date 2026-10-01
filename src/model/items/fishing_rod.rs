@@ -9,21 +9,13 @@
 //! (the angler's left, held right-handed: the left hand turns it), up +Y. (The Blockbench
 //! model is in pixels, 16 to a block.)
 
-#[allow(unused_imports, dead_code)]
-mod data {
-    include!("fishing_rod_data.rs");
-}
+use crate::model::blockbench::fishing_rod as data;
 use data::{BONES, CUBES};
-pub use data::PAGES;
 
-use crate::model::viewmodel::{cube_matrix, emit_cube, find_bone, rot_zyx, Bone};
+use crate::model::rig::viewmodel::{cube_matrix, emit_cube, find_bone, rot_zyx, Bone};
 use crate::world::mesh::Vertex;
 use crate::textures::tex;
 use glam::{Mat4, Quat, Vec3};
-
-/// The texture pages (`PAGES` of 128x128, one under the other), loaded into the texture
-/// layers from `tex::FISHING_ROD_MODEL`.
-pub static PNG: &[u8] = include_bytes!("fishing_rod.png");
 
 /// Length of the rod (blocks), butt to tip, straight.
 pub const LENGTH: f32 = 2.2;

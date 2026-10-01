@@ -7,22 +7,14 @@
 //! up +Y, its lever on the +X side. The pin (with its ring) and the spoon are bones of their
 //! own: the pin comes out with the `pull_pin` animation, and a thrown grenade has neither.
 
-#[allow(unused_imports, dead_code)]
-mod data {
-    include!("grenade_data.rs");
-}
+use crate::model::blockbench::grenade as data;
 use data::{ANIMS, BONES, CUBES};
-pub use data::PAGES;
-use crate::model::viewmodel::Cube;
+use crate::model::rig::viewmodel::Cube;
 
-use crate::model::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, BonePose};
+use crate::model::rig::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, BonePose};
 use crate::world::mesh::Vertex;
 use crate::textures::tex;
 use glam::{Mat4, Vec3};
-
-/// The texture pages (`PAGES` of 128x128, one under the other), loaded into the texture
-/// layers from `tex::GRENADE_MODEL`.
-pub static PNG: &[u8] = include_bytes!("grenade.png");
 
 /// Readying a grenade (seconds from the button going down): it comes up in `RAISE_TIME`,
 /// then the other hand pulls the pin (`pull_pin`, `PULL_TIME` long); the throw gets harder

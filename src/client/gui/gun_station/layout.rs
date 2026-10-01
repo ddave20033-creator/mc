@@ -7,10 +7,10 @@ use super::pieces::{Piece, bounds, lying_pieces, lying_root, mag_rig, pivot_bone
 use super::table::{HALF_D, Table};
 use crate::entity::{BenchItem, GunBench};
 use crate::item::*;
-use crate::model::gun::MAGAZINE;
-use crate::model::pistol_view::bench::self as rig;
-use crate::model::pistol_view::self as pv;
-use crate::model::revolver_view::bench as rrig;
+use crate::model::guns::gun::MAGAZINE;
+use crate::model::guns::pistol_view::bench::self as rig;
+use crate::model::guns::pistol_view::self as pv;
+use crate::model::guns::revolver_view::bench as rrig;
 use glam::{Vec2, Vec3};
 
 /// Across the table, how wide the strips are that a thing's shape is made of (`shape`).
@@ -23,7 +23,7 @@ const LONG: f32 = 0.8;
 /// anything else lying flat.
 fn flat_half(stack: &Stack) -> Vec2 {
     if stack.item == AMMO_BOX {
-        let size = crate::model::gun_station::ammo_box_size() / 16.0;
+        let size = crate::model::guns::gun_station::ammo_box_size() / 16.0;
         Vec2::new(size.x, size.z) * 0.5
     } else {
         Vec2::splat(0.1)

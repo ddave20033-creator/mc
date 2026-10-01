@@ -270,22 +270,22 @@ pub const CLOUD: u32 = BOOK_TABS + 4;
 pub const PISTOL_VIEW: u32 = CLOUD + 1;
 pub const PISTOL_DIRT_LEVELS: u32 = 4;
 /// The gun station block made in Blockbench: its texture pages (`model::gun_station`).
-pub const GUN_STATION_MODEL: u32 = PISTOL_VIEW + crate::model::pistol_vm::PAGES * PISTOL_DIRT_LEVELS;
+pub const GUN_STATION_MODEL: u32 = PISTOL_VIEW + crate::model::blockbench::pistol_vm::PAGES * PISTOL_DIRT_LEVELS;
 /// The grenades made in Blockbench: their texture pages (`model::grenade`).
-pub const GRENADE_MODEL: u32 = GUN_STATION_MODEL + crate::model::gun_station::PAGES;
+pub const GRENADE_MODEL: u32 = GUN_STATION_MODEL + crate::model::blockbench::gun_station::PAGES;
 /// The revolver made in Blockbench: its texture pages (`model::revolver_vm`), clean and
 /// dirtier, like the pistol's (`PISTOL_DIRT_LEVELS` sets).
-pub const REVOLVER_VIEW: u32 = GRENADE_MODEL + crate::model::grenade::PAGES;
+pub const REVOLVER_VIEW: u32 = GRENADE_MODEL + crate::model::blockbench::grenade::PAGES;
 /// The target dummy made in Blockbench: its texture pages (`model::dummy`).
-pub const DUMMY_MODEL: u32 = REVOLVER_VIEW + crate::model::revolver_vm::PAGES * PISTOL_DIRT_LEVELS;
+pub const DUMMY_MODEL: u32 = REVOLVER_VIEW + crate::model::blockbench::revolver_vm::PAGES * PISTOL_DIRT_LEVELS;
 /// Item icons drawn while the game runs for things as they are (a magazine as full as it
 /// is, a gun with its attachments and dirt...: `client::gui::icons`).
 /// The AK-47 made in Blockbench: its texture pages (`model::ak_vm`), clean and dirtier,
 /// like the pistol's (`PISTOL_DIRT_LEVELS` sets).
-pub const AK_VIEW: u32 = DUMMY_MODEL + crate::model::dummy::PAGES;
+pub const AK_VIEW: u32 = DUMMY_MODEL + crate::model::blockbench::dummy::PAGES;
 /// The rifle station made in Blockbench: its texture pages (`model::gun_station`).
-pub const RIFLE_STATION_MODEL: u32 = AK_VIEW + crate::model::ak_vm::PAGES * PISTOL_DIRT_LEVELS;
-pub const STATE_ICONS: u32 = RIFLE_STATION_MODEL + crate::model::gun_station::RIFLE_PAGES;
+pub const RIFLE_STATION_MODEL: u32 = AK_VIEW + crate::model::blockbench::ak_vm::PAGES * PISTOL_DIRT_LEVELS;
+pub const STATE_ICONS: u32 = RIFLE_STATION_MODEL + crate::model::blockbench::rifle_station::PAGES;
 pub const STATE_ICON_COUNT: u32 = 64;
 /// The wolf's atlases (wild, tame, angry, and its collar, tinted by the game), a bone and
 /// the wolf spawn egg.
@@ -304,7 +304,7 @@ pub const SHEEP_WOOL: u32 = SHEEP + crate::entity::mob::sheep_skin::PAGES;
 /// Fishing: the rod made in Blockbench (its texture pages, `model::fishing_rod`), the
 /// rod's icon, and the fish, raw and cooked.
 pub const FISHING_ROD_MODEL: u32 = SHEEP_WOOL + crate::entity::mob::sheep_skin::WOOL_PAGES;
-pub const FISHING_ROD: u32 = FISHING_ROD_MODEL + crate::model::fishing_rod::PAGES;
+pub const FISHING_ROD: u32 = FISHING_ROD_MODEL + crate::model::blockbench::fishing_rod::PAGES;
 pub const RAW_FISH: u32 = FISHING_ROD + 1;
 pub const COOKED_FISH: u32 = FISHING_ROD + 2;
 /// The bucket's galvanized steel (`model::bucket`).

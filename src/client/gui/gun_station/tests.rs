@@ -63,7 +63,7 @@ fn a_gun_lies_on_the_table_muzzle_to_the_right() {
     let (lo, hi) = extent(&t, &pieces);
     assert!(lo.y.abs() < 0.01 && hi.y > 0.02, "{lo} {hi}");
     assert!(lo.x > -HALF_W && hi.x < HALF_W && lo.z > -HALF_D && hi.z < HALF_D, "{lo} {hi}");
-    let (b, m) = crate::model::pistol_view::muzzle(&crate::model::pistol_view::PISTOL, gun_mod::SILENCER);
+    let (b, m) = crate::model::guns::pistol_view::muzzle(&crate::model::guns::pistol_view::PISTOL, gun_mod::SILENCER);
     let muzzle = pieces[0].mats[b].transform_point3(m) - t.center;
     assert!(muzzle.dot(t.right) > 0.1, "{muzzle}");
 }

@@ -181,7 +181,7 @@ impl Game {
                     self.bench_changed(p, None);
                 }
             }
-            BenchRole::Part(kind, q) if !(kind.uses_magazine() && q == crate::model::gun::MAGAZINE) => {
+            BenchRole::Part(kind, q) if !(kind.uses_magazine() && q == crate::model::guns::gun::MAGAZINE) => {
                 // One of each part (the clicked one first).
                 let mut chosen: Vec<u16> = Vec::new();
                 for &want in table_parts(kind) {

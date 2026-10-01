@@ -402,7 +402,7 @@ impl Game {
             self.input.look_delta,
         );
         // Every view, including LAN poses, uses the hand/camera step clock.
-        self.me.look.limb_swing = self.me.hand.walk_phase() / crate::model::player::LIMB_SWING_SCALE;
+        self.me.look.limb_swing = self.me.hand.walk_phase() / crate::model::players::player::LIMB_SWING_SCALE;
         self.hud.tick(dt);
     }
 

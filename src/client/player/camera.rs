@@ -3,7 +3,7 @@
 //! walls, and picking blocks under the crosshair when it is not at the eye.
 
 use crate::entity::player::raycast;
-use crate::model::player::LimbSmoother;
+use crate::model::players::player::LimbSmoother;
 use crate::util::{ray_box, wrap_angle};
 use crate::world::{World, is_solid};
 use glam::{IVec3, Mat4, Vec3};
@@ -40,7 +40,7 @@ pub(in crate::client) struct Look {
     /// the player model).
     pub(in crate::client) tp_sprint: f32,
     /// Swing of the lantern in this player's hand (third person and body model).
-    pub(in crate::client) lantern_swing: crate::model::lantern::SmoothSwing,
+    pub(in crate::client) lantern_swing: crate::model::items::lantern::SmoothSwing,
     /// Where the torch in this player's hand burns (seen last frame), for its particles.
     pub(in crate::client) held_torch_tip: Option<Vec3>,
 }

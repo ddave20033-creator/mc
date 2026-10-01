@@ -8,7 +8,7 @@ impl Game {
     /// Player figure for the inventory screen, inside the dark box at (x, y, w, h).
     /// Like Minecraft, the body turns a little toward the mouse and the head follows it.
     pub(super) fn player_preview(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        use crate::model::player::{ARM, BODY, HEAD, LEG};
+        use crate::model::players::player::{ARM, BODY, HEAD, LEG};
         use crate::textures::tex;
         use glam::Mat3;
         let s = self.ui.s;

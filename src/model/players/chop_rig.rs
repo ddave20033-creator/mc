@@ -12,12 +12,9 @@
 //!
 //! Model space: the player model's pixels, standing on the origin, facing -Z.
 
-#[allow(unused_imports, dead_code)]
-mod data {
-    include!("tp_chop_data.rs");
-}
+use crate::model::blockbench::tp_chop as data;
 
-use crate::model::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, BonePose};
+use crate::model::rig::viewmodel::{add_anim, bone_matrices, find_anim, find_bone, BonePose};
 use crate::world::mesh::Vertex;
 use glam::{Mat4, Vec3};
 
@@ -319,7 +316,7 @@ pub fn emit(
     light: [u8; 4],
     fl: u8,
 ) {
-    use crate::model::player::{skinned, ARM, BODY, HEAD, LEG};
+    use crate::model::players::player::{skinned, ARM, BODY, HEAD, LEG};
     use bone::*;
     let v = Vec3::new;
     // (bone, lower corner, upper corner, layers, rows of the texture on its sides); the
@@ -354,7 +351,7 @@ pub fn emit(
     if parts != Parts::Arms {
         let at = |b: usize, x: f32, y: f32| world * pose.bone(b) * Mat4::from_translation(Vec3::new(x, y, 0.0));
         let all = parts == Parts::All;
-        let frames = crate::model::player::ArmorFrames {
+        let frames = crate::model::players::player::ArmorFrames {
             head: all.then(|| at(bone::HEAD, 0.0, 24.0) * Mat4::from_rotation_y(shake)),
             body: at(TORSO, 0.0, 24.0),
             right_arm: all.then(|| at(RIGHT_ARM, 5.0, 22.0)),
@@ -362,7 +359,7 @@ pub fn emit(
             legs: [at(RIGHT_LEG, 1.9, 12.0), at(LEFT_LEG, -1.9, 12.0)],
             shins: [at(RIGHT_FOOT, 1.9, 12.0), at(LEFT_FOOT, -1.9, 12.0)],
         };
-        crate::model::player::emit_armor(out, &frames, armor, tint, light, fl);
+        crate::model::players::player::emit_armor(out, &frames, armor, tint, light, fl);
     }
     if parts == Parts::Body {
         return;

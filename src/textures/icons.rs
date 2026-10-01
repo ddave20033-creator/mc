@@ -73,7 +73,7 @@ pub(super) fn render_item_icons(base: &mut [u8]) {
 /// Minecraft's, the butt at the bottom left, the tip at the top right bending a little, the
 /// reel hanging below it with its crank toward the viewer.
 fn fishing_rod_icon(base: &[u8], size: usize) -> Vec<u8> {
-    use crate::model::fishing_rod::{emit, RodPose};
+    use crate::model::items::fishing_rod::{emit, RodPose};
     use glam::{Mat4, Vec3, Vec4};
     let s = std::f32::consts::FRAC_1_SQRT_2;
     // The rod's +Z to the upper right, its up to the upper left, its crank's side (+X) toward
@@ -104,7 +104,7 @@ pub fn render_icon(base: &[u8], st: &crate::item::Stack) -> Vec<u8> {
     // A three-quarter view: turned toward the viewer's left, looked at a little from above.
     let turn = -0.4;
     // A bucket from higher up, to show what is in it.
-    let down = if crate::model::bucket::is_bucket(st.item) { 0.62 } else { 0.35 };
+    let down = if crate::model::items::bucket::is_bucket(st.item) { 0.62 } else { 0.35 };
     let view = glam::Mat4::from_rotation_x(down) * glam::Mat4::from_rotation_y(turn);
     crate::model::emit_held_data(&mut verts, view, st, [255, 255, 255, 0], 0);
     // A long gun and its long parts lie across the icon corner to corner, the muzzle end up, to

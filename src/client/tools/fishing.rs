@@ -22,8 +22,8 @@ use crate::item::{FISHING_ROD, RAW_FISH, ROD_GEARS, Stack, rod_gear, set_rod_gea
 use crate::item::inventory::damage;
 use crate::app::keys::Bind;
 use crate::app::lang::t;
-use crate::model::angler;
-use crate::model::angler::{CAST_TIME, LIFT_TIME, RodAnim, WHIP_FORWARD};
+use crate::model::items::angler;
+use crate::model::items::angler::{CAST_TIME, LIFT_TIME, RodAnim, WHIP_FORWARD};
 use crate::ui::{Color, WHITE, rgba, with_alpha};
 use crate::util::vertex_light;
 use crate::world::{HEIGHT, World, fluid_level, is_solid, is_water, opens_on_use};

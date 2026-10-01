@@ -35,7 +35,7 @@ pub(in crate::client) struct Aim {
     /// Till the hands may use something again.
     pub(in crate::client) action_cooldown: f32,
     /// A chop with an axe going on (`shown::felling`).
-    pub(in crate::client) chop: Option<crate::model::chop_rig::Swing>,
+    pub(in crate::client) chop: Option<crate::model::players::chop_rig::Swing>,
     /// What the axe is stuck in, to come apart when it is pulled out.
     pub(in crate::client) struck: Option<crate::client::shown::felling::Struck>,
     /// Blocking with a sword (right mouse button held).

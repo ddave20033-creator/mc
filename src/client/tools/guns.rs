@@ -10,9 +10,9 @@ use crate::entity::player::{look_dir, ray_boxes, raycast_solid};
 use crate::item::*;
 use crate::app::keys::Bind;
 use crate::app::lang::{t, tf};
-use crate::model::ballistics;
-use crate::model::ballistics::Cases;
-use crate::model::pistol_view::{
+use crate::model::guns::ballistics;
+use crate::model::guns::ballistics::Cases;
+use crate::model::guns::pistol_view::{
     GunAnim, RELOAD_MAG_IN, RELOAD_MAG_OUT, RELOAD_SLIDE, ReloadKind, reload_anim_time,
     reload_seconds,
 };
@@ -230,7 +230,7 @@ impl Game {
     /// How dirty the held gun looks (`pistol_view::dirt_level`).
     pub(in crate::client) fn held_gun_dirt(&self) -> u8 {
         self.held_gun()
-            .map_or(0, |(s, _)| crate::model::pistol_view::stack_dirt(&s))
+            .map_or(0, |(s, _)| crate::model::guns::pistol_view::stack_dirt(&s))
     }
 
     /// How much the gun narrows the view now (1 = not at all).
@@ -299,7 +299,7 @@ impl Game {
         let item = held.map(|(s, _)| s.item);
         g.inspect = g.inspect.and_then(|(t, it)| {
             let t = t + dt;
-            let on = t < crate::model::hand::INSPECT_TIME
+            let on = t < crate::model::players::hand::INSPECT_TIME
                 && item == Some(it)
                 && !aiming
                 && g.reload.is_none()
@@ -358,7 +358,7 @@ impl Game {
         let cylinder = self.tools.guns.cylinder.filter(|_| revolver);
         self.me.hand.reload = match (self.tools.guns.reload, kind) {
             // The revolver's: where its reload animation is.
-            (_, Some(_)) if revolver => cylinder.map(|c| c.anim().0 / crate::model::revolver_view::RELOAD_END),
+            (_, Some(_)) if revolver => cylinder.map(|c| c.anim().0 / crate::model::guns::revolver_view::RELOAD_END),
             (Some(t), Some(_)) => Some(t / self.tools.guns.plan.length.max(0.01)),
             _ => None,
         };
@@ -782,7 +782,7 @@ impl Game {
             r.shot_at = Some(time);
         }
         let muzzle = self
-            .remote_gun_point(id, kind, crate::model::gun_view::muzzle(kind, mods))
+            .remote_gun_point(id, kind, crate::model::guns::gun_view::muzzle(kind, mods))
             .unwrap_or(eye + look * 0.9);
         for &vel in bullets.iter().take(32) {
             self.tools.guns.bullets.push(Bullet {
@@ -801,7 +801,7 @@ impl Game {
         }
         self.shot_fx(kind, mods & gun_mod::SILENCER != 0, muzzle, look, seed, false);
         // A revolver keeps its cases until it is reloaded.
-        let port = kind.uses_magazine().then(|| self.remote_gun_point(id, kind, crate::model::gun_view::eject(kind))).flatten();
+        let port = kind.uses_magazine().then(|| self.remote_gun_point(id, kind, crate::model::guns::gun_view::eject(kind))).flatten();
         if let Some(port) = port {
             self.throw_case(port, look, Vec3::ZERO, kind);
         }
@@ -949,7 +949,7 @@ impl Game {
             };
             let size = (0.006 + 0.004 * p.distance(cam)).min(0.1);
             ballistics::emit_laser_dot(out, p, right, up, size);
-            if let Some(from) = self.remote_gun_point(id, kind, crate::model::gun_view::laser(kind)) {
+            if let Some(from) = self.remote_gun_point(id, kind, crate::model::guns::gun_view::laser(kind)) {
                 ballistics::emit_tracer(out, from, p, cam, 0.004, true);
             }
         }
