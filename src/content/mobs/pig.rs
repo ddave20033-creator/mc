@@ -2,7 +2,7 @@
 //! (Minecraft's `PigModel`). It drops porkchops (cooked if it died burning).
 
 use super::*;
-use crate::entity::mob::{animal_root, emit_paged, head_turn, part, quadruped_legs};
+use crate::entity::mob::model::{animal_root, emit_paged, head_turn, part, quadruped_legs};
 use crate::item::{BONE, COOKED_PORKCHOP, PIG_SPAWN_EGG, PORKCHOP};
 use crate::textures::tex;
 use glam::Mat4;

@@ -4,7 +4,8 @@
 //! sheared, a wool.
 
 use super::*;
-use crate::entity::mob::{animal_root, emit_paged, head_turn, part, per_tick, quadruped_legs};
+use crate::entity::mob::model::{animal_root, emit_paged, head_turn, part, quadruped_legs};
+use crate::entity::mob::per_tick;
 use crate::item::{BONE, COOKED_MUTTON, MUTTON, SHEARS, SHEEP_SPAWN_EGG};
 use crate::textures::tex;
 use crate::world::{TALL_GRASS, WOOL};

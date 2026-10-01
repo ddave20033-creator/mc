@@ -5,7 +5,8 @@
 //! whatever its owner attacks or whoever attacks its owner.
 
 use super::*;
-use crate::entity::mob::{animal_root, emit_paged, head_turn, part, Look};
+use crate::entity::mob::model::{animal_root, emit_paged, head_turn, part};
+use crate::entity::mob::Look;
 use crate::item::{BONE, WOLF_SPAWN_EGG};
 use crate::textures::tex;
 use crate::world::{is_lava, SNOWY_GRASS};
