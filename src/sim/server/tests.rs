@@ -9,9 +9,19 @@ fn scratch_world(name: &str) -> WorldMeta {
     let folder = std::env::temp_dir().join(format!("yourworlds-server-test-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     let _ = std::fs::create_dir_all(&folder);
+    // (not `WorldMeta::create`: that makes a folder for it among the real saves)
     WorldMeta {
         folder: folder.to_string_lossy().into_owned(),
-        ..WorldMeta::create("server test", 4242, true, true)
+        name: "server test".into(),
+        seed: 4242,
+        creative: true,
+        spectator: false,
+        cheats: true,
+        last_played: 0,
+        time_of_day: 0.03,
+        spawn: None,
+        bed: None,
+        player: None,
     }
 }
 

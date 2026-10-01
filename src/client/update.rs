@@ -248,14 +248,7 @@ impl Game {
                 .map(|(_, light, _)| light + Vec3::Y * 0.3),
         );
         for tip in tips {
-            if self.random() < dt * 3.0 {
-                self.level.particles.flame(tip);
-            }
-            if self.random() < dt * 1.0 {
-                let w = &self.terrain.world;
-                let (sky, blk) = (w.sky_estimate(tip), w.block_light_estimate(tip));
-                self.level.particles.smoke(tip + Vec3::Y * 0.08, sky, blk);
-            }
+            self.burn_torch(tip, dt);
         }
         for i in 0..self.level.torches.len() {
             let p = self.level.torches[i];
@@ -266,15 +259,19 @@ impl Game {
             let base = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
             let tip = crate::world::mesh::torch_transform(base, b)
                 .transform_point3(Vec3::new(0.0, 0.21, 0.0));
-            if self.random() < dt * 3.0 {
-                self.level.particles.flame(tip);
-            }
-            if self.random() < dt * 1.0 {
-                let w = &self.terrain.world;
-                let (sky, blk) = (w.sky_estimate(tip), w.block_light_estimate(tip));
-                self.level.particles.smoke(tip + Vec3::Y * 0.08, sky, blk);
-            }
+            self.burn_torch(tip, dt);
         }
     }
 
+    /// A torch's flame flickering up at its tip, and its smoke now and then.
+    fn burn_torch(&mut self, tip: Vec3, dt: f32) {
+        if self.random() < dt * 3.0 {
+            self.level.particles.flame(tip);
+        }
+        if self.random() < dt * 1.0 {
+            let w = &self.terrain.world;
+            let (sky, blk) = (w.sky_estimate(tip), w.block_light_estimate(tip));
+            self.level.particles.smoke(tip + Vec3::Y * 0.08, sky, blk);
+        }
+    }
 }

@@ -36,8 +36,8 @@ impl Boot {
             let _ = tx.send(BootTextures {
                 base,
                 levels,
-                torch_particles: packs.texture("particle/flame").is_some(),
-                credit: packs.0.last().map(|p| (p.title().to_string(), p.description.clone())),
+                torch_particles: super::gfx::torch_particles(&packs),
+                credit: super::gfx::pack_credit(&packs),
             });
         });
         Self { textures: Some(rx), start: 0.0 }

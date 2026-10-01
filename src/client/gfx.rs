@@ -76,7 +76,8 @@ impl Gfx {
     pub(super) fn reload_packs(&mut self, enabled: &[String]) {
         let packs = crate::pack::Packs::load(enabled);
         self.texture_base = Arc::new(textures::generate_base(&packs));
-        self.torch_particles = packs.texture("particle/flame").is_some();
+        self.torch_particles = torch_particles(&packs);
+        self.pack_credit = pack_credit(&packs);
         self.refresh_skin_textures();
     }
 
@@ -126,6 +127,16 @@ impl Gfx {
             let _ = self.set_skin_png(0, png);
         }
     }
+}
+
+/// The resource packs draw torch fire as flame/smoke particles (like Minecraft).
+pub(super) fn torch_particles(packs: &crate::pack::Packs) -> bool {
+    packs.texture("particle/flame").is_some()
+}
+
+/// (title, description) of the resource pack on top, for the credits (none: the built-in one).
+pub(super) fn pack_credit(packs: &crate::pack::Packs) -> Option<(String, String)> {
+    packs.0.last().map(|p| (p.title().to_string(), p.description.clone()))
 }
 
 impl Drop for Gfx {
