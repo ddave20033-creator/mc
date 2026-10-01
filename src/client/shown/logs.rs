@@ -60,7 +60,7 @@ impl Game {
     }
 
     /// The axe struck down into the lying trunk `id`: chips fly from where it went in.
-    pub(in crate::client) fn log_hit(&mut self, id: u32, point: Vec3) {
+    pub(super) fn log_hit(&mut self, id: u32, point: Vec3) {
         let Some(i) = self.log_index(id) else { return };
         let b = self.level.lying_logs[i].pieces[0];
         self.chips(point.floor().as_ivec3(), b, point, Vec3::Y);
@@ -77,7 +77,7 @@ impl Game {
     /// The axe pulled out of the lying trunk `id`: the next piece comes off the end it was
     /// struck nearer (`from_base`) and drops its logs (the last block left with it); the axe
     /// worn by the stroke.
-    pub(in crate::client) fn cut_log(&mut self, id: u32, from_base: bool) {
+    pub(super) fn cut_log(&mut self, id: u32, from_base: bool) {
         let Some(i) = self.log_index(id) else { return };
         // The server cuts it for real (drops the logs, and says how long the next piece is:
         // `Msg::Logs`); here it shows at once.

@@ -15,18 +15,18 @@ use glam::Vec2;
 pub(super) struct Theme {
     pub(super) border: Color,
     pub(super) bevel_hi: Color,
-    pub(super) bevel_lo: Color,
+    bevel_lo: Color,
     pub(super) fill_top: Color,
-    pub(super) fill_bottom: Color,
+    fill_bottom: Color,
     pub(super) slot: Color,
     pub(super) slot_shadow: Color,
     pub(super) slot_light: Color,
-    pub(super) slot_inner: Color,
-    pub(super) hover: Color,
-    pub(super) label: Color,
-    pub(super) label_shadow: bool,
+    slot_inner: Color,
+    hover: Color,
+    label: Color,
+    label_shadow: bool,
     pub(super) idle: Color,
-    pub(super) progress: Color,
+    progress: Color,
     pub(super) preview_top: Color,
     pub(super) preview_bottom: Color,
     pub(super) scroll_track: Color,
@@ -275,7 +275,7 @@ impl Game {
     }
 
     /// Main inventory (3 rows) and hotbar at GUI offset (ox, oy) = top-left of the main rows.
-    pub(in crate::client) fn inventory_slots(
+    pub(super) fn inventory_slots(
         &mut self,
         px: f32,
         py: f32,

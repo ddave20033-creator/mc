@@ -42,13 +42,13 @@ pub(in crate::client) struct Station {
 
 /// Where things are on the screen: the view's camera matrix and the window size.
 pub(in crate::client) struct Screen2 {
-    pub(in crate::client) view_proj: Mat4,
-    pub(in crate::client) w: f32,
-    pub(in crate::client) h: f32,
+    pub(super) view_proj: Mat4,
+    pub(super) w: f32,
+    pub(super) h: f32,
 }
 
 impl Screen2 {
-    pub(in crate::client) fn to_screen(&self, p: Vec3) -> Option<Vec2> {
+    fn to_screen(&self, p: Vec3) -> Option<Vec2> {
         let c = self.view_proj * p.extend(1.0);
         (c.w > 1e-4).then(|| {
             Vec2::new(
@@ -59,7 +59,7 @@ impl Screen2 {
     }
 
     /// The ray through the screen point `m`.
-    pub(in crate::client) fn ray(&self, m: Vec2) -> (Vec3, Vec3) {
+    pub(super) fn ray(&self, m: Vec2) -> (Vec3, Vec3) {
         let n = Vec2::new(m.x / self.w * 2.0 - 1.0, m.y / self.h * 2.0 - 1.0);
         let inv = self.view_proj.inverse();
         let a = inv.project_point3(Vec3::new(n.x, n.y, 0.0));
@@ -148,7 +148,7 @@ pub(in crate::client) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
 
 impl Game {
     /// Starts gliding over a chest or crafting table.
-    pub(in crate::client) fn open_station(&mut self, c: Container) {
+    pub(super) fn open_station(&mut self, c: Container) {
         let pos = match c {
             Container::Chest(p) => p,
             Container::GunStation(p) => p,
@@ -319,7 +319,7 @@ impl Game {
     /// The chest or table view: the inventory along the bottom, the counts of the stacks lying
     /// in the chest or on the table, and what the mouse points at (in 3D or in the
     /// inventory).
-    pub(in crate::client) fn station_screen(&mut self, c: Container) -> Option<SlotRef> {
+    pub(super) fn station_screen(&mut self, c: Container) -> Option<SlotRef> {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let mut hovered = None;
         // The inventory, on a dark strip along the bottom.

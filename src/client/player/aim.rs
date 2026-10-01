@@ -22,7 +22,7 @@ pub(in crate::client) struct Aim {
     pub(in crate::client) furnace_hold: bool,
     /// The mob the crosshair is on (its id; `target_mob` finds it), when it is closer than any
     /// block. An id, not an index: a mob removed earlier in the frame must not shift it.
-    pub(in crate::client) mob_target: Option<u32>,
+    pub(super) mob_target: Option<u32>,
     /// The other player the crosshair is on.
     pub(in crate::client) player_target: Option<u8>,
     /// The lying trunk aimed at with an axe (`shown::logs`), and the cut in it going on.
@@ -31,7 +31,7 @@ pub(in crate::client) struct Aim {
     /// The block being mined and how far (0..1).
     pub(in crate::client) mining: Option<(IVec3, f32)>,
     /// Till the next mining particles.
-    pub(in crate::client) dig_timer: f32,
+    dig_timer: f32,
     /// Till the hands may use something again.
     pub(in crate::client) action_cooldown: f32,
     /// A chop with an axe going on (`shown::felling`).
@@ -46,7 +46,7 @@ pub(in crate::client) struct Aim {
 
 impl Aim {
     /// Nothing aimed at, and the hands let go of what they did (in bed, as a spectator).
-    pub(in crate::client) fn let_go(&mut self) {
+    pub(super) fn let_go(&mut self) {
         self.target = None;
         self.furnace_part = None;
         self.mob_target = None;

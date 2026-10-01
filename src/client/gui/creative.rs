@@ -76,7 +76,7 @@ impl Tab {
         })
     }
 
-    pub(super) fn icon(self) -> ItemId {
+    fn icon(self) -> ItemId {
         match self {
             Tab::Blocks => GRASS as ItemId,
             Tab::Functional => CRAFTING_TABLE as ItemId,
@@ -181,7 +181,7 @@ pub(in crate::client) fn creative_grid(tab: Tab, query: &str) -> std::rc::Rc<Vec
 
 impl Game {
     /// The search changed: the list starts from the top again.
-    pub(super) fn scroll_creative_to_top(&mut self) {
+    fn scroll_creative_to_top(&mut self) {
         self.inv_ui.creative_scroll = 0.0;
         self.inv_ui.creative_scroll_anim = 0.0;
     }

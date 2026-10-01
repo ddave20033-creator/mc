@@ -77,7 +77,7 @@ impl Game {
 
     /// Into the selected hotbar slot if it is empty (a filled bottle or bucket replacing the
     /// used one), otherwise into the inventory.
-    pub(in crate::client) fn put_in_hand(&mut self, stack: Stack) {
+    fn put_in_hand(&mut self, stack: Stack) {
         let slot = self.me.items.held_slot_mut();
         if slot.is_none() {
             *slot = Some(stack);
@@ -234,7 +234,7 @@ impl Game {
     }
 
     /// Glass bottle on water: fills it (lake water, not safe to drink until boiled).
-    pub(in crate::client) fn fill_bottle(&mut self) {
+    fn fill_bottle(&mut self) {
         let dir = self.me.look.dir();
         let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.eye(), dir, 5.0) else {
             return;
@@ -313,7 +313,7 @@ impl Game {
         self.hud.slot_name_timer = 0.0;
     }
 
-    pub(in crate::client) fn fill_bucket(&mut self) {
+    fn fill_bucket(&mut self) {
         let dir = self.me.look.dir();
         let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.eye(), dir, 5.0) else {
             return;
@@ -344,7 +344,7 @@ impl Game {
     }
 
     /// A full bucket poured out: its fluid where it points.
-    pub(in crate::client) fn empty_bucket(&mut self, fluid: Block) {
+    fn empty_bucket(&mut self, fluid: Block) {
         let Some((hit, prev)) = self.me.aim.target else {
             return;
         };
@@ -365,7 +365,7 @@ impl Game {
         self.me.aim.action_cooldown = 0.25;
     }
 
-    pub(in crate::client) fn place_block(&mut self, held: ItemId) {
+    fn place_block(&mut self, held: ItemId) {
         let Some((hit, prev)) = self.me.aim.target else {
             return;
         };
@@ -517,7 +517,7 @@ impl Game {
 
     /// Whether `q` is in front of a gun station, where its drawer slides out (nothing solid
     /// may be put there).
-    pub(in crate::client) fn drawer_room(&self, q: IVec3) -> bool {
+    fn drawer_room(&self, q: IVec3) -> bool {
         let w = &self.terrain.world;
         (0..4u8).any(|f| {
             let at = q - facing_dir(f);
@@ -618,7 +618,7 @@ impl Game {
     /// Opens or closes a door (both halves). It always swings away from the player: out
     /// into the next block when opened from the side it closes on (if there is room).
     /// The other door of a double door goes with it.
-    pub(in crate::client) fn toggle_door(&mut self, p: IVec3) {
+    fn toggle_door(&mut self, p: IVec3) {
         let w = &self.terrain.world;
         let b = w.geti(p);
         let mut cells = vec![p, p + door_other_half(b)];

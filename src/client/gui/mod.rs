@@ -36,31 +36,31 @@ use glam::Vec3;
 /// clicking slots, and what the mouse is on at an open chest or table.
 pub(super) struct InventoryUi {
     /// Creative list scroll in rows: the target set by the wheel, and the eased position.
-    pub(super) creative_scroll: f32,
-    pub(super) creative_scroll_anim: f32,
+    creative_scroll: f32,
+    creative_scroll_anim: f32,
     /// Dragging the creative scroll bar.
-    pub(super) scroll_drag: bool,
+    scroll_drag: bool,
     /// Creative inventory search text; typing goes to it while it is focused.
-    pub(super) creative_search: String,
+    creative_search: String,
     pub(super) search_focused: bool,
     /// The JEI panel beside the inventory screens.
     pub(super) jei: Jei,
     /// The open tab of the creative inventory (index into `TABS`); kept between openings.
-    pub(super) creative_tab: usize,
+    creative_tab: usize,
     /// Slot drag in progress (Minecraft-style stack spreading).
     pub(super) drag: Option<Drag>,
     /// The slot a stack was just picked up from with the button still held: letting go
     /// over another slot puts it there.
-    pub(super) press_pick: Option<SlotRef>,
+    press_pick: Option<SlotRef>,
     /// Time and slot of the last left click, for double-click collecting.
-    pub(super) slot_click: (f32, Option<SlotRef>),
+    slot_click: (f32, Option<SlotRef>),
     /// What the mouse points at in the open chest or on the open table, and the corners of
     /// its highlighted slot.
     pub(super) station_hover: Option<SlotRef>,
     pub(super) station_frame: Option<[Vec3; 4]>,
     /// The mouse is over the open chest or table, or the inventory under it: a click there
     /// does not throw the held stack.
-    pub(super) station_inside: bool,
+    station_inside: bool,
 }
 
 impl InventoryUi {

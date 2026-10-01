@@ -229,7 +229,7 @@ impl Game {
 
     /// Resource-pack torch fire: flame and smoke particles rising from the tips of the torches
     /// around the player, like Minecraft's torches.
-    pub(super) fn torch_fire(&mut self, dt: f32) {
+    fn torch_fire(&mut self, dt: f32) {
         self.level.torch_scan -= dt;
         if self.level.torch_scan <= 0.0 {
             self.level.torch_scan = 1.0;

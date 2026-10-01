@@ -232,7 +232,7 @@ impl Game {
 /// chunks away, two pictures (the view turned a hair between them) for every anti-aliasing
 /// level; `report.txt` has how much each flickers.
 pub struct Shots {
-    pub dir: std::path::PathBuf,
+    dir: std::path::PathBuf,
     /// Index into SHOT_LEVELS, and the step within it.
     config: usize,
     step: u32,
@@ -324,7 +324,7 @@ fn mountain_view(gen: &crate::world::gen::Generator, around: Vec3) -> (Vec3, f32
 
 impl Game {
     /// Shot mode, every frame while playing: hold the camera still and take the pictures.
-    pub(super) fn shots_step(&mut self, dt: f32) {
+    fn shots_step(&mut self, dt: f32) {
         let Some(s) = self.test.shots.as_mut() else {
             return;
         };

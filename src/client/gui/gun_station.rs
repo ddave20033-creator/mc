@@ -48,32 +48,32 @@ pub(in crate::client) struct BenchUi {
     /// the mouse (-1 .. 1); something picked up off the table (where the mouse was, to drag
     /// it); what the mouse points at there; scrubbing now, the dirt scrubbed off not yet
     /// taken off, and whether that is not sent yet; when the table was last sent.
-    pub(in crate::client) brush: bool,
-    pub(in crate::client) brush_at: Option<Vec3>,
+    brush: bool,
+    brush_at: Option<Vec3>,
     /// Where on the open gun station's table the mouse points (x, z), if it does.
-    pub(in crate::client) spot: Option<(f32, f32)>,
+    pub(super) spot: Option<(f32, f32)>,
     /// Where what is held on the mouse would lie on the open gun station's table.
-    pub(in crate::client) held_spot: Option<(f32, f32)>,
+    held_spot: Option<(f32, f32)>,
     /// Where in the open drawer the mouse points (on its floor), if it does.
-    pub(in crate::client) drawer_spot: Option<Vec3>,
+    pub(super) drawer_spot: Option<Vec3>,
     /// Where what is held on the mouse shows over the open gun station (world), for the
     /// others to see it there too.
     pub(in crate::client) hold_at: Option<Vec3>,
-    pub(in crate::client) pan: f32,
+    pub(super) pan: f32,
     /// At the open gun station: looking into its drawer (the mouse went down to it), and how
     /// far the camera has gone down to it (0 over the table .. 1 over the drawer).
     pub(in crate::client) in_drawer: bool,
-    pub(in crate::client) focus: f32,
+    pub(super) focus: f32,
     /// How long the mouse has stayed where it opens (or closes) the drawer.
-    pub(in crate::client) dwell: f32,
-    pub(in crate::client) drag: Option<Vec2>,
-    pub(in crate::client) hover: Option<Pick>,
-    pub(in crate::client) scrubbing: bool,
+    dwell: f32,
+    drag: Option<Vec2>,
+    hover: Option<Pick>,
+    scrubbing: bool,
     /// What the mouse is on at the gun station is where what is held goes (it lights green).
-    pub(in crate::client) hover_ok: bool,
-    pub(in crate::client) scrub: f32,
-    pub(in crate::client) scrub_dirty: bool,
-    pub(in crate::client) sent: f32,
+    hover_ok: bool,
+    scrub: f32,
+    scrub_dirty: bool,
+    sent: f32,
 }
 
 impl BenchUi {
@@ -169,18 +169,18 @@ fn blend(a: Mat4, b: Mat4, k: f32, arc: f32) -> Mat4 {
 /// toward its front.
 #[derive(Clone, Copy)]
 pub(in crate::client) struct Table {
-    pub(in crate::client) center: Vec3,
-    pub(in crate::client) right: Vec3,
-    pub(in crate::client) toward: Vec3,
+    pub(super) center: Vec3,
+    pub(super) right: Vec3,
+    pub(super) toward: Vec3,
     /// How many blocks wide the station is (the rifle station three), and how far across
     /// from its middle things may lie.
-    pub(in crate::client) wide: f32,
-    pub(in crate::client) half_w: f32,
+    wide: f32,
+    pub(super) half_w: f32,
 }
 
 impl Table {
     /// The table of the station whose left block `p` is (block `b`).
-    pub(in crate::client) fn of(p: IVec3, b: Block) -> Option<Table> {
+    fn of(p: IVec3, b: Block) -> Option<Table> {
         let f = facing(b).filter(|_| is_gun_bench(b))?;
         let toward = facing_dir(f).as_vec3();
         let right = chest_right(f).as_vec3();
@@ -195,12 +195,12 @@ impl Table {
     }
 
     /// The rifle station's (not the small one's).
-    pub(in crate::client) fn rifle(&self) -> bool {
+    fn rifle(&self) -> bool {
         self.wide > 2.5
     }
 
     /// A point on the table: `x` to the right of its middle, `z` toward its front.
-    pub(in crate::client) fn at(&self, x: f32, z: f32) -> Vec3 {
+    fn at(&self, x: f32, z: f32) -> Vec3 {
         self.center + self.right * x + self.toward * z
     }
 
@@ -1398,7 +1398,7 @@ fn emit_hold(out: &mut Vec<Vertex>, table: &Table, st: Stack, at: Vec3, light: [
 
 impl Game {
     /// The table of the gun station whose left half is `p`.
-    pub(in crate::client) fn bench_table(&self, p: IVec3) -> Option<Table> {
+    pub(super) fn bench_table(&self, p: IVec3) -> Option<Table> {
         Table::of(p, self.terrain.world.geti(p))
     }
 
@@ -1615,7 +1615,7 @@ impl Game {
     }
 
     /// Closing the gun station: the brush goes back into the drawer.
-    pub(in crate::client) fn close_gun_station(&mut self) {
+    pub(super) fn close_gun_station(&mut self) {
         self.bench_ui.hold_at = None;
         // A box of rounds still on the mouse goes back into the drawer (or onto the table).
         if let (Screen::Container(Container::GunStation(p)), Some(st)) = (self.screen, self.me.items.cursor) {
@@ -1963,7 +1963,7 @@ impl Game {
 
     /// A right click on something on the table: a gun comes apart there, a part puts a gun
     /// together from the parts on the table (when they are all there).
-    pub(in crate::client) fn bench_right_click(&mut self, p: IVec3, table: &Table, id: u16) {
+    fn bench_right_click(&mut self, p: IVec3, table: &Table, id: u16) {
         let Some(bench) = self.level.block_entities.benches.get_mut(&p) else { return };
         let Some(it) = bench.get(id).copied() else { return };
         match look(it.stack.item) {

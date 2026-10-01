@@ -19,42 +19,42 @@ use glam::IVec3;
 /// server sent it: its name and spawn, the time of day, dropped items, falling blocks and
 /// trees, lying trunks, mobs, block entities; and the animations of things in it. Made anew
 /// for every world joined, so nothing of the last one comes along.
-pub(in crate::client) struct Level {
+pub(super) struct Level {
     /// The world played (None out of a world).
-    pub(in crate::client) meta: Option<WorldMeta>,
+    pub(super) meta: Option<WorldMeta>,
     /// The world's spawn column.
-    pub(in crate::client) spawn: (i32, i32),
+    pub(super) spawn: (i32, i32),
     /// The time of day (0 sunrise .. 0.25 noon .. 0.75 midnight), as the server keeps it.
-    pub(in crate::client) time_of_day: f32,
-    pub(in crate::client) items: Vec<ItemEntity>,
-    pub(in crate::client) falling: Vec<FallingBlock>,
+    pub(super) time_of_day: f32,
+    pub(super) items: Vec<ItemEntity>,
+    pub(super) falling: Vec<FallingBlock>,
     /// Trees felled with an axe, falling over.
-    pub(in crate::client) falling_trees: Vec<crate::sim::felling::FallingTree>,
+    falling_trees: Vec<crate::sim::felling::FallingTree>,
     /// The trunks of felled trees lying on the ground.
-    pub(in crate::client) lying_logs: Vec<crate::sim::felling::LyingLog>,
-    pub(in crate::client) mobs: Vec<Mob>,
-    pub(in crate::client) block_entities: BlockEntities,
+    pub(super) lying_logs: Vec<crate::sim::felling::LyingLog>,
+    pub(super) mobs: Vec<Mob>,
+    pub(super) block_entities: BlockEntities,
     /// Chest lid animation 0..1 per chest position.
-    pub(in crate::client) chest_open: FastMap<IVec3, f32>,
+    pub(super) chest_open: FastMap<IVec3, f32>,
     /// How far each door half is swung open (0..1), easing toward its state.
-    pub(in crate::client) door_swing: FastMap<IVec3, f32>,
+    pub(super) door_swing: FastMap<IVec3, f32>,
     /// How far each gun station's drawer is out (0..1): it slides out while one is used.
-    pub(in crate::client) bench_drawer: FastMap<IVec3, f32>,
+    pub(super) bench_drawer: FastMap<IVec3, f32>,
     /// The side each crafting table was last used from (its grid faces that way).
-    pub(in crate::client) table_sides: FastMap<IVec3, u8>,
+    pub(super) table_sides: FastMap<IVec3, u8>,
     /// How much each furnace near by had made when last heard (it dings when that grows).
-    pub(in crate::client) furnace_heard: std::collections::HashMap<IVec3, u32>,
+    furnace_heard: std::collections::HashMap<IVec3, u32>,
     /// The last change seen on each gun station's table and when it started (it plays out).
-    pub(in crate::client) bench_anims: FastMap<IVec3, (u16, f32)>,
+    pub(super) bench_anims: FastMap<IVec3, (u16, f32)>,
     /// Torches near the player (rescanned every second) and the rescan timer.
-    pub(in crate::client) torches: Vec<IVec3>,
-    pub(in crate::client) torch_scan: f32,
+    pub(super) torches: Vec<IVec3>,
+    pub(super) torch_scan: f32,
     /// Smoke, sparks, crumbs, splashes...
-    pub(in crate::client) particles: Particles,
+    pub(super) particles: Particles,
 }
 
 impl Level {
-    pub(in crate::client) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             meta: None,
             spawn: (0, 0),
@@ -78,7 +78,7 @@ impl Level {
     }
 
     /// The chests open (`open`) swing their lids up, the others fall shut.
-    pub(in crate::client) fn swing_chest_lids(&mut self, open: &[IVec3], dt: f32) {
+    pub(super) fn swing_chest_lids(&mut self, open: &[IVec3], dt: f32) {
         for p in open {
             self.chest_open.entry(*p).or_insert(0.0);
         }

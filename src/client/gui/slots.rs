@@ -95,12 +95,12 @@ impl Game {
     }
 
     /// Contents of a chest: 27 slots, or 54 for a double chest (left half first).
-    pub(in crate::client) fn chest_slots(&self, p: IVec3) -> Vec<Slot> {
+    pub(super) fn chest_slots(&self, p: IVec3) -> Vec<Slot> {
         self.level.block_entities.chest_slots(&self.terrain.world, p)
     }
 
     /// Stores `slots` (as `chest_slots` returns them) into the chest's halves.
-    pub(in crate::client) fn set_chest_slots(&mut self, p: IVec3, slots: &[Slot]) {
+    fn set_chest_slots(&mut self, p: IVec3, slots: &[Slot]) {
         self.level.block_entities.set_chest_slots(&self.terrain.world, p, slots);
     }
 
@@ -129,12 +129,12 @@ impl Game {
         }
     }
 
-    pub(in crate::client) fn craft_result(&self, c: Container) -> Option<Stack> {
+    pub(super) fn craft_result(&self, c: Container) -> Option<Stack> {
         let n = Self::craft_size(c);
         craft(&self.me.items.craft[..n * n], n)
     }
 
-    pub(super) fn consume_craft_inputs(&mut self, c: Container) {
+    fn consume_craft_inputs(&mut self, c: Container) {
         let n = Self::craft_size(c);
         for s in &mut self.me.items.craft[..n * n] {
             take(s, 1);
@@ -179,7 +179,7 @@ impl Game {
 
     /// Shift-click inside the inventory: from the hotbar (slot `i` < 9) into the main part,
     /// or the other way round. Returns what does not fit.
-    pub(super) fn move_within_inventory(&mut self, i: usize, stack: Stack) -> Option<Stack> {
+    fn move_within_inventory(&mut self, i: usize, stack: Stack) -> Option<Stack> {
         if i < 9 {
             add_to(&mut self.me.items.inventory.slots[9..], stack)
         } else {
@@ -188,7 +188,7 @@ impl Game {
     }
 
     /// Shift-click: move a stack to the "other" section.
-    pub(super) fn quick_move(&mut self, c: Container, r: SlotRef) {
+    fn quick_move(&mut self, c: Container, r: SlotRef) {
         // In the inventory armor goes on (into its empty slot), and comes off.
         if let (Container::Inventory | Container::Creative, SlotRef::Inv(i)) = (c, r) {
             let piece = self.me.items.inventory.slots[i].and_then(|s| armor_of(s.item)).map(|a| a.0);

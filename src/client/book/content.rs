@@ -72,13 +72,13 @@ pub const DARK: Theme = Theme {
 /// Sizes on a page's texture: pixels per book unit, the body text's font scale and line
 /// height, the titles', and the space inside the margins.
 pub struct Metrics {
-    pub u: f32,
-    pub fs: f32,
-    pub lh: f32,
-    pub tfs: f32,
-    pub tlh: f32,
-    pub w: f32,
-    pub h: f32,
+    u: f32,
+    fs: f32,
+    lh: f32,
+    tfs: f32,
+    tlh: f32,
+    w: f32,
+    h: f32,
 }
 
 pub fn metrics() -> Metrics {

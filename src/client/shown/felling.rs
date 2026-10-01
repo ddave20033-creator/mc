@@ -39,7 +39,7 @@ enum Contact {
 impl Game {
     /// A stroke of the axe (survival): it tires the player (`exhaust`) and wears the axe in
     /// hand; one that breaks bursts apart at `at`.
-    pub(in crate::client) fn wear_axe(&mut self, exhaust: f32, at: IVec3) {
+    pub(super) fn wear_axe(&mut self, exhaust: f32, at: IVec3) {
         self.me.vitals.needs.exhaust(exhaust);
         let slot = self.me.items.hotbar_slot;
         if tool_of(self.held()).is_some() && inventory::damage(&mut self.me.items.inventory.slots[slot], 1) {
@@ -182,7 +182,7 @@ impl Game {
 
     /// The axe bit into the trunk at `p`: its knock, and chips flying out at `at` (the way
     /// `out`).
-    pub(in crate::client) fn chips(&mut self, p: IVec3, b: Block, at: Vec3, out: Vec3) {
+    pub(super) fn chips(&mut self, p: IVec3, b: Block, at: Vec3, out: Vec3) {
         self.audio.play(crate::audio::Sound::AxeChop, Some(at), 1.0);
         let tint = self.block_tint(p, b);
         for _ in 0..3 {

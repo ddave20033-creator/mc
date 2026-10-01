@@ -15,22 +15,22 @@ use glam::{IVec3, Vec3};
 pub(in crate::client) struct Vitals {
     pub(in crate::client) health: f32,
     /// The moment of invulnerability after a hit (seconds left).
-    pub(in crate::client) invuln: f32,
+    invuln: f32,
     /// The view's shake after a hit (seconds left).
     pub(in crate::client) hurt_time: f32,
     /// The hit that started the moment of invulnerability (`invuln`): a harder one in it
     /// still does the difference.
-    pub(in crate::client) last_hit: f32,
+    last_hit: f32,
     /// Hunger, thirst and effects.
     pub(in crate::client) needs: Needs,
     /// The highest point since leaving the ground (falls hurt from there).
     pub(in crate::client) fall_peak: f32,
     /// Seconds left burning, and till its next hurt.
     pub(in crate::client) fire: f32,
-    pub(in crate::client) fire_tick: f32,
+    fire_tick: f32,
     /// Breath left underwater, in seconds, and till drowning hurts again.
     pub(in crate::client) air: f32,
-    pub(in crate::client) drown_tick: f32,
+    drown_tick: f32,
     /// What the death screen says.
     pub(in crate::client) death_message: String,
     /// The head of the bed this player last used: where they come back to life.
@@ -70,7 +70,7 @@ impl Vitals {
     /// A hit of `amount`. Just hurt (Minecraft's rule): only as much as it is harder than the
     /// hit before does anything, and the moment of invulnerability does not start again.
     /// Whether it hurt.
-    pub(in crate::client) fn hurt(&mut self, amount: f32) -> bool {
+    fn hurt(&mut self, amount: f32) -> bool {
         if self.invuln > 0.0 {
             if amount <= self.last_hit {
                 return false;
@@ -88,7 +88,7 @@ impl Vitals {
     }
 
     /// The tick's part of the moment of invulnerability and of the view's shake.
-    pub(in crate::client) fn tick_hurt(&mut self, dt: f32) {
+    fn tick_hurt(&mut self, dt: f32) {
         self.invuln -= dt;
         self.hurt_time = (self.hurt_time - dt).max(0.0);
     }
@@ -96,7 +96,7 @@ impl Vitals {
     /// Falling: the highest point since leaving the ground is kept (`steady`: flying,
     /// swimming or in creative, nothing is counted); on landing (`landed`), the damage of the
     /// fall, if it was long enough.
-    pub(in crate::client) fn fall(&mut self, y: f32, steady: bool, on_ground: bool, landed: bool) -> Option<f32> {
+    fn fall(&mut self, y: f32, steady: bool, on_ground: bool, landed: bool) -> Option<f32> {
         if steady {
             self.fall_peak = y;
             None
@@ -111,7 +111,7 @@ impl Vitals {
     }
 
     /// The tick's part of burning: whether it hurts now (once a second).
-    pub(in crate::client) fn burn(&mut self, dt: f32) -> bool {
+    fn burn(&mut self, dt: f32) -> bool {
         if self.fire <= 0.0 {
             return false;
         }
@@ -126,7 +126,7 @@ impl Vitals {
 
     /// The tick's breath: it runs out with the head underwater (`underwater`), and comes back
     /// out of it. Whether drowning hurts now (every second once it is out).
-    pub(in crate::client) fn breathe(&mut self, dt: f32, underwater: bool) -> bool {
+    fn breathe(&mut self, dt: f32, underwater: bool) -> bool {
         if !underwater {
             self.air = (self.air + dt * 5.0).min(MAX_AIR);
             self.drown_tick = 0.0;
@@ -241,7 +241,7 @@ impl Game {
     }
 
     /// Blocks overlapping the player's bounding box (optionally grown a bit).
-    pub(in crate::client) fn touching(&self, grow: f32, pred: impl Fn(Block) -> bool) -> bool {
+    fn touching(&self, grow: f32, pred: impl Fn(Block) -> bool) -> bool {
         let p = self.me.body.pos;
         let min = p - Vec3::new(0.3 + grow, 0.0, 0.3 + grow);
         let max = p + Vec3::new(0.3 + grow, 1.8, 0.3 + grow);

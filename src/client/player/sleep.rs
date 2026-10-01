@@ -14,7 +14,7 @@ pub use crate::sim::is_night;
 #[derive(Clone, Copy, Debug)]
 pub(in crate::client) struct Sleep {
     /// The bed's head half.
-    pub bed: IVec3,
+    bed: IVec3,
     pub facing: u8,
     /// Seconds in bed.
     pub time: f32,
@@ -22,7 +22,7 @@ pub(in crate::client) struct Sleep {
 
 impl Game {
     /// Right click on a bed: it becomes the respawn point, and at night the player lies down.
-    pub(in crate::client) fn use_bed(&mut self, hit: IVec3) {
+    pub(super) fn use_bed(&mut self, hit: IVec3) {
         self.me.aim.action_cooldown = 0.25;
         let b = self.terrain.world.geti(hit);
         let head = if bed_head(b) {
@@ -136,7 +136,7 @@ impl Game {
 
     /// Where to stand beside the bed whose head half is at `head`: a free spot two blocks
     /// high with ground under it, around the foot half first (Minecraft's order is similar).
-    pub(in crate::client) fn bed_stand_pos(&self, head: IVec3) -> Option<Vec3> {
+    fn bed_stand_pos(&self, head: IVec3) -> Option<Vec3> {
         let b = self.block_anywhere(head);
         if !is_bed(b) {
             return None;

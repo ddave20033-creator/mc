@@ -117,29 +117,29 @@ struct Lighting {
 
 /// Frame timing and the game's time: the frame rate, the F3 graph and statistics, the frame limiter.
 pub(super) struct FrameClock {
-    pub(super) last: Instant,
+    last: Instant,
     pub(super) fps: f32,
-    pub(super) fps_accum: f32,
-    pub(super) fps_frames: u32,
+    fps_accum: f32,
+    fps_frames: u32,
     /// Max FPS: when the next frame may start.
-    pub(super) next_frame: Option<Instant>,
+    next_frame: Option<Instant>,
     /// Last frame's CPU time in ms: update, build, submit (without waiting), waiting for the GPU.
     pub(super) cpu_ms: [f32; 4],
     /// When the previous frame finished, and the time from then until this frame started.
-    pub(super) frame_end: Instant,
+    frame_end: Instant,
     pub(super) between_ms: f32,
     /// Recent frame times in milliseconds (newest last), for the F3 graph.
     pub(super) frame_times: std::collections::VecDeque<f32>,
     pub(super) sys_stats: crate::stats::Monitor,
     /// Video memory (used, budget) in bytes, refreshed once a second.
     pub(super) vram: Option<(u64, u64)>,
-    pub(super) vram_timer: f32,
+    vram_timer: f32,
     /// Seconds since the game started (the animations' and timers' clock).
     pub(super) time: f32,
     /// The simulation's ticks (20 a second), and where the frame is between the last one and
     /// the next (0..1: things are drawn that far from where they were before the last tick
     /// toward where they are).
-    pub(super) ticks: crate::sim::clock::Clock,
+    ticks: crate::sim::clock::Clock,
     pub(super) between: f32,
 }
 

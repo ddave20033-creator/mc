@@ -10,7 +10,7 @@ use glam::Vec2;
 
 pub struct Canvas<'a> {
     pub w: usize,
-    pub h: usize,
+    h: usize,
     pub px: Vec<[u8; 4]>,
     font: &'a Font,
     /// Every block texture layer at full size (`TILE` x `TILE` RGBA each).

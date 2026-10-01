@@ -32,7 +32,7 @@ impl Game {
     }
 
     /// Connects to a LAN game at "ip:port" (the settings as they are, not saved).
-    pub(in crate::client) fn connect_to(&mut self, addr: String) {
+    pub(super) fn connect_to(&mut self, addr: String) {
         // (looking the address up and connecting can take seconds: not on the window's thread)
         let (tx, rx) = std::sync::mpsc::channel();
         let target = addr.clone();
@@ -64,7 +64,7 @@ impl Game {
 
     /// Says hello through `conn` to the server at its other end (a LAN host's, or the one this
     /// game runs itself): it answers with its world.
-    pub(in crate::client) fn join_with(&mut self, conn: Conn) {
+    fn join_with(&mut self, conn: Conn) {
         conn.send(&Msg::Hello {
             proto: PROTOCOL,
             name: self.settings.name.clone(),
@@ -191,7 +191,7 @@ impl Game {
         self.net_container_sync();
     }
 
-    pub(super) fn client_handle(&mut self, m: Msg) {
+    fn client_handle(&mut self, m: Msg) {
         match m {
             Msg::Welcome {
                 id,
@@ -348,7 +348,7 @@ impl Game {
     /// Sets up the server's world (the chunks follow, then `Ready`): nothing of the last one
     /// is left.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn begin_remote_world(
+    fn begin_remote_world(
         &mut self,
         seed: u32,
         world: String,
@@ -404,7 +404,7 @@ impl Game {
     }
 
     /// A block change from the server.
-    pub(super) fn apply_remote_block(&mut self, p: IVec3, b: Block) {
+    fn apply_remote_block(&mut self, p: IVec3, b: Block) {
         // (a furnace, chest, table or gun station broken: what was known of it goes)
         self.level.block_entities.forget_unless(p, b);
         let cp = World::chunk_pos(p.x, p.z);
@@ -435,7 +435,7 @@ impl Game {
 
     /// Mobs, dropped items and falling blocks near this player, from the server: the new and
     /// changed ones, those gone (`full`: all near are listed, the rest goes).
-    pub(super) fn sync_entities(
+    fn sync_entities(
         &mut self,
         full: bool,
         mobs: Vec<crate::net::MobNet>,

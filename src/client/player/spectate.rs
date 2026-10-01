@@ -77,7 +77,7 @@ impl Game {
     }
 
     /// Puts the camera into another player's eyes.
-    pub(in crate::client) fn start_spectating(&mut self, id: u8) {
+    fn start_spectating(&mut self, id: u8) {
         let Some(name) = self
             .session.remotes
             .iter()
@@ -94,7 +94,7 @@ impl Game {
     }
 
     /// Back to flying freely, where the watched player was.
-    pub(in crate::client) fn stop_spectating(&mut self) {
+    fn stop_spectating(&mut self) {
         if self.session.spectating.take().is_some() {
             self.me.body.vel = Vec3::ZERO;
             self.say(t("spectate.stopped"), chat::GRAY);

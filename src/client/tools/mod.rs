@@ -10,10 +10,10 @@ pub(super) mod fishing;
 /// the fishing line. Made anew for every world: nothing of the last one comes along (a grenade
 /// thrown just before leaving would blow up in the next).
 #[derive(Default)]
-pub(in crate::client) struct Tools {
+pub(super) struct Tools {
     /// Shooting and the gun station.
-    pub(in crate::client) guns: guns::Guns,
-    pub(in crate::client) grenades: grenades::Grenades,
+    pub(super) guns: guns::Guns,
+    pub(super) grenades: grenades::Grenades,
     /// The fishing rod's line, bobber and the fish on it.
-    pub(in crate::client) fishing: fishing::Fishing,
+    pub(super) fishing: fishing::Fishing,
 }

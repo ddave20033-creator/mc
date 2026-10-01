@@ -42,7 +42,7 @@ impl Game {
 
     /// A double chest half placed at `at` turns the single chest it pairs with into the other
     /// half (`rules::chest_join`); what goes at `at`.
-    pub(in crate::client) fn join_chest(&mut self, at: IVec3, b: Block) -> Block {
+    fn join_chest(&mut self, at: IVec3, b: Block) -> Block {
         let (b, other) = crate::sim::rules::chest_join(&self.terrain.world, at, b);
         if let Some((q, ob)) = other {
             self.set_block(q, ob);
@@ -119,7 +119,7 @@ impl Game {
 
     /// The block `b` at `p` is going away: the blocks that belong with it follow
     /// (`rules::other_cells`; a big furnace's or gun station's things with them).
-    pub(in crate::client) fn remove_other_half(&mut self, p: IVec3, b: Block) {
+    fn remove_other_half(&mut self, p: IVec3, b: Block) {
         if let Some(q) = crate::sim::rules::contents_elsewhere(&self.terrain.world, p, b) {
             self.level.block_entities.remove(q);
         }
@@ -136,7 +136,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    pub(in crate::client) fn wall_torch_needs_its_mounting_block() {
+    fn wall_torch_needs_its_mounting_block() {
         let mut world = World::new();
         let mut chunk = ChunkData::new();
         let anchor = IVec3::new(8, 10, 8);

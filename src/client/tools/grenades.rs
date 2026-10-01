@@ -30,7 +30,7 @@ const THROW_SPEED: (f32, f32) = (6.0, 21.0);
 
 #[derive(Default)]
 pub(in crate::client) struct Grenades {
-    pub(in crate::client) list: Vec<Grenade>,
+    list: Vec<Grenade>,
     /// The view shaking after a blast near by.
     pub(in crate::client) shake: f32,
     /// The grenade in the hand being readied (the right button held).
@@ -180,7 +180,7 @@ impl Game {
 
     /// This game's copy of a grenade starts flying (thrown here, or by someone else), going off
     /// after `fuse` seconds: the server's copy decides the blast (`remote_blast`).
-    pub(in crate::client) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
+    fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
         self.tools.grenades.list.push(Grenade::new(kind, pos, vel, seed, fuse));
     }
 

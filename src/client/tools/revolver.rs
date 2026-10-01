@@ -48,7 +48,7 @@ pub(in crate::client) struct Cylinder {
 
 impl Cylinder {
     /// Where the reload animation is (seconds) and, loading a round, how far into it.
-    pub(in crate::client) fn anim(&self) -> (f32, Option<f32>) {
+    pub(super) fn anim(&self) -> (f32, Option<f32>) {
         match self.phase {
             Phase::Open => (self.t.min(RELOAD_OPEN), None),
             Phase::Loader => ((RELOAD_OPEN + self.t).min(RELOAD_CLOSE), None),
@@ -57,11 +57,11 @@ impl Cylinder {
         }
     }
 
-    pub(in crate::client) fn ejects(&self) -> bool {
+    pub(super) fn ejects(&self) -> bool {
         self.ejects
     }
 
-    pub(in crate::client) fn loader(&self) -> u8 {
+    pub(super) fn loader(&self) -> u8 {
         self.loader
     }
 }
@@ -110,7 +110,7 @@ impl Game {
 
     /// The R key with the revolver: swung out to be emptied (when there are fired cases in it)
     /// and loaded (when there is room and something to load it with).
-    pub(in crate::client) fn start_revolver_reload(&mut self) {
+    pub(super) fn start_revolver_reload(&mut self) {
         let Some(g) = self.held_revolver() else { return };
         if let Some(c) = &mut self.tools.guns.cylinder {
             // Loading already: the key again stops it.
@@ -144,14 +144,14 @@ impl Game {
     }
 
     /// A shot asked for while the cylinder is out: loading stops after the round going in.
-    pub(in crate::client) fn revolver_stop_loading(&mut self) {
+    pub(super) fn revolver_stop_loading(&mut self) {
         if let Some(c) = &mut self.tools.guns.cylinder {
             c.stop = true;
         }
     }
 
     /// The reload goes on: its steps happen with the animation.
-    pub(in crate::client) fn update_revolver_reload(&mut self, dt: f32) {
+    pub(super) fn update_revolver_reload(&mut self, dt: f32) {
         let Some(mut c) = self.tools.guns.cylinder else { return };
         if self.held_revolver().is_none() {
             self.tools.guns.cylinder = None;
@@ -345,7 +345,7 @@ impl Game {
 
     /// The trigger pulled: the next chamber comes under the hammer. Returns whether a round
     /// fired there (otherwise the hammer only clicked on an empty chamber or a fired case).
-    pub(in crate::client) fn revolver_pull(&mut self) -> bool {
+    pub(super) fn revolver_pull(&mut self) -> bool {
         let Some(g) = self.held_revolver_mut() else { return false };
         let k = revolver_next(revolver_index(g));
         set_revolver_index(g, k);

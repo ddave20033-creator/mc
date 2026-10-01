@@ -115,9 +115,9 @@ impl Look {
 pub(in crate::client) struct Rig {
     pub mode: u8,
     /// Offset from the eye in local coordinates (right, up, forward), easing toward the mode's.
-    pub local: Vec3,
+    local: Vec3,
     /// How far from the eye the camera has room to be (walls pull it in).
-    pub clear_distance: f32,
+    clear_distance: f32,
     /// Too little room for the mode's position: first person until there is.
     fallback: bool,
     transition: bool,

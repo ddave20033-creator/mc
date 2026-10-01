@@ -36,8 +36,8 @@ pub(super) struct Input {
     /// A hotbar key pressed this frame at an item screen (it swaps with the hotbar).
     pub(super) digit: Option<usize>,
     /// When jump and forward were last pressed (double taps), -1 after one.
-    pub(super) last_space: f32,
-    pub(super) last_w: f32,
+    last_space: f32,
+    last_w: f32,
     /// The game window is in front (not tabbed out): the others see "away" otherwise.
     pub(super) focused: bool,
     /// Double-tapped forward: sprinting while it is held.
@@ -73,7 +73,7 @@ impl Input {
     }
 
     /// Either control key is held.
-    pub(super) fn ctrl(&self) -> bool {
+    fn ctrl(&self) -> bool {
         self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight)
     }
 
@@ -400,7 +400,7 @@ impl Game {
         }
     }
 
-    pub(super) fn open_chat(&mut self, prefix: &str) {
+    fn open_chat(&mut self, prefix: &str) {
         self.chat.open(prefix);
         self.screen = Screen::Chat;
         self.set_grab(false);

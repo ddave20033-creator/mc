@@ -31,7 +31,7 @@ pub(super) struct Gfx {
 /// own player id's slot in one), and the PNGs they came from (sent to the other players).
 pub(super) struct Skins {
     pub(super) custom: HashMap<u8, crate::pack::Image>,
-    pub(super) pngs: HashMap<u8, Vec<u8>>,
+    pngs: HashMap<u8, Vec<u8>>,
     /// This player's own skin (`skins/custom.png`), if it has one.
     pub(super) local_png: Option<Vec<u8>>,
 }
@@ -87,7 +87,7 @@ impl Gfx {
     }
 
     /// Only one player slot's skin layers are made again and uploaded (not all the textures).
-    pub(super) fn refresh_skin_slot(&mut self, slot: u8) {
+    fn refresh_skin_slot(&mut self, slot: u8) {
         if self.texture_base.is_empty() {
             // (the textures are still being made: they will have it)
             return;

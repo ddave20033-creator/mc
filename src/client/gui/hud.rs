@@ -23,7 +23,7 @@ pub(in crate::client) struct Hud {
     /// F3: the debug and performance screens.
     pub(in crate::client) debug: bool,
     /// Drawn position of the hotbar highlight; glides toward the selected slot.
-    pub(in crate::client) hotbar_anim: f32,
+    hotbar_anim: f32,
     /// How long the selected item's name still shows, and the hints at the start.
     pub(in crate::client) slot_name_timer: f32,
     pub(in crate::client) hint_timer: f32,
@@ -313,7 +313,7 @@ impl Game {
     }
 
     /// Next to the inventory window: each effect with its name and time left.
-    pub(in crate::client) fn draw_effects_list(&mut self, panel_x: f32, panel_y: f32, panel_w: f32) {
+    pub(super) fn draw_effects_list(&mut self, panel_x: f32, panel_y: f32, panel_w: f32) {
         let s = self.ui.s;
         let (w, h) = (100.0 * s, 24.0 * s);
         let mut x = panel_x + panel_w + 6.0 * s;

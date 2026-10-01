@@ -82,18 +82,18 @@ const SPECIES: [Species; 6] = [
 /// A hooked fish and the line's fight with it (no world in it: `step` is all of it).
 #[derive(Clone, Debug)]
 pub(in crate::client) struct Fight {
-    pub(in crate::client) species: usize,
-    pub(in crate::client) weight: f32,
-    pub(in crate::client) stamina: f32,
-    pub(in crate::client) max_stamina: f32,
+    species: usize,
+    weight: f32,
+    stamina: f32,
+    max_stamina: f32,
     /// How strong its surges are.
     power: f32,
     /// How hard it pulls now (about 0.1 resting .. 2 surging).
-    pub(in crate::client) pull: f32,
+    pull: f32,
     /// How taut the line is (see `GOOD`, `TIGHT`, `SLACK`, `BREAK`).
-    pub(in crate::client) tension: f32,
+    tension: f32,
     /// Line out to it (m).
-    pub(in crate::client) dist: f32,
+    dist: f32,
     /// Notches per second of the wheel, lately (+ in, - out).
     crank_rate: f32,
     /// Line reeled (m, - let out) not yet come in: it comes in smoothly, not a notch at once.
@@ -105,8 +105,8 @@ pub(in crate::client) struct Fight {
     drift_to: f32,
     snap: f32,
     /// Seconds (weighted) too tight, and too slack.
-    pub(in crate::client) over: f32,
-    pub(in crate::client) slack: f32,
+    over: f32,
+    slack: f32,
     /// Which way it swims across (radians per second about the angler) and wants to.
     side: f32,
     side_to: f32,
@@ -138,7 +138,7 @@ impl Fight {
         Self::of(species, weight, dist)
     }
 
-    pub(in crate::client) fn of(species: usize, weight: f32, dist: f32) -> Self {
+    fn of(species: usize, weight: f32, dist: f32) -> Self {
         let sp = &SPECIES[species];
         let big = (weight / sp.kg.1).clamp(0.0, 1.0);
         let stamina = 4.0 + 6.0 * weight.sqrt();
@@ -165,17 +165,17 @@ impl Fight {
     }
 
     /// How much fight it has left (0..1).
-    pub(in crate::client) fn fresh(&self) -> f32 {
+    fn fresh(&self) -> f32 {
         (self.stamina / self.max_stamina).clamp(0.0, 1.0)
     }
 
-    pub(in crate::client) fn surging(&self) -> bool {
+    fn surging(&self) -> bool {
         self.drift > 0.2
     }
 
     /// `dt` seconds of the fight, the wheel turned `notches` (+ in, - out) in `gear`.
     /// Returns the line reeled in (m, - let out) and how it ended, if it did.
-    pub(in crate::client) fn step(&mut self, dt: f32, notches: i32, gear: u8, r: &mut dyn FnMut() -> f32) -> (f32, Option<FightEnd>) {
+    fn step(&mut self, dt: f32, notches: i32, gear: u8, r: &mut dyn FnMut() -> f32) -> (f32, Option<FightEnd>) {
         let g = (gear.clamp(1, ROD_GEARS) - 1) as usize;
         let s = self.fresh();
         // What it does next, move after move, each its own speed and strength (weaker as it
@@ -281,13 +281,13 @@ pub(in crate::client) enum Bite {
 
 /// The line out and what is on it.
 pub(in crate::client) struct Line {
-    pub(in crate::client) bobber: Vec3,
+    bobber: Vec3,
     vel: Vec3,
-    pub(in crate::client) state: Bobber,
+    state: Bobber,
     /// Line off the reel (m).
-    pub(in crate::client) length: f32,
-    pub(in crate::client) bite: Bite,
-    pub(in crate::client) fight: Option<Fight>,
+    length: f32,
+    bite: Bite,
+    fight: Option<Fight>,
     /// Reeling it all in (a right click with the line out).
     auto_reel: bool,
     /// How far the bobber is pulled under (m), and where it is drawn.
@@ -326,7 +326,7 @@ pub(in crate::client) struct Fishing {
     /// The gear digits flash when the gear is changed.
     gear_flash: f32,
     /// A bite not seen to yet (the "!" over the crosshair flashes).
-    pub(in crate::client) alarm: f32,
+    alarm: f32,
     /// Where the reel's handle is going (it follows smoothly).
     crank_to: f32,
     /// Where the bobber is drawn: it follows the game's bobber smoothly (the line's length

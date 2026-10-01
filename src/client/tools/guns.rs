@@ -52,7 +52,7 @@ struct Bullet {
 #[derive(Default)]
 pub(in crate::client) struct Guns {
     /// Looking the held gun over (the inspect key): seconds so far, and the gun.
-    pub(in crate::client) inspect: Option<(f32, ItemId)>,
+    inspect: Option<(f32, ItemId)>,
     /// Seconds after a shot before sprinting is possible again (a shot ends a sprint).
     pub(in crate::client) no_sprint: f32,
     /// Where the held gun's muzzle, ejection port and laser lens were drawn last frame
@@ -73,7 +73,7 @@ pub(in crate::client) struct Guns {
     /// its own on the gun): how much is left, where, which way, how big, its turn.
     flash: Option<(f32, Vec3, Vec3, f32, f32)>,
     /// The flash's light on the surroundings: how much is left and where.
-    pub(in crate::client) flash_light: (f32, Vec3),
+    pub(super) flash_light: (f32, Vec3),
     /// How hot the barrel is from firing (smoke curls out of it above 1), and when the last
     /// wisp came out.
     heat: f32,
@@ -85,7 +85,7 @@ pub(in crate::client) struct Guns {
     /// Reloading (the R key): seconds so far, and what it does (a revolver's: `cylinder`).
     pub(in crate::client) reload: Option<f32>,
     pub(in crate::client) plan: ReloadPlan,
-    pub(in crate::client) cylinder: Option<super::revolver::Cylinder>,
+    pub(super) cylinder: Option<super::revolver::Cylinder>,
     /// The gun a reload is for (its hotbar slot and item): put away, or another one taken up,
     /// the reload stops (it must not go on with the other gun).
     reload_owner: Option<(usize, ItemId)>,
@@ -98,7 +98,7 @@ pub(in crate::client) struct Guns {
     /// Recoil that has not come back yet (radians of pitch).
     recover: f32,
     bullets: Vec<Bullet>,
-    pub(in crate::client) cases: Cases,
+    pub(super) cases: Cases,
     /// Muzzle flashes of the other players' shots (as `flash`).
     remote_flashes: Vec<(f32, Vec3, Vec3, f32, f32)>,
     /// Holes the bullets left in the blocks.
@@ -114,7 +114,7 @@ pub(in crate::client) struct ReloadPlan {
     kind: ReloadKind,
     rack: bool,
     old_empty: bool,
-    pub(in crate::client) length: f32,
+    pub(super) length: f32,
     pub(in crate::client) new_mag: Option<Stack>,
     out_done: bool,
     in_done: bool,

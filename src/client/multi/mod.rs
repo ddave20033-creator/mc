@@ -42,33 +42,33 @@ pub(super) struct RemotePlayer {
     /// Swing of a lantern in their hand.
     lantern: crate::model::lantern::SmoothSwing,
     /// The guide book in their hands: its page turning, and how it is shown here.
-    pub(in crate::client) book: crate::model::book::TurnAnim,
-    pub(in crate::client) book_view: Option<crate::model::book::BookView>,
+    pub(super) book: crate::model::book::TurnAnim,
+    pub(super) book_view: Option<crate::model::book::BookView>,
     /// When they last fired (game time), for their gun's slide.
-    pub(in crate::client) shot_at: Option<f32>,
+    pub(super) shot_at: Option<f32>,
 }
 
 impl RemotePlayer {
     /// Alive and in the world according to the latest pose received (a spectator is not:
     /// mobs, items, beds and weapons leave them alone).
-    pub(in crate::client) fn alive(&self) -> bool {
+    pub(super) fn alive(&self) -> bool {
         self.has_pose && self.target.flags & pose_flags::DEAD == 0 && !self.target.spectator
     }
 
     /// Dead for now (not a spectator): they come back.
-    pub(in crate::client) fn dead(&self) -> bool {
+    pub(super) fn dead(&self) -> bool {
         self.has_pose && self.target.flags & pose_flags::DEAD != 0 && !self.target.spectator
     }
 
     /// Drawn: alive in the smoothed pose that is shown (spectators are invisible).
-    pub(in crate::client) fn shown(&self) -> bool {
+    fn shown(&self) -> bool {
         self.has_pose && self.pose.flags & pose_flags::DEAD == 0 && !self.pose.spectator
     }
 }
 
 pub(super) struct Client {
     conn: Conn,
-    pub(super) id: u8,
+    id: u8,
     tick: f32,
     /// Where the server says each dropped item is; they glide there.
     item_targets: FastMap<u32, Vec3>,
@@ -85,25 +85,25 @@ pub(super) struct Client {
 /// Playing in a world: the connection to its server (and the server itself when it is the
 /// game's own), the other players in it, and what came from it to wait for the world.
 /// (The fields drop in their order: the connection closes before the server stops.)
-pub(in crate::client) struct Session {
+pub(super) struct Session {
     /// The connection to the world's server (the game's own, or a LAN game's), while in a
     /// world.
-    pub(in crate::client) net: Option<Client>,
+    pub(super) net: Option<Client>,
     /// The server this game runs for the world it plays (joined through `net`), and its LAN
     /// address once it is open to the LAN.
-    pub(in crate::client) local: Option<crate::sim::server::Local>,
-    pub(in crate::client) lan_address: Option<String>,
-    pub(in crate::client) remotes: Vec<RemotePlayer>,
+    pub(super) local: Option<crate::sim::server::Local>,
+    pub(super) lan_address: Option<String>,
+    pub(super) remotes: Vec<RemotePlayer>,
     /// Spectator mode: the player whose eyes the camera is in.
-    pub(in crate::client) spectating: Option<u8>,
+    pub(super) spectating: Option<u8>,
     /// The player as the server keeps them, till the world around them has loaded.
-    pub(in crate::client) pending_player: Option<PlayerSave>,
+    pub(super) pending_player: Option<PlayerSave>,
     /// Till the player's state is sent to be saved again.
-    pub(in crate::client) autosave: f32,
+    autosave: f32,
 }
 
 impl Session {
-    pub(in crate::client) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             net: None,
             local: None,
@@ -117,7 +117,7 @@ impl Session {
 
     /// A new world (on the same connection, or none): all but the connection made anew (the
     /// other players and what was waiting for the last world go).
-    pub(in crate::client) fn forget_world(&mut self) {
+    pub(super) fn forget_world(&mut self) {
         *self = Self {
             net: self.net.take(),
             local: self.local.take(),
@@ -127,7 +127,7 @@ impl Session {
     }
 
     /// This player's id on the server (0 out of a world).
-    pub(in crate::client) fn my_id(&self) -> u8 {
+    pub(super) fn my_id(&self) -> u8 {
         self.net.as_ref().map_or(0, |c| c.id)
     }
 }
@@ -364,7 +364,7 @@ impl Game {
     }
 
     /// Debris from a block another player broke.
-    pub(super) fn break_fx(&mut self, p: IVec3, block: Block) {
+    fn break_fx(&mut self, p: IVec3, block: Block) {
         if block == AIR {
             return;
         }
@@ -374,7 +374,7 @@ impl Game {
 
     /// Hit by another player (or blown about by a grenade they threw, or bitten by a wolf):
     /// damage and knockback.
-    pub(super) fn hit_by_player(&mut self, dmg: f32, from: Vec3, knock: f32, kind: u8) {
+    fn hit_by_player(&mut self, dmg: f32, from: Vec3, knock: f32, kind: u8) {
         if kind == crate::net::hurt::BLAST {
             self.blast_hit(dmg, from, knock);
             return;
