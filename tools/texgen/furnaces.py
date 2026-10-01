@@ -1,422 +1,408 @@
-"""The better furnaces: the blast furnace (bricks bound with copper, with a brick chimney on
-top) and the advanced furnace (riveted steel, two blocks wide and two tall: the furnace,
-a gauge panel beside it and a hood with a vent grille over both, glowing while it burns).
+"""The better furnaces, in the game's flat style (see BRIEF.md).
 
-Drawn like crafted.py (flat shading, few colors, 128 x 128). The furnace fronts keep the
-furnace's two openings exactly (`UP_ARCH`, `LOW_ARCH`): the game cuts them out between their
-dark outlines (so nothing else on a front may be that dark: r + g + b < 60) and puts the
-model's hollows behind them."""
+- Blast furnace: a heavy brick body bound with dark iron (posts, bands, a plinth) full of
+  rivets, its two openings ringed by riveted iron collars; a brick chimney stack on top.
+- Advanced furnace (two blocks wide, two tall): clean light-steel panels with rounded
+  corners in a dark iron frame, bolts; the furnace, a gauge panel beside it, and a hood over
+  both with a vent grille that glows while it burns.
+
+The furnace fronts keep the plain furnace's two openings (`UP_ARCH`, `LOW_ARCH`): the game
+cuts out everything between their dark outlines in each row (r + g + b < 60) and puts the
+model's hollows behind them, so nothing else on a front is that dark.
+"""
 
 from __future__ import annotations
 
 import numpy as np
 
-from common import S, Ramp, disk, grow, pix, rect, rgba, rng, thick_line
-from crafted import (
-    BRICK, COPPER, LOW_ARCH, MORTAR, STONE, UP_ARCH, anoise, arch, ints, level,
-    paint_bricks, stepped,
-)
+import flat
+from flat import S, Canvas, box, capsule, disk, ellipse, hexc, poly, tones, union
 
-STEEL = Ramp("2c2f35", "363a41", "40454d", "4b5059", "575d67", "646b76", "737b87", "86909c",
-             "9ba4b0", "b3bbc5")
-BRASS = Ramp("5e4514", "7d5c1b", "a07824", "c09430", "d8b04a", "ecd07a")
-SOOT = Ramp("141414", "1c1b1a", "262422", "302d2a", "3b3733")
-# Opening insides: dark enough for the game to find the openings' outlines.
-HOLE = Ramp("0d0d0d", "151515")
+# ---------------------------------------------------------------------------- palette
 
+BRICK = tones("#b5553f")            # dark, base, base light, light
+MORTAR = tones("#d8cfc0", 3, 0.1)
+IRON = tones("#c9ccd2")
+STEEL = tones("#b2b7bf", spread=0.13)  # the advanced furnace's panels
+DARK = [hexc("2e3138"), hexc("3d4048"), hexc("4f535c"), hexc("6b6f79")]
+COPPER = tones("#c8743f")
+SOOT = [hexc("2a2626"), hexc("37312f"), hexc("4a423e")]
+GLOW = [hexc("ff8a2a"), hexc("ffcf5a"), hexc("ffe9a3")]
+EMBER = hexc("c4471f")
+HOLE_EDGE = hexc("100e0d")   # the openings' outline (the game finds the openings by it)
+HOLE = hexc("1b1716")        # inside an opening (cut away in the world)
+HOLE_BACK = hexc("251f1d")
 
-def rgb_of(img):
-    return img[..., :3].copy()
-
-
-def put(col, mask, color):
-    col[mask] = color
-    return col
-
-
-def rivets(col, points, r=3.2, ramp=STEEL, hi=8, mid=6, lo=3):
-    """Round rivet heads lit from the top left (no pixel darker than the steel's darkest)."""
-    yy, xx = ints()
-    for cy, cx in points:
-        m = disk(cy, cx, r)
-        col[m] = ramp.at(mid)
-        col[m & ((yy - cy) + (xx - cx) > 1.2)] = ramp.at(lo)
-        col[disk(cy - 1, cx - 1, r * 0.45)] = ramp.at(hi)
-    return col
+# The openings, as the plain furnace has them: (center y, center x, rx, ry, flat bottom).
+UP_ARCH = (56, 64, 42, 32, 56)
+LOW_ARCH = (114, 64, 44, 22, 124)
 
 
-def bevel(col, mask, ramp, light, dark, w=2):
-    """Lit top/left and shaded bottom/right edges of `mask`."""
-    inner = ~grow(~mask, w) & mask
-    edge = mask & ~inner
-    yy, xx = ints()
-    ys, xs = np.nonzero(mask)
-    if len(ys) == 0:
-        return col
-    cy, cx = ys.mean(), xs.mean()
-    top_left = edge & (((yy - cy) / max(1, np.ptp(ys))) + ((xx - cx) / max(1, np.ptp(xs))) < 0)
-    col[top_left] = ramp.at(light)
-    col[edge & ~top_left] = ramp.at(dark)
-    return col
+# ---------------------------------------------------------------------------- helpers
 
 
-def steel_value(seed, lo=4, hi=5):
-    """Brushed steel: fine horizontal streaks and a few soft blotches."""
-    yy, xx = ints()
-    streak = anoise(seed, 2, 40)
-    blot = anoise(seed + 1, 24, 24)
-    t = level(STEEL, lo) + (streak - 0.5) * 0.12 + (blot - 0.5) * 0.1
-    t += (pix(seed + 2, 2) - 0.5) * 0.05
-    return np.clip(t, level(STEEL, 1), level(STEEL, hi))
+def arch(cy, cx, rx, ry, bottom, grow_=0.0):
+    """A round-topped opening (half ellipse over a rectangle) with a flat bottom, grown by
+    `grow_` px on the top and sides."""
+    rx, ry = rx + grow_, ry + grow_
+
+    def f(y, x):
+        top = ((y - cy) / ry) ** 2 + ((x - cx) / rx) ** 2 <= 1.0
+        low = (y >= cy) & (np.abs(x - cx) <= rx)
+        return (top | low) & (y < bottom)
+
+    return f
 
 
-def steel_plates(seed, cells, frame=4, rivet_step=24):
-    """Steel sheet split into plates (y0, x0, y1, x1), each bevelled, with rivets along its
-    edges, and a heavy frame round the block."""
-    col = stepped(steel_value(seed), STEEL, 0.3)
-    for k, (y0, x0, y1, x1) in enumerate(cells):
-        m = rect(y0, x0, y1, x1)
-        col = bevel(col, m, STEEL, 7, 2, 2)
-        pts = []
-        for y in (y0 + 6, y1 - 6):
-            for x in np.arange(x0 + 7, x1 - 4, rivet_step):
-                pts.append((y, x))
-        col = rivets(col, pts, r=2.6)
-    yy, xx = ints()
-    f = (yy < frame) | (yy >= S - frame) | (xx < frame) | (xx >= S - frame)
-    col[f] = STEEL.at(2)
-    col[f & ((yy < 2) | (xx < 2))] = STEEL.at(5)
-    return col
+def raised(c: Canvas, shape, t, base=1, rim=2.0, shadow=None):
+    """`shape` lit from the top left in the 4-tone set `t` (t[0] shadow rim, t[base] face,
+    t[3] light rim), with an optional drop shadow colour down-right."""
+    if shadow is not None:
+        c.fill(flat.minus(flat.moved_shape(shape, 1.5, 1.5), shape), shadow)
+    c.raised(shape, t[base], light=t[3], dark=t[0], rim=rim)
+
+
+def rivet(c: Canvas, cy, cx, r, t, shadow=None, tile=False):
+    raised(c, disk(cy, cx, r, tile), t, 2, rim=max(1.0, r * 0.38), shadow=shadow)
+
+
+def bricks(c: Canvas, seed, bw=32, bh=16, gap=3.0, r=3.0, mortar=None, t=BRICK, y0=0.0,
+           y1=float(S), x0=0.0, x1=float(S), tile=True):
+    """A running-bond brick wall in rows y0..y1 (whole courses of `bh`), each brick a
+    rounded raised slab, two face tones mixed."""
+    rng = np.random.default_rng(seed)
+    c.fill(box(y0, x0, y1, x1), MORTAR[1] if mortar is None else mortar)
+    area = box(y0, x0, y1, x1)
+    n = int(round((y1 - y0) / bh))
+    for row in range(n):
+        top = y0 + row * bh
+        off = (bw / 2) if row % 2 else 0.0
+        for k in range(-1, int(S / bw) + 1):
+            bx0 = k * bw + off + gap / 2
+            bx1 = bx0 + bw - gap
+            shape = box(top + gap / 2, bx0, top + bh - gap / 2, bx1, r=r, tile=tile)
+            raised(c, clip(shape, area), t, base=1 + int(rng.random() < 0.45), rim=2.0)
+
+
+def clip(shape, area):
+    return lambda y, x: shape(y, x) & area(y, x)
+
+
+def iron_bar(c: Canvas, y0, x0, y1, x1, rivets_at=(), r=0.0, rr=3.0):
+    """A dark iron strap or post with rivets."""
+    raised(c, box(y0, x0, y1, x1, r=r), DARK, 1, rim=2.0)
+    for cy, cx in rivets_at:
+        rivet(c, cy, cx, rr, IRON, shadow=DARK[0])
+
+
+def opening(c: Canvas, spec, collar=7.0, collar_t=DARK, n_rivets=5, edge=3.0):
+    """An opening ringed by a collar: a raised band round it, rivets along its arc, then the
+    dark hole with its outline."""
+    cy, cx, rx, ry, bottom = spec
+    raised(c, arch(cy, cx, rx, ry, bottom, collar), collar_t, 1, rim=2.0, shadow=None)
+    for a in np.linspace(np.pi * 1.1, np.pi * 1.9, n_rivets):
+        py = cy + np.sin(a) * (ry + collar * 0.5)
+        px = cx + np.cos(a) * (rx + collar * 0.5)
+        rivet(c, py, px, 2.3, IRON)
+    c.fill(arch(cy, cx, rx, ry, bottom), HOLE_EDGE)
+    c.fill(arch(cy, cx, rx - edge, ry - edge, bottom), HOLE)
+    # The back wall, a little lighter low in the middle.
+    c.fill(clip(ellipse(bottom, cx, ry * 0.55, rx * 0.6, tile=False),
+                arch(cy, cx, rx - edge, ry - edge, bottom)), HOLE_BACK)
+
+
+def frame(c: Canvas, w=6.0, t=DARK, sides="tlbr", W=S, H=S):
+    """A dark iron frame round the block (only on `sides`: t, l, b, r)."""
+    m = np.zeros(c.alpha.shape, bool)
+    if "t" in sides:
+        m |= c.y < w
+    if "b" in sides:
+        m |= c.y > H - w
+    if "l" in sides:
+        m |= c.x < w
+    if "r" in sides:
+        m |= c.x > W - w
+    c.fill(m, t[1])
+    c.fill(m & ((c.y < 2) | (c.x < 2)), t[2])
+
+
+def steel_panel(c: Canvas, y0, x0, y1, x1, r=7.0, bolts=True, bolt_in=7.0):
+    """A clean light-steel panel with rounded corners and a bolt in each corner."""
+    raised(c, box(y0, x0, y1, x1, r=r), STEEL, 2, rim=2.5, shadow=DARK[0])
+    if bolts:
+        for by in (y0 + bolt_in, y1 - bolt_in):
+            for bx in (x0 + bolt_in, x1 - bolt_in):
+                bolt(c, by, bx)
+
+
+def bolt(c: Canvas, cy, cx, r=3.2):
+    """A hex-ish bolt head: dark ring, steel head lit from the top left."""
+    c.fill(disk(cy + 0.8, cx + 0.8, r + 0.6, False), STEEL[0])
+    raised(c, disk(cy, cx, r, False), STEEL, 1, rim=1.2)
 
 
 # ---------------------------------------------------------------------------- blast furnace
 
 
-def copper_band(col, y0, y1, seed, rivet_every=32, x0=0, x1=S):
-    """A copper strap across the texture, with rivets."""
-    yy, xx = ints()
-    m = rect(y0, x0, y1, x1)
-    t = level(COPPER, 5) + (anoise(seed, 2, 20) - 0.5) * 0.2
-    col[m] = stepped(t, COPPER, 0.3)[m]
-    col[m & (yy == y0)] = COPPER.at(9)
-    col[m & (yy == y1 - 1)] = COPPER.at(1)
-    cy = (y0 + y1) / 2
-    pts = [(cy, x) for x in np.arange(x0 + rivet_every / 2, x1, rivet_every)]
-    return rivets(col, pts, r=min(3.0, (y1 - y0) / 2 - 1), ramp=COPPER, hi=10, mid=6, lo=2)
-
-
-def copper_post(col, x0, x1, seed):
-    yy, xx = ints()
-    m = rect(0, x0, S, x1)
-    t = level(COPPER, 5) + (anoise(seed, 20, 2) - 0.5) * 0.2
-    col[m] = stepped(t, COPPER, 0.3)[m]
-    col[m & (xx == x0)] = COPPER.at(9)
-    col[m & (xx == x1 - 1)] = COPPER.at(1)
-    cx = (x0 + x1) / 2
-    return rivets(col, [(y, cx) for y in (12, 44, 76, 108)], r=2.6, ramp=COPPER, hi=10,
-                  mid=6, lo=2)
-
-
-def voussoirs(col, opening, width, seed):
-    """Wedge bricks round an arched opening, a keystone on top."""
-    yy, xx = ints()
-    ring = grow(opening, width) & ~opening
-    ys, xs = np.nonzero(opening)
-    cy, cx = ys.max(), xs.mean()
-    ang = np.arctan2(yy - cy, xx - cx)
-    seg = np.floor((ang + np.pi) / (np.pi / 9)).astype(int)
-    per = rng(seed).uniform(-0.08, 0.08, 20).astype(np.float32)
-    t = level(BRICK, 4) + per[seg % 20] + (anoise(seed + 1, 4, 4) - 0.5) * 0.15
-    col[ring] = stepped(t, BRICK, 0.3)[ring]
-    joint = ring & (np.abs(((ang + np.pi) % (np.pi / 9)) - np.pi / 18) > np.pi / 18 - 0.035)
-    col[joint] = MORTAR.at(0)
-    col[ring & ~grow(~ring, 1) & ~grow(opening, 1)] = BRICK.at(1)
-    # Keystone.
-    key = ring & (np.abs(xx - cx) < 7) & (yy < cy)
-    col[key] = BRICK.at(5)
-    col[key & (xx < cx - 5)] = BRICK.at(3)
-    return col
-
-
-def blast_front_base(seed=7301):
-    yy, xx = ints()
-    col = rgb_of(paint_bricks(seed))
-    up = arch(*UP_ARCH, 56)
-    low = arch(*LOW_ARCH, 124)
-    col = voussoirs(col, up, 7, seed + 1)
-    col = voussoirs(col, low, 6, seed + 2)
-    # A copper lintel under the upper arch, straps at the top and a plinth at the bottom.
-    col = copper_band(col, 56, 62, seed + 3, rivet_every=21, x0=16, x1=112)
-    col = copper_band(col, 0, 9, seed + 4)
-    sill = rect(124, 0, S, S)
-    col[sill] = COPPER.at(3)
-    col[sill & (yy == 124)] = COPPER.at(8)
-    col = copper_post(col, 0, 7, seed + 5)
-    col = copper_post(col, S - 7, S, seed + 6)
-    # The openings, dark inside (the upper one with a faint glow of soot).
-    core = (((yy - 56) / 13.0) ** 2 + ((xx - 64) / 24.0) ** 2 <= 1)
-    col[up] = HOLE.at(0)
-    col[up & core] = HOLE.at(1)
-    col[low] = HOLE.at(0)
-    return col
+def blast_body(c: Canvas, seed, mid=(56, 66), plinth=120):
+    """The brick body with its iron posts, top band, middle band and plinth."""
+    bricks(c, seed)
+    iron_bar(c, 0, 0, 12, S, [(6, x) for x in (32, 64, 96)])
+    iron_bar(c, mid[0], 0, mid[1], S, [((mid[0] + mid[1]) / 2, x) for x in (32, 96)])
+    iron_bar(c, plinth, 0, S, S, [((plinth + S) / 2, x) for x in (32, 64, 96)] if S - plinth > 7
+             else [])
+    for x0 in (0, S - 11):
+        iron_bar(c, 0, x0, S, x0 + 11, [(y, x0 + 5.5) for y in (6, 61, 116)])
 
 
 def paint_blast_front(seed):
-    return rgba(blast_front_base(), 255)
+    c = Canvas(tile=False)
+    bricks(c, seed)
+    iron_bar(c, 0, 0, 12, S, [(6, x) for x in (32, 96)])
+    iron_bar(c, 124, 0, S, S)
+    iron_bar(c, 56, 0, 66, S, [(61, x) for x in (16,)])
+    for x0 in (0, S - 11):
+        iron_bar(c, 0, x0, S, x0 + 11, [(y, x0 + 5.5) for y in (6, 61, 76)])
+    opening(c, UP_ARCH, collar=7.0, n_rivets=5)
+    opening(c, LOW_ARCH, collar=6.0, n_rivets=5)
+    # The lintel under the mouth runs over the collar's feet.
+    iron_bar(c, 56, 11, 66, S - 11, [(61, x) for x in (24, 64, 104)])
+    return c.finish(opaque=True)
 
 
 def paint_blast_side(seed):
-    yy, xx = ints()
-    col = rgb_of(paint_bricks(seed + 11))
-    col = copper_band(col, 0, 9, seed + 1)
-    col = copper_band(col, 60, 68, seed + 2, rivet_every=21)
-    col = copper_post(col, 0, 7, seed + 3)
-    col = copper_post(col, S - 7, S, seed + 4)
-    sill = rect(120, 0, S, S)
-    col[sill] = COPPER.at(3)
-    col[sill & (yy == 120)] = COPPER.at(8)
-    return rgba(col, 255)
+    c = Canvas(tile=False)
+    blast_body(c, seed + 11, mid=(58, 68), plinth=118)
+    return c.finish(opaque=True)
 
 
 def paint_blast_top(seed):
-    yy, xx = ints()
-    col = rgb_of(paint_bricks(seed + 21))
-    edge = (yy < 7) | (yy >= S - 7) | (xx < 7) | (xx >= S - 7)
-    t = level(COPPER, 4) + (anoise(seed, 4, 4) - 0.5) * 0.2
-    col[edge] = stepped(t, COPPER, 0.3)[edge]
-    col[edge & ((yy < 2) | (xx < 2))] = COPPER.at(9)
-    return rgba(col, 255)
+    c = Canvas(tile=False)
+    bricks(c, seed + 21)
+    frame(c, 10, DARK)
+    raised(c, flat.minus(box(0, 0, S, S), box(10, 10, S - 10, S - 10, r=6)), DARK, 1, rim=2)
+    for y in (5, S - 5):
+        for x in (5, 64, S - 5):
+            rivet(c, y, x, 2.8, IRON)
+    for x in (5, S - 5):
+        rivet(c, 64, x, 2.8, IRON)
+    return c.finish(opaque=True)
+
+
+# ---------------------------------------------------------------------------- chimney
+# The chimney model (CHIMNEY_BOXES) maps the texture by position: the slab is rows 88..128
+# of the side (the whole width), the stack rows 16..88 at x 32..96, its rim rows 0..16 at
+# x 24..104; from above the rim is the square 24..104, the slab what is round it.
 
 
 def paint_chimney_side(seed):
-    """Small bricks, sooty toward the top."""
-    yy, xx = ints()
-    course = yy // 16
-    ly = yy % 16
-    off = np.where(course % 2 == 0, 16, 0)
-    bx = (xx + off) % S
-    lx = bx % 32
-    bid = (course * 4 + bx // 32) % 32
-    per = rng(seed).uniform(-0.07, 0.07, 32).astype(np.float32)
-    t = level(BRICK, 3) + per[bid] + (anoise(seed + 1, 4, 8) - 0.5) * 0.2
-    t = np.where(ly < 2, t + 0.12, t)
-    t = np.where(ly >= 11, t - 0.1, t)
-    col = stepped(t, BRICK, 0.3)
-    mortar = (ly >= 14) | (lx >= 30)
-    col[mortar] = MORTAR.at(0)
-    # Soot: darkening to the top, in streaks.
-    soot = np.clip((72 - yy) / 72.0, 0, 1) * (0.55 + 0.45 * anoise(seed + 2, 30, 6))
-    k = np.clip(soot, 0, 0.8)[..., None]
-    col = col * (1 - k) + SOOT.at(3) * k
-    return rgba(col, 255)
+    c = Canvas(tile=False)
+    # Stack: small round-cornered bricks, sooty (darker bricks) toward the top.
+    bricks(c, seed, bw=16, bh=12, gap=2.5, r=2.5, y0=16, y1=88, x0=0, x1=S)
+    soot = [SOOT[0], SOOT[1], SOOT[1], SOOT[2]]
+    sooty = [shift_t(BRICK, -0.12), shift_t(BRICK, -0.22)]
+    bricks(c, seed + 1, bw=16, bh=12, gap=2.5, r=2.5, y0=16, y1=28, x0=0, x1=S,
+           t=sooty[1], mortar=MORTAR[0])
+    bricks(c, seed + 2, bw=16, bh=12, gap=2.5, r=2.5, y0=28, y1=40, x0=0, x1=S,
+           t=sooty[0], mortar=MORTAR[0])
+    # Rim: a heavy capstone band (dark iron) with a soot lip.
+    raised(c, box(0, 0, 16, S), DARK, 1, rim=2.0)
+    c.fill(box(0, 0, 3, S), soot[2])
+    for x in (32, 64, 96):
+        rivet(c, 9.5, x, 2.4, IRON)
+    # Slab: the dark iron base plate the stack stands on.
+    raised(c, box(88, 0, S, S), DARK, 1, rim=2.5)
+    c.fill(box(88, 0, 91, S), DARK[3])
+    for x in (12, 64, 116):
+        rivet(c, 108, x, 3.0, IRON, shadow=DARK[0])
+    return c.finish(opaque=True)
+
+
+def shift_t(t, dv):
+    return [flat.shift(x, dv=dv, ds=-0.05) for x in t]
 
 
 def paint_chimney_top(seed):
-    """The slab (stone), the stack's rim, and the sooty hole in the middle."""
-    yy, xx = ints()
-    t = level(STONE, 5) + (anoise(seed, 8, 8) - 0.5) * 0.25 + (pix(seed + 1, 2) - 0.5) * 0.08
-    col = stepped(t, STONE, 0.3)
-    rim = rect(24, 24, 104, 104)
-    t2 = level(BRICK, 2) + (anoise(seed + 2, 4, 4) - 0.5) * 0.2
-    col[rim] = stepped(t2, BRICK, 0.3)[rim]
-    col[rim & ((yy == 24) | (xx == 24))] = BRICK.at(5)
-    hole = rect(40, 40, 88, 88)
-    d = np.minimum.reduce([yy - 40, xx - 40, 87 - yy, 87 - xx]).astype(np.float32)
-    ts = np.clip(1 - d / 10.0, 0, 1)
-    col[hole] = SOOT.shade(ts, 0.4)[hole]
-    return rgba(col, 255)
+    c = Canvas(tile=False)
+    # Slab: dark iron plate with corner rivets.
+    raised(c, box(0, 0, S, S), DARK, 1, rim=2.5)
+    for y in (10, S - 10):
+        for x in (10, S - 10):
+            rivet(c, y, x, 3.2, IRON, shadow=DARK[0])
+    # The rim's top: a rounded brick ring around the flue.
+    c.fill(box(25.5, 25.5, 105.5, 105.5, r=12), DARK[0])
+    raised(c, box(24, 24, 104, 104, r=12), BRICK, 1, rim=2.5)
+    # Mortar joints across the ring, so it reads as bricks.
+    for (y0, x0, y1, x1) in ((24, 62, 40, 66), (88, 62, 104, 66), (62, 24, 66, 40),
+                             (62, 88, 66, 104)):
+        c.fill(box(y0, x0, y1, x1), MORTAR[0])
+    # The flue: sooty, darker toward the middle in flat steps.
+    c.fill(box(40, 40, 88, 88, r=7), SOOT[2])
+    c.fill(box(43, 43, 88, 88, r=6), SOOT[1])
+    c.fill(box(48, 48, 84, 84, r=5), SOOT[0])
+    return c.finish(opaque=True)
 
 
 # ---------------------------------------------------------------------------- advanced furnace
 
 
-def collar(col, opening, width, seed):
-    """A heavy bolted steel collar round an opening."""
-    yy, xx = ints()
-    ring = grow(opening, width) & ~opening
-    t = level(STEEL, 3) + (anoise(seed, 3, 3) - 0.5) * 0.1
-    col[ring] = stepped(t, STEEL, 0.3)[ring]
-    outer = ring & ~grow(~ring, 1)
-    col[outer & ~grow(opening, 2)] = STEEL.at(6)
-    col[ring & grow(opening, 1) & ~opening] = STEEL.at(1)
-    ys, xs = np.nonzero(ring)
-    pts = []
-    cy, cx = np.nonzero(opening)[0].max(), np.nonzero(opening)[1].mean()
-    for a in np.linspace(np.pi * 1.05, np.pi * 1.95, 5):
-        ry = (ys.max() - ys.min()) - width * 0.5
-        rx = (xs.max() - xs.min()) / 2 - width * 0.5
-        pts.append((cy + np.sin(a) * ry, cx + np.cos(a) * rx))
-    return rivets(col, pts, r=2.4)
-
-
 def paint_advanced_furnace_front(seed):
-    yy, xx = ints()
-    col = steel_plates(seed, [(4, 4, 124, 124)], frame=5)
-    up = arch(*UP_ARCH, 56)
-    low = arch(*LOW_ARCH, 124)
-    col = collar(col, up, 7, seed + 1)
-    col = collar(col, low, 6, seed + 2)
-    # Brass kick plate and a brass lintel.
-    kick = rect(124, 0, S, S)
-    col[kick] = BRASS.at(2)
-    col[kick & (yy == 124)] = BRASS.at(5)
-    lintel = rect(56, 14, 62, 114)
-    col[lintel] = BRASS.at(3)
-    col[lintel & (yy == 56)] = BRASS.at(5)
-    col[lintel & (yy == 61)] = BRASS.at(1)
-    col = rivets(col, [(59, x) for x in (20, 42, 86, 108)], r=2.0, ramp=BRASS, hi=5, mid=3,
-                 lo=1)
-    col = rivets(col, [(10, 10), (10, 118), (118, 10), (118, 118)], r=3.4)
-    core = (((yy - 56) / 13.0) ** 2 + ((xx - 64) / 24.0) ** 2 <= 1)
-    col[up] = HOLE.at(0)
-    col[up & core] = HOLE.at(1)
-    col[low] = HOLE.at(0)
-    return rgba(col, 255)
+    c = Canvas(tile=False, bg=DARK[1])
+    frame(c, 5)
+    steel_panel(c, 5, 5, S - 5, S - 5, r=8, bolts=False)
+    for y, x in ((12, 12), (12, S - 12)):
+        bolt(c, y, x)
+    opening(c, UP_ARCH, collar=6.0, n_rivets=4)
+    opening(c, LOW_ARCH, collar=5.0, n_rivets=4)
+    # A copper lintel between the two openings.
+    raised(c, box(56, 14, 63, S - 14, r=2.5), COPPER, 2, rim=1.5, shadow=STEEL[0])
+    for x in (22, 106):
+        bolt(c, 59.5, x, 2.2)
+    return c.finish(opaque=True)
 
 
 def paint_advanced_furnace_side(seed):
-    col = steel_plates(seed, [(4, 4, 64, 64), (4, 64, 64, 124), (64, 4, 124, 64),
-                              (64, 64, 124, 124)])
-    yy, xx = ints()
-    # A vertical rib down the middle.
-    rib = rect(0, 58, S, 70)
-    col[rib] = STEEL.at(5)
-    col[rib & (xx == 58)] = STEEL.at(8)
-    col[rib & (xx == 69)] = STEEL.at(2)
-    col = rivets(col, [(y, 64) for y in (14, 40, 88, 114)], r=2.8)
-    return rgba(col, 255)
+    c = Canvas(tile=False, bg=DARK[1])
+    frame(c, 5)
+    steel_panel(c, 8, 8, 62, S - 8, r=7)
+    steel_panel(c, 66, 8, S - 8, S - 8, r=7)
+    # A recessed louvre strip in the lower panel.
+    for k in range(4):
+        y = 80 + k * 9
+        c.fill(capsule((30, y), (98, y), 4.5), DARK[1])
+        c.fill(capsule((30, y + 1.2), (98, y + 1.2), 2.2), DARK[0])
+    return c.finish(opaque=True)
 
 
 def paint_advanced_furnace_top(seed):
-    """Tread plate: raised diagonal bumps in a steel frame."""
-    yy, xx = ints()
-    col = stepped(steel_value(seed, 4, 5), STEEL, 0.3)
-    u = (xx + yy) % 16
-    v = (xx - yy) % 32
-    bump = (np.abs(u - 8) < 2) & (np.abs(v - 16) < 6) & ((yy // 16 + xx // 16) % 2 == 0)
-    bump2 = (np.abs(((xx - yy) % 16) - 8) < 2) & (np.abs(((xx + yy) % 32) - 16) < 6) & \
-            ((yy // 16 + xx // 16) % 2 == 1)
-    col[bump | bump2] = STEEL.at(6)
-    col[(bump | bump2) & ~grow(~(bump | bump2), 1)] = STEEL.at(7)
-    f = (yy < 5) | (yy >= S - 5) | (xx < 5) | (xx >= S - 5)
-    col[f] = STEEL.at(2)
-    col[f & ((yy < 2) | (xx < 2))] = STEEL.at(5)
-    return rgba(col, 255)
+    c = Canvas(tile=False, bg=DARK[1])
+    frame(c, 5)
+    steel_panel(c, 8, 8, S - 8, S - 8, r=9)
+    # A raised centre plate.
+    raised(c, box(30, 30, 98, 98, r=8), STEEL, 1, rim=2.0)
+    raised(c, box(36, 36, 92, 92, r=6), STEEL, 2, rim=1.5)
+    return c.finish(opaque=True)
 
 
 def paint_advanced_furnace_panel(seed):
-    """Beside the furnace: a pressure gauge, a valve wheel and a copper pipe."""
-    yy, xx = ints()
-    col = steel_plates(seed, [(4, 4, 124, 124)], frame=5)
-    # Gauge: brass bezel, white face, ticks and a red needle.
-    gy, gx, gr = 44, 64, 26
-    col[disk(gy, gx, gr)] = BRASS.at(3)
-    col[disk(gy, gx, gr) & ~disk(gy + 1, gx + 1, gr - 1)] = BRASS.at(5)
-    face = disk(gy, gx, gr - 5)
-    col[face] = [230, 226, 212]
-    col[face & ~disk(gy - 1, gx - 1, gr - 7)] = [196, 190, 172]
-    for k in range(9):
-        a = np.pi * (0.75 + 1.5 * k / 8)
-        p0 = (gx + np.cos(a) * (gr - 10), gy + np.sin(a) * (gr - 10))
-        p1 = (gx + np.cos(a) * (gr - 7), gy + np.sin(a) * (gr - 7))
-        col[thick_line(p0, p1, 2.2) & face] = [70, 70, 76]
-    red = thick_line((gx - 3, gy + 3), (gx + 14, gy - 10), 2.6) & face
-    col[red] = [200, 44, 36]
-    col[disk(gy, gx, 3)] = [90, 90, 96]
-    # Valve wheel.
-    vy, vx, vr = 94, 38, 17
-    wheel = disk(vy, vx, vr) & ~disk(vy, vx, vr - 4)
-    for a in (0, np.pi / 3, 2 * np.pi / 3):
-        wheel |= thick_line((vx - np.cos(a) * vr, vy - np.sin(a) * vr),
-                            (vx + np.cos(a) * vr, vy + np.sin(a) * vr), 3.5)
-    col[wheel] = [178, 40, 34]
-    col[wheel & ((yy - vy) + (xx - vx) < -6)] = [220, 80, 64]
-    col[disk(vy, vx, 4)] = BRASS.at(4)
-    # Copper pipe along the bottom, down from the right.
-    pipe = rect(100, 60, 112, 124) | rect(70, 100, 112, 112)
-    col[pipe] = COPPER.at(5)
-    col[pipe & (((yy == 100) & (xx >= 60)) | ((xx == 100) & (yy < 100)))] = COPPER.at(9)
-    col[pipe & (((yy == 111) & (xx >= 60)) | ((xx == 111) & (yy < 111)))] = COPPER.at(1)
-    col[rect(98, 66, 114, 70)] = COPPER.at(3)
-    # A little lamp.
-    col[disk(96, 84, 5)] = [60, 120, 70]
-    col[disk(95, 83, 2)] = [150, 230, 160]
-    return rgba(col, 255)
+    """Beside the furnace: a pressure gauge, two lamps and a copper pipe."""
+    c = Canvas(tile=False, bg=DARK[1])
+    frame(c, 5)
+    steel_panel(c, 5, 5, S - 5, S - 5, r=8, bolts=False)
+    for y, x in ((12, 12), (12, S - 12), (S - 12, 12), (S - 12, S - 12)):
+        bolt(c, y, x)
+    # Gauge: copper bezel, cream face, ticks, a dark needle.
+    gy, gx, gr = 46, 64, 27
+    c.fill(disk(gy + 2, gx + 2, gr, False), STEEL[0])
+    raised(c, disk(gy, gx, gr, False), COPPER, 2, rim=2.5)
+    face = disk(gy, gx, gr - 6, False)
+    c.fill(face, hexc("efe9dc"))
+    c.fill(flat.minus(face, disk(gy + 2, gx + 2, gr - 6, False)), hexc("cfc6b4"))
+    for k in range(7):
+        a = np.pi * (0.8 + 1.4 * k / 6)
+        p0 = (gx + np.cos(a) * (gr - 12), gy + np.sin(a) * (gr - 12))
+        p1 = (gx + np.cos(a) * (gr - 9), gy + np.sin(a) * (gr - 9))
+        c.fill(capsule(p0, p1, 2.2), DARK[2])
+    c.fill(poly([(gx + 15, gy - 9), (gx - 2.5, gy - 2.5), (gx + 2.5, gy + 2.5)]), hexc("c23b2a"))
+    c.fill(disk(gy, gx, 3.5, False), DARK[1])
+    # Two lamps: green (ready) and amber.
+    for lx, col in ((30, hexc("6fbf73")), (52, hexc("ffcf5a"))):
+        c.fill(disk(96 + 1, lx + 1, 7, False), STEEL[0])
+        c.fill(disk(96, lx, 7, False), DARK[1])
+        c.fill(disk(96, lx, 4.5, False), col)
+        c.fill(disk(94.5, lx - 1.5, 1.6, False), hexc("ffffff"))
+    # Copper pipe: out of the gauge's side, round an elbow and down out of the block.
+    py0, py1, px0, px1 = 41.5, 50.5, 103.5, 112.5
+    c.fill(box(py0 + 1.5, gx + 20, py1 + 1.5, px1 + 1.5, r=4), STEEL[0])
+    c.fill(box(py0 + 1.5, px0 + 1.5, S - 5, px1 + 1.5), STEEL[0])
+    elbow_h = box(py0, gx + 20, py1, px1, r=4)
+    elbow_v = box(py0, px0, S - 5, px1, r=4)
+    c.fill(elbow_h, COPPER[2])
+    c.fill(elbow_v, COPPER[2])
+    c.fill(box(py0, gx + 20, py0 + 2.5, px1 - 3), COPPER[3])
+    c.fill(box(py0 + 3, px0, S - 5, px0 + 2.5), COPPER[3])
+    c.fill(box(py1 - 2.5, gx + 20, py1, px0), COPPER[1])
+    c.fill(box(py0 + 3, px1 - 2.5, S - 5, px1), COPPER[1])
+    for y in (72, 104):  # couplings
+        raised(c, box(y, px0 - 2, y + 5, px1 + 2, r=1.5), COPPER, 1, rim=1.0)
+    return c.finish(opaque=True)
 
 
-def hood(seed, lit):
-    """Both upper fronts together (256 x 128): a steel hood with a brass flame badge at the
-    seam and a vent grille across both, glowing orange while the furnace burns."""
+def hood(lit: bool) -> np.ndarray:
+    """Both upper fronts together (256 x 128): one steel hood in a dark iron frame, a copper
+    flame badge on the seam and a long vent grille across both, glowing while it burns."""
     W = 2 * S
-    yy, xx = np.mgrid[0:S, 0:W]
-    col = np.zeros((S, W, 3), np.float32)
-    for h, x0 in ((0, 0), (1, S)):
-        col[:, x0:x0 + S] = steel_plates(seed + h, [(4, 4, 60, 124), (60, 4, 124, 124)],
-                                         frame=5)
-    # The frame edges at the seam belong to one big hood: continuous plate there.
-    seam = (xx >= S - 5) & (xx < S + 5) & (yy >= 5) & (yy < S - 5)
-    col[seam] = STEEL.at(4)
-    # Grille: horizontal slots in a bolted frame.
-    gy0, gy1, gx0, gx1 = 70, 110, 16, W - 16
-    frame = (yy >= gy0 - 5) & (yy < gy1 + 5) & (xx >= gx0 - 5) & (xx < gx1 + 5)
-    col[frame] = STEEL.at(2)
-    col[frame & ((yy == gy0 - 5) | (xx == gx0 - 5))] = STEEL.at(6)
-    slots = (yy >= gy0) & (yy < gy1) & (xx >= gx0) & (xx < gx1) & ((yy - gy0) % 8 < 5)
-    bars = (yy >= gy0) & (yy < gy1) & (xx >= gx0) & (xx < gx1) & ~slots
-    col[bars] = STEEL.at(5)
-    col[bars & ((yy - gy0) % 8 == 5)] = STEEL.at(7)
+    c = Canvas(w=W, h=S, tile=False, bg=DARK[1])
+    frame(c, 5, W=W)
+    raised(c, box(5, 5, S - 5, W - 5, r=8), STEEL, 2, rim=2.5)
+    # A seam-less upper and lower plate, split by a groove.
+    c.fill(box(58, 10, 60, W - 10), STEEL[0])
+    c.fill(box(60, 10, 61.5, W - 10), STEEL[3])
+    for y, x in ((12, 12), (12, W - 12), (S - 12, 12), (S - 12, W - 12)):
+        bolt(c, y, x)
+    # Grille: rounded dark frame with rounded slots.
+    gy0, gy1, gx0, gx1 = 68, 114, 20, W - 20
+    c.fill(box(gy0 + 1.5, gx0 + 1.5, gy1 + 1.5, gx1 + 1.5, r=7), STEEL[0])
+    raised(c, box(gy0, gx0, gy1, gx1, r=7), DARK, 1, rim=2.0)
+    for k in range(4):
+        y = gy0 + 10 + k * 9
+        slot = capsule((gx0 + 10, y), (gx1 - 10, y), 5.5)
+        if lit:
+            c.fill(slot, GLOW[0])
+            c.fill(capsule((gx0 + 30, y), (gx1 - 30, y), 3.6), GLOW[1])
+            c.fill(capsule((W / 2 - 55, y - 0.4), (W / 2 + 55, y - 0.4), 1.8), GLOW[2])
+        else:
+            c.fill(slot, SOOT[0])
+            c.fill(capsule((gx0 + 10, y - 1.6), (gx1 - 10, y - 1.6), 2.0), SOOT[2])
+    # Badge on the seam: a copper rounded plate with a flame.
+    bx0, bx1, by0, by1 = S - 22, S + 22, 14, 52
+    c.fill(box(by0 + 2, bx0 + 2, by1 + 2, bx1 + 2, r=7), STEEL[0])
+    raised(c, box(by0, bx0, by1, bx1, r=7), COPPER, 2, rim=2.0)
+    fy, fx = (by0 + by1) / 2 + 2, S
+    outer = flame_shape(fy, fx, 11, 15)
+    inner = flame_shape(fy + 5, fx, 6, 8)
     if lit:
-        # Hot in the middle, cooler toward the ends.
-        u = np.clip(1 - np.abs(xx - W / 2) / (W / 2 - 16), 0, 1)
-        v = ((yy - gy0) % 8) / 5.0
-        t = 0.25 + 0.6 * u - 0.15 * v + (anoise(seed + 9, 6, 20, S, W) - 0.5) * 0.25
-        col[slots] = _glow(np.clip(t, 0, 1))[slots]
+        c.fill(outer, GLOW[0])
+        c.fill(inner, GLOW[2])
     else:
-        col[slots] = SOOT.at(2)
-        col[slots & ((yy - gy0) % 8 == 0)] = SOOT.at(4)
-    # Brass badge with a flame, centred on the seam.
-    badge = (np.abs(xx - S) < 22) & (yy >= 16) & (yy < 52)
-    col[badge] = BRASS.at(3)
-    col[badge & ((yy == 16) | (xx == S - 22))] = BRASS.at(5)
-    col[badge & ((yy == 51) | (xx == S + 21))] = BRASS.at(1)
-    fy, fx = yy - 34.0, xx - S
-    flame = ((fx / 10) ** 2 + ((fy - 4) / 13) ** 2 < 1) & ~(((fx - 5) / 7) ** 2 + ((fy + 6) / 10) ** 2 < 1)
-    col[flame & badge] = [214, 88, 30] if lit else BRASS.at(1)
-    inner = ((fx / 5) ** 2 + ((fy - 7) / 7) ** 2 < 1)
-    col[inner & badge] = [255, 200, 80] if lit else BRASS.at(2)
-    for x in (S - 17, S + 16):
-        for y in (21, 47):
-            col[disk(y, x, 2.2, S, W)] = BRASS.at(5)
-    return col
+        c.fill(outer, COPPER[0])
+        c.fill(inner, COPPER[1])
+    for x in (bx0 + 6, bx1 - 6):
+        for y in (by0 + 6, by1 - 6):
+            c.fill(disk(y, x, 2.0, False), COPPER[3])
+    return c.finish(opaque=True)
 
 
-def _glow(t):
-    # Deep red to orange to yellow-white.
-    stops = np.array([[120, 30, 10], [200, 70, 16], [246, 140, 40], [255, 206, 110],
-                      [255, 244, 200]], np.float32)
-    x = t * (len(stops) - 1)
-    i = np.clip(np.floor(x).astype(int), 0, len(stops) - 2)
-    f = (x - i)[..., None]
-    return stops[i] * (1 - f) + stops[i + 1] * f
+def flame_shape(cy, cx, rx, h):
+    """A flat flame: a round bottom with a pointed top."""
+    body = disk(cy + h * 0.25, cx, rx, False)
+    tip = poly([(cx - rx * 0.95, cy + h * 0.15), (cx + rx * 0.2, cy - h), (cx + rx * 0.95,
+                cy + h * 0.15)])
+    return union(body, tip)
 
 
-def hood_half(right, lit):
-    col = hood(8801, lit)
-    half = col[:, S:] if right else col[:, :S]
-    return rgba(np.ascontiguousarray(half), 255)
+_HOOD: dict[bool, np.ndarray] = {}
+
+
+def hood_half(right: bool, lit: bool):
+    if lit not in _HOOD:
+        _HOOD[lit] = hood(lit)
+    img = _HOOD[lit]
+    return np.ascontiguousarray(img[:, S:] if right else img[:, :S]).copy()
 
 
 def paint_advanced_furnace_vent_top(seed):
-    """Top of the hood: a square vent grating between rivets."""
-    yy, xx = ints()
-    col = rgb_of(paint_advanced_furnace_top(seed))
-    g = rect(28, 28, 100, 100)
-    col[g] = STEEL.at(2)
-    col[g & ((yy == 28) | (xx == 28))] = STEEL.at(6)
-    holes = rect(32, 32, 96, 96) & ((yy - 32) % 8 < 5) & ((xx - 32) % 8 < 5)
-    col[holes] = SOOT.at(1)
-    col = rivets(col, [(22, 22), (22, 106), (106, 22), (106, 106)], r=3.0)
-    return rgba(col, 255)
+    """Top of the hood: a square vent grating on the steel."""
+    c = Canvas(tile=False, bg=DARK[1])
+    frame(c, 5)
+    steel_panel(c, 8, 8, S - 8, S - 8, r=9)
+    c.fill(box(26 + 1.5, 26 + 1.5, 102 + 1.5, 102 + 1.5, r=10), STEEL[0])
+    raised(c, box(26, 26, 102, 102, r=10), DARK, 1, rim=2.0)
+    for k in range(6):
+        y = 36 + k * 11.2
+        c.fill(capsule((38, y), (90, y), 6), SOOT[0])
+        c.fill(capsule((38, y - 1.8), (90, y - 1.8), 2.2), SOOT[2])
+    return c.finish(opaque=True)
 
 
 TEXTURES = {
