@@ -115,7 +115,7 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
         let round = matches!(item, crate::item::BULLET | crate::item::MAGNUM_ROUND | crate::item::RIFLE_ROUND);
         let k = if round { 0.3 / 2.7 } else { 0.62 / (hi - lo).max_element().max(1e-3) };
         let root = m * Mat4::from_scale(Vec3::splat(k)) * Mat4::from_translation(-(lo + hi) * 0.5) * upright;
-        let first = gun_view::layers(kind, pistol_view::dirt_level(st.damage, crate::item::max_damage(item)));
+        let first = gun_view::layers(kind, pistol_view::stack_dirt(st));
         for c in cubes {
             viewmodel::emit_cube(out, c, root * mats[c.bone] * viewmodel::cube_matrix(c), first, light, fl);
         }
@@ -144,7 +144,7 @@ pub fn emit_held_data(out: &mut Vec<Vertex>, m: Mat4, st: &crate::item::Stack, l
         };
         let mods = crate::item::gun_mods(st);
         let (mats, shown) = gun_view::matrices(kind, &state, mods, true, root);
-        let dirt = pistol_view::dirt_level(st.damage, crate::item::max_damage(item));
+        let dirt = pistol_view::stack_dirt(st);
         let lamp = mods & crate::item::gun_mod::LIGHT != 0 && mods & crate::item::gun_mod::LIGHT_ON != 0;
         gun_view::emit(kind, out, None, &mats, &shown, false, dirt, lamp, &state, light, fl);
         return;

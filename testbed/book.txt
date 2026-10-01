@@ -1,0 +1,46 @@
+# The guide book held up to read: the cover, the contents, a page of each chapter (opened
+# with its number key), in English and in Hungarian, in the light and the dark theme.
+world bench
+window 1600 900
+empty
+time 0.25
+set lang en
+set dark off
+hold guide_book
+look 0 -70
+wait 2
+shot en_cover
+click right
+wait 1.2
+shot en_spread1
+press 2
+wait 2.5
+shot en_tools
+press 3
+wait 2.5
+shot en_furnaces
+press 5
+wait 2.5
+shot en_station
+press 6
+wait 2.5
+shot en_guns
+press 8
+wait 3
+shot en_recipes
+set lang hu
+press Home
+wait 3
+shot hu_cover
+press 4
+wait 2.5
+shot hu_grill
+press 7
+wait 2.5
+shot hu_ammo
+set dark on
+wait 1
+shot hu_ammo_dark
+press 1
+wait 2.5
+shot hu_start_dark

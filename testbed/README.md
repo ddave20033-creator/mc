@@ -28,6 +28,8 @@ with PIL (resize to ~640x360 each) and reading that one image.
 | `felling` | a birch chopped down (ahead, looking down with the body), its stump, struck out from above (first and third person) |
 | `mobs` | every mob summoned on the lane (front, side), the dummy hit, a sheep sheared |
 | `checks` | only the checks: zfight around, every item model, textures, flicker; then the creative inventory, each items' tab |
+| `station` | a gun station opened: a pistol laid on its table, taken apart and put together, a scope fitted, the drawer; the click maps |
+| `book` | the guide book read: the cover, the contents and pages of several chapters, in English and Hungarian, light and dark |
 
 Write a new script for anything else (copy one); a file anywhere works:
 `--test my_test.txt`. Add it to `BUILT_IN` in `src/client/testbed/mod.rs` to keep it.
@@ -49,7 +51,8 @@ start after `lane`) unless `abs` follows the command.
   · `fly on|off` · `turn <deg/s> <secs>` (the view turns while later commands run).
 - `camera fp|back|front|side|side_left|fixed` (fixed: in front, not turning with the player).
 - `set body on|off` (first-person body) · `set blur on|off` (menu backdrop) · `set hud on|off`
-  · `set fov <deg>` · `set gui <scale>` · `set view <chunks>` (view distance) · `set debug on|off` (F3).
+  · `set fov <deg>` · `set gui <scale>` · `set view <chunks>` (view distance) · `set debug on|off` (F3)
+  · `set lang en|hu` (the game's language) · `set dark on|off` (the dark theme).
 
 **Things**
 - `empty`: inventory emptied, slot 0 (use before `hold` in a copied world).

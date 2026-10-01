@@ -443,8 +443,6 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const TOOL_KINDS: [ToolKind; 4] = [ToolKind::Pickaxe, ToolKind::Axe, ToolKind::Shovel, ToolKind::Sword];
-
     #[test]
     fn the_table_is_consistent() {
         // Keys are unique (the blocks' items' too), ids follow each other file by file.

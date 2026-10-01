@@ -20,6 +20,17 @@ pub fn can_harvest(b: Block, held: ItemId) -> bool {
     }
 }
 
+/// The hardest a pickaxe of this harvest level (`Tier::level`) mines: the ores that need just
+/// that level (`ORES`, the softest first); for a level no ore needs, the blocks that do.
+pub fn hardest_mined(level: u8) -> Vec<Block> {
+    let needs = |b: Block| mining(b).is_some_and(|m| m.tool == Some(ToolKind::Pickaxe) && m.needs == Some(level));
+    let ores: Vec<Block> = ORES.into_iter().filter(|&b| needs(b)).collect();
+    if !ores.is_empty() {
+        return ores;
+    }
+    crate::content::blocks::BLOCKS.iter().map(|d| d.id).filter(|&b| needs(b)).collect()
+}
+
 /// Seconds to break `b` holding `held` (None = unbreakable).
 pub fn break_time(b: Block, held: ItemId) -> Option<f32> {
     let m = mining(b)?;
@@ -102,6 +113,12 @@ mod tests {
             assert!(ok(ore, Tier::Iron) && ok(ore, Tier::Diamond));
         }
         assert!(!ok(OBSIDIAN, Tier::Iron) && ok(OBSIDIAN, Tier::Diamond));
+        // The hardest each tier mines (what the guide book shows).
+        let hardest = |t: Tier| hardest_mined(t.level());
+        assert_eq!(hardest(Tier::Wood), [COAL_ORE]);
+        assert_eq!(hardest(Tier::Copper), [IRON_ORE]);
+        assert_eq!(hardest(Tier::Gold), [GOLD_ORE, DIAMOND_ORE]);
+        assert_eq!(hardest(Tier::Diamond), [OBSIDIAN]);
         // The copper tools have their own ids: what comes after the first 20 tools is not a
         // tool.
         assert_eq!(tool_of(BULLET), None);

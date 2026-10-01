@@ -49,3 +49,6 @@ blocks! {
         ..CUBE
     };
 }
+
+/// The ores found in the ground, from the most common (and softest) to the rarest.
+pub const ORES: [Block; 5] = [COAL_ORE, COPPER_ORE, IRON_ORE, GOLD_ORE, DIAMOND_ORE];

@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn ores_by_rarity_and_depth() {
         let gen = Generator::new(12345);
-        let ores = [COAL_ORE, COPPER_ORE, IRON_ORE, GOLD_ORE, DIAMOND_ORE];
+        let ores = ORES;
         let mut count = [0usize; 5];
         let mut ysum = [0usize; 5];
         for i in 0..36 {
