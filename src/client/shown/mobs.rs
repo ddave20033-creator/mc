@@ -12,21 +12,21 @@ impl Game {
     pub(in crate::client) fn attack(&mut self, mob: Option<usize>, player: Option<u8>) {
         // Sneaking, a hit takes a static mob (a target dummy) down (it drops as its item).
         let fixed = |m: &Mob| m.def().behavior == crate::content::mobs::Behavior::Static;
-        if let Some(i) = mob.filter(|&i| fixed(&self.level.mobs[i]) && self.player.sneaking) {
+        if let Some(i) = mob.filter(|&i| fixed(&self.level.mobs[i]) && self.me.body.sneaking) {
             let id = self.level.mobs[i].id;
             self.send(crate::net::Msg::TakeDown { id });
             return;
         }
         let held = self.held();
         let mut dmg = attack_damage(held);
-        let falling = !self.player.on_ground && !self.player.flying && self.player.vel.y < 0.0;
-        if falling && self.player.fluid(&self.terrain.world) == AIR {
+        let falling = !self.me.body.on_ground && !self.me.body.flying && self.me.body.vel.y < 0.0;
+        if falling && self.me.body.fluid(&self.terrain.world) == AIR {
             dmg *= 1.5;
         }
-        let knock = if self.player.sprinting { 2.0 } else { 1.0 };
-        let from = self.player.pos;
+        let knock = if self.me.body.sprinting { 2.0 } else { 1.0 };
+        let from = self.me.body.pos;
         if !self.creative() {
-            self.needs.exhaust(crate::entity::survival::cost::ATTACK);
+            self.me.vitals.needs.exhaust(crate::entity::survival::cost::ATTACK);
         }
         use crate::net::Msg;
         let hit = match (mob, player) {
@@ -57,18 +57,18 @@ impl Game {
                 None => 0,
             };
             if wear > 0 {
-                let slot = self.hotbar_slot;
-                if inventory::damage(&mut self.inventory.slots[slot], wear) {
+                let slot = self.me.items.hotbar_slot;
+                if inventory::damage(&mut self.me.items.inventory.slots[slot], wear) {
                     let p = hit_at.floor().as_ivec3();
-                    self.particles
+                    self.level.particles
                         .burst(&self.terrain.world, p, STONE, 12, [255; 3]);
                 }
             }
         }
-        if self.player.sprinting {
+        if self.me.body.sprinting {
             // Hitting while sprinting stops the sprint (Minecraft).
-            self.player.sprinting = false;
-            self.w_sprint = false;
+            self.me.body.sprinting = false;
+            self.input.w_sprint = false;
         }
     }
 
@@ -88,7 +88,7 @@ impl Game {
         let id = m.id;
         self.send(crate::net::Msg::UseOnMob { id, item: held });
         if !self.creative() {
-            let slot = &mut self.inventory.slots[self.hotbar_slot];
+            let slot = self.me.items.held_slot_mut();
             if used.consume {
                 take(slot, 1);
             }
@@ -96,14 +96,14 @@ impl Game {
                 inventory::damage(slot, used.wear);
             }
         }
-        self.hand.swing();
-        self.action_cooldown = 0.25;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.25;
         true
     }
 
     /// Spawn egg on a block: the mob appears on the clicked face.
     pub(in crate::client) fn use_spawn_egg(&mut self, kind: MobKind) {
-        let Some((hit, prev)) = self.target else {
+        let Some((hit, prev)) = self.me.aim.target else {
             return;
         };
         let at = if is_solid(self.terrain.world.geti(prev)) {
@@ -114,10 +114,10 @@ impl Game {
         let pos = Vec3::new(at.x as f32 + 0.5, at.y as f32, at.z as f32 + 0.5);
         self.spawn_mob(kind, pos);
         if !self.creative() {
-            take(&mut self.inventory.slots[self.hotbar_slot], 1);
+            take(self.me.items.held_slot_mut(), 1);
         }
-        self.hand.swing();
-        self.action_cooldown = 0.25;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.25;
     }
 
     pub(in crate::client) fn spawn_mob(&mut self, kind: MobKind, pos: Vec3) {

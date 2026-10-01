@@ -282,13 +282,13 @@ impl Game {
                 px + (8.0 + cx as f32 * SLOT) * s,
                 py + (oy + cy as f32 * SLOT) * s,
             );
-            if self.draw_slot(x, y, self.inventory.slots[i]) {
+            if self.draw_slot(x, y, self.me.items.inventory.slots[i]) {
                 *hovered = Some(SlotRef::Inv(i));
             }
         }
         for i in 0..9 {
             let (x, y) = (px + (8.0 + i as f32 * SLOT) * s, py + (oy + 58.0) * s);
-            if self.draw_slot(x, y, self.inventory.slots[i]) {
+            if self.draw_slot(x, y, self.me.items.inventory.slots[i]) {
                 *hovered = Some(SlotRef::Inv(i));
             }
         }
@@ -299,10 +299,10 @@ impl Game {
     pub(super) fn armor_slots(&mut self, spots: [(f32, f32); ARMOR_SLOTS], hovered: &mut Option<SlotRef>) {
         let s = self.ui.s;
         for (i, (x, y)) in spots.into_iter().enumerate() {
-            if self.draw_slot(x, y, self.inventory.armor[i]) {
+            if self.draw_slot(x, y, self.me.items.inventory.armor[i]) {
                 *hovered = Some(SlotRef::Armor(i));
             }
-            if self.inventory.armor[i].is_none() {
+            if self.me.items.inventory.armor[i].is_none() {
                 let hint = if i == VEST_SLOT { BULLETPROOF_VEST } else { armor_id(2, i) };
                 draw_stack(&mut self.ui, x + s, y + s, 16.0 * s, &Stack::one(hint));
                 let th = self.theme();

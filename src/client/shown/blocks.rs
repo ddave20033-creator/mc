@@ -21,7 +21,7 @@ impl Game {
         let old = self.terrain.world.geti(p);
         if self.terrain.world.seti(p, b) {
             // (a cut trunk gone or changed took its cut with it: `World::set`)
-            self.terrain.world.record_fluid_change(p, old, b, self.time);
+            self.terrain.world.record_fluid_change(p, old, b, self.clock.time);
             // (fluids flow on the server: it sends what they do)
             self.terrain.block_changed(p, true);
         }
@@ -99,19 +99,19 @@ impl Game {
         self.set_block(p, replacement);
         self.send(crate::net::Msg::Break { p, held, creative });
         if !creative {
-            self.needs.exhaust(crate::entity::survival::cost::MINE);
+            self.me.vitals.needs.exhaust(crate::entity::survival::cost::MINE);
             let wear = wear(held, b);
-            let slot = self.hotbar_slot;
-            if inventory::damage(&mut self.inventory.slots[slot], wear) {
+            let slot = self.me.items.hotbar_slot;
+            if inventory::damage(&mut self.me.items.inventory.slots[slot], wear) {
                 // Tool broke.
-                self.particles
+                self.level.particles
                     .burst(&self.terrain.world, p, STONE, 12, [255; 3]);
             }
         }
-        self.particles.burst(&self.terrain.world, p, b, 28, tint);
-        self.hand.swing();
-        self.mining = None;
-        self.action_cooldown = if creative { 0.2 } else { 0.15 };
+        self.level.particles.burst(&self.terrain.world, p, b, 28, tint);
+        self.me.hand.swing();
+        self.me.aim.mining = None;
+        self.me.aim.action_cooldown = if creative { 0.2 } else { 0.15 };
     }
 
     /// The block `b` at `p` is going away: the blocks that belong with it follow

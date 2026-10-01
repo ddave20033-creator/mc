@@ -251,7 +251,7 @@ pub(in crate::client) fn sheet_levels(px: &[[u8; 4]], w: usize, cols: usize, n: 
 
 impl Game {
     fn holding_book(&self) -> bool {
-        self.held() == GUIDE_BOOK && self.player.spawned && self.world_meta.is_some()
+        self.held() == GUIDE_BOOK && self.me.body.spawned && self.level.meta.is_some()
     }
 
     fn book_hu(&self) -> bool {
@@ -281,7 +281,7 @@ impl Game {
     pub(super) fn update_book(&mut self, dt: f32) {
         let holding = self.holding_book();
         let target = if holding && self.screen == Screen::Playing {
-            ((-self.pitch.to_degrees() - 12.0) / 33.0).clamp(0.0, 1.0)
+            ((-self.me.look.pitch.to_degrees() - 12.0) / 33.0).clamp(0.0, 1.0)
         } else if holding {
             self.book.read
         } else {
@@ -437,7 +437,7 @@ impl Game {
         let dark = self.settings.dark_ui;
         // What is wanted: a page, and the animation frame it should show (None: any).
         let mut wants: Vec<(PageId, Option<u32>)> = Vec::new();
-        let anim = (self.time * ANIM_FPS) as u32;
+        let anim = (self.clock.time * ANIM_FPS) as u32;
         // Pages drawn ahead (last: they must not push out pages that are shown).
         let mut ahead: Vec<(PageId, Option<u32>)> = Vec::new();
 
@@ -484,10 +484,10 @@ impl Game {
         } else {
             None
         };
-        let me = self.player.pos;
+        let me = self.me.body.pos;
         let mut remote = Vec::new();
-        for i in 0..self.remotes.len() {
-            let r = &mut self.remotes[i];
+        for i in 0..self.session.remotes.len() {
+            let r = &mut self.session.remotes[i];
             let turn = r.book.update(r.pose.book, dt);
             let near = r.pose.pos.distance(me) < SEE_PAGES;
             let shown = r.book.show(r.pose.flags & crate::net::pose_flags::SHOWING != 0, dt);
@@ -577,7 +577,7 @@ impl Game {
             show,
         });
         for (i, turn, pages, show) in remote_pages {
-            self.remotes[i].book_view = Some(BookView {
+            self.session.remotes[i].book_view = Some(BookView {
                 turn,
                 pages: pages_of(pages),
                 tabs: None,
@@ -594,10 +594,10 @@ impl Game {
         };
         let theme = if dark { &DARK } else { &LIGHT };
         let levels = {
-            let cv = draw_tabs(&self.ui.pixel_font, &self.texture_base, lay, open, hover, theme);
+            let cv = draw_tabs(&self.ui.pixel_font, &self.gfx.texture_base, lay, open, hover, theme);
             sheet_levels(&cv.px, cv.w, TAB_LAYERS as usize, TAB_LAYERS as usize)
         };
-        self.renderer.queue_layers(tex::BOOK_TABS, TAB_LAYERS, levels);
+        self.gfx.renderer.queue_layers(tex::BOOK_TABS, TAB_LAYERS, levels);
         self.book.tabs = Some((hu, dark, open, hover));
     }
 
@@ -614,11 +614,11 @@ impl Game {
             hover: id.hover,
         };
         let levels = {
-            let cv = draw_page(&self.ui.pixel_font, &self.texture_base, lay, id.page, &look);
+            let cv = draw_page(&self.ui.pixel_font, &self.gfx.texture_base, lay, id.page, &look);
             sheet_levels(&cv.px, cv.w, 2, SHEET_LAYERS as usize)
         };
         let base = tex::BOOK_SHEETS + i as u32 * SHEET_LAYERS;
-        self.renderer.queue_layers(base, SHEET_LAYERS, levels);
+        self.gfx.renderer.queue_layers(base, SHEET_LAYERS, levels);
         let s = &mut self.book.sheets[i];
         s.page = Some(id);
         s.frame = frame;

@@ -55,7 +55,7 @@ impl Game {
             name: self.settings.name.clone(),
             view: self.settings.render_distance.round().clamp(0.0, 255.0) as u8,
         });
-        self.net = Some(Client {
+        self.session.net = Some(Client {
             conn,
             id: 0,
             tick: 0.0,
@@ -72,21 +72,21 @@ impl Game {
     /// it like any player.
     pub(in crate::client) fn play_world(&mut self, meta: WorldMeta) {
         let (local, conn) = crate::sim::server::start(meta);
-        self.local = Some(local);
+        self.session.local = Some(local);
         self.menus.net_message = t("mp.connecting").to_string();
         self.join_with(conn);
     }
 
     /// Pause menu: opens this world to the LAN (its server takes the LAN players).
     pub(in crate::client) fn open_to_lan(&mut self) {
-        let Some(local) = &self.local else { return };
-        if self.lan_address.is_some() {
+        let Some(local) = &self.session.local else { return };
+        if self.session.lan_address.is_some() {
             return;
         }
         match local.open_lan(&self.settings.name) {
             Ok(address) => {
                 self.say(tf("lan.opened", &[&address]), chat::YELLOW);
-                self.lan_address = Some(address);
+                self.session.lan_address = Some(address);
                 self.resume();
             }
             Err(e) => self.say(tf("lan.failed", &[&e]), chat::RED),
@@ -98,17 +98,17 @@ impl Game {
     pub(in crate::client) fn leave_server(&mut self, message: Option<String>) {
         // (still connecting: given up; the connection, if it is made, is dropped)
         self.menus.joining = None;
-        if self.player.spawned {
+        if self.me.body.spawned {
             let state = self.client_state();
             self.send(Msg::Save(state));
         }
-        if let Some(c) = &mut self.net {
+        if let Some(c) = &mut self.session.net {
             c.conn.close();
         }
-        self.net = None;
+        self.session.net = None;
         // (the game's own server saves and stops)
-        self.local = None;
-        self.lan_address = None;
+        self.session.local = None;
+        self.session.lan_address = None;
         self.forget_world();
         self.set_grab(false);
         match message {
@@ -127,35 +127,35 @@ impl Game {
         // does not bring them back where they died.
         let dead = self.screen == Screen::Dead;
         PlayerState {
-            pos: if dead { self.home_pos() } else { self.player.pos },
-            yaw: if dead { 0.0 } else { self.yaw },
-            pitch: if dead { 0.0 } else { self.pitch },
-            health: if dead { MAX_HEALTH } else { self.health },
+            pos: if dead { self.home_pos() } else { self.me.body.pos },
+            yaw: if dead { 0.0 } else { self.me.look.yaw },
+            pitch: if dead { 0.0 } else { self.me.look.pitch },
+            health: if dead { MAX_HEALTH } else { self.me.vitals.health },
             needs: if dead {
                 Needs::new().to_array()
             } else {
-                self.needs.to_array()
+                self.me.vitals.needs.to_array()
             },
-            mode: match self.game_mode {
+            mode: match self.me.mode {
                 GameMode::Survival => crate::net::mode::SURVIVAL,
                 GameMode::Creative => crate::net::mode::CREATIVE,
                 GameMode::Spectator => crate::net::mode::SPECTATOR,
             },
-            flying: self.player.flying,
-            slot: self.hotbar_slot as u8,
-            inventory: slots.iter().chain(&self.inventory.armor).copied().collect(),
-            bed: self.bed_spawn,
+            flying: self.me.body.flying,
+            slot: self.me.items.hotbar_slot as u8,
+            inventory: slots.iter().chain(&self.me.items.inventory.armor).copied().collect(),
+            bed: self.me.vitals.bed_spawn,
         }
     }
 
     pub(super) fn client_tick(&mut self, dt: f32) {
-        let Some(c) = &mut self.net else {
+        let Some(c) = &mut self.session.net else {
             return;
         };
         let (msgs, open) = c.conn.poll();
         for m in msgs {
             self.client_handle(m);
-            if self.net.is_none() {
+            if self.session.net.is_none() {
                 return; // refused
             }
         }
@@ -163,11 +163,11 @@ impl Game {
             self.leave_server(Some(t("mp.lost").to_string()));
             return;
         }
-        if !self.player.spawned {
+        if !self.me.body.spawned {
             return;
         }
         let pose = self.my_pose();
-        if let Some(c) = &mut self.net {
+        if let Some(c) = &mut self.session.net {
             // (20 a second whatever the frame rate; after a stall not all at once)
             c.tick += dt;
             if c.tick >= TICK_SECS {
@@ -190,13 +190,13 @@ impl Game {
                 cheats,
                 state,
             } => {
-                if let Some(c) = &mut self.net {
+                if let Some(c) = &mut self.session.net {
                     c.id = id;
                 }
                 self.begin_remote_world(seed, world, time, spawn, creative, cheats, state);
                 if self.settings.skin == 4 {
-                    if let Some(png) = self.local_skin_png.clone() {
-                        if self.set_skin_png(id, png.clone()).is_ok() {
+                    if let Some(png) = self.gfx.skins.local_png.clone() {
+                        if self.gfx.set_skin_png(id, png.clone()).is_ok() {
                             self.send(Msg::Skin { id, png });
                         }
                     }
@@ -228,7 +228,7 @@ impl Game {
                     self.apply_remote_block(p, b);
                 }
             }
-            Msg::Time(t) => self.time_of_day = t,
+            Msg::Time(t) => self.level.time_of_day = t,
             Msg::Join { id, name } => self.add_remote(id, name),
             Msg::Leave { id } => self.remove_remote(id),
             Msg::Poses(list) => {
@@ -262,10 +262,10 @@ impl Game {
             Msg::TreeFalls(t) => self.tree_falls(*t),
             Msg::TreeLands { id } => self.tree_landed(id),
             Msg::Collect { item, by } => {
-                let now = self.time;
+                let now = self.clock.time;
                 if let Some(it) = self.level.items.iter_mut().find(|it| it.id == item && !it.is_picking_up()) {
                     it.start_pickup(now);
-                    if let Some(c) = &mut self.net {
+                    if let Some(c) = &mut self.session.net {
                         c.collecting.insert(item, by);
                     }
                 }
@@ -289,7 +289,7 @@ impl Game {
                 };
                 self.apply_container(p, kind, &slots);
                 let open_here = matches!(self.screen, Screen::Container(c) if Self::container_pos(c) == Some(p));
-                if let (true, Some(c)) = (open_here, &mut self.net) {
+                if let (true, Some(c)) = (open_here, &mut self.session.net) {
                     c.container_known = Some(msg.encode());
                 }
             }
@@ -303,9 +303,9 @@ impl Game {
                 bullets,
             } => self.remote_shot(id, kind, mods, eye, seed, &bullets),
             Msg::Skin { id, png } => {
-                let own = matches!(&self.net, Some(c) if c.id == id);
+                let own = matches!(&self.session.net, Some(c) if c.id == id);
                 if !own {
-                    let _ = self.set_skin_png(id, png);
+                    let _ = self.gfx.set_skin_png(id, png);
                 }
             }
             _ => {}
@@ -318,16 +318,16 @@ impl Game {
         let (sky, blk) = self.terrain.world.light_estimate(pos);
         match kind {
             fx::WOLF_TAKES | fx::WOLF_REFUSES => {
-                self.particles.crumbs(pos, crate::world::textures::tex::BONE, 6, sky, blk);
+                self.level.particles.crumbs(pos, crate::world::textures::tex::BONE, 6, sky, blk);
                 if kind == fx::WOLF_TAKES {
                     self.audio.play(crate::audio::Sound::WolfBark, Some(pos), 0.8);
                 } else {
                     for _ in 0..4 {
-                        self.particles.smoke_shaded(pos + Vec3::Y * 0.3, 70, sky, blk);
+                        self.level.particles.smoke_shaded(pos + Vec3::Y * 0.3, 70, sky, blk);
                     }
                 }
             }
-            fx::POOF => self.particles.poof(pos, sky, blk),
+            fx::POOF => self.level.particles.poof(pos, sky, blk),
             _ => {}
         }
     }
@@ -346,14 +346,14 @@ impl Game {
         state: Option<PlayerState>,
     ) {
         self.forget_world();
-        self.renderer.clear_chunks();
+        self.gfx.renderer.clear_chunks();
         self.terrain = Terrain::new(seed);
-        self.spawn = spawn;
-        self.pano = Self::panorama_pos(&self.terrain, spawn);
-        self.game_mode = if creative { GameMode::Creative } else { GameMode::Survival };
-        self.cheats = cheats;
-        self.time_of_day = time;
-        self.world_meta = Some(WorldMeta {
+        self.level.spawn = spawn;
+        self.menus.pano = Self::panorama_pos(&self.terrain, spawn);
+        self.me.mode = if creative { GameMode::Creative } else { GameMode::Survival };
+        self.me.cheats = cheats;
+        self.level.time_of_day = time;
+        self.level.meta = Some(WorldMeta {
             folder: String::new(),
             name: world,
             seed,
@@ -368,17 +368,17 @@ impl Game {
         });
         self.screen = Screen::Connecting;
         if let Some(s) = state {
-            self.bed_spawn = s.bed;
-            self.inventory.slots = std::array::from_fn(|i| s.inventory.get(i).copied().flatten());
+            self.me.vitals.bed_spawn = s.bed;
+            self.me.items.inventory.slots = std::array::from_fn(|i| s.inventory.get(i).copied().flatten());
             let worn = crate::item::inventory::SIZE;
-            self.inventory.armor = std::array::from_fn(|i| s.inventory.get(worn + i).copied().flatten());
-            self.needs = Needs::from_array(s.needs);
-            self.game_mode = match s.mode {
+            self.me.items.inventory.armor = std::array::from_fn(|i| s.inventory.get(worn + i).copied().flatten());
+            self.me.vitals.needs = Needs::from_array(s.needs);
+            self.me.mode = match s.mode {
                 crate::net::mode::CREATIVE => GameMode::Creative,
                 crate::net::mode::SPECTATOR => GameMode::Spectator,
                 _ => GameMode::Survival,
             };
-            self.pending_player = Some(PlayerSave {
+            self.session.pending_player = Some(PlayerSave {
                 pos: s.pos.to_array(),
                 yaw: s.yaw,
                 pitch: s.pitch,
@@ -453,7 +453,7 @@ impl Game {
         for c in gone {
             let w = &self.terrain.world;
             let (sky, blk) = (w.sky_estimate(c), w.block_light_estimate(c));
-            self.particles.poof(c, sky, blk);
+            self.level.particles.poof(c, sky, blk);
         }
         // (found by id through a map: after a tree comes down there can be hundreds)
         let at: FastMap<u32, usize> = self.level.mobs.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
@@ -472,7 +472,7 @@ impl Game {
         let gone_ids: FastSet<u32> = gone_items.iter().copied().collect();
         // (one flying to whoever picked it up goes on until it is there)
         self.level.items.retain(|it| it.is_picking_up() || stays(&ids, &gone_ids, it.id));
-        let Some(c) = &mut self.net else {
+        let Some(c) = &mut self.session.net else {
             return;
         };
         if full {
@@ -499,7 +499,7 @@ impl Game {
         }
         // Falling blocks: each one here goes on from where it is drawn (found by its block and
         // column), gliding to where the server has it, at the speed it fell since.
-        let now = self.time;
+        let now = self.clock.time;
         let since = (now - c.falling_at).max(TICK_SECS);
         c.falling_at = now;
         let mut old: Vec<Option<(FallingBlock, Vec3)>> =
@@ -530,13 +530,13 @@ impl Game {
             }
         }
         // Items fly to whoever picked them up (this player's eye, or another player).
-        let me = match &self.net {
+        let me = match &self.session.net {
             Some(c) => c.id,
             _ => 0,
         };
         let eye = self.eye() - Vec3::Y * 0.25;
-        let remotes: Vec<(u8, Vec3)> = self.remotes.iter().map(|r| (r.id, r.pose.pos + Vec3::Y * 1.2)).collect();
-        if let Some(c) = &mut self.net {
+        let remotes: Vec<(u8, Vec3)> = self.session.remotes.iter().map(|r| (r.id, r.pose.pos + Vec3::Y * 1.2)).collect();
+        if let Some(c) = &mut self.session.net {
             let k = crate::util::damp(15.0, dt);
             let mut landed = Vec::new();
             for it in &mut self.level.items {
@@ -567,10 +567,10 @@ impl Game {
                 f.pos = f.pos.lerp(*target, k);
             }
         }
-        self.time_of_day = crate::sim::advance_time(self.time_of_day, dt);
-        self.autosave -= dt;
-        if self.autosave <= 0.0 {
-            self.autosave = AUTOSAVE_SECONDS;
+        self.level.time_of_day = crate::sim::advance_time(self.level.time_of_day, dt);
+        self.session.autosave -= dt;
+        if self.session.autosave <= 0.0 {
+            self.session.autosave = AUTOSAVE_SECONDS;
             self.save_world();
         }
     }

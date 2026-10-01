@@ -108,7 +108,7 @@ impl Game {
     /// Sends the icons asked for to be drawn, and puts those drawn into a layer not in use or
     /// not seen for longest.
     pub(in crate::client) fn update_state_icons(&mut self) {
-        let base = self.texture_base.clone();
+        let base = self.gfx.texture_base.clone();
         let done: Vec<Done> = CACHE.with(|c| {
             let mut c = c.borrow_mut();
             c.frame += 1;
@@ -153,7 +153,7 @@ impl Game {
                 Some(i)
             });
             if let Some(i) = slot {
-                self.renderer.queue_layers(tex::STATE_ICONS + i as u32, 1, levels);
+                self.gfx.renderer.queue_layers(tex::STATE_ICONS + i as u32, 1, levels);
             }
         }
     }

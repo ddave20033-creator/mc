@@ -52,17 +52,17 @@ impl Game {
         };
         if let Some(made) = boot.textures.as_ref().and_then(|rx| rx.try_recv().ok()) {
             boot.textures = None;
-            self.texture_base = Arc::new(made.base);
-            self.torch_particles = made.torch_particles;
-            self.pack_credit = made.credit;
-            self.renderer.replace_block_textures(&self.gpu, &made.levels);
+            self.gfx.texture_base = Arc::new(made.base);
+            self.gfx.torch_particles = made.torch_particles;
+            self.gfx.pack_credit = made.credit;
+            self.gfx.renderer.replace_block_textures(&self.gfx.gpu, &made.levels);
             self.book.textures_remade();
         }
         let Some(boot) = self.boot.as_mut() else {
             return false;
         };
-        let age = self.time - boot.start;
-        let world_ready = self.renderer.chunk_count() >= 80 && self.renderer.pending() == 0;
+        let age = self.clock.time - boot.start;
+        let world_ready = self.gfx.renderer.chunk_count() >= 80 && self.gfx.renderer.pending() == 0;
         if boot.textures.is_none() && age >= SHORTEST && (world_ready || age >= LONGEST) {
             self.boot = None;
             return false;
@@ -75,14 +75,14 @@ impl Game {
     pub fn boot_progress(&self) -> Option<f32> {
         let boot = self.boot.as_ref()?;
         let made = if boot.textures.is_some() { textures::progress() } else { 1.0 };
-        let world = (self.renderer.chunk_count() as f32 / 80.0).min(1.0);
+        let world = (self.gfx.renderer.chunk_count() as f32 / 80.0).min(1.0);
         Some((0.1 + 0.65 * made + 0.25 * world).min(0.99))
     }
 
     /// Shows the game's window (hidden while starting up), the title screen coming in.
     pub fn show_window(&mut self) {
         self.ui.age = 0.0;
-        self.window.set_visible(true);
-        self.window.focus_window();
+        self.gfx.window.set_visible(true);
+        self.gfx.window.focus_window();
     }
 }

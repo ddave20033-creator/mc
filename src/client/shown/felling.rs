@@ -36,22 +36,22 @@ impl Game {
     /// A stroke of the axe (survival): it tires the player (`exhaust`) and wears the axe in
     /// hand; one that breaks bursts apart at `at`.
     pub(in crate::client) fn wear_axe(&mut self, exhaust: f32, at: IVec3) {
-        self.needs.exhaust(exhaust);
-        let slot = self.hotbar_slot;
-        if tool_of(self.held()).is_some() && inventory::damage(&mut self.inventory.slots[slot], 1) {
-            self.particles.burst(&self.terrain.world, at, STONE, 12, [255; 3]);
+        self.me.vitals.needs.exhaust(exhaust);
+        let slot = self.me.items.hotbar_slot;
+        if tool_of(self.held()).is_some() && inventory::damage(&mut self.me.items.inventory.slots[slot], 1) {
+            self.level.particles.burst(&self.terrain.world, at, STONE, 12, [255; 3]);
         }
     }
 
     /// Where the chop's rig is in the world (as the player model draws it, where the camera
     /// is).
     pub(in crate::client) fn chop_world(&self) -> Mat4 {
-        chop_rig::to_world(self.player.drawn_pos(self.between), self.visual_head_yaw())
+        chop_rig::to_world(self.me.body.drawn_pos(self.clock.between), self.me.look.visual_head_yaw())
     }
 
     /// How the swing is aimed (as the player model draws it).
     pub(in crate::client) fn chop_aim(&self) -> Aim {
-        Aim::new(self.pitch, self.visual_head_yaw(), self.body_yaw)
+        Aim::new(self.me.look.pitch, self.me.look.visual_head_yaw(), self.me.look.body_yaw)
     }
 
     /// The trunk the player is aiming an axe at, if any, and the swing it takes: a standing
@@ -59,10 +59,10 @@ impl Game {
     fn chop_target(&self) -> Option<Kind> {
         chops_needed(self.held())?;
         // (a lying trunk is cut up struck from above too)
-        if self.log_aim.is_some() {
+        if self.me.aim.log_aim.is_some() {
             return Some(Kind::Stump);
         }
-        let (hit, _) = self.target?;
+        let (hit, _) = self.me.aim.target?;
         let w = &self.terrain.world;
         if !is_trunk(w.geti(hit)) {
             return None;
@@ -104,7 +104,7 @@ impl Game {
     /// going on (the normal mining is left out, and the hand is drawn by the rig; after the
     /// last swing, until the axe has settled back in the hands).
     pub(in crate::client) fn update_chopping(&mut self, active: bool, dt: f32) -> bool {
-        if let Some(mut sw) = self.chop {
+        if let Some(mut sw) = self.me.aim.chop {
             let times = sw.kind.times();
             let before = sw.anim_time();
             sw.clock += dt;
@@ -126,31 +126,31 @@ impl Game {
             if sw.pulling() {
                 self.come_apart();
             }
-            self.chop = (!sw.done()).then_some(sw);
+            self.me.aim.chop = (!sw.done()).then_some(sw);
         }
         // (between swings: a swing over is only settling back)
-        let idle = self.chop.is_none_or(|s| s.over());
+        let idle = self.me.aim.chop.is_none_or(|s| s.over());
         if idle {
             self.come_apart();
-            self.log_cut = None;
+            self.me.aim.log_cut = None;
         }
         let target = if active { self.chop_target() } else { None };
         if idle && (target.is_none() || !self.input.left_down) {
-            self.hand.hidden = self.chop.is_some();
-            return target.is_some() || self.chop.is_some();
+            self.me.hand.hidden = self.me.aim.chop.is_some();
+            return target.is_some() || self.me.aim.chop.is_some();
         }
-        self.mining = None;
+        self.me.aim.mining = None;
         if let (true, Some(kind)) = (idle, target) {
-            self.chop = Some(Swing { kind, ..Swing::default() });
-            self.log_cut = self.log_aim.map(|a| (a.id, a.from_base));
+            self.me.aim.chop = Some(Swing { kind, ..Swing::default() });
+            self.me.aim.log_cut = self.me.aim.log_aim.map(|a| (a.id, a.from_base));
         }
-        self.hand.hidden = true;
+        self.me.hand.hidden = true;
         true
     }
 
     /// What the axe was stuck in comes apart as it is pulled out.
     fn come_apart(&mut self) {
-        match self.struck.take() {
+        match self.me.aim.struck.take() {
             Some(Struck::Stump(p)) => self.break_stump(p),
             Some(Struck::Log(id, from_base)) => self.cut_log(id, from_base),
             None => {}
@@ -164,7 +164,7 @@ impl Game {
         self.chips(p, b, point, Vec3::Y);
         // (a standing trunk in the way only gives chips)
         if stump_of(&self.terrain.world, p).is_some() {
-            self.struck = Some(Struck::Stump(p));
+            self.me.aim.struck = Some(Struck::Stump(p));
         }
     }
 
@@ -173,7 +173,7 @@ impl Game {
         let q = point.floor().as_ivec3();
         let b = self.terrain.world.geti(q);
         let tint = self.block_tint(q, b);
-        self.particles.impact(&self.terrain.world, point, Vec3::Y, b, tint);
+        self.level.particles.impact(&self.terrain.world, point, Vec3::Y, b, tint);
     }
 
     /// The axe bit into the trunk at `p`: its knock, and chips flying out at `at` (the way
@@ -182,11 +182,11 @@ impl Game {
         self.audio.play(crate::audio::Sound::AxeChop, Some(at), 1.0);
         let tint = self.block_tint(p, b);
         for _ in 0..3 {
-            self.particles.impact(&self.terrain.world, at, out, b, tint);
+            self.level.particles.impact(&self.terrain.world, at, out, b, tint);
         }
         let layer = face_texture(b, 2);
         let (sky, blk) = self.terrain.world.light_estimate(at);
-        self.particles.crumbs(at, layer, 6, sky, blk);
+        self.level.particles.crumbs(at, layer, 6, sky, blk);
     }
 
     /// The stump the axe was struck into comes apart: the cut block and the trunk under it
@@ -211,7 +211,7 @@ impl Game {
         let b = self.terrain.world.geti(p);
         if self.terrain.world.notch(p).is_some_and(|n| n.felled) {
             // (a stump is not chopped level: only chips)
-            let out = Vec2::new(self.player.pos.x - p.x as f32 - 0.5, self.player.pos.z - p.z as f32 - 0.5).normalize_or_zero();
+            let out = Vec2::new(self.me.body.pos.x - p.x as f32 - 0.5, self.me.body.pos.z - p.z as f32 - 0.5).normalize_or_zero();
             self.chips(p, b, point, Vec3::new(out.x, 0.3, out.y));
             return;
         }
@@ -220,7 +220,7 @@ impl Game {
         // Where it bit in: round the trunk from its middle toward the point hit (or the
         // player, hit straight on), and how high.
         let side = Vec2::new(point.x - middle.x, point.z - middle.z);
-        let side = if side.length() > 0.05 { side } else { Vec2::new(self.player.pos.x - middle.x, self.player.pos.z - middle.z) };
+        let side = if side.length() > 0.05 { side } else { Vec2::new(self.me.body.pos.x - middle.x, self.me.body.pos.z - middle.z) };
         let (angle, height) = (side.y.atan2(side.x), point.y - p.y as f32);
         let before = self.terrain.world.notch(p);
         let notch = deepen(before, angle, height, chop_step(self.held(), creative));
@@ -263,7 +263,7 @@ impl Game {
             let q = t.at(&turn, o).floor().as_ivec3();
             let tint = if is_leaves(b) { t.leaf_tint } else { [255; 3] };
             if !is_leaves(b) || n % 3 == 0 {
-                self.particles.burst(&self.terrain.world, q, b, if is_leaves(b) { 3 } else { 6 }, tint);
+                self.level.particles.burst(&self.terrain.world, q, b, if is_leaves(b) { 3 } else { 6 }, tint);
             }
         }
     }
@@ -286,7 +286,7 @@ impl Game {
         use crate::model::{emit_box, emit_item};
         let fl = crate::world::mesh::flags::ENTITY;
         for t in &self.level.falling_trees {
-            let turn = t.turned(t.prev_angle + (t.angle - t.prev_angle) * self.between);
+            let turn = t.turned(t.prev_angle + (t.angle - t.prev_angle) * self.clock.between);
             let mid = t.at(&turn, Vec3::new(0.0, t.height * 0.5, 0.0));
             if mid.distance(eye) > sight + t.height {
                 continue;

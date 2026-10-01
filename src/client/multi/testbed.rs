@@ -11,7 +11,7 @@ impl Game {
         match w.as_slice() {
             ["open"] => {
                 self.open_to_lan();
-                match &self.lan_address {
+                match &self.session.lan_address {
                     Some(address) => vec![format!("LAN open at {address}")],
                     None => vec!["LAN could not open".into()],
                 }
@@ -39,7 +39,7 @@ impl Game {
             }
             ["report"] => self.lan_report(),
             // The block this player aims at (and the one in front of it, where one goes).
-            ["target"] => match self.target {
+            ["target"] => match self.me.aim.target {
                 Some((hit, prev)) => vec![format!(
                     "target {} {} {}: {}, before it {} {} {}",
                     hit.x,
@@ -59,13 +59,13 @@ impl Game {
     fn lan_report(&self) -> Vec<String> {
         let mut out = Vec::new();
         let (mobs, items) = (self.level.mobs.len(), self.level.items.len());
-        match &self.net {
+        match &self.session.net {
             Some(_) => {
                 let w = &self.terrain.world;
                 let pending: usize = w.pending.values().map(|v| v.len()).sum();
                 out.push(format!(
                     "player: {} other player(s), {mobs} mobs, {items} items, {} chunks loaded, {} saved, {pending} changes waiting in {} chunks, screen {:?}",
-                    self.remotes.len(),
+                    self.session.remotes.len(),
                     w.chunks.len(),
                     w.saved.len(),
                     w.pending.len(),

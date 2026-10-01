@@ -24,15 +24,15 @@ pub struct Bench {
 impl Game {
     /// Called at the start of every frame in bench mode.
     pub(super) fn bench_step(&mut self, dt: f32) {
-        if self.shots.is_some() && self.screen == Screen::Playing {
+        if self.test.shots.is_some() && self.screen == Screen::Playing {
             self.shots_step(dt);
             return;
         }
-        if self.testbed.is_some() {
+        if self.test.testbed.is_some() {
             self.testbed_step(dt);
             return;
         }
-        let Some(b) = self.bench.as_mut() else {
+        let Some(b) = self.test.bench.as_mut() else {
             return;
         };
         match self.screen {
@@ -76,27 +76,27 @@ impl Game {
             Screen::Playing => {
                 let t = b.t.get_or_insert(0.0);
                 if *t == 0.0 {
-                    b.origin = self.player.pos;
+                    b.origin = self.me.body.pos;
                 }
                 *t += dt;
                 let t = *t;
                 // Glide east at 6 blocks/s just above the ground (through grass and forests,
                 // where most of the drawing happens), slowly turning the view.
-                self.player.flying = true;
-                self.player.vel = Vec3::ZERO;
+                self.me.body.flying = true;
+                self.me.body.vel = Vec3::ZERO;
                 let (x, z) = (b.origin.x + 6.0 * t, b.origin.z);
                 let ground = self
                     .terrain
                     .gen
                     .column(x.floor() as i32, z.floor() as i32)
                     .height;
-                self.player.pos = Vec3::new(x, ground.max(SEA) as f32 + 1.5, z);
-                self.player.start_tick();
-                self.yaw = (t * 0.4).sin() * 1.2;
-                self.pitch = -0.1;
-                self.body_yaw = self.yaw;
+                self.me.body.pos = Vec3::new(x, ground.max(SEA) as f32 + 1.5, z);
+                self.me.body.start_tick();
+                self.me.look.yaw = (t * 0.4).sin() * 1.2;
+                self.me.look.pitch = -0.1;
+                self.me.look.body_yaw = self.me.look.yaw;
                 if t > WARMUP {
-                    b.drawn.push(self.renderer.drawn_chunks);
+                    b.drawn.push(self.gfx.renderer.drawn_chunks);
                 }
                 if t > WARMUP + MEASURE {
                     self.bench_report();
@@ -109,14 +109,14 @@ impl Game {
 
     /// Records one frame's timings (called after rendering).
     pub(super) fn bench_record(&mut self, frame_ms: f32) {
-        let Some(b) = self.bench.as_mut() else {
+        let Some(b) = self.test.bench.as_mut() else {
             return;
         };
         if b.t.is_some_and(|t| t > WARMUP) {
             let c = self.clock.cpu_ms;
-            let g = self.renderer.gpu_ms.unwrap_or_default();
-            let r = self.renderer.cpu_detail;
-            b.rec.push(self.renderer.rec_detail);
+            let g = self.gfx.renderer.gpu_ms.unwrap_or_default();
+            let r = self.gfx.renderer.cpu_detail;
+            b.rec.push(self.gfx.renderer.rec_detail);
             b.samples.push([
                 frame_ms,
                 c[0],
@@ -135,7 +135,7 @@ impl Game {
     }
 
     fn bench_report(&self) {
-        let Some(b) = &self.bench else { return };
+        let Some(b) = &self.test.bench else { return };
         let n = b.samples.len().max(1) as f32;
         let avg = |i: usize| b.samples.iter().map(|s| s[i]).sum::<f32>() / n;
         let mut frames: Vec<f32> = b.samples.iter().map(|s| s[0]).collect();
@@ -215,11 +215,11 @@ impl Game {
         println!(
             "chunks drawn avg {:.0}, loaded {}, render distance {}, shadows {}, window {}x{}",
             drawn,
-            self.renderer.chunk_count(),
+            self.gfx.renderer.chunk_count(),
             self.settings.render_distance,
             self.settings.shadows,
-            self.gpu.extent.width,
-            self.gpu.extent.height
+            self.gfx.gpu.extent.width,
+            self.gfx.gpu.extent.height
         );
     }
 }
@@ -321,29 +321,29 @@ fn mountain_view(gen: &crate::world::gen::Generator, around: Vec3) -> (Vec3, f32
 impl Game {
     /// Shot mode, every frame while playing: hold the camera still and take the pictures.
     pub(super) fn shots_step(&mut self, dt: f32) {
-        let Some(s) = self.shots.as_mut() else {
+        let Some(s) = self.test.shots.as_mut() else {
             return;
         };
-        self.hide_hud = true;
-        self.player.flying = true;
-        self.player.vel = Vec3::ZERO;
+        self.hud.hide = true;
+        self.me.body.flying = true;
+        self.me.body.vel = Vec3::ZERO;
         let (pos, yaw, pitch) = *s.spot.get_or_insert_with(|| {
             // RUSTCRAFT_SHOT_HERE=1: where the player was last, looking the same way.
             let (p, yaw, pitch) = if std::env::var_os("RUSTCRAFT_SHOT_HERE").is_some() {
-                (self.player.pos, self.yaw, self.pitch)
+                (self.me.body.pos, self.me.look.yaw, self.me.look.pitch)
             } else {
                 // Nearly level: the land toward the mountain under the horizon.
-                let (p, yaw) = mountain_view(&self.terrain.gen, self.player.pos);
+                let (p, yaw) = mountain_view(&self.terrain.gen, self.me.body.pos);
                 (p, yaw, -0.04)
             };
             println!("shot spot: {:.0} {:.0} {:.0}, yaw {:.2}", p.x, p.y, p.z, yaw);
             (p, yaw, pitch)
         });
-        self.player.pos = pos;
-        self.player.start_tick();
-        self.pitch = pitch;
-        self.body_yaw = yaw;
-        self.yaw = yaw;
+        self.me.body.pos = pos;
+        self.me.body.start_tick();
+        self.me.look.pitch = pitch;
+        self.me.look.body_yaw = yaw;
+        self.me.look.yaw = yaw;
         s.wait -= dt;
         if s.wait > 0.0 {
             return;
@@ -356,22 +356,22 @@ impl Game {
         let name = shot_name(n);
         match s.step {
             0 => {
-                if n > self.gpu.max_samples {
+                if n > self.gfx.gpu.max_samples {
                     s.config += 1;
                     return;
                 }
-                self.gpu.set_msaa(n);
+                self.gfx.gpu.set_msaa(n);
                 s.wait = 1.5;
                 s.step = 1;
             }
             1 => {
-                self.gpu.capture = Some(s.dir.join(format!("{name}_a.png")));
+                self.gfx.gpu.capture = Some(s.dir.join(format!("{name}_a.png")));
                 s.step = 2;
             }
             _ => {
-                self.yaw = yaw + SHOT_TURN;
-                self.body_yaw = self.yaw;
-                self.gpu.capture = Some(s.dir.join(format!("{name}_b.png")));
+                self.me.look.yaw = yaw + SHOT_TURN;
+                self.me.look.body_yaw = self.me.look.yaw;
+                self.gfx.gpu.capture = Some(s.dir.join(format!("{name}_b.png")));
                 s.step = 0;
                 s.config += 1;
                 s.wait = 0.2;
@@ -383,7 +383,7 @@ impl Game {
     /// around the horizon) jump in brightness between the two pictures: the sparkle the eye
     /// sees, not the slight shift of every edge.
     fn shots_report(&self) {
-        let Some(s) = &self.shots else { return };
+        let Some(s) = &self.test.shots else { return };
         let mut text = String::new();
         for n in SHOT_LEVELS {
             let name = shot_name(n);

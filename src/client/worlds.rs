@@ -82,11 +82,11 @@ impl Game {
             world_card(&mut self.ui, meta, lx, y, lw, card_h, hovered || focused, selected);
             self.ui.restore(old);
             if hovered && self.ui.pressed {
-                if self.menus.last_click.0 == i && self.time - self.menus.last_click.1 < 0.35 {
+                if self.menus.last_click.0 == i && self.clock.time - self.menus.last_click.1 < 0.35 {
                     play = Some(i);
                 }
                 self.menus.selected_world = Some(i);
-                self.menus.last_click = (i, self.time);
+                self.menus.last_click = (i, self.clock.time);
                 self.ui.clicked = true;
             }
         }
@@ -252,64 +252,57 @@ impl Game {
     /// animations, the player's state and inventory, the other players), all at once: on
     /// leaving it, and again before the next one's comes (`begin_remote_world`).
     pub(super) fn forget_world(&mut self) {
-        self.world_meta = None;
-        self.pending_player = None;
-        self.bed_spawn = None;
-        self.sleep = None;
-        self.inventory = Inventory::new();
+        self.level.meta = None;
+        self.me.vitals.bed_spawn = None;
+        self.me.vitals.sleep = None;
+        self.me.items.inventory = Inventory::new();
         self.level = Level::new();
-        self.mob_target = None;
-        self.chop = None;
-        self.struck = None;
-        self.log_aim = None;
-        self.log_cut = None;
-        self.cursor = None;
-        self.craft = [None; 9];
+        self.me.aim.mob_target = None;
+        self.me.aim.chop = None;
+        self.me.aim.struck = None;
+        self.me.aim.log_aim = None;
+        self.me.aim.log_cut = None;
+        self.me.items.cursor = None;
+        self.me.items.craft = [None; 9];
         // Nothing of the last world's shots, grenades, fishing or effects comes along (a grenade
         // thrown just before leaving would blow up in the next).
-        self.guns = Default::default();
-        self.grenades = Default::default();
-        self.fishing = Default::default();
-        self.particles = Particles::new();
+        self.tools.guns = Default::default();
+        self.tools.grenades = Default::default();
+        self.tools.fishing = Default::default();
+        self.level.particles = Particles::new();
         self.station = None;
-        self.craft_out = None;
-        self.craft_fx = None;
-        self.furnace_part = None;
-        self.furnace_hold = false;
-        self.player_target = None;
-        self.blocking = false;
-        self.fall_peak = 0.0;
-        self.fire_tick = 0.0;
-        self.drown_tick = 0.0;
+        self.me.items.craft_out = None;
+        self.me.items.craft_fx = None;
+        self.me.aim.furnace_part = None;
+        self.me.aim.furnace_hold = false;
+        self.me.aim.player_target = None;
+        self.me.aim.blocking = false;
+        self.me.vitals.fall_peak = 0.0;
+        self.me.vitals.fire_tick = 0.0;
+        self.me.vitals.drown_tick = 0.0;
         self.inv_ui.drag = None;
-        self.mining = None;
-        self.target = None;
-        self.air = MAX_AIR;
-        self.invuln = 0.0;
-        self.spectating = None;
-        self.player = Player::default();
-        self.health = MAX_HEALTH;
-        self.needs = Needs::new();
-        self.using = None;
-        self.fire = 0.0;
-        self.hurt_time = 0.0;
+        self.me.aim.mining = None;
+        self.me.aim.target = None;
+        self.me.vitals.air = MAX_AIR;
+        self.me.vitals.invuln = 0.0;
+        self.me.body = Player::default();
+        self.me.vitals.health = MAX_HEALTH;
+        self.me.vitals.needs = Needs::new();
+        self.me.aim.using = None;
+        self.me.vitals.fire = 0.0;
+        self.me.vitals.hurt_time = 0.0;
         self.chat = Chat::new();
-        self.camera = Default::default();
-        self.autosave = AUTOSAVE_SECONDS;
+        self.me.look.camera = Default::default();
         // The other players, and their skins (this player's own in the first slot again).
-        self.remotes.clear();
-        self.custom_skins.retain(|&id, _| id == 0);
-        self.skin_pngs.retain(|&id, _| id == 0);
-        if let Some(png) = self.local_skin_png.clone() {
-            let _ = self.set_skin_png(0, png);
-        }
+        self.session.forget_world();
+        self.gfx.forget_other_skins();
     }
 
     /// Where the world is being loaded around (saved player position or spawn).
     pub(super) fn load_center(&self) -> Vec3 {
-        match &self.pending_player {
+        match &self.session.pending_player {
             Some(p) => Vec3::from(p.pos),
-            None => Vec3::new(self.spawn.0 as f32, 64.0, self.spawn.1 as f32),
+            None => Vec3::new(self.level.spawn.0 as f32, 64.0, self.level.spawn.1 as f32),
         }
     }
 
@@ -317,7 +310,7 @@ impl Game {
         let c = self.load_center();
         self.terrain
             .ready_around(World::chunk_pos(c.x.floor() as i32, c.z.floor() as i32), 3)
-            && self.renderer.pending() < 32
+            && self.gfx.renderer.pending() < 32
     }
 
     pub(super) fn load_progress(&self) -> f32 {
@@ -338,22 +331,22 @@ impl Game {
     }
 
     pub(super) fn enter_game(&mut self) {
-        match self.pending_player.take() {
+        match self.session.pending_player.take() {
             Some(p) => {
-                self.player = Player {
+                self.me.body = Player {
                     pos: Vec3::from(p.pos),
                     spawned: true,
-                    flying: p.flying && !matches!(self.game_mode, GameMode::Survival),
+                    flying: p.flying && !matches!(self.me.mode, GameMode::Survival),
                     noclip: self.spectator(),
                     ..Default::default()
                 };
-                self.yaw = p.yaw;
-                self.pitch = p.pitch;
-                self.health = p.health.max(1.0);
-                self.needs = p.needs.map(Needs::from_array).unwrap_or_else(Needs::new);
-                self.hotbar_slot = p.slot.min(8);
-                self.fall_peak = p.pos[1];
-                self.body_yaw = self.yaw;
+                self.me.look.yaw = p.yaw;
+                self.me.look.pitch = p.pitch;
+                self.me.vitals.health = p.health.max(1.0);
+                self.me.vitals.needs = p.needs.map(Needs::from_array).unwrap_or_else(Needs::new);
+                self.me.items.hotbar_slot = p.slot.min(8);
+                self.me.vitals.fall_peak = p.pos[1];
+                self.me.look.body_yaw = self.me.look.yaw;
             }
             None => {
                 self.spawn_player();
@@ -362,8 +355,8 @@ impl Game {
                 self.say(t("chat.welcome"), chat::YELLOW);
             }
         }
-        self.hint_timer = 14.0;
-        self.hand.equip(self.held());
+        self.hud.hint_timer = 14.0;
+        self.me.hand.equip(self.held());
         self.resume();
         self.save_world();
     }
@@ -372,7 +365,7 @@ impl Game {
     /// Works even when the spawn chunk is not loaded (e.g. after dying far away): then the
     /// edited copy or a freshly generated copy of the chunk is used.
     pub(super) fn spawn_pos(&self) -> Vec3 {
-        let (x, z) = self.spawn;
+        let (x, z) = self.level.spawn;
         let w = &self.terrain.world;
         let cp = World::chunk_pos(x, z);
         let generated;
@@ -397,33 +390,29 @@ impl Game {
 
     pub(super) fn spawn_player(&mut self) {
         let pos = self.spawn_pos();
-        self.sleep = None;
-        self.player = Player {
+        self.me.vitals.sleep = None;
+        self.me.body = Player {
             pos,
             spawned: true,
             ..Default::default()
         };
-        self.fall_peak = pos.y;
-        self.air = MAX_AIR;
-        self.yaw = 0.0;
-        self.body_yaw = self.yaw;
-        self.pitch = 0.0;
+        self.me.vitals.fall_peak = pos.y;
+        self.me.vitals.air = MAX_AIR;
+        self.me.look.yaw = 0.0;
+        self.me.look.body_yaw = self.me.look.yaw;
+        self.me.look.pitch = 0.0;
     }
 
     pub(super) fn respawn(&mut self) {
-        self.health = MAX_HEALTH;
-        self.needs = Needs::new();
-        self.using = None;
-        self.fire = 0.0;
-        self.invuln = 0.0;
-        self.hurt_time = 0.0;
+        self.me.vitals.revive();
+        self.me.aim.using = None;
         self.spawn_at_home(true);
         self.resume();
     }
 
     /// Saves: the player's things go to the world's server (which keeps them, and the world).
     pub(super) fn save_world(&mut self) {
-        if self.world_meta.is_some() && self.player.spawned {
+        if self.level.meta.is_some() && self.me.body.spawned {
             let state = self.client_state();
             self.send(crate::net::Msg::Save(state));
         }

@@ -87,18 +87,18 @@ impl Game {
     }
 
     fn held_revolver_mut(&mut self) -> Option<&mut Stack> {
-        let slot = self.hotbar_slot;
-        self.inventory.slots[slot].as_mut().filter(|s| s.item == REVOLVER)
+        let slot = self.me.items.hotbar_slot;
+        self.me.items.inventory.slots[slot].as_mut().filter(|s| s.item == REVOLVER)
     }
 
     /// Rounds to load with (always, in creative).
     fn has_bullets(&self) -> bool {
-        self.creative() || self.inventory.count(MAGNUM_ROUND) > 0
+        self.creative() || self.me.items.inventory.count(MAGNUM_ROUND) > 0
     }
 
     /// The fullest loaded speedloader carried: its slot and rounds.
     fn loaded_speedloader(&self) -> Option<(usize, u8)> {
-        self.inventory
+        self.me.items.inventory
             .slots
             .iter()
             .enumerate()
@@ -110,7 +110,7 @@ impl Game {
     /// and loaded (when there is room and something to load it with).
     pub(in crate::client) fn start_revolver_reload(&mut self) {
         let Some(g) = self.held_revolver() else { return };
-        if let Some(c) = &mut self.guns.cylinder {
+        if let Some(c) = &mut self.tools.guns.cylinder {
             // Loading already: the key again stops it.
             c.stop = true;
             return;
@@ -125,7 +125,7 @@ impl Game {
             self.gun_message(t("gun.no_ammo"));
             return;
         }
-        self.guns.cylinder = Some(Cylinder {
+        self.tools.guns.cylinder = Some(Cylinder {
             phase: Phase::Open,
             t: 0.0,
             ejects: spent > 0,
@@ -136,24 +136,24 @@ impl Game {
             seated: false,
             stop: false,
         });
-        self.guns.aim = 0.0;
-        self.guns.reload = Some(0.0);
-        self.guns.plan.length = RELOAD_END + if can_load { room as f32 * LOAD_END } else { 0.0 };
+        self.tools.guns.aim = 0.0;
+        self.tools.guns.reload = Some(0.0);
+        self.tools.guns.plan.length = RELOAD_END + if can_load { room as f32 * LOAD_END } else { 0.0 };
     }
 
     /// A shot asked for while the cylinder is out: loading stops after the round going in.
     pub(in crate::client) fn revolver_stop_loading(&mut self) {
-        if let Some(c) = &mut self.guns.cylinder {
+        if let Some(c) = &mut self.tools.guns.cylinder {
             c.stop = true;
         }
     }
 
     /// The reload goes on: its steps happen with the animation.
     pub(in crate::client) fn update_revolver_reload(&mut self, dt: f32) {
-        let Some(mut c) = self.guns.cylinder else { return };
+        let Some(mut c) = self.tools.guns.cylinder else { return };
         if self.held_revolver().is_none() {
-            self.guns.cylinder = None;
-            self.guns.reload = None;
+            self.tools.guns.cylinder = None;
+            self.tools.guns.reload = None;
             return;
         }
         let at = self.eye();
@@ -209,14 +209,14 @@ impl Game {
                 if c.t >= RELOAD_END - RELOAD_CLOSE {
                     self.audio.play(Sound::CylinderShut, Some(at), 0.7);
                     self.revolver_align();
-                    self.guns.cylinder = None;
-                    self.guns.reload = None;
+                    self.tools.guns.cylinder = None;
+                    self.tools.guns.reload = None;
                     return;
                 }
             }
         }
-        self.guns.cylinder = Some(c);
-        self.guns.reload = Some(self.guns.reload.unwrap_or(0.0) + dt);
+        self.tools.guns.cylinder = Some(c);
+        self.tools.guns.reload = Some(self.tools.guns.reload.unwrap_or(0.0) + dt);
     }
 
     /// Out and emptied: loaded from a speedloader, or a round at a time, or shut again.
@@ -257,10 +257,10 @@ impl Game {
     /// The round in the left hand pushed into the chamber under the hammer.
     fn revolver_seat_round(&mut self) {
         if !self.creative() {
-            let Some(i) = self.inventory.slots.iter().position(|s| s.is_some_and(|s| s.item == MAGNUM_ROUND)) else {
+            let Some(i) = self.me.items.inventory.slots.iter().position(|s| s.is_some_and(|s| s.item == MAGNUM_ROUND)) else {
                 return;
             };
-            crate::item::inventory::take(&mut self.inventory.slots[i], 1);
+            crate::item::inventory::take(&mut self.me.items.inventory.slots[i], 1);
         }
         if let Some(g) = self.held_revolver_mut() {
             let k = revolver_index(g);
@@ -274,7 +274,7 @@ impl Game {
     fn revolver_from_loader(&mut self, c: &Cylinder) {
         let mut n = 0;
         if let Some(slot) = c.loader_slot {
-            if let Some(l) = self.inventory.slots[slot].as_mut().filter(|s| s.item == SPEEDLOADER) {
+            if let Some(l) = self.me.items.inventory.slots[slot].as_mut().filter(|s| s.item == SPEEDLOADER) {
                 n = gun_rounds(l).min(c.loader.count_ones() as u8);
                 set_gun_rounds(l, gun_rounds(l) - n);
             }
@@ -307,13 +307,13 @@ impl Game {
     fn revolver_empty(&mut self) {
         let Some(g) = self.held_revolver() else { return };
         let eye = self.eye();
-        let look = look_dir(self.yaw, self.pitch);
+        let look = self.me.look.dir();
         let right = look.cross(Vec3::Y).normalize_or_zero();
         // Where each chamber's head is (the first-person gun, or near the hands).
-        let fallback = self.guns.eject.or(self.guns.eject_tp).unwrap_or(eye - Vec3::Y * 0.3 + look * 0.45 - right * 0.1);
-        let heads = self.guns.chambers.filter(|_| self.camera.mode == 0);
+        let fallback = self.tools.guns.eject.or(self.tools.guns.eject_tp).unwrap_or(eye - Vec3::Y * 0.3 + look * 0.45 - right * 0.1);
+        let heads = self.tools.guns.chambers.filter(|_| self.me.look.camera.mode == 0);
         // Out of the back of the cylinder: away from the muzzle.
-        let back = match (heads, self.guns.muzzle.filter(|_| self.camera.mode == 0)) {
+        let back = match (heads, self.tools.guns.muzzle.filter(|_| self.me.look.camera.mode == 0)) {
             (Some(h), Some(m)) => (h.iter().copied().sum::<Vec3>() / 6.0 - m).normalize_or(-look),
             _ => -look,
         };
@@ -326,10 +326,10 @@ impl Game {
             let r = |g: &mut Self| g.random() - 0.5;
             let spread = Vec3::new(r(self), r(self), r(self)) * 0.5;
             let at = heads.map_or(fallback + spread * 0.08, |h| h[k]);
-            let vel = back * (1.1 + r(self) * 0.4) + spread + Vec3::Y * 0.3 + self.player.vel * 0.8;
+            let vel = back * (1.1 + r(self) * 0.4) + spread + Vec3::Y * 0.3 + self.me.body.vel * 0.8;
             if what == chamber::SPENT {
                 let spin = Vec3::new(r(self), r(self), r(self)) * 18.0;
-                self.guns.cases.eject(at, vel, spin, GunKind::Revolver);
+                self.tools.guns.cases.eject(at, vel, spin, GunKind::Revolver);
             } else if !creative {
                 self.add_item(crate::entity::dropped::ItemEntity::new(at, vel, Stack::one(MAGNUM_ROUND), 1.0));
             }

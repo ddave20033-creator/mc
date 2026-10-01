@@ -26,7 +26,7 @@ impl Game {
         let plain = [255u8; 3];
         let v = Vec3::new;
         // What is worn (as on the player model), in the colors of its material.
-        let (worn, vest) = unpack_armor(armor_code(&self.inventory.armor));
+        let (worn, vest) = unpack_armor(armor_code(&self.me.items.inventory.armor));
         let look = |m: usize| match m {
             0 => ([tex::ARMOR_WOOL; 6], [196, 184, 160]),
             1 => ([tex::ARMOR_METAL; 6], [226, 146, 96]),

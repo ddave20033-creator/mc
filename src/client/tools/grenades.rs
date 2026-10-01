@@ -55,20 +55,20 @@ impl Game {
     /// the pin comes out). Putting it away, or a menu opening, before it is thrown puts the
     /// pin back.
     pub(in crate::client) fn update_grenade_hold(&mut self, dt: f32, control: bool) {
-        let slot = self.hotbar_slot;
+        let slot = self.me.items.hotbar_slot;
         let item = self.held();
         let kind = GrenadeKind::of(item).filter(|_| !self.spectator());
-        if let Some(h) = self.grenades.hold {
+        if let Some(h) = self.tools.grenades.hold {
             if !control || h.slot != slot || h.item != item || kind.is_none() {
-                self.grenades.hold = None;
+                self.tools.grenades.hold = None;
             }
         }
-        match &mut self.grenades.hold {
+        match &mut self.tools.grenades.hold {
             None => {
                 // (on a rifle station's grenade crate, the grenade goes into it instead)
                 let crate_ = self.crate_under_crosshair().is_some();
-                if control && kind.is_some() && self.input.right_pressed && self.action_cooldown <= 0.0 && !crate_ {
-                    self.grenades.hold = Some(Hold { slot, item, t: 0.0, released: false });
+                if control && kind.is_some() && self.input.right_pressed && self.me.aim.action_cooldown <= 0.0 && !crate_ {
+                    self.tools.grenades.hold = Some(Hold { slot, item, t: 0.0, released: false });
                 }
             }
             Some(h) => {
@@ -82,17 +82,17 @@ impl Game {
                     self.audio.play(Sound::PinPull, None, 0.8);
                 }
                 if released && t >= PIN_OUT {
-                    self.grenades.hold = None;
+                    self.tools.grenades.hold = None;
                     self.throw_grenade(t);
                 } else if t >= FUSE {
                     // Held too long: a frag grenade goes off in the hand; a smoke grenade is
                     // let go at the feet.
-                    self.grenades.hold = None;
+                    self.tools.grenades.hold = None;
                     self.grenade_in_hand_goes_off();
                 }
             }
         }
-        self.hand.grenade = self.grenades.hold.map(|h| (h.t, power(h.t)));
+        self.me.hand.grenade = self.tools.grenades.hold.map(|h| (h.t, power(h.t)));
     }
 
     /// The readied grenade, held `held` seconds, leaves the hand (the farther the longer it
@@ -102,23 +102,23 @@ impl Game {
         let Some(kind) = GrenadeKind::of(self.held()) else {
             return;
         };
-        self.action_cooldown = 0.35;
-        let look = look_dir(self.yaw, self.pitch);
+        self.me.aim.action_cooldown = 0.35;
+        let look = self.me.look.dir();
         let (lo, hi) = THROW_SPEED;
         let k = power(held);
         let speed = lo + (hi - lo) * k;
         // From the hand, toward what the crosshair is on.
         let pos = self.grenade_in_hand();
         let aim = (self.eye() + look * 30.0 - pos).normalize_or(look);
-        let vel = aim * speed + Vec3::Y * (1.0 + 1.5 * k) + self.player.vel * 0.6;
+        let vel = aim * speed + Vec3::Y * (1.0 + 1.5 * k) + self.me.body.vel * 0.6;
         let fuse = match kind {
             GrenadeKind::Frag => (FUSE - held).max(0.05),
             GrenadeKind::Smoke => SMOKE_FUSE,
         };
         self.let_go_grenade(kind, pos, vel, fuse);
-        self.hand.throw();
+        self.me.hand.throw();
         // (the body's arm swings through too, seen from outside and by the others)
-        self.hand.swing();
+        self.me.hand.swing();
         self.audio.play(Sound::Throw, None, 0.3 + 0.5 * k);
     }
 
@@ -131,19 +131,19 @@ impl Game {
         let hand = self.grenade_in_hand();
         let (pos, vel, fuse) = match kind {
             GrenadeKind::Frag => (hand, Vec3::ZERO, 0.0),
-            GrenadeKind::Smoke => (hand, self.player.vel * 0.5, 0.0),
+            GrenadeKind::Smoke => (hand, self.me.body.vel * 0.5, 0.0),
         };
         self.let_go_grenade(kind, pos, vel, fuse);
-        self.hand.throw();
+        self.me.hand.throw();
     }
 
     /// Where the readied grenade is: in the hand as it is seen (the first-person hand, or the
     /// player model's), unless a wall is between it and the eyes (then just in front of them).
     fn grenade_in_hand(&self) -> Vec3 {
         let eye = self.eye();
-        let look = look_dir(self.yaw, self.pitch);
+        let look = self.me.look.dir();
         let fallback = eye + look * 0.3 - Vec3::Y * 0.1;
-        let hand = if self.camera.mode == 0 { self.grenades.hand_fp } else { self.grenades.hand_tp };
+        let hand = if self.me.look.camera.mode == 0 { self.tools.grenades.hand_fp } else { self.tools.grenades.hand_tp };
         let Some(hand) = hand.filter(|h| h.distance(eye) < 2.0) else { return fallback };
         let to = hand - eye;
         let d = to.length();
@@ -157,8 +157,8 @@ impl Game {
     /// flying, here and for the others.
     fn let_go_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, fuse: f32) {
         if !self.creative() {
-            let slot = self.hotbar_slot;
-            take(&mut self.inventory.slots[slot], 1);
+            let slot = self.me.items.hotbar_slot;
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
         self.audio.play(Sound::SpoonFly, None, 0.6);
         // (two draws: one is only 24 bits, and the seed tells the grenades apart over LAN)
@@ -179,7 +179,7 @@ impl Game {
     /// This game's copy of a grenade starts flying (thrown here, or by someone else), going off
     /// after `fuse` seconds: the server's copy decides the blast (`remote_blast`).
     pub(in crate::client) fn spawn_grenade(&mut self, kind: GrenadeKind, pos: Vec3, vel: Vec3, seed: u32, fuse: f32) {
-        self.grenades.list.push(Grenade::new(kind, pos, vel, seed, fuse));
+        self.tools.grenades.list.push(Grenade::new(kind, pos, vel, seed, fuse));
     }
 
     /// Someone else threw a grenade.
@@ -189,14 +189,14 @@ impl Game {
 
     /// The server says where a grenade went off.
     pub(in crate::client) fn remote_blast(&mut self, pos: Vec3, seed: u32) {
-        self.grenades.list.retain(|g| g.seed != seed);
+        self.tools.grenades.list.retain(|g| g.seed != seed);
         self.explode(pos, seed);
     }
 
     /// Grenades fly, bounce and go off; smoke pours out.
     pub(in crate::client) fn update_grenades(&mut self, dt: f32) {
-        self.grenades.shake = (self.grenades.shake - dt * 2.0).max(0.0);
-        let mut list = std::mem::take(&mut self.grenades.list);
+        self.tools.grenades.shake = (self.tools.grenades.shake - dt * 2.0).max(0.0);
+        let mut list = std::mem::take(&mut self.tools.grenades.list);
         let mut blasts = Vec::new();
         let mut bounces = Vec::new();
         let mut puffs = Vec::new();
@@ -235,7 +235,7 @@ impl Game {
             let blown = g.kind == GrenadeKind::Frag && blasts.iter().any(|b| b.1 == g.seed);
             !blown && g.smoke.is_none_or(|s| s > 0.0)
         });
-        self.grenades.list.extend(list);
+        self.tools.grenades.list.extend(list);
         for (at, k) in bounces {
             self.audio.play(Sound::GrenadeBounce, Some(at), 0.3 + 0.7 * k);
         }
@@ -245,7 +245,7 @@ impl Game {
         }
         for at in puffs {
             let (sky, blk) = self.terrain.world.light_estimate(at + Vec3::Y);
-            self.particles.smoke_cloud(at, sky, blk);
+            self.level.particles.smoke_cloud(at, sky, blk);
         }
         for (pos, seed) in blasts {
             self.explode(pos, seed);
@@ -254,7 +254,7 @@ impl Game {
 
     /// The hiss of the smoking grenades (looping sounds, as `furnace_sounds`).
     pub(in crate::client) fn grenade_sounds(&self) -> Vec<(u64, Sound, Vec3, f32)> {
-        self.grenades
+        self.tools.grenades
             .list
             .iter()
             .filter(|g| g.smoke.is_some())
@@ -267,32 +267,32 @@ impl Game {
     fn explode(&mut self, pos: Vec3, seed: u32) {
         self.audio.play(Sound::Explosion, Some(pos), 1.0);
         let (sky, blk) = self.terrain.world.light_estimate(pos + Vec3::Y * 0.5);
-        self.particles.explosion(pos, sky, blk);
-        self.guns.flash_light = (3.0, pos + Vec3::Y * 0.5);
+        self.level.particles.explosion(pos, sky, blk);
+        self.tools.guns.flash_light = (3.0, pos + Vec3::Y * 0.5);
         let near = pos.distance(self.eye());
-        self.grenades.shake = self.grenades.shake.max((1.0 - near / 18.0).max(0.0));
+        self.tools.grenades.shake = self.tools.grenades.shake.max((1.0 - near / 18.0).max(0.0));
         let blocks = blast_blocks(&self.terrain.world, pos, seed);
         for q in blocks.iter().take(12) {
             let b = self.terrain.world.geti(*q);
             let tint = self.block_tint(*q, b);
-            self.particles.burst(&self.terrain.world, *q, b, 8, tint);
+            self.level.particles.burst(&self.terrain.world, *q, b, 8, tint);
         }
     }
 
     /// This player is caught in a blast: hurt and thrown away from it.
     pub(in crate::client) fn blast_hit(&mut self, dmg: f32, from: Vec3, knock: f32) {
-        let before = self.health;
+        let before = self.me.vitals.health;
         let dmg = self.armor_hit(dmg, crate::net::hurt::BLAST);
         self.damage(dmg, "death.explosion");
-        if self.health < before {
-            let away = (self.player.pos + Vec3::Y * 0.5 - from).normalize_or(Vec3::Y);
-            self.player.vel += away * 9.0 * knock + Vec3::Y * 3.0 * knock;
+        if self.me.vitals.health < before {
+            let away = (self.me.body.pos + Vec3::Y * 0.5 - from).normalize_or(Vec3::Y);
+            self.me.body.vel += away * 9.0 * knock + Vec3::Y * 3.0 * knock;
         }
     }
 
     /// The grenades in flight or lying about.
     pub(in crate::client) fn build_grenades(&self, out: &mut Vec<Vertex>) {
-        for g in &self.grenades.list {
+        for g in &self.tools.grenades.list {
             let (sky, blk) = self.terrain.world.light_estimate(g.pos);
             let light = vertex_light(sky, blk);
             let m = Mat4::from_rotation_translation(g.rot, g.pos);

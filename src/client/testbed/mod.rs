@@ -25,6 +25,26 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("mobs", include_str!("../../../testbed/mobs.txt")),
 ];
 
+/// The runs that drive the game themselves (no settings saved, the mouse not grabbed, going
+/// on in the background).
+pub(super) struct TestModes {
+    /// `--bench` mode state.
+    pub(super) bench: Option<super::bench::Bench>,
+    /// `--aa-shots`: anti-aliasing comparison pictures (runs in bench mode).
+    pub(super) shots: Option<super::bench::Shots>,
+    /// `--test`: a test script running.
+    pub(super) testbed: Option<Testbed>,
+    /// A test asked for the menus' backdrop sharp.
+    pub(super) no_blur: bool,
+}
+
+impl TestModes {
+    /// A bench, picture or test run is going on.
+    pub(super) fn any(&self) -> bool {
+        self.bench.is_some() || self.testbed.is_some()
+    }
+}
+
 pub struct Testbed {
     name: String,
     dir: PathBuf,
@@ -101,14 +121,14 @@ impl Game {
     /// Every frame of a test: the held keys, buttons and turning, then the script's next
     /// commands once the last one's time is up.
     pub(super) fn testbed_step(&mut self, dt: f32) {
-        let Some(tb) = self.testbed.as_mut() else { return };
+        let Some(tb) = self.test.testbed.as_mut() else { return };
         if self.boot.is_some() {
             return;
         }
         tb.clock += dt;
         let now = tb.clock;
         if let Some(t) = tb.time_of_day {
-            self.time_of_day = t;
+            self.level.time_of_day = t;
         }
         // Held keys and buttons.
         tb.held.retain(|&(_, until)| until > now);
@@ -117,7 +137,7 @@ impl Game {
         for k in held {
             self.input.keys.insert(k);
         }
-        let tb = self.testbed.as_mut().unwrap();
+        let tb = self.test.testbed.as_mut().unwrap();
         for (i, b) in tb.buttons.iter_mut().enumerate() {
             let down = b.is_some_and(|until| until > now);
             if !down {
@@ -131,7 +151,7 @@ impl Game {
         }
         if let Some((rate, until)) = tb.turning {
             if now < until {
-                self.yaw += rate.to_radians() * dt;
+                self.me.look.yaw += rate.to_radians() * dt;
             } else {
                 tb.turning = None;
             }
@@ -139,17 +159,17 @@ impl Game {
         self.input.mouse_delta = Vec2::ZERO;
         // A world being made ready: loaded, entered, and the chunks around drawn.
         if let Some(since) = tb.loading {
-            let ready = self.screen == Screen::Playing && self.renderer.pending() == 0 && self.renderer.chunk_count() > 60;
+            let ready = self.screen == Screen::Playing && self.gfx.renderer.pending() == 0 && self.gfx.renderer.chunk_count() > 60;
             if (ready && now - since > 1.5) || now - since > 25.0 {
-                let tb = self.testbed.as_mut().unwrap();
+                let tb = self.test.testbed.as_mut().unwrap();
                 tb.loading = None;
-                tb.origin = self.player.pos;
-                let p = self.player.pos;
+                tb.origin = self.me.body.pos;
+                let p = self.me.body.pos;
                 tb.log(format!("world ready at {:.1} {:.1} {:.1}", p.x, p.y, p.z));
             }
             return;
         }
-        let tb = self.testbed.as_mut().unwrap();
+        let tb = self.test.testbed.as_mut().unwrap();
         if tb.frames > 0 {
             tb.frames -= 1;
             return;
@@ -160,7 +180,7 @@ impl Game {
         }
         // Commands run until one takes time.
         loop {
-            let tb = self.testbed.as_mut().unwrap();
+            let tb = self.test.testbed.as_mut().unwrap();
             let Some(cmd) = tb.cmds.get(tb.next).cloned() else {
                 self.testbed_finish();
                 return;
@@ -168,7 +188,7 @@ impl Game {
             tb.next += 1;
             let wait = self.testbed_run(cmd);
             // The blocks the command set go to the world's server.
-            let edits = self.testbed.as_mut().map(|tb| std::mem::take(&mut tb.edits)).unwrap_or_default();
+            let edits = self.test.testbed.as_mut().map(|tb| std::mem::take(&mut tb.edits)).unwrap_or_default();
             if !edits.is_empty() {
                 self.send(crate::net::Msg::Edit(edits));
             }
@@ -182,14 +202,14 @@ impl Game {
     /// the world's owner).
     fn test_set(&mut self, p: IVec3, b: Block) {
         self.set_block(p, b);
-        if let Some(tb) = self.testbed.as_mut() {
+        if let Some(tb) = self.test.testbed.as_mut() {
             tb.edits.push((p, b));
         }
     }
 
     /// Runs one command; true if the next has to wait (for time, a frame, or the world).
     fn testbed_run(&mut self, cmd: Cmd) -> bool {
-        let tb = self.testbed.as_mut().unwrap();
+        let tb = self.test.testbed.as_mut().unwrap();
         let origin = tb.origin;
         let at = |o: Origin, v: [f32; 3]| match o {
             Origin::Rel => origin + Vec3::from(v),
@@ -206,23 +226,23 @@ impl Game {
                     WorldKind::Bench => self.play_world(test_world(None)),
                     WorldKind::New(seed) => self.play_world(test_world(Some(seed))),
                 }
-                self.testbed.as_mut().unwrap().loading = Some(self.testbed.as_ref().unwrap().clock);
+                self.test.testbed.as_mut().unwrap().loading = Some(self.test.testbed.as_ref().unwrap().clock);
                 return true;
             }
             Cmd::Window(w, h) => {
-                let _ = self.window.request_inner_size(winit::dpi::PhysicalSize::new(w, h));
+                let _ = self.gfx.window.request_inner_size(winit::dpi::PhysicalSize::new(w, h));
                 tb.log(format!("window {w}x{h}"));
                 tb.frames = 3;
                 return true;
             }
             Cmd::Lane => {
                 let o = self.testbed_lane(origin);
-                let tb = self.testbed.as_mut().unwrap();
+                let tb = self.test.testbed.as_mut().unwrap();
                 tb.origin = o;
                 tb.log(format!("lane from {:.1} {:.1} {:.1}", o.x, o.y, o.z));
-                self.player.pos = o;
-                self.player.start_tick();
-                self.player.vel = Vec3::ZERO;
+                self.me.body.pos = o;
+                self.me.body.start_tick();
+                self.me.body.vel = Vec3::ZERO;
             }
             Cmd::Clear(r, h) => {
                 let b = origin.floor().as_ivec3();
@@ -236,17 +256,17 @@ impl Game {
             }
             Cmd::Time(t) => tb.time_of_day = Some(t),
             Cmd::Pos(o, v) => {
-                self.player.pos = at(o, v);
-                self.player.start_tick();
-                self.player.vel = Vec3::ZERO;
+                self.me.body.pos = at(o, v);
+                self.me.body.start_tick();
+                self.me.body.vel = Vec3::ZERO;
             }
             Cmd::Look(yaw, pitch) => {
-                self.yaw = yaw.to_radians();
-                self.body_yaw = self.yaw;
-                self.pitch = pitch.to_radians();
+                self.me.look.yaw = yaw.to_radians();
+                self.me.look.body_yaw = self.me.look.yaw;
+                self.me.look.pitch = pitch.to_radians();
             }
-            Cmd::Fly(on) => self.player.flying = on,
-            Cmd::Camera(m) => self.camera.mode = m,
+            Cmd::Fly(on) => self.me.body.flying = on,
+            Cmd::Camera(m) => self.me.look.camera.mode = m,
             Cmd::Hold(name, count, loaded) => match crate::item::from_key(&name) {
                 Some(id) => {
                     let mut st = Stack::new(id, count.clamp(1, 64) as u8);
@@ -258,16 +278,16 @@ impl Game {
                             crate::item::set_gun_rounds(&mut st, n);
                         }
                     }
-                    self.inventory.slots[self.hotbar_slot] = Some(st);
+                    *self.me.items.held_slot_mut() = Some(st);
                 }
                 None => tb.problems.push(format!("hold: no item `{name}`")),
             },
-            Cmd::Slot(s) => self.hotbar_slot = s,
+            Cmd::Slot(s) => self.me.items.hotbar_slot = s,
             Cmd::Empty => {
-                for s in self.inventory.slots.iter_mut() {
+                for s in self.me.items.inventory.slots.iter_mut() {
                     *s = None;
                 }
-                self.hotbar_slot = 0;
+                self.me.items.hotbar_slot = 0;
             }
             Cmd::Command(line) => {
                 let line = format!("/{line}");
@@ -356,7 +376,7 @@ impl Game {
             Cmd::Screen(name) => {
                 tb.log(format!("screen {name}"));
                 if !self.testbed_screen(&name) {
-                    self.testbed.as_mut().unwrap().problems.push(format!("screen: unknown `{name}`"));
+                    self.test.testbed.as_mut().unwrap().problems.push(format!("screen: unknown `{name}`"));
                 }
                 self.set_grab(false);
             }
@@ -365,12 +385,12 @@ impl Game {
                 let on = matches!(value.as_str(), "on" | "true" | "1");
                 match what.as_str() {
                     "body" => self.settings.first_person_body = on,
-                    "blur" => self.test_no_blur = !on,
-                    "hud" => self.hide_hud = !on,
+                    "blur" => self.test.no_blur = !on,
+                    "hud" => self.hud.hide = !on,
                     "fov" => self.settings.fov = value.parse().unwrap_or(self.settings.fov),
                     "gui" => self.settings.gui_scale = value.parse().unwrap_or(self.settings.gui_scale),
                     "view" => self.settings.render_distance = value.parse().unwrap_or(self.settings.render_distance),
-                    "debug" => self.show_debug = on,
+                    "debug" => self.hud.debug = on,
                     _ => tb.problems.push(format!("set: unknown `{what}`")),
                 }
             }
@@ -384,16 +404,16 @@ impl Game {
             }
             Cmd::Shot(name) => {
                 let file = format!("{name}.png");
-                self.gpu.capture = Some(tb.dir.join(&file));
+                self.gfx.gpu.capture = Some(tb.dir.join(&file));
                 let what = format!(
                     "screen {:?}, at {:.1} {:.1} {:.1}, looking {:.0}° {:.0}°, camera {}",
                     self.screen,
-                    self.player.pos.x,
-                    self.player.pos.y,
-                    self.player.pos.z,
-                    self.yaw.to_degrees(),
-                    self.pitch.to_degrees(),
-                    self.camera.mode
+                    self.me.body.pos.x,
+                    self.me.body.pos.y,
+                    self.me.body.pos.z,
+                    self.me.look.yaw.to_degrees(),
+                    self.me.look.pitch.to_degrees(),
+                    self.me.look.camera.mode
                 );
                 tb.log(format!("shot `{file}`"));
                 tb.shots.push((file, what));
@@ -405,8 +425,8 @@ impl Game {
                 // A hair: the view turned a thousandth of a degree and moved a thousandth of a
                 // block — nothing that is drawn right changes.
                 let k = if on { 1.0 } else { -1.0 };
-                self.yaw += 0.00002 * k;
-                self.player.pos.x += 0.001 * k;
+                self.me.look.yaw += 0.00002 * k;
+                self.me.body.pos.x += 0.001 * k;
             }
             Cmd::Compare(a, b, out) => {
                 let dir = tb.dir.clone();
@@ -437,8 +457,8 @@ impl Game {
             Cmd::Echo(text) => tb.log(format!("**{text}**")),
             Cmd::Stats => {
                 let mb = |b: u64| b / (1 << 20);
-                let (pages, bytes, used, retired) = self.renderer.mesh_memory();
-                let vram = self.gpu.vram_usage().map_or("?".into(), |(u, b)| format!("{}/{} MB", mb(u), mb(b)));
+                let (pages, bytes, used, retired) = self.gfx.renderer.mesh_memory();
+                let vram = self.gfx.gpu.vram_usage().map_or("?".into(), |(u, b)| format!("{}/{} MB", mb(u), mb(b)));
                 let ram = self.clock.sys_stats.get().ram_game;
                 let w = &self.terrain.world;
                 let blocks: usize = w.chunks.values().map(|c| c.memory()).sum();
@@ -447,14 +467,14 @@ impl Game {
                 tb.log(format!(
                     "stats: {:?} at {:.1} {:.1} {:.1}; {:.0} fps, {:.1} ms; chunks {} loaded, {} meshed, {} waiting; mesh memory {} pages {} MB ({} MB used), {} to free; VRAM {vram}; RAM {} MB",
                     self.screen,
-                    self.player.pos.x,
-                    self.player.pos.y,
-                    self.player.pos.z,
+                    self.me.body.pos.x,
+                    self.me.body.pos.y,
+                    self.me.body.pos.z,
                     self.clock.fps,
                     self.clock.frame_times.back().copied().unwrap_or(0.0),
                     self.terrain.world.chunks.len(),
-                    self.renderer.chunk_count(),
-                    self.renderer.pending(),
+                    self.gfx.renderer.chunk_count(),
+                    self.gfx.renderer.pending(),
                     pages,
                     mb(bytes),
                     mb(used),
@@ -464,7 +484,7 @@ impl Game {
             }
             Cmd::Lan(args) => {
                 for line in self.testbed_lan(&args) {
-                    self.testbed.as_mut().unwrap().log(line);
+                    self.test.testbed.as_mut().unwrap().log(line);
                 }
             }
             Cmd::Quit => {
@@ -500,7 +520,7 @@ impl Game {
             "multi" => Screen::Multiplayer,
             "skin" => Screen::Skin,
             "dead" => {
-                self.death_message = "Steve fell from a high place".into();
+                self.me.vitals.death_message = "Steve fell from a high place".into();
                 Screen::Dead
             }
             "inventory" => Screen::Container(Container::Inventory),
@@ -547,7 +567,7 @@ impl Game {
         let mut bad = 0usize;
         match what {
             "zfight" => {
-                let origin = self.testbed.as_ref().unwrap().origin;
+                let origin = self.test.testbed.as_ref().unwrap().origin;
                 let c = ((origin.x / 16.0).floor() as i32, (origin.z / 16.0).floor() as i32);
                 let mut chunks = 0;
                 for dz in -radius..=radius {
@@ -582,7 +602,7 @@ impl Game {
             }
             "textures" => {
                 let layer_bytes = crate::world::textures::TILE * crate::world::textures::TILE * 4;
-                let base = &self.texture_base;
+                let base = &self.gfx.texture_base;
                 let empty = |l: u32| {
                     base.get(l as usize * layer_bytes..(l as usize + 1) * layer_bytes)
                         .is_none_or(|px| px.chunks_exact(4).all(|p| p[3] == 0))
@@ -609,11 +629,11 @@ impl Game {
                 lines.insert(0, format!("{checked} textures in use checked, {bad} empty"));
             }
             other => {
-                self.testbed.as_mut().unwrap().problems.push(format!("check: unknown `{other}`"));
+                self.test.testbed.as_mut().unwrap().problems.push(format!("check: unknown `{other}`"));
                 return;
             }
         }
-        let tb = self.testbed.as_mut().unwrap();
+        let tb = self.test.testbed.as_mut().unwrap();
         tb.log(format!("check {what}: {}", lines[0]));
         for l in lines.iter().skip(1).take(40) {
             let _ = writeln!(tb.report, "    - {l}");
@@ -625,7 +645,7 @@ impl Game {
 
     /// The script is done: writes the report and quits.
     fn testbed_finish(&mut self) {
-        let Some(tb) = self.testbed.as_ref() else { return };
+        let Some(tb) = self.test.testbed.as_ref() else { return };
         let mut md = String::new();
         let _ = writeln!(md, "# Test `{}`\n", tb.name);
         let _ = writeln!(md, "Ran {:.1} s (game time {:.1} s). Pictures and this report in `{}`.\n", tb.started.elapsed().as_secs_f32(), tb.clock, tb.dir.display());

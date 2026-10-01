@@ -18,7 +18,7 @@ impl Game {
     fn furnace_part_at(&self, hit: IVec3, prev: IVec3) -> Option<u8> {
         let b = self.terrain.world.geti(hit);
         let f = facing(b).filter(|_| is_furnace(b))?;
-        let local = self.target_point - hit.as_vec3();
+        let local = self.me.aim.target_point - hit.as_vec3();
         let normal = prev - hit;
         if normal == IVec3::Y {
             Some((local.x >= 0.5) as u8 + 2 * (local.z >= 0.5) as u8)
@@ -38,32 +38,32 @@ impl Game {
     /// (until it is let go). Returns true while mining is held off.
     pub(in crate::client) fn furnace_left_click(&mut self) -> bool {
         if !self.input.left_down {
-            self.furnace_hold = false;
+            self.me.aim.furnace_hold = false;
             return false;
         }
         if self.input.left_pressed {
-            if let Some((p, k)) = self.furnace_part {
+            if let Some((p, k)) = self.me.aim.furnace_part {
                 if self.use_furnace(p, k, true) {
-                    self.furnace_hold = true;
-                    self.mining = None;
+                    self.me.aim.furnace_hold = true;
+                    self.me.aim.mining = None;
                 }
             }
         }
-        self.furnace_hold
+        self.me.aim.furnace_hold
     }
 
     /// Finds the furnace part under the crosshair (after targeting).
     pub(in crate::client) fn aim_furnace(&mut self) {
-        self.furnace_part = self
-            .target
+        self.me.aim.furnace_part = self
+            .me.aim.target
             .and_then(|(hit, prev)| self.furnace_part_at(hit, prev).map(|k| (hit, k)));
     }
 
     /// The aimed furnace part, if the held item can go in or there is something to take or
     /// turn over.
     fn furnace_part_active(&self) -> Option<(IVec3, u8)> {
-        let (p, k) = self.furnace_part?;
-        let held = self.inventory.slots[self.hotbar_slot];
+        let (p, k) = self.me.aim.furnace_part?;
+        let held = self.me.items.held_stack();
         let empty = Furnace::default();
         let f = self.level.block_entities.furnaces.get(&p).unwrap_or(&empty);
         (f.has(k) || held.is_some_and(|h| f.accepts(k, h.item))).then_some((p, k))
@@ -93,8 +93,8 @@ impl Game {
     /// smelted first, then what is still to smelt; the fuel). Returns false when it does
     /// nothing there.
     pub(in crate::client) fn use_furnace(&mut self, p: IVec3, k: u8, take: bool) -> bool {
-        let slot = self.hotbar_slot;
-        let held = self.inventory.slots[slot];
+        let slot = self.me.items.hotbar_slot;
+        let held = self.me.items.inventory.slots[slot];
         let tier = furnace_tier(self.terrain.world.geti(p));
         let f = self.level.block_entities.furnaces.entry(p).or_default();
         f.tier = tier;
@@ -109,7 +109,7 @@ impl Game {
         }
         let r = f.use_part(k, held, take);
         if r.used > 0 && !self.creative() {
-            inventory::take(&mut self.inventory.slots[slot], r.used);
+            inventory::take(&mut self.me.items.inventory.slots[slot], r.used);
         }
         // The server does it for real and sends back what comes out.
         let offered = held
@@ -121,8 +121,8 @@ impl Game {
             take,
             offered,
         });
-        self.hand.swing();
-        self.action_cooldown = 0.2;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.2;
         true
     }
 
@@ -130,7 +130,7 @@ impl Game {
     /// advanced furnace roars with its bellows (looping sounds: an id, the sound, where, how
     /// loud). A furnace that just finished smelting something dings.
     pub(in crate::client) fn furnace_sounds(&mut self) -> Vec<(u64, Sound, Vec3, f32)> {
-        let near = self.player.pos;
+        let near = self.me.body.pos;
         let mut loops = Vec::new();
         let mut dings = Vec::new();
         for (p, f) in &self.level.block_entities.furnaces {
@@ -193,7 +193,7 @@ impl Game {
                 }
             }
         }
-        let near = self.player.pos;
+        let near = self.me.body.pos;
         let mut puffs = Vec::new();
         let mut sparks = Vec::new();
         let mut fires = Vec::new();
@@ -223,7 +223,7 @@ impl Game {
                 _ => {}
             }
             // The resource pack's flame particles burn in the firebox, like on its torches.
-            if let (true, Some(fac)) = (self.torch_particles, facing(b)) {
+            if let (true, Some(fac)) = (self.gfx.torch_particles, facing(b)) {
                 // Bigger with more fuel: embers, a fire, a blaze.
                 let n = match f.fuel.map_or(0, |s| s.count) {
                     0 => 1,
@@ -261,9 +261,9 @@ impl Game {
                     let k = self.random();
                     let at = crate::entity::block_entity::furnace_flame_spot(p, fac, k);
                     if self.random() < 0.75 {
-                        self.particles.fire(at);
+                        self.level.particles.fire(at);
                     } else {
-                        self.particles.flame(at + Vec3::Y * 0.08);
+                        self.level.particles.flame(at + Vec3::Y * 0.08);
                     }
                 }
                 due -= 1.0;
@@ -275,13 +275,13 @@ impl Game {
                 let w = &self.terrain.world;
                 let (sky, blk) = (w.sky_estimate(top), w.block_light_estimate(top));
                 let gray = 60 + (self.random() * 50.0) as u8;
-                self.particles.smoke_shaded(top + jitter, gray, sky, blk);
+                self.level.particles.smoke_shaded(top + jitter, gray, sky, blk);
             }
         }
         for (mouth, right) in sparks {
             if self.random() < dt * 2.5 {
                 let x = (self.random() - 0.5) * 0.3;
-                self.particles.flame(mouth + right * x);
+                self.level.particles.flame(mouth + right * x);
             }
         }
         for (pos, rate, gray) in puffs {
@@ -289,7 +289,7 @@ impl Game {
                 let jitter = Vec3::new(self.random() - 0.5, 0.0, self.random() - 0.5) * 0.25;
                 let w = &self.terrain.world;
                 let (sky, blk) = (w.sky_estimate(pos), w.block_light_estimate(pos));
-                self.particles.smoke_shaded(pos + jitter, gray, sky, blk);
+                self.level.particles.smoke_shaded(pos + jitter, gray, sky, blk);
             }
         }
     }

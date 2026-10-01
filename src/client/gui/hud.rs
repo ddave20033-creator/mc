@@ -8,6 +8,28 @@ pub(in crate::client) const FRAME_GRAPH: usize = 240;
 /// How far away a dummy's damage can be read (blocks).
 const DUMMY_TAG_RANGE: f32 = 40.0;
 
+/// What the HUD keeps between frames.
+#[derive(Default)]
+pub(in crate::client) struct Hud {
+    /// F1: hide the HUD and the hand (for screenshots), like Minecraft.
+    pub(in crate::client) hide: bool,
+    /// F3: the debug and performance screens.
+    pub(in crate::client) debug: bool,
+    /// Drawn position of the hotbar highlight; glides toward the selected slot.
+    pub(in crate::client) hotbar_anim: f32,
+    /// How long the selected item's name still shows, and the hints at the start.
+    pub(in crate::client) slot_name_timer: f32,
+    pub(in crate::client) hint_timer: f32,
+}
+
+impl Hud {
+    /// The frame's part of the timers.
+    pub(in crate::client) fn tick(&mut self, dt: f32) {
+        self.slot_name_timer -= dt;
+        self.hint_timer -= dt;
+    }
+}
+
 /// Damage as it is shown: whole numbers without a fraction, the rest to a tenth.
 fn damage_text(v: f32) -> String {
     if (v - v.round()).abs() < 0.05 {
@@ -24,7 +46,7 @@ impl Game {
         use crate::content::mobs::target_dummy::DUMMY_RESET;
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let cam = self.eye();
-        let focal = 1.0 / (self.fov_current.to_radians() * 0.5).tan();
+        let focal = 1.0 / (self.me.look.fov.to_radians() * 0.5).tan();
         let tags: Vec<(Vec3, f32, f32, f32)> = self
             .level.mobs
             .iter()
@@ -37,7 +59,7 @@ impl Game {
             if dist > DUMMY_TAG_RANGE || !self.line_of_sight(cam, top) {
                 continue;
             }
-            let clip = self.view_proj * top.extend(1.0);
+            let clip = self.me.look.view_proj * top.extend(1.0);
             if clip.w < 0.1 {
                 continue;
             }
@@ -264,7 +286,7 @@ impl Game {
         let s = self.ui.s;
         let size = 18.0 * s;
         let mut x = self.ui.w - size - 4.0 * s;
-        for e in self.needs.effects() {
+        for e in self.me.vitals.needs.effects() {
             let y = 4.0 * s;
             self.ui
                 .rect(x, y, size, size, rgba(14, 16, 22, 185), 2.0 * s);
@@ -293,7 +315,7 @@ impl Game {
             x = (panel_x - w - 6.0 * s).max(0.0);
         }
         let mut y = panel_y;
-        for e in self.needs.effects() {
+        for e in self.me.vitals.needs.effects() {
             let color = Self::effect_color(e.kind);
             self.ui.rect(x, y, w, h, rgba(14, 16, 22, 215), 3.0 * s);
             Self::progress_frame(
@@ -362,8 +384,8 @@ impl Game {
             if in_lava {
                 ui.solid(0.0, 0.0, w, h, rgba(255, 90, 10, 150));
             }
-            if self.fire > 0.0 && !creative {
-                let flicker = 0.8 + 0.2 * (self.time * 17.0).sin();
+            if self.me.vitals.fire > 0.0 && !creative {
+                let flicker = 0.8 + 0.2 * (self.clock.time * 17.0).sin();
                 ui.gradient(
                     0.0,
                     h * 0.55,
@@ -373,16 +395,16 @@ impl Game {
                     rgba(255, 90, 10, (150.0 * flicker) as u8),
                 );
             }
-            if self.hurt_time > 0.0 {
-                ui.vignette(rgba(200, 0, 0, (self.hurt_time / 0.4 * 200.0) as u8));
+            if self.me.vitals.hurt_time > 0.0 {
+                ui.vignette(rgba(200, 0, 0, (self.me.vitals.hurt_time / 0.4 * 200.0) as u8));
             }
             // In bed the view slowly darkens (Minecraft fades it over the 5 seconds).
-            if let Some(sl) = self.sleep {
+            if let Some(sl) = self.me.vitals.sleep {
                 let k = (sl.time / 5.0).min(1.0);
                 ui.solid(0.0, 0.0, w, h, rgba(8, 10, 24, (k * 190.0) as u8));
             }
         }
-        if self.sleep.is_some() && matches!(self.screen, Screen::Playing | Screen::Chat) {
+        if self.me.vitals.sleep.is_some() && matches!(self.screen, Screen::Playing | Screen::Chat) {
             let status = self.sleep_status();
             let ui = &mut self.ui;
             let mut y = h * 0.62;
@@ -393,7 +415,7 @@ impl Game {
             ui.text_centered(t("bed.leave"), w * 0.5, y, s, rgba(200, 200, 200, 255), true);
         }
         // F1 hides the rest while playing (menus and the open chat still show).
-        if self.hide_hud && self.screen == Screen::Playing {
+        if self.hud.hide && self.screen == Screen::Playing {
             return;
         }
         let gun = self.holding_gun();
@@ -402,7 +424,7 @@ impl Game {
 
             // Crosshair (a gun draws its own)
             if self.screen == Screen::Playing
-                && self.camera.mode != 2
+                && self.me.look.camera.mode != 2
                 && !gun
             {
                 let center = Vec2::new((w * 0.5).round(), (h * 0.5).round());
@@ -413,7 +435,7 @@ impl Game {
         }
 
         if matches!(self.screen, Screen::Playing | Screen::Chat)
-            && self.sleep.is_none()
+            && self.me.vitals.sleep.is_none()
             && !self.spectator()
         {
             self.draw_gun_hud();
@@ -421,7 +443,7 @@ impl Game {
         }
 
         // Names of the other LAN players.
-        if self.in_world_view() && self.camera.mode != 2 {
+        if self.in_world_view() && self.me.look.camera.mode != 2 {
             self.draw_name_tags();
         }
         // The damage the target dummies have taken, over their heads.
@@ -486,13 +508,13 @@ impl Game {
                 ui.rect(sx, sy, slot, slot, rgba(255, 255, 255, 16), 3.0 * s);
             }
             // The highlight glides to the selected slot, like the creative list scrolls.
-            let target = self.hotbar_slot as f32;
+            let target = self.me.items.hotbar_slot as f32;
             let ease = crate::util::damp(18.0, ui.dt);
-            self.hotbar_anim += (target - self.hotbar_anim) * ease;
-            if (target - self.hotbar_anim).abs() < 0.002 {
-                self.hotbar_anim = target;
+            self.hud.hotbar_anim += (target - self.hud.hotbar_anim) * ease;
+            if (target - self.hud.hotbar_anim).abs() < 0.002 {
+                self.hud.hotbar_anim = target;
             }
-            let hx = (x0 + pad + self.hotbar_anim * (slot + gap)).round();
+            let hx = (x0 + pad + self.hud.hotbar_anim * (slot + gap)).round();
             ui.rect(
                 hx - s,
                 sy - s,
@@ -504,7 +526,7 @@ impl Game {
             ui.rect(hx, sy, slot, slot, rgba(40, 44, 54, 240), 3.0 * s);
             for i in 0..9 {
                 let sx = (x0 + pad + i as f32 * (slot + gap)).round();
-                if let Some(st) = self.inventory.slots[i] {
+                if let Some(st) = self.me.items.inventory.slots[i] {
                     gui::draw_stack(ui, sx + 2.0 * s, sy + 2.0 * s, 16.0 * s, &st);
                 }
             }
@@ -513,9 +535,9 @@ impl Game {
         // Hearts (survival only)
         let hearts_y = (y0 - 11.0 * s).round();
         if show_bars && !creative {
-            let flash = self.hurt_time > 0.0 && ((self.hurt_time * 12.0) as i32) % 2 == 0;
+            let flash = self.me.vitals.hurt_time > 0.0 && ((self.me.vitals.hurt_time * 12.0) as i32) % 2 == 0;
             for i in 0..10 {
-                let hp = self.health - i as f32 * 2.0;
+                let hp = self.me.vitals.health - i as f32 * 2.0;
                 let fill = if hp >= 2.0 {
                     2
                 } else if hp >= 1.0 {
@@ -524,11 +546,11 @@ impl Game {
                     0
                 };
                 let mut y = hearts_y;
-                if self.health <= 4.0 {
-                    let jitter = ((self.time * 20.0) as i32 * 7 + i * 13) % 3 - 1;
+                if self.me.vitals.health <= 4.0 {
+                    let jitter = ((self.clock.time * 20.0) as i32 * 7 + i * 13) % 3 - 1;
                     y += jitter as f32 * s;
                 }
-                let poison = self.needs.poison > 0.0;
+                let poison = self.me.vitals.needs.poison > 0.0;
                 Self::draw_heart(
                     &mut self.ui,
                     x0 + i as f32 * 8.0 * s,
@@ -558,12 +580,12 @@ impl Game {
                 // Shake when nearly empty.
                 let jitter = |v: f32| {
                     if v <= 6.0 {
-                        (((self.time * 20.0) as i32 * 5 + i * 11) % 3 - 1) as f32 * s * 0.5
+                        (((self.clock.time * 20.0) as i32 * 5 + i * 11) % 3 - 1) as f32 * s * 0.5
                     } else {
                         0.0
                     }
                 };
-                let (food, thirst) = (self.needs.food, self.needs.thirst);
+                let (food, thirst) = (self.me.vitals.needs.food, self.me.vitals.needs.thirst);
                 Self::draw_food(&mut self.ui, x, hearts_y + jitter(food), s, fill(food, i));
                 Self::draw_drop(
                     &mut self.ui,
@@ -573,8 +595,8 @@ impl Game {
                     fill(thirst, i),
                 );
             }
-            if self.air < MAX_AIR {
-                let bubbles = (self.air / MAX_AIR * 10.0).ceil() as i32;
+            if self.me.vitals.air < MAX_AIR {
+                let bubbles = (self.me.vitals.air / MAX_AIR * 10.0).ceil() as i32;
                 for i in 0..bubbles {
                     let x = right - (i + 1) as f32 * 8.0 * s;
                     Self::draw_bubble(&mut self.ui, x, thirst_y - 10.0 * s, s);
@@ -584,8 +606,8 @@ impl Game {
 
         let held = self.held();
         let ui = &mut self.ui;
-        if self.slot_name_timer > 0.0 && playing && held != NONE && !spectator {
-            let a = self.slot_name_timer.min(0.5) / 0.5;
+        if self.hud.slot_name_timer > 0.0 && playing && held != NONE && !spectator {
+            let a = self.hud.slot_name_timer.min(0.5) / 0.5;
             let name_y = if creative {
                 y0 - 14.0 * s
             } else {
@@ -601,8 +623,8 @@ impl Game {
             );
         }
 
-        if self.hint_timer > 0.0 && self.screen == Screen::Playing {
-            let a = self.hint_timer.min(1.0);
+        if self.hud.hint_timer > 0.0 && self.screen == Screen::Playing {
+            let a = self.hud.hint_timer.min(1.0);
             let text = t("hud.hint");
             let fs = (s - 1.0).max(1.0);
             let tw = ui.text_width(text, fs);
@@ -626,12 +648,12 @@ impl Game {
             );
         }
 
-        self.chat.draw(ui, self.time, self.screen == Screen::Chat);
+        self.chat.draw(ui, self.clock.time, self.screen == Screen::Chat);
 
         let fs = (s - 1.0).max(1.0);
-        if self.show_debug {
-            let p = self.player.pos;
-            let deg = self.yaw.to_degrees().rem_euclid(360.0);
+        if self.hud.debug {
+            let p = self.me.body.pos;
+            let deg = self.me.look.yaw.to_degrees().rem_euclid(360.0);
             let facing = match ((deg + 45.0) / 90.0) as i32 % 4 {
                 0 => "east (+X)",
                 1 => "south (+Z)",
@@ -640,7 +662,7 @@ impl Game {
             };
             let world = &self.terrain.world;
             let target = self
-                .target
+                .me.aim.target
                 .map(|(t, _)| {
                     format!(
                         "Looking at: {} ({}, {}, {})",
@@ -656,16 +678,16 @@ impl Game {
                 .gen
                 .column(p.x.floor() as i32, p.z.floor() as i32)
                 .biome;
-            let hours = (self.time_of_day * 24.0 + 6.0) % 24.0;
+            let hours = (self.level.time_of_day * 24.0 + 6.0) % 24.0;
             let lines = [
                 crate::ui::VERSION.to_string(),
                 format!("{:.0} fps", self.clock.fps),
-                format!("GPU: {}", self.gpu.device_name),
+                format!("GPU: {}", self.gfx.gpu.device_name),
                 format!(
                     "Chunks: {} drawn / {} loaded, {} pending",
-                    self.renderer.drawn_chunks,
-                    self.renderer.chunk_count(),
-                    self.renderer.pending()
+                    self.gfx.renderer.drawn_chunks,
+                    self.gfx.renderer.chunk_count(),
+                    self.gfx.renderer.pending()
                 ),
                 format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
                 format!("Facing: {facing}"),
@@ -674,14 +696,14 @@ impl Game {
                     "Time: {:02}:{:02} ({} ticks)",
                     hours as i32,
                     ((hours.fract()) * 60.0) as i32,
-                    (self.time_of_day * 24000.0) as i32
+                    (self.level.time_of_day * 24000.0) as i32
                 ),
                 target,
                 format!(
                     "Mode: {:?}{}  HP: {:.0}/20  Items: {}",
-                    self.game_mode,
-                    if self.player.flying { " (flying)" } else { "" },
-                    self.health,
+                    self.me.mode,
+                    if self.me.body.flying { " (flying)" } else { "" },
+                    self.me.vitals.health,
                     self.level.items.len()
                 ),
             ];
@@ -729,7 +751,7 @@ impl Game {
                 "CPU ms: update {:.1} / build {:.1} / submit {:.1}, wait {:.1}",
                 self.clock.cpu_ms[0], self.clock.cpu_ms[1], self.clock.cpu_ms[2], self.clock.cpu_ms[3]
             ),
-            match self.renderer.gpu_ms {
+            match self.gfx.renderer.gpu_ms {
                 Some([sh, wo, ui]) => {
                     format!("GPU ms: shadows {sh:.1} / world {wo:.1} / UI {ui:.1}")
                 }
@@ -748,7 +770,7 @@ impl Game {
                 gb(st.ram_total)
             ),
             String::new(),
-            format!("GPU: {}", self.gpu.device_name),
+            format!("GPU: {}", self.gfx.gpu.device_name),
             format!(
                 "GPU use: {} game / {} total",
                 pct(st.gpu_game),

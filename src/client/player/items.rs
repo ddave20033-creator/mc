@@ -1,26 +1,72 @@
-//! Using items: throwing, placing blocks, buckets, bottles, eating and drinking, and opening
-//! containers.
+//! What the player carries (`Items`), and using items: throwing, placing blocks, buckets,
+//! bottles, eating and drinking, and opening containers.
 
 use crate::client::*;
 use crate::entity::player::raycast_fluid;
 use crate::item::inventory::take;
 use crate::item::*;
+
+/// The inventory and the hotbar, and what is in the hands at the item screens: on the mouse,
+/// in the crafting grid and made by it.
+pub(in crate::client) struct Items {
+    pub(in crate::client) inventory: Inventory,
+    pub(in crate::client) hotbar_slot: usize,
+    /// On the mouse at an item screen.
+    pub(in crate::client) cursor: Slot,
+    /// The crafting grid in use: the inventory's 2x2 or an open table's 3x3 (stored back into
+    /// the table when it closes, `stash_table`).
+    pub(in crate::client) craft: [Slot; 9],
+    /// What was crafted at the open table, lying in the middle of its grid until taken.
+    pub(in crate::client) craft_out: Slot,
+    /// The ingredients sliding into the middle of the table: seconds since, and the grid as
+    /// it was.
+    pub(in crate::client) craft_fx: Option<(f32, [Slot; 9])>,
+}
+
+impl Items {
+    pub(in crate::client) fn new() -> Self {
+        Self {
+            inventory: Inventory::new(),
+            hotbar_slot: 0,
+            cursor: None,
+            craft: [None; 9],
+            craft_out: None,
+            craft_fx: None,
+        }
+    }
+
+    /// The stack in the selected hotbar slot.
+    pub(in crate::client) fn held_stack(&self) -> Slot {
+        self.inventory.slots[self.hotbar_slot]
+    }
+
+    /// The selected hotbar slot, to change what is in it.
+    pub(in crate::client) fn held_slot_mut(&mut self) -> &mut Slot {
+        &mut self.inventory.slots[self.hotbar_slot]
+    }
+
+    /// The item in the selected hotbar slot.
+    pub(in crate::client) fn held(&self) -> ItemId {
+        self.held_stack().map_or(NONE, |s| s.item)
+    }
+}
+
 impl Game {
     /// Q: throw the held item (Ctrl+Q: the whole stack).
     pub(in crate::client) fn drop_held(&mut self, all: bool) {
-        let slot = self.hotbar_slot;
-        let Some(s) = self.inventory.slots[slot] else {
+        let slot = self.me.items.hotbar_slot;
+        let Some(s) = self.me.items.inventory.slots[slot] else {
             return;
         };
         let n = if all { s.count } else { 1 };
-        take(&mut self.inventory.slots[slot], n);
+        take(&mut self.me.items.inventory.slots[slot], n);
         self.throw(Stack { count: n, ..s });
-        self.hand.swing();
+        self.me.hand.swing();
     }
 
     /// Throws a stack in the look direction.
     pub(in crate::client) fn throw(&mut self, stack: Stack) {
-        let dir = look_dir(self.yaw, self.pitch);
+        let dir = self.me.look.dir();
         let pos = self.eye() - Vec3::Y * 0.3 + dir * 0.3;
         self.add_item(ItemEntity::new(pos, dir * 6.0 + Vec3::Y * 1.5, stack, 1.5));
     }
@@ -28,7 +74,7 @@ impl Game {
     /// Into the selected hotbar slot if it is empty (a filled bottle or bucket replacing the
     /// used one), otherwise into the inventory.
     pub(in crate::client) fn put_in_hand(&mut self, stack: Stack) {
-        let slot = &mut self.inventory.slots[self.hotbar_slot];
+        let slot = self.me.items.held_slot_mut();
         if slot.is_none() {
             *slot = Some(stack);
         } else {
@@ -38,7 +84,7 @@ impl Game {
 
     /// The mob the crosshair is on, as an index into `mobs` (if it is still there).
     pub(in crate::client) fn target_mob(&self) -> Option<usize> {
-        let id = self.mob_target?;
+        let id = self.me.aim.mob_target?;
         self.level.mobs.iter().position(|m| m.id == id)
     }
 
@@ -46,11 +92,11 @@ impl Game {
     /// (an open crafting table keeps its own grid).
     pub(in crate::client) fn carried_slots(&self) -> [Slot; crate::item::inventory::SIZE] {
         let at_table = matches!(self.screen, Screen::Container(Container::Crafting(_)));
-        let mut slots = self.inventory.slots;
-        let grid = if at_table { &[][..] } else { &self.craft[..] };
+        let mut slots = self.me.items.inventory.slots;
+        let grid = if at_table { &[][..] } else { &self.me.items.craft[..] };
         // A magazine on its way into a gun (a reload going on) is still the player's.
-        let reloading = self.guns.reload.is_some() && !self.creative();
-        let held = [self.cursor, self.craft_out, self.guns.plan.new_mag.filter(|_| reloading)];
+        let reloading = self.tools.guns.reload.is_some() && !self.creative();
+        let held = [self.me.items.cursor, self.me.items.craft_out, self.tools.guns.plan.new_mag.filter(|_| reloading)];
         for s in grid.iter().chain(held.iter()).flatten() {
             let _ = inventory::add_to(&mut slots, *s);
         }
@@ -59,7 +105,7 @@ impl Game {
 
     /// Puts a stack into the inventory; drops what does not fit.
     pub(in crate::client) fn give(&mut self, stack: Stack) {
-        if let Some(left) = self.inventory.add(stack) {
+        if let Some(left) = self.me.items.inventory.add(stack) {
             self.throw(left);
         }
     }
@@ -78,14 +124,14 @@ impl Game {
             OnUse::Aim | OnUse::Throw | OnUse::Nothing => return,
             // A fishing rod casts by holding the button (`update_fishing`), unless there is
             // something to open.
-            OnUse::Cast if !self.opens_target() || self.fishing.line.is_some() => return,
+            OnUse::Cast if !self.opens_target() || self.tools.fishing.line.is_some() => return,
             // Armor in hand: put it on (swapping with what is worn).
             OnUse::Wear => {
                 if let (true, Some((piece, _))) = (self.input.right_pressed, armor_of(held)) {
-                    let slot = self.hotbar_slot;
-                    std::mem::swap(&mut self.inventory.slots[slot], &mut self.inventory.armor[piece]);
+                    let slot = self.me.items.hotbar_slot;
+                    std::mem::swap(&mut self.me.items.inventory.slots[slot], &mut self.me.items.inventory.armor[piece]);
                     self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
-                    self.hand.swing();
+                    self.me.hand.swing();
                 }
                 return;
             }
@@ -97,7 +143,7 @@ impl Game {
                 return;
             }
         }
-        if let Some((hit, _)) = self.target {
+        if let Some((hit, _)) = self.me.aim.target {
             let hb = self.terrain.world.geti(hit);
             // Opening things (tables, chests, doors, beds...) takes a fresh click: holding the
             // button (blocking with a sword, placing blocks) and looking at one does nothing.
@@ -105,7 +151,7 @@ impl Game {
                 return;
             }
             // Furnaces have no screen: meat goes on top, the rest into the front.
-            if let Some((p, k)) = self.furnace_part.filter(|(p, _)| *p == hit) {
+            if let Some((p, k)) = self.me.aim.furnace_part.filter(|(p, _)| *p == hit) {
                 if self.input.right_pressed && self.use_furnace(p, k, false) {
                     return;
                 }
@@ -113,7 +159,7 @@ impl Game {
             if !sneaking {
                 if hb == CRAFTING_TABLE {
                     // Whatever was left on the table is still there.
-                    self.craft = self
+                    self.me.items.craft = self
                         .level.block_entities
                         .tables
                         .get(&hit)
@@ -129,13 +175,13 @@ impl Game {
                 if hb == GUN_STATION {
                     // An old one-block station: it becomes the two-block one (reaching to the
                     // right, facing the player) where there is room, and opens.
-                    let d = look_dir(self.yaw, 0.0);
+                    let d = look_dir(self.me.look.yaw, 0.0);
                     let facing = (facing_of(d.x, d.z) + 2) & 3;
                     let w = &self.terrain.world;
                     let right = hit + chest_right(facing);
                     let front = facing_dir(facing);
                     let room = is_replaceable(w.geti(right))
-                        && !self.player.intersects(right)
+                        && !self.me.body.intersects(right)
                         && !is_solid(w.geti(hit + front))
                         && !is_solid(w.geti(right + front));
                     if room {
@@ -185,20 +231,20 @@ impl Game {
 
     /// Glass bottle on water: fills it (lake water, not safe to drink until boiled).
     pub(in crate::client) fn fill_bottle(&mut self) {
-        let dir = look_dir(self.yaw, self.pitch);
+        let dir = self.me.look.dir();
         let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.eye(), dir, 5.0) else {
             return;
         };
         if !is_water(self.terrain.world.geti(hit)) {
             return;
         }
-        let slot = self.hotbar_slot;
+        let slot = self.me.items.hotbar_slot;
         if !self.creative() {
-            take(&mut self.inventory.slots[slot], 1);
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
         self.put_in_hand(Stack::one(WATER_BOTTLE));
-        self.hand.swing();
-        self.action_cooldown = 0.25;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.25;
     }
 
     /// Holding the right mouse button with food or drink: eat or drink it in 1.6 seconds
@@ -213,18 +259,18 @@ impl Game {
             && self.input.right_down
             && !self.creative()
             && !at_container
-            && c.as_ref().is_some_and(|c| self.needs.wants(c));
+            && c.as_ref().is_some_and(|c| self.me.vitals.needs.wants(c));
         let Some(c) = c.filter(|_| ok) else {
-            self.using = None;
-            self.hand.eating = None;
+            self.me.aim.using = None;
+            self.me.hand.eating = None;
             return;
         };
-        let before = match self.using {
+        let before = match self.me.aim.using {
             Some((item, t)) if item == held => t,
             _ => 0.0,
         };
         let now = before + dt;
-        let mouth = self.eye() + look_dir(self.yaw, self.pitch) * 0.35 - Vec3::Y * 0.15;
+        let mouth = self.eye() + self.me.look.dir() * 0.35 - Vec3::Y * 0.15;
         if !c.drink && now > 0.35 && (now / 0.2).floor() != (before / 0.2).floor() {
             // Bits of food fly off every 4 ticks, like Minecraft's eating particles.
             if let Icon::Flat(layer) = icon(held) {
@@ -232,20 +278,20 @@ impl Game {
                     self.terrain.world.sky_estimate(mouth),
                     self.terrain.world.block_light_estimate(mouth),
                 );
-                self.particles.crumbs(mouth, layer, 5, sky, blk);
+                self.level.particles.crumbs(mouth, layer, 5, sky, blk);
             }
         }
         if now < USE_TIME {
-            self.using = Some((held, now));
-            self.hand.eating = Some(now);
+            self.me.aim.using = Some((held, now));
+            self.me.hand.eating = Some(now);
             return;
         }
         // Done: restore food/thirst, use up the item, the bottle comes back empty.
-        self.using = None;
-        self.hand.eating = None;
-        self.needs.consume(&c);
-        let slot = self.hotbar_slot;
-        take(&mut self.inventory.slots[slot], 1);
+        self.me.aim.using = None;
+        self.me.hand.eating = None;
+        self.me.vitals.needs.consume(&c);
+        let slot = self.me.items.hotbar_slot;
+        take(&mut self.me.items.inventory.slots[slot], 1);
         if c.drink {
             self.put_in_hand(Stack::one(GLASS_BOTTLE));
         }
@@ -254,17 +300,17 @@ impl Game {
             // view sways for longer).
             use crate::entity::survival::EffectKind;
             if s.poison > 0.0 {
-                self.needs.add_effect(EffectKind::Poison, s.poison);
+                self.me.vitals.needs.add_effect(EffectKind::Poison, s.poison);
             }
             if s.nausea > 0.0 {
-                self.needs.add_effect(EffectKind::Nausea, s.nausea);
+                self.me.vitals.needs.add_effect(EffectKind::Nausea, s.nausea);
             }
         }
-        self.slot_name_timer = 0.0;
+        self.hud.slot_name_timer = 0.0;
     }
 
     pub(in crate::client) fn fill_bucket(&mut self) {
-        let dir = look_dir(self.yaw, self.pitch);
+        let dir = self.me.look.dir();
         let Some((hit, _)) = raycast_fluid(&self.terrain.world, self.eye(), dir, 5.0) else {
             return;
         };
@@ -278,24 +324,24 @@ impl Game {
             LAVA_BUCKET
         };
         self.edit_block(hit, AIR);
-        let slot = self.hotbar_slot;
+        let slot = self.me.items.hotbar_slot;
         if !self.creative() {
-            take(&mut self.inventory.slots[slot], 1);
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
         // Creative only takes one filled bucket unless the empty one was used up.
-        if self.inventory.slots[slot].is_none()
+        if self.me.items.inventory.slots[slot].is_none()
             || !self.creative()
-            || self.inventory.count(filled) == 0
+            || self.me.items.inventory.count(filled) == 0
         {
             self.put_in_hand(Stack::one(filled));
         }
-        self.hand.swing();
-        self.action_cooldown = 0.25;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.25;
     }
 
     /// A full bucket poured out: its fluid where it points.
     pub(in crate::client) fn empty_bucket(&mut self, fluid: Block) {
-        let Some((hit, prev)) = self.target else {
+        let Some((hit, prev)) = self.me.aim.target else {
             return;
         };
         let w = &self.terrain.world;
@@ -309,14 +355,14 @@ impl Game {
         }
         self.edit_block(at, fluid);
         if !self.creative() {
-            self.inventory.slots[self.hotbar_slot] = Some(Stack::one(BUCKET));
+            *self.me.items.held_slot_mut() = Some(Stack::one(BUCKET));
         }
-        self.hand.swing();
-        self.action_cooldown = 0.25;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.25;
     }
 
     pub(in crate::client) fn place_block(&mut self, held: ItemId) {
-        let Some((hit, prev)) = self.target else {
+        let Some((hit, prev)) = self.me.aim.target else {
             return;
         };
         let Some(base) = block_of(held) else { return };
@@ -327,7 +373,7 @@ impl Game {
             return;
         }
         // Directional blocks face the player; stairs and doors take the look direction.
-        let d = look_dir(self.yaw, 0.0);
+        let d = look_dir(self.me.look.yaw, 0.0);
         let look = facing_of(d.x, d.z);
         let facing = (look + 2) & 3;
         // The face of the clicked block the new one goes against (outward).
@@ -368,7 +414,7 @@ impl Game {
             Place::Facing => base + facing as Block,
             Place::Stairs => {
                 // Upside down against the underside of a block or the top half of a side.
-                let upper = self.target_point.y - at.y as f32 > 0.5;
+                let upper = self.me.aim.target_point.y - at.y as f32 > 0.5;
                 let upside_down = normal == IVec3::NEG_Y || (normal.y == 0 && upper);
                 stairs_id(look, upside_down)
             }
@@ -396,7 +442,7 @@ impl Game {
             }
             Place::Plain => base,
         };
-        if is_solid(b) && (self.player.intersects(at) || self.drawer_room(at)) {
+        if is_solid(b) && (self.me.body.intersects(at) || self.drawer_room(at)) {
             return;
         }
         if needs_support(b) && !crate::sim::rules::supported(w, at, b) {
@@ -404,11 +450,11 @@ impl Game {
         }
         self.edit_block(at, b);
         if !self.creative() {
-            let slot = self.hotbar_slot;
-            take(&mut self.inventory.slots[slot], 1);
+            let slot = self.me.items.hotbar_slot;
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
-        self.hand.swing();
-        self.action_cooldown = 0.2;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.2;
     }
 
     /// A blast furnace (with its chimney) or an advanced furnace (two wide, two tall), its
@@ -418,7 +464,7 @@ impl Game {
         let w = &self.terrain.world;
         let room = cells.iter().all(|&(o, _)| {
             let q = at + o;
-            q.y < HEIGHT as i32 && is_replaceable(w.geti(q)) && !self.player.intersects(q) && !self.drawer_room(q)
+            q.y < HEIGHT as i32 && is_replaceable(w.geti(q)) && !self.me.body.intersects(q) && !self.drawer_room(q)
         });
         if !room {
             return;
@@ -428,11 +474,11 @@ impl Game {
             self.edit_block(at + o, b);
         }
         if !self.creative() {
-            let slot = self.hotbar_slot;
-            take(&mut self.inventory.slots[slot], 1);
+            let slot = self.me.items.hotbar_slot;
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
-        self.hand.swing();
-        self.action_cooldown = 0.2;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.2;
     }
 
     /// A gun station, two blocks wide (a rifle station three): its left block at `at`, the
@@ -444,7 +490,7 @@ impl Game {
         let cells = bench_cells(at, main);
         let front = facing_dir(facing);
         let room = cells.iter().all(|&q| {
-            is_replaceable(w.geti(q)) && !self.player.intersects(q) && !self.drawer_room(q) && !is_solid(w.geti(q + front))
+            is_replaceable(w.geti(q)) && !self.me.body.intersects(q) && !self.drawer_room(q) && !is_solid(w.geti(q + front))
         });
         if !room {
             return;
@@ -458,11 +504,11 @@ impl Game {
             self.edit_block(q, b);
         }
         if !self.creative() {
-            let slot = self.hotbar_slot;
-            take(&mut self.inventory.slots[slot], 1);
+            let slot = self.me.items.hotbar_slot;
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
-        self.hand.swing();
-        self.action_cooldown = 0.2;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.2;
     }
 
     /// Whether `q` is in front of a gun station, where its drawer slides out (nothing solid
@@ -486,8 +532,8 @@ impl Game {
             || !is_replaceable(w.geti(top))
             || !is_solid(below)
             || is_door(below)
-            || self.player.intersects(at)
-            || self.player.intersects(top)
+            || self.me.body.intersects(at)
+            || self.me.body.intersects(top)
             || self.drawer_room(at)
             || self.drawer_room(top)
         {
@@ -497,11 +543,11 @@ impl Game {
         self.edit_block(at, door_id(facing, false, false, hinge_right));
         self.edit_block(top, door_id(facing, false, true, hinge_right));
         if !self.creative() {
-            let slot = self.hotbar_slot;
-            take(&mut self.inventory.slots[slot], 1);
+            let slot = self.me.items.hotbar_slot;
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
-        self.hand.swing();
-        self.action_cooldown = 0.2;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.2;
     }
 
     /// A bed: the foot half at `at` and the head half one block further the way the player
@@ -512,8 +558,8 @@ impl Game {
         if !is_replaceable(w.geti(head))
             || !is_solid(w.geti(at - IVec3::Y))
             || !is_solid(w.geti(head - IVec3::Y))
-            || self.player.intersects(at)
-            || self.player.intersects(head)
+            || self.me.body.intersects(at)
+            || self.me.body.intersects(head)
             || self.drawer_room(at)
             || self.drawer_room(head)
         {
@@ -522,11 +568,11 @@ impl Game {
         self.edit_block(at, bed_id(facing, false));
         self.edit_block(head, bed_id(facing, true));
         if !self.creative() {
-            let slot = self.hotbar_slot;
-            take(&mut self.inventory.slots[slot], 1);
+            let slot = self.me.items.hotbar_slot;
+            take(&mut self.me.items.inventory.slots[slot], 1);
         }
-        self.hand.swing();
-        self.action_cooldown = 0.2;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.2;
     }
 
     /// Minecraft's door hinge: next to another door it makes a double door, otherwise the
@@ -555,8 +601,8 @@ impl Game {
         }
         let d = facing_dir(facing);
         let (dx, dz) = (
-            self.target_point.x - at.x as f32,
-            self.target_point.z - at.z as f32,
+            self.me.aim.target_point.x - at.x as f32,
+            self.me.aim.target_point.z - at.z as f32,
         );
         let left_hinge = (d.x >= 0 || dz >= 0.5)
             && (d.x <= 0 || dz <= 0.5)
@@ -588,7 +634,7 @@ impl Game {
         let open = !door_open(b);
         let c = door_closed_side(b);
         let center = p.as_vec3() + Vec3::splat(0.5);
-        let from_closed_side = (self.player.pos - center).dot(c.as_vec3()) > 0.0;
+        let from_closed_side = (self.me.body.pos - center).dot(c.as_vec3()) > 0.0;
         let room = cells.iter().all(|&q| {
             let n = w.geti(q + c);
             !is_solid(n) || is_door(n)
@@ -603,7 +649,7 @@ impl Game {
         for (q, nb) in changes {
             self.edit_block(q, nb);
         }
-        self.hand.swing();
-        self.action_cooldown = 0.25;
+        self.me.hand.swing();
+        self.me.aim.action_cooldown = 0.25;
     }
 }

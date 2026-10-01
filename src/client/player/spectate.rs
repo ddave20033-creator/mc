@@ -8,33 +8,30 @@ use crate::lang::tf;
 impl Game {
     /// Switches this player's game mode (the /gamemode command).
     pub(in crate::client) fn set_game_mode(&mut self, mode: GameMode) {
-        let was = self.game_mode;
-        self.game_mode = mode;
-        self.spectating = None;
+        let was = self.me.mode;
+        self.me.mode = mode;
+        self.session.spectating = None;
         match mode {
             GameMode::Survival => {
-                self.player.flying = false;
-                self.player.noclip = false;
+                self.me.body.flying = false;
+                self.me.body.noclip = false;
             }
             GameMode::Creative => {
-                self.fire = 0.0;
-                self.player.noclip = false;
+                self.me.vitals.fire = 0.0;
+                self.me.body.noclip = false;
                 // Out of spectator mode in the air: keep flying instead of falling.
-                self.player.flying |= was == GameMode::Spectator;
+                self.me.body.flying |= was == GameMode::Spectator;
             }
             GameMode::Spectator => {
-                if self.sleep.is_some() {
+                if self.me.vitals.sleep.is_some() {
                     self.wake_up();
                 }
-                self.fire = 0.0;
-                self.air = MAX_AIR;
-                self.hurt_time = 0.0;
-                self.using = None;
-                self.blocking = false;
-                self.mining = None;
-                self.target = None;
-                self.player.flying = true;
-                self.player.noclip = true;
+                self.me.vitals.fire = 0.0;
+                self.me.vitals.air = MAX_AIR;
+                self.me.vitals.hurt_time = 0.0;
+                self.me.aim.let_go();
+                self.me.body.flying = true;
+                self.me.body.noclip = true;
             }
         }
     }
@@ -52,7 +49,7 @@ impl Game {
     /// not spectating themselves), in the order they joined.
     fn spectate_candidates(&self) -> Vec<(u8, String)> {
         let mut v: Vec<(u8, String)> = self
-            .remotes
+            .session.remotes
             .iter()
             .filter(|r| r.alive())
             .map(|r| (r.id, r.name.clone()))
@@ -77,14 +74,14 @@ impl Game {
     /// Puts the camera into another player's eyes.
     pub(in crate::client) fn start_spectating(&mut self, id: u8) {
         let Some(name) = self
-            .remotes
+            .session.remotes
             .iter()
             .find(|r| r.id == id)
             .map(|r| r.name.clone())
         else {
             return;
         };
-        self.spectating = Some(id);
+        self.session.spectating = Some(id);
         self.say(tf("spectate.now", &[&name]), chat::GRAY);
         if self.screen == Screen::Spectate {
             self.resume();
@@ -93,8 +90,8 @@ impl Game {
 
     /// Back to flying freely, where the watched player was.
     pub(in crate::client) fn stop_spectating(&mut self) {
-        if self.spectating.take().is_some() {
-            self.player.vel = Vec3::ZERO;
+        if self.session.spectating.take().is_some() {
+            self.me.body.vel = Vec3::ZERO;
             self.say(t("spectate.stopped"), chat::GRAY);
         }
     }
@@ -110,7 +107,7 @@ impl Game {
             return;
         };
         let found = self
-            .remotes
+            .session.remotes
             .iter()
             .filter(|r| r.alive())
             .find(|r| r.name.eq_ignore_ascii_case(name))
@@ -124,56 +121,50 @@ impl Game {
     /// Spectator movement: flying through blocks, or riding along in the watched player's
     /// eyes (sneak lets go of them).
     pub(in crate::client) fn update_spectator(&mut self, dt: f32, control: bool) {
-        self.player.flying = true;
-        self.player.noclip = true;
-        self.blocking = false;
-        self.hand.blocking = false;
-        self.using = None;
-        self.mining = None;
-        self.target = None;
-        self.furnace_part = None;
-        self.mob_target = None;
-        self.player_target = None;
-        self.fire = 0.0;
-        self.air = MAX_AIR;
-        self.hurt_time = 0.0;
-        self.fall_peak = self.player.pos.y;
+        self.me.body.flying = true;
+        self.me.body.noclip = true;
+        self.me.aim.let_go();
+        self.me.hand.blocking = false;
+        self.me.vitals.fire = 0.0;
+        self.me.vitals.air = MAX_AIR;
+        self.me.vitals.hurt_time = 0.0;
+        self.me.vitals.fall_peak = self.me.body.pos.y;
         // (bullets, cases and grenades in the world go on in `update_world`)
         self.update_guns(dt, false);
 
-        if let Some(id) = self.spectating {
+        if let Some(id) = self.session.spectating {
             if control && self.sneaking() {
                 self.stop_spectating();
             } else {
-                match self.remotes.iter().find(|r| r.id == id) {
+                match self.session.remotes.iter().find(|r| r.id == id) {
                     Some(r) if r.alive() => {
                         let p = r.pose;
-                        self.player.pos = p.pos;
-                        self.player.vel = Vec3::ZERO;
-                        self.player.crouch = p.crouch;
-                        self.yaw = p.yaw;
-                        self.pitch = p.pitch;
-                        self.body_yaw = p.body_yaw;
-                        self.limb_amount = 0.0;
+                        self.me.body.pos = p.pos;
+                        self.me.body.vel = Vec3::ZERO;
+                        self.me.body.crouch = p.crouch;
+                        self.me.look.yaw = p.yaw;
+                        self.me.look.pitch = p.pitch;
+                        self.me.look.body_yaw = p.body_yaw;
+                        self.me.look.limb_amount = 0.0;
                         return;
                     }
                     // Dead for now: wait where they fell until they are back.
                     Some(r) if r.dead() => return,
                     _ => {
-                        self.spectating = None;
+                        self.session.spectating = None;
                         self.say(t("spectate.lost"), chat::GRAY);
                     }
                 }
             }
         }
 
-        self.body_yaw = self.yaw;
-        self.limb_amount += (0.0 - self.limb_amount) * (crate::util::damp(10.0, dt));
+        self.me.look.body_yaw = self.me.look.yaw;
+        self.me.look.limb_amount += (0.0 - self.me.look.limb_amount) * (crate::util::damp(10.0, dt));
     }
 
     /// A spectator's tick: flying about (not while watching someone: then it is where they are).
     pub(in crate::client) fn tick_spectator(&mut self, control: bool) {
-        if self.spectating.is_some() {
+        if self.session.spectating.is_some() {
             return;
         }
         let k = |b: Bind| control && self.bind_down(b);
@@ -183,22 +174,22 @@ impl Game {
             strafe: axis(k(Bind::Right), k(Bind::Left)),
             up: k(Bind::Jump),
             down: k(Bind::Sneak),
-            sprint: k(Bind::Sprint) || (self.w_sprint && k(Bind::Forward)),
+            sprint: k(Bind::Sprint) || (self.input.w_sprint && k(Bind::Forward)),
             sneak: false,
             using: false,
             aiming: false,
         };
-        self.player.flying = true;
-        self.player.noclip = true;
-        self.player.update(TICK_SECS, &self.terrain.world, self.yaw, &input);
+        self.me.body.flying = true;
+        self.me.body.noclip = true;
+        self.me.body.update(TICK_SECS, &self.terrain.world, self.me.look.yaw, &input);
     }
 
     /// Instead of the hotbar: what spectator mode is doing and which keys work.
     pub(in crate::client) fn draw_spectator_hud(&mut self) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let watched = self
-            .spectating
-            .and_then(|id| self.remotes.iter().find(|r| r.id == id))
+            .session.spectating
+            .and_then(|id| self.session.remotes.iter().find(|r| r.id == id))
             .map(|r| r.name.clone());
         let (title, hint) = match &watched {
             Some(name) => (tf("spectate.watching", &[name]), t("spectate.hint_watching")),
@@ -236,7 +227,7 @@ impl Game {
         let mut pick = None;
         if players.is_empty() {
             // (this game's own world, not open to the LAN: nobody else can be in it)
-            let msg = if self.local.is_some() && self.lan_address.is_none() {
+            let msg = if self.session.local.is_some() && self.session.lan_address.is_none() {
                 t("spectate.single")
             } else {
                 t("spectate.none")
@@ -245,7 +236,7 @@ impl Game {
             y += 24.0 * s;
         }
         for (i, (id, name)) in players.iter().enumerate() {
-            let label = if self.spectating == Some(*id) {
+            let label = if self.session.spectating == Some(*id) {
                 format!("{}. {name}  ({})", i + 1, t("spectate.current"))
             } else if i < 9 {
                 format!("{}. {name}", i + 1)
@@ -259,10 +250,10 @@ impl Game {
         }
         y += 6.0 * s;
         let mut stop = false;
-        if self.spectating.is_some() && ui.button(t("spectate.stop"), x, y, bw, bh, true) {
+        if self.session.spectating.is_some() && ui.button(t("spectate.stop"), x, y, bw, bh, true) {
             stop = true;
         }
-        if self.spectating.is_some() {
+        if self.session.spectating.is_some() {
             y += 24.0 * s;
         }
         let back = ui.button(t("gui.done"), x, y, bw, bh, true);

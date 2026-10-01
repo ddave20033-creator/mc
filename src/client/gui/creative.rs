@@ -243,7 +243,7 @@ impl Game {
                 shown = it.as_str();
             }
             let tw = self.ui.text(shown, tx, ty, fs, WHITE, true);
-            if self.inv_ui.search_focused && (self.time * 2.5) as i32 % 2 == 0 {
+            if self.inv_ui.search_focused && (self.clock.time * 2.5) as i32 % 2 == 0 {
                 self.ui.text("_", tx + tw + fs * 0.5, ty, fs, WHITE, true);
             }
         }
@@ -313,7 +313,7 @@ impl Game {
             );
             if hovered {
                 over = true;
-                if self.cursor.is_none() {
+                if self.me.items.cursor.is_none() {
                     self.ui.set_tooltip(tab.name());
                 }
                 if self.ui.pressed && !open {
@@ -333,7 +333,7 @@ impl Game {
         let s = self.ui.s;
         for i in 0..9 {
             let (x, y) = (px + (9.0 + i as f32 * SLOT) * s, py + 134.0 * s);
-            if self.draw_slot(x, y, self.inventory.slots[i]) {
+            if self.draw_slot(x, y, self.me.items.inventory.slots[i]) {
                 *hovered = Some(SlotRef::Inv(i));
             }
         }

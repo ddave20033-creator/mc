@@ -27,15 +27,15 @@ impl Game {
     /// The lying trunk aimed at with an axe (before any block further off): it takes the
     /// crosshair from the block then.
     pub(in crate::client) fn aim_lying_logs(&mut self, control: bool) {
-        self.log_aim = None;
+        self.me.aim.log_aim = None;
         if !control || !matches!(tool_of(self.held()), Some((ToolKind::Axe, _))) {
             return;
         }
         // (a swing going on keeps to the trunk it began on)
         let eye = self.eye();
-        let dir = look_dir(self.yaw, self.pitch);
+        let dir = self.me.look.dir();
         let block_dist = self
-            .target
+            .me.aim.target
             .and_then(|(hit, _)| crate::util::ray_box(eye, dir, hit.as_vec3(), hit.as_vec3() + Vec3::ONE, AIM_REACH))
             .unwrap_or(AIM_REACH);
         let mut best: Option<(f32, LogAim)> = None;
@@ -49,9 +49,9 @@ impl Game {
             }
         }
         if let Some((_, aim)) = best {
-            self.log_aim = Some(aim);
-            self.target = None;
-            self.mining = None;
+            self.me.aim.log_aim = Some(aim);
+            self.me.aim.target = None;
+            self.me.aim.mining = None;
         }
     }
 
@@ -60,14 +60,14 @@ impl Game {
         let Some(i) = self.log_index(id) else { return };
         let b = self.level.lying_logs[i].pieces[0];
         self.chips(point.floor().as_ivec3(), b, point, Vec3::Y);
-        let from_base = match self.log_cut {
+        let from_base = match self.me.aim.log_cut {
             Some((c_id, from_base)) if c_id == id => from_base,
             _ => {
                 let l = &self.level.lying_logs[i];
                 l.from_base_at((point - l.base).dot(l.dir))
             }
         };
-        self.struck = Some(Struck::Log(id, from_base));
+        self.me.aim.struck = Some(Struck::Log(id, from_base));
     }
 
     /// The axe pulled out of the lying trunk `id`: the next piece comes off the end it was
@@ -83,7 +83,7 @@ impl Game {
             self.level.lying_logs.remove(i);
         }
         for &(b, p) in &off {
-            self.particles.burst(&self.terrain.world, p.floor().as_ivec3(), b, 8, [255; 3]);
+            self.level.particles.burst(&self.terrain.world, p.floor().as_ivec3(), b, 8, [255; 3]);
         }
         if let (false, Some(&(_, at))) = (self.creative(), off.first()) {
             self.wear_axe(crate::entity::survival::cost::MINE, at.floor().as_ivec3());
@@ -96,7 +96,7 @@ impl Game {
     pub(in crate::client) fn build_lying_logs(&self, out: &mut Vec<Vertex>, eye: Vec3, sight: f32) {
         use crate::model::emit_item;
         let fl = crate::world::mesh::flags::ENTITY;
-        let aim = self.log_aim.or(self.log_cut.map(|(id, from_base)| LogAim { id, from_base }));
+        let aim = self.me.aim.log_aim.or(self.me.aim.log_cut.map(|(id, from_base)| LogAim { id, from_base }));
         for l in &self.level.lying_logs {
             let length = l.pieces.len() as f32;
             if (l.base + l.dir * length * 0.5).distance(eye) > sight + length {
@@ -115,7 +115,7 @@ impl Game {
             let taken = l.taken(a.from_base);
             let marks: Vec<usize> = if taken.len() == n { vec![0, n] } else if a.from_base { vec![taken.end] } else { vec![taken.start] };
             let layer = face_texture(PLANKS, 2);
-            let pulse = 0.85 + 0.15 * (self.time * 6.0).sin();
+            let pulse = 0.85 + 0.15 * (self.clock.time * 6.0).sin();
             // (lit up, day or night, a little pulsing)
             let light = [255, 255, (255.0 * pulse) as u8, 0];
             for k in marks {

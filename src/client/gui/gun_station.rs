@@ -32,6 +32,65 @@ use crate::util::{ray_box, vertex_light};
 use crate::world::mesh::flags;
 use glam::{Mat3, Quat};
 
+/// At the open gun station: the brush, the mouse on its table and in its drawer, the camera,
+/// scrubbing, and what was last sent.
+pub(in crate::client) struct BenchUi {
+    /// At the open gun station: holding its brush, and where it is; the camera's sway with
+    /// the mouse (-1 .. 1); something picked up off the table (where the mouse was, to drag
+    /// it); what the mouse points at there; scrubbing now, the dirt scrubbed off not yet
+    /// taken off, and whether that is not sent yet; when the table was last sent.
+    pub(in crate::client) brush: bool,
+    pub(in crate::client) brush_at: Option<Vec3>,
+    /// Where on the open gun station's table the mouse points (x, z), if it does.
+    pub(in crate::client) spot: Option<(f32, f32)>,
+    /// Where what is held on the mouse would lie on the open gun station's table.
+    pub(in crate::client) held_spot: Option<(f32, f32)>,
+    /// Where in the open drawer the mouse points (on its floor), if it does.
+    pub(in crate::client) drawer_spot: Option<Vec3>,
+    /// Where what is held on the mouse shows over the open gun station (world), for the
+    /// others to see it there too.
+    pub(in crate::client) hold_at: Option<Vec3>,
+    pub(in crate::client) pan: f32,
+    /// At the open gun station: looking into its drawer (the mouse went down to it), and how
+    /// far the camera has gone down to it (0 over the table .. 1 over the drawer).
+    pub(in crate::client) in_drawer: bool,
+    pub(in crate::client) focus: f32,
+    /// How long the mouse has stayed where it opens (or closes) the drawer.
+    pub(in crate::client) dwell: f32,
+    pub(in crate::client) drag: Option<Vec2>,
+    pub(in crate::client) hover: Option<Pick>,
+    pub(in crate::client) scrubbing: bool,
+    /// What the mouse is on at the gun station is where what is held goes (it lights green).
+    pub(in crate::client) hover_ok: bool,
+    pub(in crate::client) scrub: f32,
+    pub(in crate::client) scrub_dirty: bool,
+    pub(in crate::client) sent: f32,
+}
+
+impl BenchUi {
+    pub(in crate::client) fn new() -> Self {
+        Self {
+            brush: false,
+            brush_at: None,
+            spot: None,
+            held_spot: None,
+            drawer_spot: None,
+            hold_at: None,
+            pan: 0.0,
+            in_drawer: false,
+            focus: 0.0,
+            dwell: 0.0,
+            drag: None,
+            hover: None,
+            scrubbing: false,
+            hover_ok: false,
+            scrub: 0.0,
+            scrub_dirty: false,
+            sent: 0.0,
+        }
+    }
+}
+
 /// Blocks per model pixel of the pistol lying on the table.
 const PX: f32 = 0.026;
 /// How far from the table's middle things may lie (across, and toward the front and back).
@@ -1338,7 +1397,7 @@ impl Game {
     /// Seconds into the animation of the last change on the table at `p` (when one was seen).
     fn bench_time(&self, p: IVec3) -> Option<f32> {
         let serial = self.level.block_entities.benches.get(&p)?.event.serial;
-        self.level.bench_anims.get(&p).filter(|a| a.0 == serial).map(|a| self.time - a.1)
+        self.level.bench_anims.get(&p).filter(|a| a.0 == serial).map(|a| self.clock.time - a.1)
     }
 
     /// Whether something on the table at `p` is still moving (its things wait until then).
@@ -1352,7 +1411,7 @@ impl Game {
     pub(in crate::client) fn set_bench(&mut self, p: IVec3, bench: GunBench) {
         let serial = bench.event.serial;
         if serial != 0 && self.level.bench_anims.get(&p).is_none_or(|a| a.0 != serial) {
-            self.level.bench_anims.insert(p, (serial, self.time));
+            self.level.bench_anims.insert(p, (serial, self.clock.time));
         }
         self.level.block_entities.benches.insert(p, bench);
     }
@@ -1360,11 +1419,11 @@ impl Game {
     /// The half of a rifle station's grenade crate the crosshair is on (the station's left
     /// block, 0 frag grenades / 1 smoke grenades), within reach.
     pub(in crate::client) fn crate_under_crosshair(&self) -> Option<(IVec3, usize)> {
-        let (hit, _) = self.target?;
+        let (hit, _) = self.me.aim.target?;
         let w = &self.terrain.world;
         let main = bench_main(hit, w.geti(hit), |q| w.geti(q))?;
         let table = Table::of(main, w.geti(main)).filter(|t| t.rifle())?;
-        let (eye, dir) = (self.eye(), look_dir(self.yaw, self.pitch));
+        let (eye, dir) = (self.eye(), self.me.look.dir());
         let mut found: Option<(usize, f32)> = None;
         for (half, lo, hi, m) in crate::model::gun_station::crate_halves(main, table.toward) {
             let inv = m.inverse();
@@ -1390,19 +1449,19 @@ impl Game {
         let Some((main, half)) = self.crate_under_crosshair() else { return false };
         let kinds = [FRAG_GRENADE, SMOKE_GRENADE];
         let held = self.held();
-        let slot = self.hotbar_slot;
+        let slot = self.me.items.hotbar_slot;
         let creative = self.creative();
         let sneaking = self.sneaking();
         let bench = self.level.block_entities.benches.entry(main).or_default();
         if let Some(i) = kinds.iter().position(|&k| k == held) {
-            let count = self.inventory.slots[slot].map_or(0, |s| s.count);
+            let count = self.me.items.inventory.slots[slot].map_or(0, |s| s.count);
             let k = (if sneaking { count } else { 1 }).min(CRATE_MAX - bench.grenades[i].min(CRATE_MAX));
             if k == 0 {
                 return true;
             }
             bench.grenades[i] += k;
             if !creative {
-                take(&mut self.inventory.slots[slot], k);
+                take(&mut self.me.items.inventory.slots[slot], k);
             }
         } else if bench.grenades[half] > 0 {
             let n = if sneaking { bench.grenades[half] } else { 1 };
@@ -1412,7 +1471,7 @@ impl Game {
             return true;
         }
         self.audio.play(crate::audio::Sound::GrenadeBounce, Some(self.eye()), 0.35);
-        self.hand.swing();
+        self.me.hand.swing();
         self.bench_changed(main, None);
         true
     }
@@ -1420,7 +1479,7 @@ impl Game {
     /// Something on the table at `p` changed here: with `event`, what happened (everyone
     /// plays it); it goes to the others.
     fn bench_changed(&mut self, p: IVec3, event: Option<BenchEvent>) {
-        let now = self.time;
+        let now = self.clock.time;
         let b = self.level.block_entities.benches.entry(p).or_default();
         if let Some(mut e) = event {
             e.serial = b.event.serial.wrapping_add(1).max(1);
@@ -1436,7 +1495,7 @@ impl Game {
     /// in someone's hand.
     pub(in crate::client) fn build_benches(&mut self, out: &mut Vec<Vertex>, dt: f32) {
         let world = &self.terrain.world;
-        let near = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < 48.0 * 48.0;
+        let near = |p: &IVec3| (p.as_vec3() - self.me.body.pos).length_squared() < 48.0 * 48.0;
         let open_here = match self.screen {
             Screen::Container(Container::GunStation(q)) => Some(q),
             _ => None,
@@ -1461,7 +1520,7 @@ impl Game {
             let handle_lit = open_here == Some(p) && self.bench_ui.hover == Some(Pick::Handle);
             let loader = self.level.block_entities.benches.get(&p).map_or(Default::default(), |b| crate::model::gun_station::Loader {
                 there: b.loader && table.rifle(),
-                feed: b.loader_source().map(|_| self.time),
+                feed: b.loader_source().map(|_| self.clock.time),
             });
             crate::model::gun_station::emit_block(out, table.rifle(), p, table.toward, drawer, !brush_out, ammo, loader, handle_lit, light, flags::ENTITY);
             if table.rifle() {
@@ -1503,7 +1562,7 @@ impl Game {
                 }
                 _ => None,
             };
-            let held = self.cursor.filter(|st| belongs_on_bench(st.item, table.rifle()));
+            let held = self.me.items.cursor.filter(|st| belongs_on_bench(st.item, table.rifle()));
             if open_here == Some(p) {
                 self.bench_ui.hold_at = None;
             }
@@ -1518,8 +1577,8 @@ impl Game {
             }
             if open_here == Some(p) && self.bench_ui.brush {
                 if let Some(at) = self.bench_ui.brush_at {
-                    let tilt = if self.bench_ui.scrubbing { (self.time * 26.0).sin() * 0.12 } else { 0.0 };
-                    let wiggle = if self.bench_ui.scrubbing { table.right * (self.time * 26.0).sin() * 0.015 } else { Vec3::ZERO };
+                    let tilt = if self.bench_ui.scrubbing { (self.clock.time * 26.0).sin() * 0.12 } else { 0.0 };
+                    let wiggle = if self.bench_ui.scrubbing { table.right * (self.clock.time * 26.0).sin() * 0.015 } else { Vec3::ZERO };
                     crate::model::gun_station::emit_brush(out, at + wiggle, table.toward.x.atan2(table.toward.z), tilt, light, flags::ENTITY);
                 }
             }
@@ -1551,9 +1610,9 @@ impl Game {
     pub(in crate::client) fn close_gun_station(&mut self) {
         self.bench_ui.hold_at = None;
         // A box of rounds still on the mouse goes back into the drawer (or onto the table).
-        if let (Screen::Container(Container::GunStation(p)), Some(st)) = (self.screen, self.cursor) {
+        if let (Screen::Container(Container::GunStation(p)), Some(st)) = (self.screen, self.me.items.cursor) {
             if st.item == AMMO_BOX {
-                self.cursor = None;
+                self.me.items.cursor = None;
                 let table = self.bench_table(p);
                 let bench = self.level.block_entities.benches.entry(p).or_default();
                 match bench.boxes.iter().position(|b| b.is_none()) {
@@ -1589,7 +1648,7 @@ impl Game {
         self.inventory_slots(px, py, 5.0, &mut hovered);
         let over_inventory = self.ui.hit(px, py, pw, ph);
         // A box of rounds belongs to the station: it does not go into the inventory.
-        let holding_box = self.cursor.is_some_and(|st| st.item == AMMO_BOX);
+        let holding_box = self.me.items.cursor.is_some_and(|st| st.item == AMMO_BOX);
         if holding_box {
             hovered = None;
         }
@@ -1602,7 +1661,7 @@ impl Game {
 
         let Some(table) = self.bench_table(p) else { return hovered };
         let ready = self.station.as_ref().is_some_and(|st| st.blend > 0.9 && !st.closing);
-        let view = Screen2 { view_proj: self.view_proj, w, h };
+        let view = Screen2 { view_proj: self.me.look.view_proj, w, h };
         let (o, d) = view.ray(self.ui.mouse);
         let bench = self.level.block_entities.benches.get(&p).cloned().unwrap_or_default();
         let made = scene_at(p, &table, &bench, self.bench_time(p));
@@ -1637,8 +1696,8 @@ impl Game {
         // the view), it shuts and the camera goes back up; brought down toward it from the
         // table with what goes into it (the brush, rounds, a box of them), it opens again.
         let settled = self.bench_ui.focus > 0.99 || self.bench_ui.focus < 0.01;
-        let holding = self.cursor.is_some() || self.bench_ui.brush;
-        let for_drawer = self.bench_ui.brush || self.cursor.is_some_and(|st| BOX_AMMO.contains(&st.item) || st.item == AMMO_BOX);
+        let holding = self.me.items.cursor.is_some() || self.bench_ui.brush;
+        let for_drawer = self.bench_ui.brush || self.me.items.cursor.is_some_and(|st| BOX_AMMO.contains(&st.item) || st.item == AMMO_BOX);
         let over_table = spot.is_some() || low < DRAWER_CLOSE;
         let wants = if self.bench_ui.in_drawer {
             holding && over_table && drawer_spot.is_none()
@@ -1661,7 +1720,7 @@ impl Game {
         let pick = found.map(|(k, _)| k);
         let point = found.map(|(_, t)| o + d * t).or(spot.map(|(x, z)| table.at(x, z))).or(drawer_spot);
         // Where what is held on the mouse would lie (kept from the last frame while it can be).
-        self.bench_ui.held_spot = match (self.cursor, spot) {
+        self.bench_ui.held_spot = match (self.me.items.cursor, spot) {
             (Some(st), Some((x, z))) if belongs_on_bench(st.item, table.rifle()) => {
                 let st = if rig_of(&st, 0.0).is_some() { Stack { count: 1, ..st } } else { st };
                 Some(free_spot_near(&table, &bench, st, x, z, 0.0, self.bench_ui.held_spot))
@@ -1671,8 +1730,8 @@ impl Game {
         // What the mouse is on lights up: what a click takes; with something held, only where
         // it goes on or into (green).
         let ok = self.bench_target_ok(&bench, pick);
-        self.bench_ui.hover = pick.filter(|_| self.cursor.is_none() || ok);
-        self.bench_ui.hover_ok = self.cursor.is_some() && ok;
+        self.bench_ui.hover = pick.filter(|_| self.me.items.cursor.is_none() || ok);
+        self.bench_ui.hover_ok = self.me.items.cursor.is_some() && ok;
 
         let (left, right) = (self.ui.pressed, self.ui.right_pressed);
         self.bench_ui.scrubbing = false;
@@ -1702,7 +1761,7 @@ impl Game {
                 }
             }
         } else if (left || right) && ready && !busy && !over_inventory {
-            match (self.cursor, pick) {
+            match (self.me.items.cursor, pick) {
                 (_, Some(Pick::Ammo(i))) => self.bench_box_slot(p, i as usize, right),
                 (_, Some(Pick::Loader)) => self.bench_loader_click(p, &table),
                 (_, Some(Pick::Handle)) => {
@@ -1718,7 +1777,7 @@ impl Game {
                 (None, Some(Pick::Brush)) if left => self.bench_ui.brush = true,
                 (None, Some(Pick::Item(id))) if left => {
                     if let Some(it) = self.level.block_entities.benches.get_mut(&p).and_then(|b| b.take(id)) {
-                        self.cursor = Some(it.stack);
+                        self.me.items.cursor = Some(it.stack);
                         self.bench_ui.drag = Some(self.ui.mouse);
                         self.bench_changed(p, None);
                     }
@@ -1742,7 +1801,7 @@ impl Game {
         self.inv_ui.station_inside = over_inventory || over_block || pick.is_some() || spot.is_some() || holding_box;
         self.inv_ui.station_hover = None;
         // A glow on the table under what the mouse is on, or where what is held would go.
-        self.inv_ui.station_frame = match (self.bench_ui.hover, self.cursor, spot) {
+        self.inv_ui.station_frame = match (self.bench_ui.hover, self.me.items.cursor, spot) {
             (Some(h), _, _) => glow_under(&table, &pieces, &flats, h),
             (None, Some(st), Some(_)) if !self.bench_ui.brush && belongs_on_bench(st.item, table.rifle()) => {
                 let st = if rig_of(&st, 0.0).is_some() { Stack { count: 1, ..st } } else { st };
@@ -1762,7 +1821,7 @@ impl Game {
     /// gun without one, a magazine into a gun without one, rounds into a magazine or a box
     /// with room, a box into an empty place in the drawer.
     fn bench_target_ok(&self, bench: &GunBench, pick: Option<Pick>) -> bool {
-        let Some(st) = self.cursor else { return pick.is_some() };
+        let Some(st) = self.me.items.cursor else { return pick.is_some() };
         let item = |id: u16| bench.get(id).map(|i| i.stack);
         match pick {
             // A magazine onto the loader when there is none on it; the loader into its bay.
@@ -1803,7 +1862,7 @@ impl Game {
     /// the mouse (if it fits and has none such), otherwise laid where the mouse points (all
     /// of it, or one with the right button; the pistol's parts one at a time).
     fn bench_put(&mut self, p: IVec3, table: &Table, pick: Option<Pick>, spot: Option<(f32, f32)>, one: bool) {
-        let Some(st) = self.cursor else { return };
+        let Some(st) = self.me.items.cursor else { return };
         if let Some(Pick::Item(id) | Pick::Mod(id, _) | Pick::Mag(id)) = pick {
             if self.bench_mag_in(p, id, spot) {
                 return;
@@ -1821,7 +1880,7 @@ impl Game {
                 if let Some(g) = bench.items.iter_mut().find(|g| g.id == id) {
                     { let m = gun_mods(&g.stack) | bit; set_gun_mods(&mut g.stack, m); }
                 }
-                take(&mut self.cursor, 1);
+                take(&mut self.me.items.cursor, 1);
                 let e = BenchEvent { kind: bench_event::FIT, gun: id, bit, gone: vec![gone], ..Default::default() };
                 self.bench_changed(p, Some(e));
                 return;
@@ -1834,7 +1893,7 @@ impl Game {
                 let n = (if one { 1 } else { st.count as u16 }).min(room);
                 if n > 0 {
                     b.stack.data = box_with(b.stack.data, st.item, n);
-                    take(&mut self.cursor, n as u8);
+                    take(&mut self.me.items.cursor, n as u8);
                     self.bench_changed(p, None);
                 }
                 return;
@@ -1848,7 +1907,7 @@ impl Game {
                 if n > 0 {
                     let r = gun_rounds(&l.stack) + n;
                     set_gun_rounds(&mut l.stack, r);
-                    take(&mut self.cursor, n);
+                    take(&mut self.me.items.cursor, n);
                     self.bench_changed(p, None);
                 }
                 return;
@@ -1867,7 +1926,7 @@ impl Game {
                     }
                     let (x, z) = spot.unwrap_or((m.x, m.z + 0.15));
                     let gone = BenchItem { id: 0, stack: Stack::new(st.item, n), x, z, turn: 0.0 };
-                    take(&mut self.cursor, n);
+                    take(&mut self.me.items.cursor, n);
                     let e = BenchEvent { kind: bench_event::LOAD, gun: id, bit: n, gone: vec![gone], ..Default::default() };
                     self.bench_changed(p, Some(e));
                 }
@@ -1890,7 +1949,7 @@ impl Game {
             _ => free_spot(table, bench, lay, x, z, turn),
         };
         bench.add(lay, x, z, turn);
-        take(&mut self.cursor, lay.count);
+        take(&mut self.me.items.cursor, lay.count);
         self.bench_changed(p, None);
     }
 
@@ -1921,11 +1980,11 @@ impl Game {
             }
             Look::Flat if it.stack.item == AMMO_BOX => {
                 // A round out of it, onto the mouse.
-                if let (true, Some(kind)) = (self.cursor.is_none(), box_ammo(it.stack.data)) {
+                if let (true, Some(kind)) = (self.me.items.cursor.is_none(), box_ammo(it.stack.data)) {
                     if let Some(b) = bench.items.iter_mut().find(|b| b.id == id) {
                         b.stack.data = box_without(b.stack.data, 1);
                     }
-                    self.cursor = Some(Stack::one(kind));
+                    self.me.items.cursor = Some(Stack::one(kind));
                     self.bench_ui.drag = Some(self.ui.mouse);
                     self.bench_changed(p, None);
                 }
@@ -1966,17 +2025,17 @@ impl Game {
     /// one with the right button), a box put back where there is none.
     fn bench_box_slot(&mut self, p: IVec3, i: usize, right: bool) {
         let bench = self.level.block_entities.benches.entry(p).or_default();
-        match (self.cursor, bench.boxes[i]) {
+        match (self.me.items.cursor, bench.boxes[i]) {
             (None, Some(v)) if right => match box_ammo(v) {
                 Some(kind) => {
                     bench.boxes[i] = Some(box_without(v, 1));
-                    self.cursor = Some(Stack::one(kind));
+                    self.me.items.cursor = Some(Stack::one(kind));
                 }
                 None => return,
             },
             (None, Some(v)) => {
                 bench.boxes[i] = None;
-                self.cursor = Some(Stack { data: v, ..Stack::one(AMMO_BOX) });
+                self.me.items.cursor = Some(Stack { data: v, ..Stack::one(AMMO_BOX) });
             }
             (Some(st), Some(v)) if BOX_AMMO.contains(&st.item) => {
                 // Only the kind it holds (either, when it is empty).
@@ -1985,15 +2044,15 @@ impl Game {
                     return;
                 }
                 bench.boxes[i] = Some(box_with(v, st.item, k));
-                take(&mut self.cursor, k as u8);
+                take(&mut self.me.items.cursor, k as u8);
             }
             (Some(st), None) if st.item == AMMO_BOX => {
                 bench.boxes[i] = Some(st.data);
-                take(&mut self.cursor, 1);
+                take(&mut self.me.items.cursor, 1);
             }
             _ => return,
         }
-        if self.cursor.is_some() {
+        if self.me.items.cursor.is_some() {
             self.bench_ui.drag = Some(self.ui.mouse);
         }
         self.bench_changed(p, None);
@@ -2036,7 +2095,7 @@ impl Game {
             }
         }
     }
-    if !self.bench_ui.brush && self.cursor.is_none() && drawer > 0.8 {
+    if !self.bench_ui.brush && self.me.items.cursor.is_none() && drawer > 0.8 {
         for (c, m) in crate::model::gun_station::brush_in_drawer(table.rifle(), p, table.toward, drawer) {
             let inv = m.inverse();
             let (a, b) = (Vec3::from(c.from), Vec3::from(c.to));
@@ -2075,7 +2134,7 @@ impl Game {
     pub(in crate::client) fn bench_pick_map(&self, p: IVec3, path: &std::path::Path) {
         let Some(table) = self.bench_table(p) else { return };
         let (w, h) = (self.ui.w, self.ui.h);
-        let view = Screen2 { view_proj: self.view_proj, w, h };
+        let view = Screen2 { view_proj: self.me.look.view_proj, w, h };
         let bench = self.level.block_entities.benches.get(&p).cloned().unwrap_or_default();
         let (pieces, flats) = scene(&table, &bench, self.bench_time(p));
         let drawer = self.level.bench_drawer.get(&p).copied().unwrap_or(0.0);
@@ -2108,7 +2167,7 @@ impl Game {
     /// in (held, none there), a magazine laid on it (held, the loader there and bare), or taken
     /// out (empty-handed: the magazine on it, or the loader).
     fn loader_can(&self, bench: &GunBench) -> bool {
-        match self.cursor {
+        match self.me.items.cursor {
             None => bench.loader,
             Some(st) if st.item == MAG_LOADER => !bench.loader,
             Some(st) => is_gun_magazine(st.item) && bench.loader && bench.loader_mag.is_none(),
@@ -2122,7 +2181,7 @@ impl Game {
     fn bench_loader_click(&mut self, p: IVec3, table: &Table) {
         let drawer = self.level.bench_drawer.get(&p).copied().unwrap_or(0.0);
         let bench = self.level.block_entities.benches.entry(p).or_default();
-        match self.cursor {
+        match self.me.items.cursor {
             Some(st) if st.item == MAG_LOADER => {
                 if !table.rifle() {
                     self.gun_message(t("gun.loader_rifle_station"));
@@ -2132,19 +2191,19 @@ impl Game {
                     return;
                 }
                 bench.loader = true;
-                take(&mut self.cursor, 1);
+                take(&mut self.me.items.cursor, 1);
             }
             Some(st) if is_gun_magazine(st.item) && bench.loader && bench.loader_mag.is_none() => {
                 bench.loader_mag = Some(Stack { count: 1, ..st });
-                take(&mut self.cursor, 1);
+                take(&mut self.me.items.cursor, 1);
             }
             None if bench.loader_mag.is_some() => {
-                self.cursor = bench.loader_mag.take();
+                self.me.items.cursor = bench.loader_mag.take();
                 self.bench_ui.drag = Some(self.ui.mouse);
             }
             None if bench.loader => {
                 bench.loader = false;
-                self.cursor = Some(Stack::one(MAG_LOADER));
+                self.me.items.cursor = Some(Stack::one(MAG_LOADER));
                 self.bench_ui.drag = Some(self.ui.mouse);
             }
             _ => return,
@@ -2171,7 +2230,7 @@ impl Game {
 
     /// A magazine held on the mouse let go on a gun without one: it goes in.
     fn bench_mag_in(&mut self, p: IVec3, id: u16, spot: Option<(f32, f32)>) -> bool {
-        let Some(st) = self.cursor.filter(|s| is_gun_magazine(s.item)) else { return false };
+        let Some(st) = self.me.items.cursor.filter(|s| is_gun_magazine(s.item)) else { return false };
         let Some(bench) = self.level.block_entities.benches.get_mut(&p) else { return false };
         let fits = magazine_gun(st.item);
         let Some(g) = bench.items.iter_mut().find(|g| g.id == id && GunKind::of(g.stack.item) == fits && !gun_has_mag(&g.stack)) else {
@@ -2180,7 +2239,7 @@ impl Game {
         g.stack = with_magazine(&g.stack, &st);
         let (x, z) = spot.unwrap_or((g.x, g.z + 0.2));
         let gone = BenchItem { id: 0, stack: Stack { count: 1, ..st }, x, z, turn: g.turn };
-        take(&mut self.cursor, 1);
+        take(&mut self.me.items.cursor, 1);
         let e = BenchEvent { kind: bench_event::MAG_IN, gun: id, gone: vec![gone], ..Default::default() };
         self.bench_changed(p, Some(e));
         true
@@ -2220,7 +2279,7 @@ impl Game {
             it.stack.damage = it.stack.damage.saturating_sub(off as u16);
             self.bench_ui.scrub_dirty = true;
         }
-        if self.bench_ui.scrub_dirty && self.time - self.bench_ui.sent > SCRUB_SYNC {
+        if self.bench_ui.scrub_dirty && self.clock.time - self.bench_ui.sent > SCRUB_SYNC {
             self.bench_ui.scrub_dirty = false;
             self.bench_changed(p, None);
         }
@@ -2228,7 +2287,7 @@ impl Game {
             if self.rng.next() < dt * 25.0 {
                 let (sky, blk) = self.terrain.world.light_estimate(at + Vec3::Y * 0.2);
                 let jitter = Vec3::new(self.rng.next() - 0.5, 0.0, self.rng.next() - 0.5) * 0.06;
-                self.particles.smoke_shaded(at + jitter + Vec3::Y * 0.02, 245, sky, blk);
+                self.level.particles.smoke_shaded(at + jitter + Vec3::Y * 0.02, 245, sky, blk);
             }
         }
     }

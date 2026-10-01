@@ -100,6 +100,93 @@ struct Lighting {
     view_distance: f32,
 }
 
+/// Frame timing and the game's time: the frame rate, the F3 graph and statistics, the frame limiter.
+pub(super) struct FrameClock {
+    pub(super) last: Instant,
+    pub(super) fps: f32,
+    pub(super) fps_accum: f32,
+    pub(super) fps_frames: u32,
+    /// Max FPS: when the next frame may start.
+    pub(super) next_frame: Option<Instant>,
+    /// Last frame's CPU time in ms: update, build, submit (without waiting), waiting for the GPU.
+    pub(super) cpu_ms: [f32; 4],
+    /// When the previous frame finished, and the time from then until this frame started.
+    pub(super) frame_end: Instant,
+    pub(super) between_ms: f32,
+    /// Recent frame times in milliseconds (newest last), for the F3 graph.
+    pub(super) frame_times: std::collections::VecDeque<f32>,
+    pub(super) sys_stats: crate::stats::Monitor,
+    /// Video memory (used, budget) in bytes, refreshed once a second.
+    pub(super) vram: Option<(u64, u64)>,
+    pub(super) vram_timer: f32,
+    /// Seconds since the game started (the animations' and timers' clock).
+    pub(super) time: f32,
+    /// The simulation's ticks (20 a second), and where the frame is between the last one and
+    /// the next (0..1: things are drawn that far from where they were before the last tick
+    /// toward where they are).
+    pub(super) ticks: crate::sim::clock::Clock,
+    pub(super) between: f32,
+}
+
+impl FrameClock {
+    pub(super) fn new() -> Self {
+        Self {
+            last: Instant::now(),
+            fps: 0.0,
+            fps_accum: 0.0,
+            fps_frames: 0,
+            next_frame: None,
+            cpu_ms: [0.0; 4],
+            frame_end: Instant::now(),
+            between_ms: 0.0,
+            frame_times: std::collections::VecDeque::with_capacity(hud::FRAME_GRAPH),
+            sys_stats: crate::stats::start(),
+            vram: None,
+            vram_timer: 0.0,
+            time: 0.0,
+            ticks: crate::sim::clock::Clock::new(Instant::now()),
+            between: 1.0,
+        }
+    }
+}
+
+impl FrameClock {
+    /// A frame starts at `now`: the time since the last one goes into the graph; returns the
+    /// frame's time step (at most a tenth of a second: after a stall the game does not leap).
+    fn start(&mut self, now: Instant) -> f32 {
+        self.between_ms = (now - self.frame_end).as_secs_f32() * 1000.0;
+        let frame_ms = (now - self.last).as_secs_f32() * 1000.0;
+        self.last = now;
+        if self.frame_times.len() == hud::FRAME_GRAPH {
+            self.frame_times.pop_front();
+        }
+        self.frame_times.push_back(frame_ms);
+        (frame_ms / 1000.0).min(0.1)
+    }
+
+    /// Whether the video memory is to be asked again (once a second while `shown`).
+    fn vram_due(&mut self, dt: f32, shown: bool) -> bool {
+        self.vram_timer -= dt;
+        if shown && self.vram_timer <= 0.0 {
+            self.vram_timer = 1.0;
+            return true;
+        }
+        false
+    }
+
+    /// The frame's step counted: the game's time, and the frame rate (every half second).
+    fn count(&mut self, dt: f32) {
+        self.time += dt;
+        self.fps_accum += dt;
+        self.fps_frames += 1;
+        if self.fps_accum >= 0.5 {
+            self.fps = self.fps_frames as f32 / self.fps_accum;
+            self.fps_accum = 0.0;
+            self.fps_frames = 0;
+        }
+    }
+}
+
 /// Geometry built on the CPU this frame, by render range. Kept from frame to frame (emptied,
 /// not freed), so its lists do not grow anew to hundreds of thousands of vertices each frame.
 #[derive(Default)]
@@ -149,7 +236,7 @@ impl Game {
     /// last moment, which sleep is too coarse for).
     fn limit_fps(&mut self) {
         let limit = self.settings.fps_limit;
-        if limit == 0 || self.bench.is_some() {
+        if limit == 0 || self.test.bench.is_some() {
             self.clock.next_frame = None;
             return;
         }
@@ -180,7 +267,7 @@ impl Game {
     /// event loop waits and takes in input, so the frame is drawn with the latest of it (not
     /// input read before a long sleep).
     pub fn next_frame_due(&self) -> Option<Instant> {
-        self.clock.next_frame.filter(|_| self.settings.fps_limit != 0 && self.bench.is_none())
+        self.clock.next_frame.filter(|_| self.settings.fps_limit != 0 && self.test.bench.is_none())
     }
 
     pub fn frame(&mut self) {
@@ -191,13 +278,13 @@ impl Game {
         self.net_tick(dt);
         self.stream_chunks();
 
-        let size = self.window.inner_size();
+        let size = self.gfx.window.inner_size();
         if size.width == 0 || size.height == 0 {
             // Minimized: nothing is drawn, but a LAN game runs on for the other players.
-            if self.net.is_some() {
+            if self.session.net.is_some() {
                 self.update(dt);
             }
-            self.end_input();
+            self.input.end_frame();
             return;
         }
         let (w, h) = (size.width as f32, size.height as f32);
@@ -216,7 +303,7 @@ impl Game {
         // Out of a world (the title screen's and the other menus' panorama), the world
         // behind the menu is blurred: drawn small by the scope pass, spread over the screen.
         // (a test can have it sharp, to look at the world in pictures)
-        let blur = !view.in_world && !matches!(self.screen, Screen::Playing | Screen::Chat) && !self.test_no_blur;
+        let blur = !view.in_world && !matches!(self.screen, Screen::Playing | Screen::Chat) && !self.test.no_blur;
         if blur {
             let corner = |x: f32, y: f32| crate::world::mesh::Vertex {
                 pos: [x, y, 0.0],
@@ -236,7 +323,7 @@ impl Game {
             && !self.in_station()
             && self.furnace_frame().is_none()
         {
-            self.target.map(|(p, _)| {
+            self.me.aim.target.map(|(p, _)| {
                 let w = &self.terrain.world;
                 let (lo, hi) = block_boxes(w.geti(p), |d| w.geti(p + d)).bounds();
                 (p.as_vec3() + Vec3::from(lo), p.as_vec3() + Vec3::from(hi))
@@ -253,7 +340,7 @@ impl Game {
             view_distance: lighting.view_distance,
             shadows: lighting.shadows,
             shadow_distance: SHADOW_DISTANCE,
-            detail_px: h * 0.5 / (self.detail_fov.to_radians() * 0.5).tan(),
+            detail_px: h * 0.5 / (self.me.look.detail_fov.to_radians() * 0.5).tan(),
             ui: &self.ui.verts,
             ui_clips: &self.ui.clips,
             outline,
@@ -271,7 +358,7 @@ impl Game {
             scope: if blur {
                 let mut ubo = lighting.ubo;
                 ubo.light_dir[3] = 0.0;
-                let detail_px = crate::render::SCOPE_SIZE as f32 * 0.5 / (self.detail_fov.to_radians() * 0.5).tan();
+                let detail_px = crate::render::SCOPE_SIZE as f32 * 0.5 / (self.me.look.detail_fov.to_radians() * 0.5).tan();
                 ubo.detail[0] = detail_px;
                 Some(crate::render::ScopeView { ubo, view_proj: view.view_proj, cam_pos: view.cam, detail_px })
             } else { scene.scope.map(|(from, dir, up, fov, near)| {
@@ -291,10 +378,10 @@ impl Game {
             }) },
         };
         let t_build = Instant::now();
-        self.renderer.render(&mut self.gpu, &frame);
+        self.gfx.renderer.render(&mut self.gfx.gpu, &frame);
         let t_end = Instant::now();
         let ms = |a: Instant, b: Instant| (b - a).as_secs_f32() * 1000.0;
-        let wait = self.gpu.wait_ms;
+        let wait = self.gfx.gpu.wait_ms;
         self.clock.cpu_ms = [
             ms(now, t_update),
             ms(t_update, t_build),
@@ -303,48 +390,32 @@ impl Game {
         ];
         // This frame's own duration (the frame time measured at the start is the previous one's).
         self.bench_record(self.clock.between_ms + ms(now, t_end));
-        self.scene = scene;
-        self.end_input();
+        self.gfx.scene = scene;
+        self.input.end_frame();
         self.clock.frame_end = Instant::now();
     }
 
     /// Frame timing (fps, the F3 graph and stats, bench mode); returns this frame's time step.
     fn frame_clock(&mut self, now: Instant) -> f32 {
-        self.clock.between_ms = (now - self.clock.frame_end).as_secs_f32() * 1000.0;
-        let frame_ms = (now - self.clock.last).as_secs_f32() * 1000.0;
-        let dt = (frame_ms / 1000.0).min(0.1);
-        self.clock.last = now;
-        if self.clock.frame_times.len() == hud::FRAME_GRAPH {
-            self.clock.frame_times.pop_front();
-        }
-        self.clock.frame_times.push_back(frame_ms);
-        self.clock.sys_stats.set_active(self.show_debug);
-        self.clock.vram_timer -= dt;
-        if self.show_debug && self.clock.vram_timer <= 0.0 {
-            self.clock.vram_timer = 1.0;
-            self.clock.vram = self.gpu.vram_usage();
+        let dt = self.clock.start(now);
+        self.clock.sys_stats.set_active(self.hud.debug);
+        if self.clock.vram_due(dt, self.hud.debug) {
+            self.clock.vram = self.gfx.gpu.vram_usage();
         }
         self.bench_step(dt);
-        self.time += dt;
-        self.clock.fps_accum += dt;
-        self.clock.fps_frames += 1;
-        if self.clock.fps_accum >= 0.5 {
-            self.clock.fps = self.clock.fps_frames as f32 / self.clock.fps_accum;
-            self.clock.fps_accum = 0.0;
-            self.clock.fps_frames = 0;
-        }
+        self.clock.count(dt);
         dt
     }
 
     /// Loads and meshes chunks around the player (or the loading point, or the menu
     /// panorama), and enters the world once it is ready.
     fn stream_chunks(&mut self) {
-        let focus = if self.in_world_view() && self.player.spawned {
-            self.player.pos
+        let focus = if self.in_world_view() && self.me.body.spawned {
+            self.me.body.pos
         } else if self.screen == Screen::Loading {
             self.load_center()
         } else {
-            self.pano
+            self.menus.pano
         };
         let center = World::chunk_pos(focus.x.floor() as i32, focus.z.floor() as i32);
         let mut events = Vec::new();
@@ -352,8 +423,8 @@ impl Game {
         self.terrain.update(center, radius, &mut events);
         for e in events {
             match e {
-                TerrainEvent::Mesh(m) => self.renderer.queue_mesh(m),
-                TerrainEvent::Unload(p) => self.renderer.remove_chunk(p),
+                TerrainEvent::Mesh(m) => self.gfx.renderer.queue_mesh(m),
+                TerrainEvent::Unload(p) => self.gfx.renderer.remove_chunk(p),
             }
         }
         if self.screen == Screen::Loading && self.world_ready() {
@@ -364,7 +435,7 @@ impl Game {
     /// The player's eye where it is drawn this frame (between the last two ticks): what the
     /// camera sees from, and what is aimed and shot from.
     pub(super) fn eye(&self) -> Vec3 {
-        self.player.drawn_eye(self.between)
+        self.me.body.drawn_eye(self.clock.between)
     }
 
     /// What runs on the current screen: the player (with the keys, or not while a screen is
@@ -380,7 +451,7 @@ impl Game {
             | Screen::Options { in_game: true }
             | Screen::ResourcePacks { in_game: true }
             | Screen::KeyBinds { in_game: true }
-                if !(self.local.is_some() && self.remotes.is_empty()) =>
+                if !(self.session.local.is_some() && self.session.remotes.is_empty()) =>
             {
                 (Some(false), true)
             }
@@ -394,7 +465,7 @@ impl Game {
     fn update(&mut self, dt: f32) {
         let now = Instant::now();
         let (player, world) = self.running();
-        for _ in 0..self.ticks.due(now) {
+        for _ in 0..self.clock.ticks.due(now) {
             if let Some(control) = player {
                 self.tick_player(control);
             }
@@ -403,7 +474,7 @@ impl Game {
                 self.fall_trees_here(crate::sim::clock::TICK_SECS);
             }
         }
-        self.between = self.ticks.between(now);
+        self.clock.between = self.clock.ticks.between(now);
         if let Some(control) = player {
             self.update_player(dt, control);
         }
@@ -413,29 +484,28 @@ impl Game {
             // Paused (or out of the world): burning furnaces and the like go quiet.
             self.audio.set_loops(&[]);
         }
-        self.particles.update(dt, &self.terrain.world);
+        self.level.particles.update(dt, &self.terrain.world);
         self.update_craft_fx(dt);
         self.update_book(dt);
         if self.in_world_view() {
             self.check_stations();
         }
-        let mining = self.mining.is_some();
-        self.hand.sprinting = self.player.sprinting;
-        self.hand.crouching = self.player.sneaking;
-        let (fwd, right) = (look_dir(self.yaw, 0.0), look_dir(self.yaw + FRAC_PI_2, 0.0));
-        let v = self.player.vel;
-        self.hand.motion = Vec3::new(v.dot(right), v.y, v.dot(fwd));
-        self.hand.update(
+        let mining = self.me.aim.mining.is_some();
+        self.me.hand.sprinting = self.me.body.sprinting;
+        self.me.hand.crouching = self.me.body.sneaking;
+        let (fwd, right) = (look_dir(self.me.look.yaw, 0.0), look_dir(self.me.look.yaw + FRAC_PI_2, 0.0));
+        let v = self.me.body.vel;
+        self.me.hand.motion = Vec3::new(v.dot(right), v.y, v.dot(fwd));
+        self.me.hand.update(
             dt,
             mining,
-            self.player.horizontal_speed(),
-            self.player.on_ground && !self.player.flying,
+            self.me.body.horizontal_speed(),
+            self.me.body.on_ground && !self.me.body.flying,
             self.input.look_delta,
         );
         // Every view, including LAN poses, uses the hand/camera step clock.
-        self.limb_swing = self.hand.walk_phase() / crate::model::player::LIMB_SWING_SCALE;
-        self.slot_name_timer -= dt;
-        self.hint_timer -= dt;
+        self.me.look.limb_swing = self.me.hand.walk_phase() / crate::model::player::LIMB_SWING_SCALE;
+        self.hud.tick(dt);
     }
 
     /// Camera position and projections: first person, a third-person view (F5), or the
@@ -443,23 +513,23 @@ impl Game {
     fn camera_view(&mut self, dt: f32, w: f32, h: f32) -> View {
         let in_world = self.in_world_view();
         let eye = self.sleep_eye().unwrap_or(self.eye());
-        let aim_dir = look_dir(self.yaw, self.pitch);
+        let aim_dir = self.me.look.dir();
         let camera_offset = self
-            .camera
+            .me.look.camera
             .update(&self.terrain.world, eye, aim_dir, in_world, dt);
         let third_person = in_world && camera_offset.length() > 0.22;
         let (cam, mut fwd) = if in_world {
             (eye + camera_offset, aim_dir)
         } else {
             (
-                self.pano,
-                look_dir(self.time * 0.03, -0.14 + (self.time * 0.1).sin() * 0.04),
+                self.menus.pano,
+                look_dir(self.clock.time * 0.03, -0.14 + (self.clock.time * 0.1).sin() * 0.04),
             )
         };
         if third_person {
-            if self.camera.mode == 2 {
+            if self.me.look.camera.mode == 2 {
                 fwd = -fwd;
-            } else if matches!(self.camera.mode, super::camera::SIDE_VIEW | super::camera::SIDE_LEFT | super::camera::FIXED_FRONT) {
+            } else if matches!(self.me.look.camera.mode, super::camera::SIDE_VIEW | super::camera::SIDE_LEFT | super::camera::FIXED_FRONT) {
                 fwd = (eye - Vec3::Y * 0.5 - cam).normalize_or_zero();
             } else {
                 // Keep view rotation independent of changing nearby blocks and plants.
@@ -482,19 +552,19 @@ impl Game {
             * gun_zoom
             * if zooming {
                 0.25
-            } else if self.player.sprinting || (self.player.flying && self.bind_down(Bind::Sprint))
+            } else if self.me.body.sprinting || (self.me.body.flying && self.bind_down(Bind::Sprint))
             {
                 1.12
             } else {
                 1.0
             };
-        self.fov_current += (fov_target - self.fov_current) * (crate::util::damp(10.0, dt));
+        self.me.look.fov += (fov_target - self.me.look.fov) * (crate::util::damp(10.0, dt));
         // The field of view detail is measured with: the setting and the zoom, not the sprint
         // widening (the simplified distance would slide back and forth).
         let detail_target = self.settings.fov * gun_zoom * if zooming { 0.25 } else { 1.0 };
-        self.detail_fov += (detail_target - self.detail_fov) * (crate::util::damp(10.0, dt));
+        self.me.look.detail_fov += (detail_target - self.me.look.detail_fov) * (crate::util::damp(10.0, dt));
         let fov = if in_world {
-            self.fov_current
+            self.me.look.fov
         } else {
             self.settings.fov
         };
@@ -511,20 +581,20 @@ impl Game {
 
         // Camera-space effects: hurt shake and view bobbing (applied to world and hand alike).
         let mut cam_fx = Mat4::IDENTITY;
-        if in_world && self.hurt_time > 0.0 {
-            let f = self.hurt_time / 0.4;
+        if in_world && self.me.vitals.hurt_time > 0.0 {
+            let f = self.me.vitals.hurt_time / 0.4;
             cam_fx = Mat4::from_rotation_z(-(f * f * PI).sin() * 10f32.to_radians());
         }
-        if in_world && self.grenades.shake > 0.0 {
+        if in_world && self.tools.grenades.shake > 0.0 {
             // A blast near by shakes the view.
-            let (k, t) = (self.grenades.shake * self.grenades.shake, self.time);
+            let (k, t) = (self.tools.grenades.shake * self.tools.grenades.shake, self.clock.time);
             cam_fx *= Mat4::from_rotation_x((t * 53.0).sin() * 2.2f32.to_radians() * k)
                 * Mat4::from_rotation_z((t * 41.0).sin() * 1.6f32.to_radians() * k);
         }
-        if in_world && self.needs.nausea > 0.0 && !self.creative() && !self.spectator() {
+        if in_world && self.me.vitals.needs.nausea > 0.0 && !self.creative() && !self.spectator() {
             // Nausea: the view slowly rolls and sways, fading out over the last 3 seconds.
-            let k = (self.needs.nausea / 3.0).min(1.0);
-            let t = self.time;
+            let k = (self.me.vitals.needs.nausea / 3.0).min(1.0);
+            let t = self.clock.time;
             cam_fx *= Mat4::from_rotation_z((t * 1.3).sin() * 7f32.to_radians() * k)
                 * Mat4::from_rotation_y((t * 0.9).sin() * 3f32.to_radians() * k)
                 * Mat4::from_rotation_x((t * 1.7).cos() * 2f32.to_radians() * k);
@@ -533,18 +603,18 @@ impl Game {
             && !third_person
             && !station
             && self.settings.view_bobbing
-            && !self.player.flying
+            && !self.me.body.flying
         {
-            self.view_bob = self.hand.bob_matrix();
-            cam_fx *= self.view_bob;
+            self.me.look.view_bob = self.me.hand.bob_matrix();
+            cam_fx *= self.me.look.view_bob;
         } else {
-            self.view_bob = Mat4::IDENTITY;
+            self.me.look.view_bob = Mat4::IDENTITY;
         }
         let view = cam_fx * Mat4::look_to_rh(cam, fwd, Vec3::Y);
         let mut proj = Mat4::perspective_rh(fov, w / h, 0.05, 2500.0);
         proj.y_axis.y *= -1.0;
         let view_proj = proj * view;
-        self.view_proj = view_proj;
+        self.me.look.view_proj = view_proj;
         let mut vm_proj = Mat4::perspective_rh(70f32.to_radians(), w / h, 0.02, 10.0);
         vm_proj.y_axis.y *= -1.0;
         View {
@@ -577,7 +647,7 @@ impl Game {
             1.0
         };
         let tod = if in_world {
-            self.time_of_day
+            self.level.time_of_day
         } else {
             MENU_TIME_OF_DAY
         };
@@ -624,14 +694,14 @@ impl Game {
             inv_view_proj: view.view_proj.inverse().to_cols_array(),
             light_view_proj: light_view_proj.to_cols_array(),
             // Shot mode: wind and water stand still, so pictures differ only by the view.
-            cam_pos: [cam.x, cam.y, cam.z, if self.shots.is_some() { 100.0 } else { self.time }],
+            cam_pos: [cam.x, cam.y, cam.z, if self.test.shots.is_some() { 100.0 } else { self.clock.time }],
             sun_dir: [sky.sun.x, sky.sun.y, sky.sun.z, sky.day],
             // w: anti-aliasing is on (the shader smooths grass and leaf edges).
             light_dir: [
                 sky.light_dir.x,
                 sky.light_dir.y,
                 sky.light_dir.z,
-                if self.gpu.samples.as_raw() > 1 { 1.0 } else { 0.0 },
+                if self.gfx.gpu.samples.as_raw() > 1 { 1.0 } else { 0.0 },
             ],
             sun_color: [
                 sky.light_tint.x,
@@ -654,14 +724,14 @@ impl Game {
                 self.settings.clouds as i32 as f32,
                 1.0 + (1.0 - sky.day) * 0.15,
                 1.0 / SHADOW_SIZE as f32,
-                self.time,
+                self.clock.time,
             ],
             held_lights: self.held_lights(in_world, cam),
             spots: spots.0,
             spot_view_proj: spots.1,
             detail: [
-                self.gpu.extent.height as f32 * 0.5
-                    / (self.detail_fov.to_radians() * 0.5).tan(),
+                self.gfx.gpu.extent.height as f32 * 0.5
+                    / (self.me.look.detail_fov.to_radians() * 0.5).tan(),
                 0.0,
                 0.0,
                 0.0,
@@ -684,7 +754,7 @@ impl Game {
     #[allow(clippy::type_complexity)]
     fn gun_spots(&self, in_world: bool, cam: Vec3) -> ([[f32; 4]; 2 * crate::render::MAX_SPOTS], [[f32; 16]; crate::render::MAX_SPOTS]) {
         let mut spots: Vec<(Vec3, Vec3)> = Vec::new();
-        if in_world && self.player.spawned && !self.spectator() {
+        if in_world && self.me.body.spawned && !self.spectator() {
             spots.extend(self.own_gun_light());
         }
         if in_world {
@@ -720,16 +790,16 @@ impl Game {
             if held == LANTERN as ItemId || held == crate::item::LAVA_BUCKET {
                 1.0
             } else {
-                torch_flicker(self.time + phase)
+                torch_flicker(self.clock.time + phase)
             }
         };
         let mut lights: Vec<(Vec3, f32)> = Vec::new();
         // A muzzle flash lights up the surroundings for a moment.
-        if let Some(p) = self.guns.flash_light_pos().filter(|_| in_world) {
+        if let Some(p) = self.tools.guns.flash_light_pos().filter(|_| in_world) {
             lights.push(p);
         }
         if in_world
-            && self.player.spawned
+            && self.me.body.spawned
             && self.screen != Screen::Dead
             && !self.spectator()
             && crate::model::player::gives_light(self.held())
@@ -768,20 +838,20 @@ impl Game {
     /// crafting tables.
     fn build_scene(&mut self, view: &View, dt: f32) -> Scene {
         let (in_world, third_person, cam) = (view.in_world, view.third_person, view.cam);
-        let mut scene = std::mem::take(&mut self.scene);
+        let mut scene = std::mem::take(&mut self.gfx.scene);
         scene.clear();
         if in_world {
             // The pages the books in hands are open at.
             self.update_book_views(dt);
         }
-        self.particles
+        self.level.particles
             .build(&mut scene.particles, view.right, view.up);
         if in_world {
             self.build_gun_effects(&mut scene.particles, cam, view.right, view.up);
             self.build_bullet_holes(&mut scene.overlay, cam);
             self.build_grenades(&mut scene.particles);
         }
-        if let (Some((p, prog)), Screen::Playing) = (self.mining, self.screen) {
+        if let (Some((p, prog)), Screen::Playing) = (self.me.aim.mining, self.screen) {
             if prog > 0.02 && !self.creative() {
                 crack_overlay(&mut scene.overlay, p, prog);
             }
@@ -800,7 +870,7 @@ impl Game {
         let fp_body = in_world
             && !third_person
             && self.settings.first_person_body
-            && self.sleep.is_none()
+            && self.me.vitals.sleep.is_none()
             && !self.in_station();
         let torch = self.held() == TORCH as ItemId;
         // Where the held torch burns (for its flame particles), from whichever model shows it.
@@ -812,11 +882,11 @@ impl Game {
         let lantern = self.held() == LANTERN as ItemId || crate::model::bucket::is_bucket(self.held());
         // (and so is a fishing rod: both hands on it)
         let rod = self.held() == crate::item::FISHING_ROD;
-        let pistol = self.holding_gun() || self.grenades.hold.is_some() || rod;
+        let pistol = self.holding_gun() || self.tools.grenades.hold.is_some() || rod;
         // The guide book is always held open in both first-person hands.
         let book = self.held() == crate::item::GUIDE_BOOK;
-        let down = -self.pitch.to_degrees();
-        let lower = &mut self.hand.lower;
+        let down = -self.me.look.pitch.to_degrees();
+        let lower = &mut self.me.hand.lower;
         if !fp_body || torch || lantern || pistol || book || down <= 15.0 {
             *lower = (*lower + 8.0 * dt).min(1.0);
         } else if down < 30.0 {
@@ -827,22 +897,22 @@ impl Game {
         // Seen from the player's own eyes, its hands shown.
         let own_view = in_world
             && !third_person
-            && !self.hide_hud
+            && !self.hud.hide
             && self.screen != Screen::Dead
-            && self.sleep.is_none()
+            && self.me.vitals.sleep.is_none()
             && !self.in_station()
             && !self.spectator();
         // Chopping: the arms and the axe where the chop's rig has them in the world (the same
         // ones the player model shows from outside), however far down the player looks (the
         // first-person body draws the rest of it).
-        if let (true, Some(swing)) = (own_view, self.chop) {
+        if let (true, Some(swing)) = (own_view, self.me.aim.chop) {
             use crate::model::chop_rig::{emit, Parts};
             let light = crate::util::vertex_light(player_sky, player_blk);
             let fl = crate::world::mesh::flags::ENTITY;
             emit(&mut scene.particles, self.chop_world(), &swing.pose().aimed(self.chop_aim()), Parts::Arms, self.held(), self.effective_skin(), [255; 3], 0, 0.0, light, fl);
         }
         if own_view && !(fp_body && (torch || (down > 35.0 && !lantern && !pistol && !book))) {
-            let f = look_dir(self.yaw, self.pitch);
+            let f = self.me.look.dir();
             let r = f.cross(Vec3::Y).normalize();
             let u = r.cross(f);
             let cam_to_world = Mat4::from_cols(
@@ -854,14 +924,14 @@ impl Game {
             // A gun is held steady against the view's bobbing: it sways on its own (see
             // `HandAnim::build_gun`), so the sights stay where they point.
             let cam_to_world = if pistol {
-                cam_to_world * self.view_bob.inverse()
+                cam_to_world * self.me.look.view_bob.inverse()
             } else {
                 cam_to_world
             };
-            self.hand.fancy_lantern = fp_body;
-            self.hand.rod = self.rod_anim();
-            self.hand.book = self.book_view().map(|v| (self.book_read(), v));
-            self.hand.build(
+            self.me.hand.fancy_lantern = fp_body;
+            self.me.hand.rod = self.rod_anim();
+            self.me.hand.book = self.book_view().map(|v| (self.book_read(), v));
+            self.me.hand.build(
                 &mut scene.viewmodel,
                 cam_to_world,
                 player_sky,
@@ -871,24 +941,24 @@ impl Game {
             );
             // The hand is drawn with its own 70 degree view: move its torch tip to where the
             // world's view shows the same spot, so the flame sits on the torch.
-            let k = (self.fov_current.to_radians() * 0.5).tan() / 35f32.to_radians().tan();
+            let k = (self.me.look.fov.to_radians() * 0.5).tan() / 35f32.to_radians().tan();
             let to_world_view = |tip: Vec3| {
                 let p = cam_to_world.inverse().transform_point3(tip);
                 cam_to_world.transform_point3(Vec3::new(p.x * k, p.y * k, p.z))
             };
-            if let Some(tip) = self.hand.torch_tip {
+            if let Some(tip) = self.me.hand.torch_tip {
                 held_torch_tip = Some(to_world_view(tip));
             }
-            scene.viewmodel_glass = std::mem::take(&mut self.hand.glass);
+            scene.viewmodel_glass = std::mem::take(&mut self.me.hand.glass);
             // A direction in the hand's view turned into the world's.
             let to_world_dir = |v: Vec3| {
                 let d = cam_to_world.inverse().transform_vector3(v);
                 cam_to_world.transform_vector3(Vec3::new(d.x * k, d.y * k, d.z)).normalize()
             };
             // Where the gun points: its barrel, or its scope's axis when it has one.
-            self.guns.gun_dir = self.hand.barrel_dir.map(to_world_dir);
+            self.tools.guns.gun_dir = self.me.hand.barrel_dir.map(to_world_dir);
             // The scope's eyepiece: a disc on its back lens showing the scope's magnified view.
-            if let Some((mid, right, up, radius)) = self.hand.eyepiece {
+            if let Some((mid, right, up, radius)) = self.me.hand.eyepiece {
                 let corner = |x: f32, y: f32| mid + right * radius * x + up * radius * y;
                 let quad = [(-1.0, 1.0, [0.0, 0.0]), (1.0, 1.0, [1.0, 0.0]), (1.0, -1.0, [1.0, 1.0]), (-1.0, -1.0, [0.0, 1.0])]
                     .map(|(x, y, uv)| Vertex {
@@ -903,16 +973,16 @@ impl Game {
                 // with it), from the hand's view into the world's.
                 let dir = to_world_dir(up.cross(right));
                 let up = to_world_dir(up);
-                self.guns.gun_dir = Some(dir);
+                self.tools.guns.gun_dir = Some(dir);
                 // Its field of view is the one it has fully aimed, however far from the eye.
-                if self.hand.aim > 0.97 {
+                if self.me.hand.aim > 0.97 {
                     let dist = (mid - cam).length().max(1e-3);
-                    self.hand.scope_across = (radius / dist) / 35f32.to_radians().tan();
+                    self.me.hand.scope_across = (radius / dist) / 35f32.to_radians().tan();
                 }
-                let across = self.hand.scope_across;
-                let half = (across * (self.fov_current.to_radians() * 0.5).tan()).atan();
+                let across = self.me.hand.scope_across;
+                let half = (across * (self.me.look.fov.to_radians() * 0.5).tan()).atan();
                 // (only a gun a scope fits has one)
-                let zoom = crate::item::GunKind::of(self.hand.held).and_then(|k| k.def().scope_zoom);
+                let zoom = crate::item::GunKind::of(self.me.hand.held).and_then(|k| k.def().scope_zoom);
                 let magnify = 1.0 / zoom.unwrap_or(1.0);
                 // Seen from the scope itself, not from the eye: but never from beyond a wall
                 // the eye is up against (the gun would be in it), and with its near plane
@@ -926,23 +996,23 @@ impl Game {
                 scene.scope = Some((from, dir, up, (2.0 * half / magnify).max(0.2f32.to_radians()), near));
             }
             // The same for the pistol's muzzle flash and the spent cases.
-            self.guns.muzzle = self.hand.muzzle_tip.map(to_world_view);
-            self.guns.eject = self.hand.eject_tip.map(to_world_view);
-            self.guns.chambers = self.hand.chamber_tips.map(|c| c.map(to_world_view));
-            self.guns.laser_from = self.hand.laser_tip.map(to_world_view);
-            self.guns.light_from = self.hand.light_tip.map(to_world_view);
-            self.grenades.hand_fp = self.hand.grenade_tip.map(to_world_view);
-            self.fishing.tip_fp = self.hand.rod_tip.map(to_world_view);
-            let hit = self.hand.book_hit;
+            self.tools.guns.muzzle = self.me.hand.muzzle_tip.map(to_world_view);
+            self.tools.guns.eject = self.me.hand.eject_tip.map(to_world_view);
+            self.tools.guns.chambers = self.me.hand.chamber_tips.map(|c| c.map(to_world_view));
+            self.tools.guns.laser_from = self.me.hand.laser_tip.map(to_world_view);
+            self.tools.guns.light_from = self.me.hand.light_tip.map(to_world_view);
+            self.tools.grenades.hand_fp = self.me.hand.grenade_tip.map(to_world_view);
+            self.tools.fishing.tip_fp = self.me.hand.rod_tip.map(to_world_view);
+            let hit = self.me.hand.book_hit;
             self.set_book_hit(hit);
         } else {
-            self.guns.muzzle = None;
-            self.guns.eject = None;
-            self.guns.chambers = None;
-            self.guns.laser_from = None;
-            self.guns.light_from = None;
-            self.guns.gun_dir = None;
-            self.fishing.tip_fp = None;
+            self.tools.guns.muzzle = None;
+            self.tools.guns.eject = None;
+            self.tools.guns.chambers = None;
+            self.tools.guns.laser_from = None;
+            self.tools.guns.light_from = None;
+            self.tools.guns.gun_dir = None;
+            self.tools.fishing.tip_fp = None;
             self.set_book_hit(None);
         }
         if in_world {
@@ -950,79 +1020,79 @@ impl Game {
         }
         // The player model (shadow only in first person); a spectator has no body.
         // Running eases the gun across the chest (and back) on the player model.
-        let run = if self.player.sprinting { 1.0 } else { 0.0 };
-        self.tp_sprint += (run - self.tp_sprint) * (crate::util::damp(dt, 8.0));
-        if in_world && self.player.spawned && self.screen != Screen::Dead && !self.spectator() {
+        let run = if self.me.body.sprinting { 1.0 } else { 0.0 };
+        self.me.look.tp_sprint += (run - self.me.look.tp_sprint) * (crate::util::damp(dt, 8.0));
+        if in_world && self.me.body.spawned && self.screen != Screen::Dead && !self.spectator() {
             // In bed: built standing, then laid down on it.
-            let bed = self.sleep.map(|s| {
-                crate::model::player::lying(self.player.drawn_pos(self.between), facing_dir(s.facing).as_vec3())
+            let bed = self.me.vitals.sleep.map(|s| {
+                crate::model::player::lying(self.me.body.drawn_pos(self.clock.between), facing_dir(s.facing).as_vec3())
             });
             let (pos, head_yaw, pitch) = match bed {
                 Some((feet, yaw, _)) => (feet, yaw, 0.0),
-                None => (self.player.drawn_pos(self.between), self.visual_head_yaw(), self.pitch),
+                None => (self.me.body.drawn_pos(self.clock.between), self.me.look.visual_head_yaw(), self.me.look.pitch),
             };
             let pose = PlayerPose {
                 pos,
-                body_yaw: self.body_yaw,
+                body_yaw: self.me.look.body_yaw,
                 head_yaw,
                 pitch,
-                limb_swing: self.limb_swing,
-                limb_amount: self.limb_amount,
-                attack: self.hand.attack(),
-                crouch: self.player.crouch,
-                sprint: self.tp_sprint,
+                limb_swing: self.me.look.limb_swing,
+                limb_amount: self.me.look.limb_amount,
+                attack: self.me.hand.attack(),
+                crouch: self.me.body.crouch,
+                sprint: self.me.look.tp_sprint,
                 held: self.held(),
                 skin: self.effective_skin(),
-                time: self.time,
-                hurt: self.hurt_time > 0.0,
+                time: self.clock.time,
+                hurt: self.me.vitals.hurt_time > 0.0,
                 first_person: false,
-                burning: self.fire > 0.0,
-                blocking: self.blocking,
+                burning: self.me.vitals.fire > 0.0,
+                blocking: self.me.aim.blocking,
                 hide_arms: false,
                 hide_right_arm: false,
                 lantern: None,
                 gun_mods: self.held_gun_mods(),
                 gun_dirt: self.held_gun_dirt(),
-                held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
-                gun: self.hand.gun_anim(),
-                armor: crate::item::armor_code(&self.inventory.armor),
+                held_data: self.me.items.held_stack().map_or(0, |s| s.data),
+                gun: self.me.hand.gun_anim(),
+                armor: crate::item::armor_code(&self.me.items.inventory.armor),
                 book: self.book_view(),
-                grenade: self.grenades.hold.map(|h| h.t),
+                grenade: self.tools.grenades.hold.map(|h| h.t),
                 rod: self.rod_anim(),
-                chop: self.chop,
+                chop: self.me.aim.chop,
             };
             // Where the gun's muzzle and ejection port are on the player model (third person).
             if let Some(kind) = crate::item::GunKind::of(pose.held) {
                 let mods = pose.gun_mods;
                 use crate::model::gun_view::{eject, light, muzzle, rest_point_in_gun_space};
                 let point = |q| crate::model::player::gun_point(&pose, kind, rest_point_in_gun_space(kind, q));
-                self.guns.muzzle_tp = Some(point(muzzle(kind, mods)));
-                self.guns.eject_tp = Some(point(eject(kind)));
-                self.guns.light_tp = Some(point(light(kind)));
+                self.tools.guns.muzzle_tp = Some(point(muzzle(kind, mods)));
+                self.tools.guns.eject_tp = Some(point(eject(kind)));
+                self.tools.guns.light_tp = Some(point(light(kind)));
             } else {
-                self.guns.muzzle_tp = None;
-                self.guns.eject_tp = None;
-                self.guns.light_tp = None;
+                self.tools.guns.muzzle_tp = None;
+                self.tools.guns.eject_tp = None;
+                self.tools.guns.light_tp = None;
             }
             let target = limb_targets(&PlayerPose {
                 first_person: fp_body,
                 ..pose
             });
-            let limbs = self.limbs.update(target, dt);
+            let limbs = self.me.look.limbs.update(target, dt);
             // Where a readied grenade is in the model's hand (thrown from there, seen from
             // outside).
-            self.grenades.hand_tp = pose.grenade.map(|_| crate::model::player::held_center(&pose, &limbs));
+            self.tools.grenades.hand_tp = pose.grenade.map(|_| crate::model::player::held_center(&pose, &limbs));
             // Where the fishing rod's tip is on the model (the line leaves from there).
-            self.fishing.tip_tp = crate::model::player::rod_tip(&pose);
+            self.tools.fishing.tip_tp = crate::model::player::rod_tip(&pose);
             // A held lantern swings from the hand.
             let lantern_dir = if crate::model::player::hangs(pose.held) {
                 let pivot = hand_pivot(&pose, &limbs);
                 Some(
-                    self.lantern_swing
+                    self.me.look.lantern_swing
                         .update(crate::model::lantern::ON_MODEL, pivot, dt),
                 )
             } else {
-                self.lantern_swing = Default::default();
+                self.me.look.lantern_swing = Default::default();
                 None
             };
             let pose = PlayerPose {
@@ -1046,8 +1116,8 @@ impl Game {
             // 0.25 blocks behind the camera (0.27 while sneaking), so looking down shows the
             // chest, legs and feet instead of the top of the shoulders.
             if fp_body {
-                let back = 0.25 + 0.02 * self.player.crouch;
-                let body_fwd = look_dir(self.body_yaw, 0.0);
+                let back = 0.25 + 0.02 * self.me.body.crouch;
+                let body_fwd = look_dir(self.me.look.body_yaw, 0.0);
                 let fp = PlayerPose {
                     pos: pose.pos - body_fwd * back,
                     first_person: true,
@@ -1062,7 +1132,7 @@ impl Game {
                 }
             }
         }
-        self.held_torch_tip = held_torch_tip;
+        self.me.look.held_torch_tip = held_torch_tip;
         if in_world {
             self.build_fishing(&mut scene.particles, cam);
         }
@@ -1123,10 +1193,10 @@ impl Game {
         // the rest past the view distance.
         const ITEM_SIGHT: f32 = 64.0;
         let sight = self.settings.render_distance * CHUNK as f32;
-        let eye = self.player.pos;
+        let eye = self.me.body.pos;
         for it in self.level.items.iter().filter(|it| it.pos.distance_squared(eye) < ITEM_SIGHT * ITEM_SIGHT) {
             let (sky, blk) = world.light_estimate(it.pos + Vec3::Y * 0.3);
-            it.build(target, self.time, sky, blk);
+            it.build(target, self.clock.time, sky, blk);
         }
         for f in self.level.falling.iter().filter(|f| f.pos.distance_squared(eye) < sight * sight) {
             let (sky, blk) = world.light_estimate(f.pos + Vec3::Y * 0.5);
@@ -1138,29 +1208,29 @@ impl Game {
         // range only draws shadows, so they are copied into the particle range to be seen too.
         let mob_verts = &mut scene.mobs;
         for m in &self.level.mobs {
-            if (m.pos - self.player.pos).length_squared() > 128.0 * 128.0 {
+            if (m.pos - self.me.body.pos).length_squared() > 128.0 * 128.0 {
                 continue;
             }
             let (sky, blk) = world.light_estimate(m.center());
             m.build(mob_verts, sky, blk);
         }
         // Watching someone through their eyes: their own model would be in the way.
-        let inside = self.spectating.filter(|_| !third_person);
+        let inside = self.session.spectating.filter(|_| !third_person);
         multi::build_remote_players(
-            &mut self.remotes,
+            &mut self.session.remotes,
             world,
-            self.time,
+            self.clock.time,
             mob_verts,
             &mut scene.translucent,
             dt,
             inside,
         );
-        let near = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < 48.0 * 48.0;
+        let near = |p: &IVec3| (p.as_vec3() - self.me.body.pos).length_squared() < 48.0 * 48.0;
         let light = |p: IVec3| world.light_estimate(p.as_vec3() + Vec3::new(0.5, 1.2, 0.5));
         // Every chest in sight gets its lid, known contents or not (the chunk mesh has only
         // its body: a lid missing would leave it open-topped).
         let sight = (self.settings.render_distance * CHUNK as f32).powi(2);
-        let in_sight = |p: &IVec3| (p.as_vec3() - self.player.pos).length_squared() < sight;
+        let in_sight = |p: &IVec3| (p.as_vec3() - self.me.body.pos).length_squared() < sight;
         for p in self.terrain.chests.values().flatten().filter(|p| in_sight(p)) {
             let b = world.geti(*p);
             if let Some(facing) = facing(b).filter(|_| is_chest(b)) {
@@ -1226,8 +1296,8 @@ impl Game {
                 let front = *p + facing_dir(facing);
                 let (fs, fb) = world.light_estimate(front.as_vec3() + Vec3::splat(0.5));
                 let inside = crate::util::vertex_light(fs, fb);
-                let planes = !self.torch_particles;
-                build_furnace_items(target, *p, facing, f, self.time, sky, blk, inside, planes);
+                let planes = !self.gfx.torch_particles;
+                build_furnace_items(target, *p, facing, f, self.clock.time, sky, blk, inside, planes);
             }
         }
         let open_table = match self.screen {
@@ -1248,9 +1318,9 @@ impl Game {
             };
             let (sky, blk) = light(p);
             let side = self.table_side(p);
-            build_table_items(target, p, side, &self.craft, lift, sky, blk);
-            if let Some(made) = &self.craft_out {
-                let (t, used) = self.craft_fx.unwrap_or((10.0, [None; 9]));
+            build_table_items(target, p, side, &self.me.items.craft, lift, sky, blk);
+            if let Some(made) = &self.me.items.craft_out {
+                let (t, used) = self.me.items.craft_fx.unwrap_or((10.0, [None; 9]));
                 let hovered = self.inv_ui.station_hover == Some(gui::SlotRef::CraftOut);
                 build_table_made(target, p, side, made, &used, t, hovered, sky, blk);
             }
@@ -1280,8 +1350,7 @@ impl Game {
         self.ui.mouse_down = self.input.left_down;
         self.ui.pressed = self.input.left_pressed && !self.input.cursor_grabbed;
         self.ui.right_pressed = self.input.right_pressed && !self.input.cursor_grabbed;
-        self.ui.shift =
-            self.input.keys.contains(&KeyCode::ShiftLeft) || self.input.keys.contains(&KeyCode::ShiftRight);
+        self.ui.shift = self.input.shift();
         self.ui.scroll = if self.input.cursor_grabbed {
             0.0
         } else {
@@ -1289,7 +1358,7 @@ impl Game {
         };
         self.ui.typed = std::mem::take(&mut self.input.typed);
         self.ui.backspace = self.input.backspace;
-        self.ui.begin(w, h, s, dt, self.time);
+        self.ui.begin(w, h, s, dt, self.clock.time);
         if in_world {
             self.draw_hud(medium.underwater, medium.in_lava);
         }
@@ -1313,7 +1382,7 @@ impl Game {
             Screen::Skin => screens::skin_menu(
                 &mut self.ui,
                 self.settings.skin,
-                self.custom_skins.contains_key(&0),
+                self.gfx.skins.custom.contains_key(&0),
                 &self.menus.skin_error,
             ),
             Screen::Options { in_game } => screens::options(
@@ -1321,7 +1390,7 @@ impl Game {
                 &mut self.settings,
                 in_game,
                 &mut self.menus.options,
-                self.gpu.max_samples,
+                self.gfx.gpu.max_samples,
             ),
             Screen::ResourcePacks { in_game } => {
                 screens::resource_packs(&mut self.ui, &mut self.menus.pack_screen, in_game)
@@ -1331,7 +1400,7 @@ impl Game {
             }
             Screen::Credits => screens::credits(
                 &mut self.ui,
-                self.pack_credit
+                self.gfx.pack_credit
                     .as_ref()
                     .map(|(t, d)| (t.as_str(), d.as_str())),
             ),
@@ -1344,7 +1413,7 @@ impl Game {
                 Action::None
             }
             Screen::Paused => {
-                let lan = match (&self.lan_address, &self.local) {
+                let lan = match (&self.session.lan_address, &self.session.local) {
                     (Some(address), _) => screens::PauseLan::Open(address),
                     (None, Some(_)) => screens::PauseLan::Available,
                     (None, None) => screens::PauseLan::Joined,
@@ -1353,7 +1422,7 @@ impl Game {
             }
             Screen::Multiplayer => self.multiplayer_screen(),
             Screen::Connecting | Screen::Disconnected => self.net_status_screen(),
-            Screen::Dead => screens::death(&mut self.ui, &self.death_message),
+            Screen::Dead => screens::death(&mut self.ui, &self.me.vitals.death_message),
             Screen::Spectate => {
                 self.spectate_screen();
                 Action::None

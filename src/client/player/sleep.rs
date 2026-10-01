@@ -20,7 +20,7 @@ pub(in crate::client) struct Sleep {
 impl Game {
     /// Right click on a bed: it becomes the respawn point, and at night the player lies down.
     pub(in crate::client) fn use_bed(&mut self, hit: IVec3) {
-        self.action_cooldown = 0.25;
+        self.me.aim.action_cooldown = 0.25;
         let b = self.terrain.world.geti(hit);
         let head = if bed_head(b) {
             hit
@@ -30,9 +30,9 @@ impl Game {
         if !is_bed(self.terrain.world.geti(head)) {
             return;
         }
-        self.bed_spawn = Some(head);
+        self.me.vitals.bed_spawn = Some(head);
         self.say(t("bed.spawn_set"), chat::WHITE);
-        if !is_night(self.time_of_day) {
+        if !is_night(self.level.time_of_day) {
             self.say(t("bed.no_sleep"), chat::WHITE);
             return;
         }
@@ -40,75 +40,71 @@ impl Game {
             self.say(t("bed.occupied"), chat::WHITE);
             return;
         }
-        self.sleep = Some(Sleep {
+        self.me.vitals.sleep = Some(Sleep {
             bed: head,
             facing: bed_facing(b),
             time: 0.0,
         });
-        self.mining = None;
-        self.using = None;
-        self.player.flying = false;
-        self.player.vel = Vec3::ZERO;
+        self.me.aim.mining = None;
+        self.me.aim.using = None;
+        self.me.body.flying = false;
+        self.me.body.vel = Vec3::ZERO;
     }
 
     /// The player's frame while in bed (instead of moving): they lie still on it until they
     /// sneak, the morning comes or the bed is gone. Health and hunger go on.
     pub(in crate::client) fn update_sleep(&mut self, dt: f32, control: bool) {
-        let Some(s) = self.sleep.as_mut() else {
+        let Some(s) = self.me.vitals.sleep.as_mut() else {
             return;
         };
         s.time += dt;
         let s = *s;
         let b = self.terrain.world.geti(s.bed);
         let leave = control && self.bind_down(Bind::Sneak);
-        if !(is_bed(b) && bed_head(b)) || !is_night(self.time_of_day) || leave {
+        if !(is_bed(b) && bed_head(b)) || !is_night(self.level.time_of_day) || leave {
             self.wake_up();
             return;
         }
-        self.player.pos = s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT, 0.5);
-        self.player.start_tick();
-        self.player.vel = Vec3::ZERO;
-        self.fall_peak = self.player.pos.y;
+        self.me.body.pos = s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT, 0.5);
+        self.me.body.start_tick();
+        self.me.body.vel = Vec3::ZERO;
+        self.me.vitals.fall_peak = self.me.body.pos.y;
         let foot = -facing_dir(s.facing).as_vec3();
-        self.body_yaw = foot.z.atan2(foot.x);
-        self.limb_amount = 0.0;
-        self.blocking = false;
-        self.hand.blocking = false;
-        self.target = None;
-        self.mob_target = None;
-        self.player_target = None;
-        self.mining = None;
-        let on_ground = self.player.on_ground;
+        self.me.look.body_yaw = foot.z.atan2(foot.x);
+        self.me.look.limb_amount = 0.0;
+        self.me.aim.let_go();
+        self.me.hand.blocking = false;
+        let on_ground = self.me.body.on_ground;
         self.update_health(dt, on_ground);
         if self.screen == Screen::Dead {
-            self.sleep = None;
+            self.me.vitals.sleep = None;
         }
     }
 
     /// Gets out of bed onto a free spot beside it (or on top of it if there is none).
     pub(in crate::client) fn wake_up(&mut self) {
-        let Some(s) = self.sleep.take() else {
+        let Some(s) = self.me.vitals.sleep.take() else {
             return;
         };
         let pos = self
             .bed_stand_pos(s.bed)
             .unwrap_or(s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT, 0.5));
-        self.player.pos = pos;
-        self.player.start_tick();
-        self.player.vel = Vec3::ZERO;
-        self.fall_peak = pos.y;
+        self.me.body.pos = pos;
+        self.me.body.start_tick();
+        self.me.body.vel = Vec3::ZERO;
+        self.me.vitals.fall_peak = pos.y;
     }
 
     /// The camera in bed: the eyes of the model lying on the pillow.
     pub(in crate::client) fn sleep_eye(&self) -> Option<Vec3> {
-        let s = self.sleep?;
+        let s = self.me.vitals.sleep?;
         let head = facing_dir(s.facing).as_vec3();
         Some(s.bed.as_vec3() + Vec3::new(0.5, BED_HEIGHT + 0.3, 0.5) + head * 0.25)
     }
 
     /// LAN: how many of the players are in bed, while this player waits in one.
     pub(in crate::client) fn sleep_status(&self) -> Option<String> {
-        self.sleep?;
+        self.me.vitals.sleep?;
         let (remotes, asleep) = self.remotes_asleep();
         (remotes > 0).then(|| {
             tf(
@@ -180,7 +176,7 @@ impl Game {
 
     /// Where the player comes back to life: beside their bed, else at the world spawn.
     pub(in crate::client) fn home_pos(&self) -> Vec3 {
-        self.bed_spawn
+        self.me.vitals.bed_spawn
             .and_then(|b| self.bed_stand_pos(b))
             .unwrap_or_else(|| self.spawn_pos())
     }
@@ -188,17 +184,17 @@ impl Game {
     /// Back to life at home. A bed that is gone or blocked is forgotten (with a message).
     pub(in crate::client) fn spawn_at_home(&mut self, tell: bool) {
         self.spawn_player();
-        let Some(bed) = self.bed_spawn else {
+        let Some(bed) = self.me.vitals.bed_spawn else {
             return;
         };
         match self.bed_stand_pos(bed) {
             Some(pos) => {
-                self.player.pos = pos;
-                self.player.start_tick();
-                self.fall_peak = pos.y;
+                self.me.body.pos = pos;
+                self.me.body.start_tick();
+                self.me.vitals.fall_peak = pos.y;
             }
             None => {
-                self.bed_spawn = None;
+                self.me.vitals.bed_spawn = None;
                 if tell {
                     self.say(t("bed.missing"), chat::WHITE);
                 }

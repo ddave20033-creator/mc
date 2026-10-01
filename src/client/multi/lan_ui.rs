@@ -7,10 +7,10 @@ impl Game {
     pub(in crate::client) fn draw_name_tags(&mut self) {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let cam = self.eye();
-        let time = self.time;
-        for r in &self.remotes {
+        let time = self.clock.time;
+        for r in &self.session.remotes {
             let p = r.pose;
-            if !r.shown() || Some(r.id) == self.spectating {
+            if !r.shown() || Some(r.id) == self.session.spectating {
                 continue;
             }
             let top = p.pos + Vec3::Y * (2.1 - 0.3 * p.crouch);
@@ -20,7 +20,7 @@ impl Game {
                 continue;
             }
             let fade = ((NAME_RANGE - dist) / 8.0).clamp(0.0, 1.0);
-            let clip = self.view_proj * top.extend(1.0);
+            let clip = self.me.look.view_proj * top.extend(1.0);
             if clip.w < 0.1 {
                 continue;
             }
@@ -31,7 +31,7 @@ impl Game {
             let (x, y) = ((ndc.x * 0.5 + 0.5) * w, (ndc.y * 0.5 + 0.5) * h);
             // The tag is a fixed size in the world (about a quarter block tall, like
             // Minecraft's), so it shrinks with distance instead of covering far players.
-            let focal = 1.0 / (self.fov_current.to_radians() * 0.5).tan();
+            let focal = 1.0 / (self.me.look.fov.to_radians() * 0.5).tan();
             let px_per_block = h * 0.5 * focal / clip.w;
             let fs = (0.27 * px_per_block / 9.0).clamp(0.5, 2.0 * s);
             let tw = self.ui.text_width(&r.name, fs);
@@ -62,9 +62,9 @@ impl Game {
 
     /// Tab: everyone in the world, top center (the world's owner first, marked).
     pub(in crate::client) fn draw_player_list(&mut self) {
-        let my_id = self.net.as_ref().map_or(OWNER_ID, |c| c.id);
+        let my_id = self.session.net.as_ref().map_or(OWNER_ID, |c| c.id);
         let mut players: Vec<(u8, String)> = self
-            .remotes
+            .session.remotes
             .iter()
             .map(|r| (r.id, r.name.clone()))
             .collect();
@@ -177,7 +177,7 @@ impl Game {
             .unwrap_or_default();
         let mut join = None;
         if games.is_empty() {
-            let dots = ".".repeat(1 + (self.time * 2.0) as usize % 3);
+            let dots = ".".repeat(1 + (self.clock.time * 2.0) as usize % 3);
             let text = if self.menus.finder.as_ref().is_some_and(|f| f.error) {
                 t("mp.search_failed").to_string()
             } else {
@@ -205,9 +205,9 @@ impl Game {
                 );
             }
             if hovered && self.ui.pressed {
-                let double = self.menus.mp_selected == Some(g.addr) && self.menus.last_click.0 == i && self.time - self.menus.last_click.1 < 0.35;
+                let double = self.menus.mp_selected == Some(g.addr) && self.menus.last_click.0 == i && self.clock.time - self.menus.last_click.1 < 0.35;
                 self.menus.mp_selected = Some(g.addr);
-                self.menus.last_click = (i, self.time);
+                self.menus.last_click = (i, self.clock.time);
                 if double && g.compatible {
                     join = Some(g.addr.to_string());
                 }

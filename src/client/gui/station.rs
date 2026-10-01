@@ -148,7 +148,7 @@ impl Game {
             Container::GunStation(p) => p,
             Container::Crafting(p) => {
                 // The grid reads like a page from where the player stands.
-                let d = self.player.pos - (p.as_vec3() + Vec3::splat(0.5));
+                let d = self.me.body.pos - (p.as_vec3() + Vec3::splat(0.5));
                 self.level.table_sides.insert(p, facing_of(d.x, d.z));
                 p
             }
@@ -197,10 +197,10 @@ impl Game {
 
     /// The ingredients slide into the middle of the table.
     pub(in crate::client) fn update_craft_fx(&mut self, dt: f32) {
-        if let Some((t, _)) = &mut self.craft_fx {
+        if let Some((t, _)) = &mut self.me.items.craft_fx {
             *t += dt;
             if *t > CRAFT_SLIDE + 1.0 {
-                self.craft_fx = None;
+                self.me.items.craft_fx = None;
             }
         }
     }
@@ -333,7 +333,7 @@ impl Game {
         let over_inventory = self.ui.hit(px, py, pw, ph);
 
         let view = Screen2 {
-            view_proj: self.view_proj,
+            view_proj: self.me.look.view_proj,
             w,
             h,
         };
@@ -383,7 +383,7 @@ impl Game {
             let point = hit_plane(o, d, top).filter(|_| ready && !over_inventory);
             if let Some(i) = point.and_then(|pt| table_cell_at(p, side, pt)) {
                 // What was crafted lies in the middle, over that cell.
-                let made = i == 4 && self.craft_out.is_some();
+                let made = i == 4 && self.me.items.craft_out.is_some();
                 hovered = Some(if made {
                     SlotRef::CraftOut
                 } else {
@@ -394,15 +394,15 @@ impl Game {
                 frame = Some([c - x - z, c + x - z, c + x + z, c - x + z]);
             }
             let label = |i: usize| table_cell(p, side, i) + toward * 0.05 + right * 0.06;
-            for (i, st) in self.craft.iter().enumerate() {
+            for (i, st) in self.me.items.craft.iter().enumerate() {
                 if let Some(st) = st.filter(|st| st.count > 1) {
-                    if i != 4 || self.craft_out.is_none() {
+                    if i != 4 || self.me.items.craft_out.is_none() {
                         labels.push((label(i), st.count));
                     }
                 }
             }
-            let settled = self.craft_fx.is_none_or(|(t, _)| t >= CRAFT_SLIDE);
-            if let Some(st) = self.craft_out.filter(|st| st.count > 1 && settled) {
+            let settled = self.me.items.craft_fx.is_none_or(|(t, _)| t >= CRAFT_SLIDE);
+            if let Some(st) = self.me.items.craft_out.filter(|st| st.count > 1 && settled) {
                 labels.push((label(4) + Vec3::Y * 0.04, st.count));
             }
         }

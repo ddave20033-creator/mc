@@ -6,7 +6,7 @@
 //! A stack can also be dragged out of a slot and let go over another one.
 
 mod gun_station;
-pub(super) use gun_station::Pick as BenchPick;
+pub(super) use gun_station::BenchUi;
 mod jei;
 pub(super) use jei::Jei;
 pub(super) mod hud;
@@ -31,6 +31,57 @@ use crate::lang::tf;
 use crate::ui::rgba;
 
 /// GUI pixel size of a slot (16 px icon + 1 px border each side).
+/// The inventory screens: the creative tabs, list and search, the JEI panel, dragging and
+/// clicking slots, and what the mouse is on at an open chest or table.
+pub(super) struct InventoryUi {
+    /// Creative list scroll in rows: the target set by the wheel, and the eased position.
+    pub(super) creative_scroll: f32,
+    pub(super) creative_scroll_anim: f32,
+    /// Dragging the creative scroll bar.
+    pub(super) scroll_drag: bool,
+    /// Creative inventory search text; typing goes to it while it is focused.
+    pub(super) creative_search: String,
+    pub(super) search_focused: bool,
+    /// The JEI panel beside the inventory screens.
+    pub(super) jei: Jei,
+    /// The open tab of the creative inventory (index into `TABS`); kept between openings.
+    pub(super) creative_tab: usize,
+    /// Slot drag in progress (Minecraft-style stack spreading).
+    pub(super) drag: Option<Drag>,
+    /// The slot a stack was just picked up from with the button still held: letting go
+    /// over another slot puts it there.
+    pub(super) press_pick: Option<SlotRef>,
+    /// Time and slot of the last left click, for double-click collecting.
+    pub(super) slot_click: (f32, Option<SlotRef>),
+    /// What the mouse points at in the open chest or on the open table, and the corners of
+    /// its highlighted slot.
+    pub(super) station_hover: Option<SlotRef>,
+    pub(super) station_frame: Option<[Vec3; 4]>,
+    /// The mouse is over the open chest or table, or the inventory under it: a click there
+    /// does not throw the held stack.
+    pub(super) station_inside: bool,
+}
+
+impl InventoryUi {
+    pub(super) fn new() -> Self {
+        Self {
+            creative_scroll: 0.0,
+            creative_scroll_anim: 0.0,
+            scroll_drag: false,
+            creative_search: String::new(),
+            search_focused: false,
+            jei: Default::default(),
+            creative_tab: 0,
+            drag: None,
+            press_pick: None,
+            slot_click: (-1.0, None),
+            station_hover: None,
+            station_frame: None,
+            station_inside: false,
+        }
+    }
+}
+
 const SLOT: f32 = 18.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -114,7 +165,7 @@ impl Game {
                         grid_x + (i % n) as f32 * SLOT,
                         grid_y + (i / n) as f32 * SLOT,
                     );
-                    if self.draw_slot(x, y, self.craft[i]) {
+                    if self.draw_slot(x, y, self.me.items.craft[i]) {
                         hovered = Some(SlotRef::Craft(i));
                     }
                 }
@@ -150,7 +201,7 @@ impl Game {
                 for i in 9..36 {
                     let (cx, cy) = ((i - 9) % 9, (i - 9) / 9);
                     let (x, y) = at(9.0 + cx as f32 * SLOT, 76.0 + cy as f32 * SLOT);
-                    if self.draw_slot(x, y, self.inventory.slots[i]) {
+                    if self.draw_slot(x, y, self.me.items.inventory.slots[i]) {
                         hovered = Some(SlotRef::Inv(i));
                     }
                 }
@@ -285,7 +336,7 @@ impl Game {
             if !self.input.left_down {
                 self.inv_ui.press_pick = None;
                 if let Some(r) = hovered.filter(|&r| r != from && droppable(r)) {
-                    if self.cursor.is_some() {
+                    if self.me.items.cursor.is_some() {
                         self.click_slot(c, r, false, false);
                     }
                 }
@@ -293,7 +344,7 @@ impl Game {
         }
 
         // Tooltip for the hovered stack.
-        if self.cursor.is_none() {
+        if self.me.items.cursor.is_none() {
             if let Some(r) = hovered {
                 let st = match r {
                     SlotRef::Creative(_) => hovered_stack,
@@ -333,26 +384,26 @@ impl Game {
         } else if let Some(r) = hovered {
             // Middle click (creative): a full stack of the hovered item on the cursor.
             let middle = self.input.middle_pressed && !self.input.cursor_grabbed;
-            if middle && self.creative() && self.cursor.is_none() {
+            if middle && self.creative() && self.me.items.cursor.is_none() {
                 let st = match r {
                     SlotRef::Creative(id) => Some(Stack::one(id)),
                     SlotRef::CraftOut => self.craft_out_stack(c),
                     SlotRef::Trash => None,
                     _ => self.slot_mut(c, r).and_then(|s| *s),
                 };
-                self.cursor = st.map(|st| Stack::new(st.item, max_stack(st.item)));
+                self.me.items.cursor = st.map(|st| Stack::new(st.item, max_stack(st.item)));
             }
             if self.ui.pressed || self.ui.right_pressed {
                 let right = !self.ui.pressed;
                 let double = !right
                     && !shift
                     && self.inv_ui.slot_click.1 == Some(r)
-                    && self.time - self.inv_ui.slot_click.0 < 0.3;
+                    && self.clock.time - self.inv_ui.slot_click.0 < 0.3;
                 if !right {
-                    self.inv_ui.slot_click = (self.time, Some(r));
+                    self.inv_ui.slot_click = (self.clock.time, Some(r));
                 }
                 let cur = self.slot_mut(c, r).and_then(|s| *s);
-                match self.cursor {
+                match self.me.items.cursor {
                     Some(_) if double && droppable(r) => self.collect_all(c),
                     Some(st) if !shift && droppable(r) && fits(cur, &st) => {
                         let d = Drag {
@@ -364,9 +415,9 @@ impl Game {
                         self.inv_ui.drag = Some(d);
                     }
                     _ => {
-                        let empty = self.cursor.is_none();
+                        let empty = self.me.items.cursor.is_none();
                         self.click_slot(c, r, right, shift && !right);
-                        if empty && !right && !shift && self.cursor.is_some() {
+                        if empty && !right && !shift && self.me.items.cursor.is_some() {
                             self.inv_ui.press_pick = Some(r);
                         }
                     }
@@ -384,15 +435,15 @@ impl Game {
                             | SlotRef::Armor(_)
                     )
                 {
-                    let mut hot = self.inventory.slots[d].take();
+                    let mut hot = self.me.items.inventory.slots[d].take();
                     if let Some(slot) = self.slot_mut(c, r) {
                         std::mem::swap(slot, &mut hot);
                     }
-                    self.inventory.slots[d] = hot;
+                    self.me.items.inventory.slots[d] = hot;
                 }
             }
         } else if self.ui.pressed
-            && self.cursor.is_none()
+            && self.me.items.cursor.is_none()
             && matches!(c, Container::Crafting(_))
             && self.in_station()
         {
@@ -402,13 +453,13 @@ impl Game {
             // Clicking outside the window (or away from the chest or table and the inventory)
             // throws the held stack: all of it with the left button, one with the right.
             if !inside {
-                if let Some(st) = self.cursor {
+                if let Some(st) = self.me.items.cursor {
                     if self.ui.right_pressed {
                         let one = Stack { count: 1, ..st };
-                        take(&mut self.cursor, 1);
+                        take(&mut self.me.items.cursor, 1);
                         self.throw(one);
                     } else {
-                        self.cursor = None;
+                        self.me.items.cursor = None;
                         self.throw(st);
                     }
                 }
@@ -419,11 +470,11 @@ impl Game {
         // (only what may lie there: anything else stays a picture on the mouse)
         let on_bench = matches!(c, Container::GunStation(_))
             && (self.bench_ui.spot.is_some() || self.bench_ui.drawer_spot.is_some())
-            && self.cursor.is_some_and(|st| {
+            && self.me.items.cursor.is_some_and(|st| {
                 let rifle = matches!(c, Container::GunStation(p) if is_rifle_bench(self.terrain.world.geti(p)));
                 gun_station::belongs_on_bench(st.item, rifle)
             });
-        if let (Some(st), false) = (self.cursor, on_bench) {
+        if let (Some(st), false) = (self.me.items.cursor, on_bench) {
             let m = self.ui.mouse;
             draw_stack(&mut self.ui, m.x - 8.0 * s, m.y - 8.0 * s, 16.0 * s, &st);
         }

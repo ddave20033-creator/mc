@@ -80,6 +80,55 @@ pub(super) struct Client {
     falling_at: f32,
 }
 
+/// Playing in a world: the connection to its server (and the server itself when it is the
+/// game's own), the other players in it, and what came from it to wait for the world.
+pub(in crate::client) struct Session {
+    /// The connection to the world's server (the game's own, or a LAN game's), while in a
+    /// world.
+    pub(in crate::client) net: Option<Client>,
+    /// The server this game runs for the world it plays (joined through `net`), and its LAN
+    /// address once it is open to the LAN.
+    pub(in crate::client) local: Option<crate::sim::server::Local>,
+    pub(in crate::client) lan_address: Option<String>,
+    pub(in crate::client) remotes: Vec<RemotePlayer>,
+    /// Spectator mode: the player whose eyes the camera is in.
+    pub(in crate::client) spectating: Option<u8>,
+    /// The player as the server keeps them, till the world around them has loaded.
+    pub(in crate::client) pending_player: Option<PlayerSave>,
+    /// Till the player's state is sent to be saved again.
+    pub(in crate::client) autosave: f32,
+}
+
+impl Session {
+    pub(in crate::client) fn new() -> Self {
+        Self {
+            net: None,
+            local: None,
+            lan_address: None,
+            remotes: Vec::new(),
+            spectating: None,
+            pending_player: None,
+            autosave: AUTOSAVE_SECONDS,
+        }
+    }
+
+    /// A new world (on the same connection, or none): all but the connection made anew (the
+    /// other players and what was waiting for the last world go).
+    pub(in crate::client) fn forget_world(&mut self) {
+        *self = Self {
+            net: self.net.take(),
+            local: self.local.take(),
+            lan_address: self.lan_address.take(),
+            ..Self::new()
+        };
+    }
+
+    /// This player's id on the server (0 out of a world).
+    pub(in crate::client) fn my_id(&self) -> u8 {
+        self.net.as_ref().map_or(0, |c| c.id)
+    }
+}
+
 fn color_bytes(c: Color) -> [u8; 4] {
     c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
@@ -91,7 +140,7 @@ fn color_from(b: [u8; 4]) -> Color {
 impl Game {
     /// Sends a message to the server.
     pub(super) fn send(&self, m: Msg) {
-        if let Some(c) = &self.net {
+        if let Some(c) = &self.session.net {
             // The server checks what a player does against where they stand and what they
             // hold: it gets the pose as it is right now first.
             let checked = matches!(
@@ -108,7 +157,7 @@ impl Game {
                     | Msg::Stump { .. }
                     | Msg::CutLog { .. }
             );
-            if checked && self.player.spawned {
+            if checked && self.me.body.spawned {
                 c.conn.send(&Msg::Pose(self.my_pose()));
             }
             c.conn.send(&m);
@@ -127,7 +176,7 @@ impl Game {
 
     /// Another player is lying in the bed whose head is at `head`.
     pub(super) fn remote_in_bed(&self, head: IVec3) -> bool {
-        self.remotes.iter().any(|r| {
+        self.session.remotes.iter().any(|r| {
             r.alive()
                 && r.target.flags & pose_flags::SLEEPING != 0
                 && r.target.pos.floor().as_ivec3() == head
@@ -136,7 +185,7 @@ impl Game {
 
     /// Living players on the LAN other than this one: (how many, how many are asleep).
     pub(super) fn remotes_asleep(&self) -> (usize, usize) {
-        let alive = self.remotes.iter().filter(|r| r.alive());
+        let alive = self.session.remotes.iter().filter(|r| r.alive());
         let asleep = alive
             .clone()
             .filter(|r| r.target.flags & pose_flags::SLEEPING != 0)
@@ -145,50 +194,50 @@ impl Game {
     }
 
     pub(super) fn remote_pos(&self, id: u8) -> Option<Vec3> {
-        self.remotes.iter().find(|r| r.id == id).map(|r| r.pose.pos)
+        self.session.remotes.iter().find(|r| r.id == id).map(|r| r.pose.pos)
     }
 
     /// This player's pose, as the others should see it.
     fn my_pose(&self) -> Pose {
         let mut flags = 0;
-        if self.fire > 0.0 {
+        if self.me.vitals.fire > 0.0 {
             flags |= pose_flags::BURNING;
         }
-        if self.blocking {
+        if self.me.aim.blocking {
             flags |= pose_flags::BLOCKING;
         }
-        if self.hurt_time > 0.0 {
+        if self.me.vitals.hurt_time > 0.0 {
             flags |= pose_flags::HURT;
         }
-        if self.screen == Screen::Dead || !self.player.spawned {
+        if self.screen == Screen::Dead || !self.me.body.spawned {
             flags |= pose_flags::DEAD;
         }
         if self.creative() {
             flags |= pose_flags::CREATIVE;
         }
-        if self.sleep.is_some() {
+        if self.me.vitals.sleep.is_some() {
             flags |= pose_flags::SLEEPING;
         }
-        if self.holding_gun() && self.guns.aim > 0.5 {
+        if self.holding_gun() && self.tools.guns.aim > 0.5 {
             flags |= pose_flags::AIMING;
         }
         if self.book_showing() {
             flags |= pose_flags::SHOWING;
         }
         Pose {
-            pos: self.player.pos,
-            yaw: self.visual_head_yaw(),
-            pitch: self.pitch,
-            body_yaw: self.body_yaw,
-            limb_swing: self.limb_swing,
-            limb_amount: self.limb_amount,
-            attack: self.hand.attack(),
-            crouch: self.player.crouch,
+            pos: self.me.body.pos,
+            yaw: self.me.look.visual_head_yaw(),
+            pitch: self.me.look.pitch,
+            body_yaw: self.me.look.body_yaw,
+            limb_swing: self.me.look.limb_swing,
+            limb_amount: self.me.look.limb_amount,
+            attack: self.me.hand.attack(),
+            crouch: self.me.body.crouch,
             held: self.held(),
             skin: self.effective_skin(),
             flags,
-            mining: self.mining.map(|(p, _)| p).unwrap_or(NO_BLOCK),
-            mine_progress: match self.mining {
+            mining: self.me.aim.mining.map(|(p, _)| p).unwrap_or(NO_BLOCK),
+            mine_progress: match self.me.aim.mining {
                 Some((_, prog)) if !self.creative() => prog.min(1.0),
                 _ => 0.0,
             },
@@ -198,21 +247,21 @@ impl Game {
             },
             status: self.my_status(),
             gun_mods: self.held_gun_mods(),
-            gun_state: if self.holding_gun() { self.hand.gun_anim().pack() } else { 0 },
-            armor: armor_code(&self.inventory.armor),
+            gun_state: if self.holding_gun() { self.me.hand.gun_anim().pack() } else { 0 },
+            armor: armor_code(&self.me.items.inventory.armor),
             book: self.book_pose().0,
             book_page: self.book_pose().1,
             spectator: self.spectator(),
-            sprint: self.tp_sprint,
+            sprint: self.me.look.tp_sprint,
             gun_dirt: self.held_gun_dirt(),
             brush: self.bench_brush_pose(),
             drawer: matches!(self.screen, Screen::Container(Container::GunStation(_))) && self.bench_ui.in_drawer,
-            held_data: self.inventory.slots[self.hotbar_slot].map_or(0, |s| s.data),
-            gun_extra: if self.holding_gun() { self.hand.gun_anim().pack_extra() } else { 0 },
-            grenade: self.grenades.hold.map_or(0, |h| (h.t * 100.0).round().min(65000.0) as u16 + 1),
+            held_data: self.me.items.held_stack().map_or(0, |s| s.data),
+            gun_extra: if self.holding_gun() { self.me.hand.gun_anim().pack_extra() } else { 0 },
+            grenade: self.tools.grenades.hold.map_or(0, |h| (h.t * 100.0).round().min(65000.0) as u16 + 1),
             rod: self.rod_anim(),
-            chop: self.chop,
-            bench_hold: match (self.screen, self.cursor, self.bench_ui.hold_at) {
+            chop: self.me.aim.chop,
+            bench_hold: match (self.screen, self.me.items.cursor, self.bench_ui.hold_at) {
                 (Screen::Container(Container::GunStation(_)), Some(st), Some(at)) => Some((st, at)),
                 _ => None,
             },
@@ -242,7 +291,7 @@ impl Game {
 
     /// What the other players have open, and where they stand.
     pub(super) fn remote_open_blocks(&self) -> Vec<(IVec3, Vec3)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
             .map(|r| (r.target.open, r.target.pos))
@@ -253,7 +302,7 @@ impl Game {
     /// the brush is.
     /// Gun stations another player looks into the drawer of (it is out for everyone).
     pub(super) fn remote_drawers(&self) -> Vec<IVec3> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.has_pose && r.target.drawer && r.target.open != NO_BLOCK)
             .map(|r| r.target.open)
@@ -263,7 +312,7 @@ impl Game {
     /// What the other players hold over a gun station's table (the station, the stack, where
     /// it shows).
     pub(super) fn remote_bench_holds(&self) -> Vec<(IVec3, crate::item::Stack, Vec3)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
             .filter_map(|r| r.target.bench_hold.map(|(st, at)| (r.target.open, st, at)))
@@ -271,7 +320,7 @@ impl Game {
     }
 
     pub(super) fn remote_brushes(&self) -> Vec<(IVec3, Vec3)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
             .filter_map(|r| r.target.brush.map(|b| (r.target.open, b)))
@@ -280,7 +329,7 @@ impl Game {
 
     /// Chests the other players have open (their lids open here too).
     pub(super) fn remote_open_chests(&self) -> Vec<IVec3> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
             .map(|r| r.target.open)
@@ -290,7 +339,7 @@ impl Game {
 
     /// Torches and lanterns in the other players' hands: (id, where the light is, item).
     pub(super) fn remote_held_lights(&self) -> Vec<(u8, Vec3, ItemId)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.shown())
             .filter(|r| crate::model::player::gives_light(r.pose.held))
@@ -304,7 +353,7 @@ impl Game {
 
     /// Crack overlays of the blocks the other players are mining.
     pub(super) fn remote_cracks(&self) -> Vec<(IVec3, f32)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.has_pose && r.target.mine_progress > 0.02 && r.target.mining != NO_BLOCK)
             .map(|r| (r.target.mining, r.target.mine_progress))
@@ -317,7 +366,7 @@ impl Game {
             return;
         }
         let tint = self.block_tint(p, block);
-        self.particles.burst(&self.terrain.world, p, block, 28, tint);
+        self.level.particles.burst(&self.terrain.world, p, block, 28, tint);
     }
 
     /// Hit by another player (or blown about by a grenade they threw, or bitten by a wolf):
@@ -328,15 +377,15 @@ impl Game {
             return;
         }
         let dmg = self.armor_hit(dmg, kind);
-        let before = self.health;
+        let before = self.me.vitals.health;
         let cause = if kind == crate::net::hurt::WOLF { "death.wolf" } else { "death.player" };
         self.damage(dmg, cause);
-        if self.health < before {
-            let away = (self.player.pos - from) * Vec3::new(1.0, 0.0, 1.0);
+        if self.me.vitals.health < before {
+            let away = (self.me.body.pos - from) * Vec3::new(1.0, 0.0, 1.0);
             let away = away.try_normalize().unwrap_or(Vec3::X);
-            self.player.vel.x = away.x * 6.0 * knock;
-            self.player.vel.z = away.z * 6.0 * knock;
-            self.player.vel.y = self.player.vel.y.max(5.0);
+            self.me.body.vel.x = away.x * 6.0 * knock;
+            self.me.body.vel.z = away.z * 6.0 * knock;
+            self.me.body.vel.y = self.me.body.vel.y.max(5.0);
         }
     }
 
@@ -349,7 +398,7 @@ impl Game {
         // Other players glide toward their latest pose.
         let k = crate::util::damp(15.0, dt);
         let mut chops = Vec::new();
-        for r in &mut self.remotes {
+        for r in &mut self.session.remotes {
             let (p, t) = (&mut r.pose, r.target);
             // (their axe biting in: heard where it is, about an arm ahead of them)
             if let (Some(None), Some(Some(_))) = (p.chop.map(|s| s.hit), t.chop.map(|s| s.hit)) {
@@ -426,7 +475,7 @@ impl Game {
     }
 
     fn set_remote_pose(&mut self, id: u8, pose: Pose) {
-        if let Some(r) = self.remotes.iter_mut().find(|r| r.id == id) {
+        if let Some(r) = self.session.remotes.iter_mut().find(|r| r.id == id) {
             if !r.has_pose {
                 r.pose = pose;
             }
@@ -437,18 +486,13 @@ impl Game {
 
     /// Another player left: their model and skin go.
     fn remove_remote(&mut self, id: u8) {
-        self.remotes.retain(|r| r.id != id);
-        self.custom_skins.remove(&id);
-        self.skin_pngs.remove(&id);
-        // (its slot shows the default skin again, for whoever gets it next)
-        if id < crate::world::textures::tex::CUSTOM_SKIN_SLOTS {
-            self.refresh_skin_slot(id);
-        }
+        self.session.remotes.retain(|r| r.id != id);
+        self.gfx.remove_skin(id);
     }
 
     fn add_remote(&mut self, id: u8, name: String) {
-        self.remotes.retain(|r| r.id != id);
-        self.remotes.push(RemotePlayer {
+        self.session.remotes.retain(|r| r.id != id);
+        self.session.remotes.push(RemotePlayer {
             id,
             name,
             pose: Pose::default(),
@@ -528,7 +572,7 @@ impl Game {
     /// The other players holding a gun (and not in bed): id, the gun, its attachments,
     /// their eye and where they look.
     pub(super) fn remote_guns(&self) -> Vec<(u8, GunKind, u8, Vec3, Vec3)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.shown() && r.pose.flags & pose_flags::SLEEPING == 0)
             .filter_map(|r| {
@@ -542,8 +586,8 @@ impl Game {
     /// Where a point of another player's gun (Blockbench model: bone and point) is on their
     /// model.
     pub(super) fn remote_gun_point(&self, id: u8, kind: GunKind, point: (usize, Vec3)) -> Option<Vec3> {
-        let r = self.remotes.iter().find(|r| r.id == id && r.shown())?;
-        let pose = standing_pose(&r.pose, self.time, r.shot_at);
+        let r = self.session.remotes.iter().find(|r| r.id == id && r.shown())?;
+        let pose = standing_pose(&r.pose, self.clock.time, r.shot_at);
         let point = crate::model::gun_view::rest_point_in_gun_space(kind, point);
         Some(crate::model::player::gun_point(&pose, kind, point))
     }
@@ -553,12 +597,12 @@ impl Game {
     /// The other players fishing: where the tip of their rod is and what it is doing (for
     /// their line and bobber).
     pub(super) fn remote_rods(&self) -> Vec<(Vec3, crate::model::angler::RodAnim)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.shown() && r.pose.flags & pose_flags::SLEEPING == 0)
             .filter_map(|r| {
                 let rod = r.pose.rod.filter(|_| r.pose.held == crate::item::FISHING_ROD)?;
-                let pose = standing_pose(&r.pose, self.time, r.shot_at);
+                let pose = standing_pose(&r.pose, self.clock.time, r.shot_at);
                 Some((crate::model::player::rod_tip(&pose)?, rod))
             })
             .collect()
@@ -648,7 +692,7 @@ impl Game {
         reach: f32,
         except: Option<u8>,
     ) -> Option<(u8, f32)> {
-        self.remotes
+        self.session.remotes
             .iter()
             .filter(|r| r.alive() && Some(r.id) != except)
             .filter_map(|r| {
@@ -679,7 +723,7 @@ impl Game {
     fn container_msg(&self, p: IVec3) -> Option<Msg> {
         let (kind, mut slots) = self.level.block_entities.container(&self.terrain.world, p)?;
         if matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p) {
-            slots = self.craft.to_vec();
+            slots = self.me.items.craft.to_vec();
         }
         Some(Msg::Container { p, kind, slots })
     }
@@ -688,7 +732,7 @@ impl Game {
     fn apply_container(&mut self, p: IVec3, kind: u8, slots: &[Slot]) {
         let open_here = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
         if kind == container::TABLE && open_here {
-            self.craft = std::array::from_fn(|i| slots.get(i).copied().flatten());
+            self.me.items.craft = std::array::from_fn(|i| slots.get(i).copied().flatten());
         } else {
             self.level.block_entities.apply_container(&self.terrain.world, p, kind, slots);
         }
@@ -718,14 +762,14 @@ impl Game {
 
     /// This player opened a container: the server sends its contents.
     pub(super) fn net_container_opened(&mut self, p: IVec3) {
-        if let Some(c) = &mut self.net {
+        if let Some(c) = &mut self.session.net {
             c.container_known = None;
             c.conn.send(&Msg::Open { p });
         }
     }
 
     pub(super) fn net_container_closed(&mut self) {
-        if let Some(c) = &mut self.net {
+        if let Some(c) = &mut self.session.net {
             c.container_known = None;
             c.conn.send(&Msg::Open {
                 p: IVec3::new(0, CLOSED_Y, 0),
@@ -745,7 +789,7 @@ impl Game {
             return;
         };
         let bytes = msg.encode();
-        if let Some(c) = &mut self.net {
+        if let Some(c) = &mut self.session.net {
             // Nothing known yet: wait for the server's copy instead of overwriting it.
             if c.container_known.as_ref().is_some_and(|k| *k != bytes) {
                 c.conn.send(&msg);

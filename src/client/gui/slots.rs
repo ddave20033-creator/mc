@@ -45,13 +45,13 @@ impl Game {
     /// Stores the crafting grid of an open crafting table back into the table.
     pub(in crate::client) fn stash_table(&mut self, clear: bool) {
         if let Screen::Container(Container::Crafting(p)) = self.screen {
-            if self.craft.iter().any(|s| s.is_some()) {
-                self.level.block_entities.tables.insert(p, self.craft);
+            if self.me.items.craft.iter().any(|s| s.is_some()) {
+                self.level.block_entities.tables.insert(p, self.me.items.craft);
             } else {
                 self.level.block_entities.tables.remove(&p);
             }
             if clear {
-                self.craft = [None; 9];
+                self.me.items.craft = [None; 9];
             }
         }
     }
@@ -73,10 +73,10 @@ impl Game {
         if let Screen::Container(Container::GunStation(_)) = self.screen {
             self.close_gun_station();
         }
-        let mut back: Vec<Stack> = self.craft.iter_mut().filter_map(|s| s.take()).collect();
-        back.extend(self.cursor.take());
-        back.extend(self.craft_out.take());
-        self.craft_fx = None;
+        let mut back: Vec<Stack> = self.me.items.craft.iter_mut().filter_map(|s| s.take()).collect();
+        back.extend(self.me.items.cursor.take());
+        back.extend(self.me.items.craft_out.take());
+        self.me.items.craft_fx = None;
         for s in back {
             self.give(s);
         }
@@ -111,8 +111,8 @@ impl Game {
 
     pub(super) fn slot_mut(&mut self, c: Container, r: SlotRef) -> Option<&mut Slot> {
         match r {
-            SlotRef::Inv(i) => Some(&mut self.inventory.slots[i]),
-            SlotRef::Craft(i) => Some(&mut self.craft[i]),
+            SlotRef::Inv(i) => Some(&mut self.me.items.inventory.slots[i]),
+            SlotRef::Craft(i) => Some(&mut self.me.items.craft[i]),
             SlotRef::Chest(i) => match c {
                 Container::Chest(p) => {
                     let (a, b) = self.chest_halves(p);
@@ -121,19 +121,19 @@ impl Game {
                 }
                 _ => None,
             },
-            SlotRef::Armor(i) => Some(&mut self.inventory.armor[i]),
+            SlotRef::Armor(i) => Some(&mut self.me.items.inventory.armor[i]),
             _ => None,
         }
     }
 
     pub(in crate::client) fn craft_result(&self, c: Container) -> Option<Stack> {
         let n = Self::craft_size(c);
-        craft(&self.craft[..n * n], n)
+        craft(&self.me.items.craft[..n * n], n)
     }
 
     pub(super) fn consume_craft_inputs(&mut self, c: Container) {
         let n = Self::craft_size(c);
-        for s in &mut self.craft[..n * n] {
+        for s in &mut self.me.items.craft[..n * n] {
             take(s, 1);
         }
     }
@@ -142,7 +142,7 @@ impl Game {
     /// inventory what the 2x2 grid makes.
     pub(super) fn craft_out_stack(&self, c: Container) -> Option<Stack> {
         if matches!(c, Container::Crafting(_)) {
-            self.craft_out
+            self.me.items.craft_out
         } else {
             self.craft_result(c)
         }
@@ -152,8 +152,8 @@ impl Game {
     /// fit in one stack (64, or one of what does not stack), into the middle of the table.
     /// With more on the grid, the next click makes the next stack once this one is taken.
     pub(super) fn craft_batch(&mut self, c: Container) {
-        let before = self.craft;
-        let mut made = self.craft_out;
+        let before = self.me.items.craft;
+        let mut made = self.me.items.craft_out;
         while let Some(res) = self.craft_result(c) {
             match &mut made {
                 None => made = Some(res),
@@ -167,10 +167,10 @@ impl Game {
             }
             self.consume_craft_inputs(c);
         }
-        if made != self.craft_out {
-            self.craft_out = made;
-            self.craft_fx = Some((0.0, before));
-            self.hand.swing();
+        if made != self.me.items.craft_out {
+            self.me.items.craft_out = made;
+            self.me.items.craft_fx = Some((0.0, before));
+            self.me.hand.swing();
         }
     }
 
@@ -178,9 +178,9 @@ impl Game {
     /// or the other way round. Returns what does not fit.
     pub(super) fn move_within_inventory(&mut self, i: usize, stack: Stack) -> Option<Stack> {
         if i < 9 {
-            add_to(&mut self.inventory.slots[9..], stack)
+            add_to(&mut self.me.items.inventory.slots[9..], stack)
         } else {
-            add_to(&mut self.inventory.slots[..9], stack)
+            add_to(&mut self.me.items.inventory.slots[..9], stack)
         }
     }
 
@@ -188,9 +188,9 @@ impl Game {
     pub(super) fn quick_move(&mut self, c: Container, r: SlotRef) {
         // In the inventory armor goes on (into its empty slot), and comes off.
         if let (Container::Inventory | Container::Creative, SlotRef::Inv(i)) = (c, r) {
-            let piece = self.inventory.slots[i].and_then(|s| armor_of(s.item)).map(|a| a.0);
-            if let Some(p) = piece.filter(|&p| self.inventory.armor[p].is_none()) {
-                self.inventory.armor[p] = self.inventory.slots[i].take();
+            let piece = self.me.items.inventory.slots[i].and_then(|s| armor_of(s.item)).map(|a| a.0);
+            if let Some(p) = piece.filter(|&p| self.me.items.inventory.armor[p].is_none()) {
+                self.me.items.inventory.armor[p] = self.me.items.inventory.slots[i].take();
                 self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
                 return;
             }
@@ -206,7 +206,7 @@ impl Game {
                 left
             }
             (_, SlotRef::Inv(i)) => self.move_within_inventory(i, stack),
-            _ => self.inventory.add(stack),
+            _ => self.me.items.inventory.add(stack),
         };
         if let Some(left) = left {
             match self.slot_mut(c, r) {
@@ -221,8 +221,8 @@ impl Game {
             SlotRef::CraftOut if matches!(c, Container::Crafting(_)) => {
                 // At a table, what was crafted lies in the middle: a click puts it straight
                 // into the inventory (what does not fit stays there).
-                if let Some(st) = self.craft_out {
-                    self.craft_out = self.inventory.add(st);
+                if let Some(st) = self.me.items.craft_out {
+                    self.me.items.craft_out = self.me.items.inventory.add(st);
                 }
             }
             SlotRef::CraftOut => {
@@ -234,18 +234,18 @@ impl Game {
                     // that did fit would be added without consuming the ingredients.
                     let mut n = 0;
                     while let Some(res) = self.craft_result(c) {
-                        let mut slots = self.inventory.slots;
+                        let mut slots = self.me.items.inventory.slots;
                         if add_to(&mut slots, res).is_some() || n > 64 {
                             break;
                         }
-                        self.inventory.slots = slots;
+                        self.me.items.inventory.slots = slots;
                         self.consume_craft_inputs(c);
                         n += 1;
                     }
                     return;
                 }
-                match &mut self.cursor {
-                    None => self.cursor = Some(res),
+                match &mut self.me.items.cursor {
+                    None => self.me.items.cursor = Some(res),
                     Some(cur)
                         if cur.stacks_with(&res)
                             && cur.count + res.count <= max_stack(res.item) =>
@@ -259,42 +259,42 @@ impl Game {
             SlotRef::Creative(id) => {
                 if shift {
                     // A full stack straight into the first empty slot (hotbar first).
-                    if let Some(slot) = self.inventory.slots.iter_mut().find(|s| s.is_none()) {
+                    if let Some(slot) = self.me.items.inventory.slots.iter_mut().find(|s| s.is_none()) {
                         *slot = Some(Stack::new(id, max_stack(id)));
                     }
                     return;
                 }
                 // Like Minecraft: a click takes one; clicking again with the same item adds one
                 // more, and clicking with anything else puts the held stack away.
-                match &mut self.cursor {
-                    None => self.cursor = Some(Stack::one(id)),
+                match &mut self.me.items.cursor {
+                    None => self.me.items.cursor = Some(Stack::one(id)),
                     Some(cur) if cur.item == id && cur.damage == 0 => {
                         cur.count = (cur.count + 1).min(max_stack(id));
                     }
-                    Some(_) => self.cursor = None,
+                    Some(_) => self.me.items.cursor = None,
                 }
             }
-            SlotRef::Trash => self.cursor = None,
+            SlotRef::Trash => self.me.items.cursor = None,
             // Only the piece that goes there.
             SlotRef::Armor(i)
                 if self
-                    .cursor
+                    .me.items.cursor
                     .is_some_and(|c| armor_of(c.item).map(|a| a.0) != Some(i)) => {}
             SlotRef::Armor(i) if !shift => {
-                let mut cursor = self.cursor.take();
-                click(&mut self.inventory.armor[i], &mut cursor, false);
-                self.cursor = cursor;
+                let mut cursor = self.me.items.cursor.take();
+                click(&mut self.me.items.inventory.armor[i], &mut cursor, false);
+                self.me.items.cursor = cursor;
                 self.audio.play(crate::audio::Sound::ArmorEquip, None, 0.8);
             }
             _ => {
                 if shift {
                     self.quick_move(c, r);
                 } else {
-                    let mut cursor = self.cursor.take();
+                    let mut cursor = self.me.items.cursor.take();
                     if let Some(slot) = self.slot_mut(c, r) {
                         click(slot, &mut cursor, right);
                     }
-                    self.cursor = cursor;
+                    self.me.items.cursor = cursor;
                 }
             }
         }
@@ -328,7 +328,7 @@ impl Game {
                 });
             }
         }
-        self.cursor = (left > 0).then_some(Stack {
+        self.me.items.cursor = (left > 0).then_some(Stack {
             count: left,
             ..d.stack
         });
@@ -336,7 +336,7 @@ impl Game {
 
     /// Double-click: pull matching items from every slot into the cursor stack.
     pub(super) fn collect_all(&mut self, c: Container) {
-        let Some(mut cur) = self.cursor else { return };
+        let Some(mut cur) = self.me.items.cursor else { return };
         let max = max_stack(cur.item);
         let n = Self::craft_size(c);
         let mut refs: Vec<SlotRef> = (0..n * n).map(SlotRef::Craft).collect();
@@ -357,6 +357,6 @@ impl Game {
                 take(slot, k);
             }
         }
-        self.cursor = Some(cur);
+        self.me.items.cursor = Some(cur);
     }
 }

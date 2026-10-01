@@ -1,13 +1,113 @@
-//! The third-person and shoulder cameras (F5): where the camera goes, keeping it out of
+//! Where the player looks (`Look`: the view, the field of view, the body and limbs following),
+//! and the third-person and shoulder cameras (F5): where the camera goes, keeping it out of
 //! walls, and picking blocks under the crosshair when it is not at the eye.
 
 use crate::entity::player::raycast;
 use crate::util::{ray_box, wrap_angle};
 use crate::world::{is_solid, World};
-use glam::{IVec3, Vec3};
+use crate::model::player::LimbSmoother;
+use glam::{IVec3, Mat4, Vec3};
 use std::f32::consts::PI;
 
 const RADIUS: f32 = 0.18;
+
+/// Where the player looks and how the view and their model follow: the camera (F5), the
+/// field of view, the body turning after the head, the limbs swinging.
+pub(in crate::client) struct Look {
+    pub(in crate::client) yaw: f32,
+    pub(in crate::client) pitch: f32,
+    /// F5 view mode and the third-person camera's state.
+    pub(in crate::client) camera: Rig,
+    /// The field of view easing toward the setting's (zoomed, widened while sprinting).
+    pub(in crate::client) fov: f32,
+    /// Field of view for simplifying detail too small for the screen (setting and zoom only).
+    pub(in crate::client) detail_fov: f32,
+    /// This frame's view bobbing (camera space), taken off a held gun again.
+    pub(in crate::client) view_bob: Mat4,
+    /// Last frame's camera matrix (for name tags).
+    pub(in crate::client) view_proj: Mat4,
+    /// The body's turn, following the head's (`yaw`).
+    pub(in crate::client) body_yaw: f32,
+    pub(in crate::client) limb_swing: f32,
+    pub(in crate::client) limb_amount: f32,
+    /// Smoothed arm and leg rotations of the player model.
+    pub(in crate::client) limbs: LimbSmoother,
+    /// How far into running the player is (0..1, eased: the gun carried across the chest on
+    /// the player model).
+    pub(in crate::client) tp_sprint: f32,
+    /// Swing of the lantern in this player's hand (third person and body model).
+    pub(in crate::client) lantern_swing: crate::model::lantern::SmoothSwing,
+    /// Where the torch in this player's hand burns (seen last frame), for its particles.
+    pub(in crate::client) held_torch_tip: Option<Vec3>,
+}
+
+impl Look {
+    /// Looking north, first person; `fov`: the field of view setting.
+    pub(in crate::client) fn new(fov: f32) -> Self {
+        Self {
+            yaw: 0.0,
+            pitch: 0.0,
+            camera: Rig::default(),
+            fov,
+            detail_fov: fov,
+            view_bob: Mat4::IDENTITY,
+            view_proj: Mat4::IDENTITY,
+            body_yaw: 0.0,
+            limb_swing: 0.0,
+            limb_amount: 0.0,
+            limbs: LimbSmoother::default(),
+            tp_sprint: 0.0,
+            lantern_swing: Default::default(),
+            held_torch_tip: None,
+        }
+    }
+
+    /// Where the player looks.
+    pub(in crate::client) fn dir(&self) -> Vec3 {
+        crate::entity::player::look_dir(self.yaw, self.pitch)
+    }
+
+    /// The mouse turns the view (`sens`: radians a pixel); up and down only so far.
+    pub(in crate::client) fn turn(&mut self, delta: glam::Vec2, sens: f32) {
+        self.yaw += delta.x * sens;
+        self.pitch = (self.pitch - delta.y * sens).clamp(-1.55, 1.55);
+    }
+
+    /// The body follows the head when moving (`speed`: horizontally), otherwise lags within
+    /// 50 degrees (like Minecraft); with a gun in hand it turns with the head, all of it at
+    /// once.
+    pub(in crate::client) fn follow_body(&mut self, dt: f32, speed: f32, gun: bool, chopping: bool) {
+        let diff = wrap_angle(self.yaw - self.body_yaw);
+        let lag = 50f32.to_radians();
+        // (The shoulder views, 3 and 4, orbit the body while stationary.)
+        let orbiting = matches!(self.camera.mode, 3 | 4);
+        if gun {
+            // Turned with the look at once, all of it (the torso never twisted off the legs).
+            self.body_yaw = self.yaw;
+        } else if chopping {
+            // Chopping: the feet step round after the swing (the upper body turns at once).
+            self.body_yaw += diff * (crate::util::damp(8.0, dt));
+        } else if speed > 0.1 {
+            self.body_yaw += diff * (crate::util::damp(10.0, dt));
+        } else if !orbiting && diff.abs() > lag {
+            // In regular views the torso follows the head so a large turn still looks natural.
+            let excess = diff - diff.signum() * lag;
+            self.body_yaw += excess * (crate::util::damp(12.0, dt));
+        }
+    }
+
+    /// Limb swing follows horizontal movement (in the air too, like Minecraft; less flying).
+    pub(in crate::client) fn swing_limbs(&mut self, dt: f32, speed: f32, flying: bool) {
+        let fly = if flying { 0.3 } else { 1.0 };
+        let target = (speed / 4.3).min(1.0) * fly;
+        self.limb_amount += (target - self.limb_amount) * (crate::util::damp(10.0, dt));
+    }
+
+    /// Keep the model's head within a natural turn while the shoulder camera orbits freely.
+    pub(in crate::client) fn visual_head_yaw(&self) -> f32 {
+        self.body_yaw + head_turn(self.yaw, self.body_yaw)
+    }
+}
 
 /// The camera's F5 view mode (0 first person, 1 behind, 2 in front, 3 and 4 over the right
 /// and left shoulder) and how it eases between positions and around walls.

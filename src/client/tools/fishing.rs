@@ -408,11 +408,11 @@ fn kilos(w: f32) -> String {
 
 impl Game {
     fn holding_rod(&self) -> bool {
-        self.held() == FISHING_ROD && !self.spectator() && self.player.spawned && self.screen != Screen::Dead
+        self.held() == FISHING_ROD && !self.spectator() && self.me.body.spawned && self.screen != Screen::Dead
     }
 
     fn rod_stack(&self) -> Option<Stack> {
-        self.inventory.slots[self.hotbar_slot].filter(|s| s.item == FISHING_ROD)
+        self.me.items.held_stack().filter(|s| s.item == FISHING_ROD)
     }
 
     /// The gear the held rod's reel is in.
@@ -423,11 +423,11 @@ impl Game {
     /// Where the line leaves the rod (as it was drawn last frame, from the eyes or from
     /// outside), or about there.
     fn rod_tip(&self) -> Vec3 {
-        let tip = if self.camera.mode == 0 { self.fishing.tip_fp } else { self.fishing.tip_tp };
+        let tip = if self.me.look.camera.mode == 0 { self.tools.fishing.tip_fp } else { self.tools.fishing.tip_tp };
         let eye = self.eye();
-        tip.or(self.fishing.tip_tp)
+        tip.or(self.tools.fishing.tip_tp)
             .filter(|t| t.distance(eye) < 4.0)
-            .unwrap_or_else(|| eye + look_dir(self.yaw, self.pitch) * 1.8 + Vec3::Y * 0.6)
+            .unwrap_or_else(|| eye + self.me.look.dir() * 1.8 + Vec3::Y * 0.6)
     }
 
     /// The mouse wheel with the rod in hand: Shift shifts the reel's gear; with the line out
@@ -435,10 +435,10 @@ impl Game {
     /// (otherwise it goes through the hotbar).
     pub(in crate::client) fn fishing_scroll(&mut self) -> bool {
         if !self.holding_rod() {
-            self.fishing.scroll = 0.0;
+            self.tools.fishing.scroll = 0.0;
             return false;
         }
-        let f = &mut self.fishing;
+        let f = &mut self.tools.fishing;
         f.scroll += self.input.scroll;
         let whole = f.scroll.trunc();
         f.scroll -= whole;
@@ -446,41 +446,41 @@ impl Game {
         if self.bind_down(Bind::Sneak) {
             // Away from you: up a gear.
             if n != 0 {
-                let slot = self.hotbar_slot;
-                if let Some(s) = self.inventory.slots[slot].as_mut() {
+                let slot = self.me.items.hotbar_slot;
+                if let Some(s) = self.me.items.inventory.slots[slot].as_mut() {
                     let before = rod_gear(s);
                     let g = (before as i32 + n).clamp(1, ROD_GEARS as i32) as u8;
                     set_rod_gear(s, g);
                     if g != before {
                         let pitch = 0.85 + 0.08 * g as f32;
                         self.audio.play_pitched(Sound::GearClick, None, 0.55, pitch);
-                        self.fishing.gear_flash = 0.4;
+                        self.tools.fishing.gear_flash = 0.4;
                     }
                 }
             }
             return true;
         }
-        if self.fishing.line.is_some() || self.fishing.charge.is_some() || self.fishing.cast.is_some() {
+        if self.tools.fishing.line.is_some() || self.tools.fishing.charge.is_some() || self.tools.fishing.cast.is_some() {
             // Toward you (the wheel turned down) reels in.
-            self.fishing.notches -= n;
+            self.tools.fishing.notches -= n;
             return true;
         }
-        self.fishing.scroll = 0.0;
+        self.tools.fishing.scroll = 0.0;
         false
     }
 
     /// Something the right button opens is under the crosshair (a rod does not cast then, and
     /// nothing is eaten or drunk).
     pub(in crate::client) fn opens_target(&self) -> bool {
-        self.target.is_some_and(|(hit, _)| opens_on_use(self.terrain.world.geti(hit)))
+        self.me.aim.target.is_some_and(|(hit, _)| opens_on_use(self.terrain.world.geti(hit)))
     }
 
     /// The rod in hand: casting, the bobber, bites and the fight. Putting it away cuts the
     /// line.
     pub(in crate::client) fn update_fishing(&mut self, dt: f32, control: bool) {
-        let notches = std::mem::take(&mut self.fishing.notches);
+        let notches = std::mem::take(&mut self.tools.fishing.notches);
         {
-            let f = &mut self.fishing;
+            let f = &mut self.tools.fishing;
             f.gear_flash = (f.gear_flash - dt).max(0.0);
             f.alarm = (f.alarm - dt).max(0.0);
             if let Some((_, t, _)) = &mut f.toast {
@@ -494,7 +494,7 @@ impl Game {
             f.lift = f.lift.map(|t| t + dt).filter(|&t| t < LIFT_TIME);
         }
         if !self.holding_rod() {
-            let f = &mut self.fishing;
+            let f = &mut self.tools.fishing;
             f.line = None;
             f.charge = None;
             f.cast = None;
@@ -509,38 +509,38 @@ impl Game {
         }
         // Drawing back, and letting go to cast.
         if control && self.input.right_pressed {
-            let can_cast = self.fishing.cast.is_none() && !self.opens_target() && self.action_cooldown <= 0.0;
-            match &mut self.fishing.line {
+            let can_cast = self.tools.fishing.cast.is_none() && !self.opens_target() && self.me.aim.action_cooldown <= 0.0;
+            match &mut self.tools.fishing.line {
                 Some(line) if line.fight.is_none() => line.auto_reel = true,
                 Some(_) => {}
                 None if can_cast => {
-                    self.fishing.charge = Some(0.0);
+                    self.tools.fishing.charge = Some(0.0);
                 }
                 None => {}
             }
         }
-        if let Some(c) = self.fishing.charge {
+        if let Some(c) = self.tools.fishing.charge {
             if !control {
-                self.fishing.charge = None;
+                self.tools.fishing.charge = None;
             } else if self.input.right_down {
-                self.fishing.charge = Some(c + dt);
+                self.tools.fishing.charge = Some(c + dt);
             } else {
-                self.fishing.charge = None;
-                self.fishing.cast = Some(0.0);
-                self.fishing.cast_power = smooth(c / CHARGE_TIME).max(0.05);
-                self.audio.play(Sound::FishCast, None, 0.35 + 0.45 * self.fishing.cast_power);
+                self.tools.fishing.charge = None;
+                self.tools.fishing.cast = Some(0.0);
+                self.tools.fishing.cast_power = smooth(c / CHARGE_TIME).max(0.05);
+                self.audio.play(Sound::FishCast, None, 0.35 + 0.45 * self.tools.fishing.cast_power);
             }
         }
-        if let Some(t) = self.fishing.cast {
+        if let Some(t) = self.tools.fishing.cast {
             let at = WHIP_FORWARD * CAST_TIME;
             if t < at && t + dt >= at {
                 self.launch_bobber();
             }
-            self.fishing.cast = Some(t + dt).filter(|&t| t < CAST_TIME);
+            self.tools.fishing.cast = Some(t + dt).filter(|&t| t < CAST_TIME);
         }
         self.update_line(dt, notches);
         // What the rod shows.
-        let f = &mut self.fishing;
+        let f = &mut self.tools.fishing;
         let (fighting, want) = match &f.line {
             Some(Line { fight: Some(fi), .. }) => (true, fi.tension),
             Some(l) if l.dragged > 0.0 => (false, 0.2),
@@ -558,7 +558,7 @@ impl Game {
         let ease = |rate: f32| crate::util::damp(rate, dt);
         let gear = self.rod_gear() as f32;
         let tip = self.rod_tip();
-        let f = &mut self.fishing;
+        let f = &mut self.tools.fishing;
         f.crank += (f.crank_to - f.crank) * ease(14.0);
 
         // The bobber out on the line.
@@ -629,18 +629,18 @@ impl Game {
     /// The bobber leaves the rod's tip at the whip's furthest forward, as hard as it was
     /// drawn back, toward where the crosshair is.
     fn launch_bobber(&mut self) {
-        let k = self.fishing.cast_power;
+        let k = self.tools.fishing.cast_power;
         let (lo, hi) = CAST_SPEED;
         let speed = lo + (hi - lo) * k.powf(0.8);
-        let look = look_dir(self.yaw, self.pitch);
+        let look = self.me.look.dir();
         // Up a little over the look (a cast goes up and out).
         let flat = Vec3::new(look.x, 0.0, look.z).normalize_or(Vec3::X);
         let up = (look.y + 0.35).clamp(-0.3, 0.9);
         let dir = (flat + Vec3::Y * up).normalize();
         let from = self.rod_tip();
-        self.fishing.line = Some(Line {
+        self.tools.fishing.line = Some(Line {
             bobber: from,
-            vel: dir * speed + self.player.vel * 0.5,
+            vel: dir * speed + self.me.body.vel * 0.5,
             state: Bobber::Flying,
             length: 0.0,
             bite: Bite::Wait(0.0),
@@ -651,7 +651,7 @@ impl Game {
             dragged: 0.0,
         });
         self.audio.play(Sound::LineZip, None, 0.5);
-        self.action_cooldown = 0.3;
+        self.me.aim.action_cooldown = 0.3;
     }
 
     /// A new wait for a fish: shorter in deeper water.
@@ -661,12 +661,12 @@ impl Game {
     }
 
     fn toast(&mut self, text: String, color: Color) {
-        self.fishing.toast = Some((text, 3.0, color));
+        self.tools.fishing.toast = Some((text, 3.0, color));
     }
 
     /// The bobber flies, floats or lies; the reel pulls it in; fish bite; the fight goes on.
     fn update_line(&mut self, dt: f32, notches: i32) {
-        let Some(mut line) = self.fishing.line.take() else { return };
+        let Some(mut line) = self.tools.fishing.line.take() else { return };
         let tip = self.rod_tip();
         let gear = self.rod_gear();
         let g = (gear - 1) as usize;
@@ -701,7 +701,7 @@ impl Game {
                     line.bite = Bite::Wait(wait);
                     self.audio.play(Sound::BobberPlop, Some(p), (0.4 + hit / 20.0).min(1.0));
                     let (sky, blk) = self.terrain.world.light_estimate(p + Vec3::Y);
-                    self.particles.splash(Vec3::new(p.x, s, p.z), 10, (hit / 25.0).min(1.0), sky, blk);
+                    self.level.particles.splash(Vec3::new(p.x, s, p.z), 10, (hit / 25.0).min(1.0), sky, blk);
                 } else if landed && line.vel.length() < 0.5 {
                     line.state = Bobber::Ground;
                     line.vel = Vec3::ZERO;
@@ -742,7 +742,7 @@ impl Game {
         // The reel.
         let fighting = line.fight.is_some();
         if notches != 0 {
-            self.fishing.crank_to += notches as f32 * 0.9;
+            self.tools.fishing.crank_to += notches as f32 * 0.9;
             let pitch = 0.9 + 0.06 * gear as f32;
             if notches > 0 {
                 self.audio.play_pitched(Sound::ReelClick, None, 0.45, pitch);
@@ -753,8 +753,8 @@ impl Game {
         if line.auto_reel && !fighting {
             let n = 14.0 * dt;
             line.length -= n;
-            self.fishing.crank_to += n * 1.5;
-            if (self.time * 8.0).fract() < dt * 8.0 {
+            self.tools.fishing.crank_to += n * 1.5;
+            if (self.clock.time * 8.0).fract() < dt * 8.0 {
                 self.audio.play_pitched(Sound::ReelClick, None, 0.35, 1.2);
             }
         }
@@ -794,14 +794,14 @@ impl Game {
                 line.dragged = 0.15;
                 if line.state == Bobber::Floating && self.random() < dt * 12.0 {
                     let (sky, blk) = self.terrain.world.light_estimate(q + Vec3::Y);
-                    self.particles.splash(q, 1, 0.1, sky, blk);
+                    self.level.particles.splash(q, 1, 0.1, sky, blk);
                 }
             }
             let near = line.bobber.distance(tip);
             if near < 1.5 || line.length < 0.3 {
                 // Reeled all the way in.
                 self.audio.play_pitched(Sound::ReelClick, None, 0.5, 0.8);
-                self.fishing.line = None;
+                self.tools.fishing.line = None;
                 return;
             }
         }
@@ -825,15 +825,15 @@ impl Game {
                         let p = line.bobber;
                         self.audio.play(Sound::FishNibble, Some(p), 0.6);
                         let (sky, blk) = self.terrain.world.light_estimate(p + Vec3::Y);
-                        self.particles.splash(p, 3, 0.05, sky, blk);
+                        self.level.particles.splash(p, 3, 0.05, sky, blk);
                     } else {
                         // The bite: pulled right under.
                         line.bite = Bite::Strike(STRIKE_TIME);
                         let p = line.bobber;
                         self.audio.play(Sound::FishBite, Some(p), 1.0);
                         let (sky, blk) = self.terrain.world.light_estimate(p + Vec3::Y);
-                        self.particles.splash(p, 14, 0.5, sky, blk);
-                        self.fishing.alarm = STRIKE_TIME;
+                        self.level.particles.splash(p, 14, 0.5, sky, blk);
+                        self.tools.fishing.alarm = STRIKE_TIME;
                         self.toast(t("fish.bite").to_string(), rgba(255, 230, 120, 255));
                     }
                 }
@@ -844,8 +844,8 @@ impl Game {
                         let mut r = || self.rng.next();
                         line.fight = Some(Fight::new(d, &mut r));
                         line.bite = Bite::Wait(0.0);
-                        self.fishing.alarm = 0.0;
-                        self.fishing.toast = None;
+                        self.tools.fishing.alarm = 0.0;
+                        self.tools.fishing.toast = None;
                         let p = line.bobber;
                         self.audio.play(Sound::FishSplash, Some(p), 0.9);
                     } else if secs - dt <= 0.0 {
@@ -870,7 +870,7 @@ impl Game {
             let mut r = || self.rng.next();
             let (reeled, end) = fight.step(dt, notches, gear, &mut r);
             if reeled > 0.0 {
-                self.fishing.crank_to += reeled * 0.5;
+                self.tools.fishing.crank_to += reeled * 0.5;
             }
             line.length = fight.dist;
             // It swims: across (turning about the angler) and at the length of the line.
@@ -905,7 +905,7 @@ impl Game {
                 let big = (fight.weight / 8.0).min(1.0);
                 self.audio.play(Sound::FishSplash, Some(q), 0.5 + 0.5 * big);
                 let (sky, blk) = self.terrain.world.light_estimate(q + Vec3::Y);
-                self.particles.splash(q, 6 + (big * 10.0) as usize, 0.3 + 0.5 * big, sky, blk);
+                self.level.particles.splash(q, 6 + (big * 10.0) as usize, 0.3 + 0.5 * big, sky, blk);
             }
             match end {
                 Some(FightEnd::Landed) => {
@@ -923,7 +923,7 @@ impl Game {
                 None => line.fight = Some(fight),
             }
         }
-        self.fishing.line = Some(line);
+        self.tools.fishing.line = Some(line);
     }
 
     /// Wears the held rod; it may break.
@@ -931,8 +931,8 @@ impl Game {
         if self.creative() {
             return;
         }
-        let slot = self.hotbar_slot;
-        if damage(&mut self.inventory.slots[slot], n) {
+        let slot = self.me.items.hotbar_slot;
+        if damage(&mut self.me.items.inventory.slots[slot], n) {
             self.audio.play(Sound::LineSnap, None, 0.8);
             self.say(t("fish.rod_broke"), rgba(255, 170, 120, 255));
         }
@@ -947,12 +947,12 @@ impl Game {
         self.toast(msg, rgba(150, 230, 255, 255));
         self.audio.play(Sound::FishLand, Some(at), 1.0);
         let (sky, blk) = self.terrain.world.light_estimate(at + Vec3::Y);
-        self.particles.splash(at, 18, 0.7, sky, blk);
+        self.level.particles.splash(at, 18, 0.7, sky, blk);
         let count = (1.0 + fight.weight / 4.0).min(4.0) as u8;
         self.give(Stack::new(RAW_FISH, count));
-        self.fishing.flying = Some((at, 0.0, fight.species, fight.weight));
-        self.fishing.lift = Some(0.0);
-        self.fishing.line = None;
+        self.tools.fishing.flying = Some((at, 0.0, fight.species, fight.weight));
+        self.tools.fishing.lift = Some(0.0);
+        self.tools.fishing.line = None;
         self.wear_rod(1);
     }
 
@@ -960,8 +960,8 @@ impl Game {
     fn snap_line(&mut self, at: Vec3) {
         let tip = self.rod_tip();
         self.audio.play(Sound::LineSnap, Some(tip), 1.0);
-        self.fishing.snapped = Some((0.0, at));
-        self.fishing.line = None;
+        self.tools.fishing.snapped = Some((0.0, at));
+        self.tools.fishing.line = None;
         self.toast(t("fish.snap").to_string(), rgba(255, 120, 100, 255));
         self.wear_rod(3);
     }
@@ -971,7 +971,7 @@ impl Game {
         if self.held() != FISHING_ROD {
             return None;
         }
-        let f = &self.fishing;
+        let f = &self.tools.fishing;
         let line = f.line.as_ref();
         Some(RodAnim {
             charge: f.charge.map_or(0.0, |c| smooth(c / CHARGE_TIME)),
@@ -987,7 +987,7 @@ impl Game {
 
     /// The rod creaking under a fish's pull (a looping sound).
     pub(in crate::client) fn fishing_sounds(&self) -> Vec<(u64, Sound, Vec3, f32)> {
-        match &self.fishing.line {
+        match &self.tools.fishing.line {
             Some(Line { fight: Some(f), .. }) if f.tension > 0.35 => {
                 vec![(0xf15_4000, Sound::RodCreak, self.rod_tip(), ((f.tension - 0.35) * 1.6).min(1.0))]
             }
@@ -1006,7 +1006,7 @@ impl Game {
         let mut rods: Vec<(Vec3, RodAnim, bool)> = self.remote_rods().into_iter().map(|(t, a)| (t, a, false)).collect();
         let own = self.rod_anim().filter(|_| self.holding_rod());
         if let Some(a) = own {
-            let tip = if self.camera.mode == 0 { self.fishing.tip_fp } else { self.fishing.tip_tp };
+            let tip = if self.me.look.camera.mode == 0 { self.tools.fishing.tip_fp } else { self.tools.fishing.tip_tp };
             if let Some(tip) = tip {
                 rods.push((tip, a, true));
             }
@@ -1028,8 +1028,8 @@ impl Game {
                 None => {
                     // Hanging from the tip on a short line (this player's swings, see
                     // `smooth_fishing`), along the line.
-                    let hang = self.fishing.hang.map(|h| h.0).filter(|_| mine);
-                    let sway = Vec3::new((self.time * 1.3).sin(), 0.0, (self.time * 1.1).cos()) * 0.02;
+                    let hang = self.tools.fishing.hang.map(|h| h.0).filter(|_| mine);
+                    let sway = Vec3::new((self.clock.time * 1.3).sin(), 0.0, (self.clock.time * 1.1).cos()) * 0.02;
                     let knot = hang.unwrap_or(tip - Vec3::Y * 0.55 + sway);
                     let up = (tip - knot).normalize_or(Vec3::Y);
                     let b = knot - up * 0.1;
@@ -1040,33 +1040,33 @@ impl Game {
             }
         }
         // A fish close in on the line shows at the surface.
-        if let (Some(line), true) = (&self.fishing.line, own.is_some()) {
+        if let (Some(line), true) = (&self.tools.fishing.line, own.is_some()) {
             if let Some(f) = line.fight.as_ref().filter(|f| f.dist < 6.0) {
                 let sp = &SPECIES[f.species];
                 let size = (f.weight / 0.5).cbrt().clamp(0.7, 3.0);
                 let tip = self.rod_tip();
                 let away = Vec3::new(line.bobber.x - tip.x, 0.0, line.bobber.z - tip.z).normalize_or(Vec3::X);
-                let wiggle = (self.time * (8.0 + 10.0 * f.pull)).sin() * 0.6;
-                let bob = self.fishing.bob_draw.unwrap_or(line.bobber);
+                let wiggle = (self.clock.time * (8.0 + 10.0 * f.pull)).sin() * 0.6;
+                let bob = self.tools.fishing.bob_draw.unwrap_or(line.bobber);
                 let pos = bob - Vec3::Y * (0.12 * size) + away * 0.12 * size;
                 angler::emit_fish(out, pos, away + Vec3::Y * 0.2, size, wiggle, sp.tint, light(pos));
             }
         }
         // A landed fish flying out to the player.
-        if let Some((from, t, species, weight)) = self.fishing.flying {
+        if let Some((from, t, species, weight)) = self.tools.fishing.flying {
             let k = t / 0.6;
             // (to the feet in front, not into the eyes)
-            let ahead = look_dir(self.yaw, 0.0);
-            let to = self.player.pos + Vec3::Y * 0.5 + ahead * 0.9;
+            let ahead = look_dir(self.me.look.yaw, 0.0);
+            let to = self.me.body.pos + Vec3::Y * 0.5 + ahead * 0.9;
             let pos = from.lerp(to, k) + Vec3::Y * (4.0 * k * (1.0 - k) * 1.5);
             let size = (weight / 0.5).cbrt().clamp(0.7, 3.0);
             let dir = (to - from).normalize_or(Vec3::X);
-            let wiggle = (self.time * 22.0).sin() * 0.7;
+            let wiggle = (self.clock.time * 22.0).sin() * 0.7;
             let size = size * (1.0 - 0.6 * smooth((k - 0.7) / 0.3));
             angler::emit_fish(out, pos, dir + Vec3::Y * (1.0 - 2.0 * k), size, wiggle, SPECIES[species].tint, light(pos));
         }
         // The loose end of a parted line, whipping back and falling.
-        if let (Some((t, at)), Some(_)) = (self.fishing.snapped, own) {
+        if let (Some((t, at)), Some(_)) = (self.tools.fishing.snapped, own) {
             let tip = self.rod_tip();
             let k = t / 0.8;
             let reach = (1.0 - k) * 3.0 + 0.4;
@@ -1084,7 +1084,7 @@ impl Game {
             return;
         }
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
-        let f = &self.fishing;
+        let f = &self.tools.fishing;
         let line = f.line.as_ref();
         let fight = line.and_then(|l| l.fight.as_ref());
         let fade = smooth(f.hud_in);
@@ -1093,7 +1093,7 @@ impl Game {
         let (crank, flash, alarm) = (f.crank, f.gear_flash, f.alarm);
         let toast = f.toast.clone();
         let (over, slack) = fight.map_or((0.0, 0.0), |fi| (fi.over / OVER_TIME, fi.slack / SLACK_TIME));
-        let time = self.time;
+        let time = self.clock.time;
         let ui = &mut self.ui;
         let a = |c: Color, k: f32| with_alpha(c, k * fade);
         // A round dot (for arcs and caps).

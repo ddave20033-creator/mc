@@ -158,7 +158,7 @@ impl Game {
                     *hovered = Some(SlotRef::Creative(id));
                     *hovered_stack = Some(st);
                 } else {
-                    if self.cursor.is_none() {
+                    if self.me.items.cursor.is_none() {
                         self.tooltip_for(&st);
                     }
                     if self.ui.pressed || self.ui.right_pressed {
@@ -218,7 +218,7 @@ impl Game {
                 shown = it.as_str();
             }
             let tw = self.ui.text(shown, tx, ty, fs, WHITE, true);
-            if self.inv_ui.jei.focused && (self.time * 2.5) as i32 % 2 == 0 {
+            if self.inv_ui.jei.focused && (self.clock.time * 2.5) as i32 % 2 == 0 {
                 self.ui.text("_", tx + tw + fs * 0.5, ty, fs, WHITE, true);
             }
         }
@@ -269,7 +269,7 @@ impl Game {
             top += 11.0 * s;
         }
         // Ingredients with several choices show each in turn.
-        let tick = self.time as usize;
+        let tick = self.clock.time as usize;
         let mut clicked = None;
         match &ways[page] {
             Way::Craft(grid, count) => {

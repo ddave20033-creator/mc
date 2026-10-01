@@ -26,7 +26,7 @@ impl Game {
         };
         let args: Vec<&str> = cmd.split_whitespace().collect();
         // The time is the world's: its server sets it (and answers).
-        if args.first() == Some(&"time") && self.cheats {
+        if args.first() == Some(&"time") && self.me.cheats {
             self.send(crate::net::Msg::Command(line.to_string()));
             return;
         }
@@ -34,7 +34,7 @@ impl Game {
             args.first(),
             Some(&"help") | Some(&"?") | Some(&"seed") | Some(&"save")
         );
-        if needs_cheats && !self.cheats {
+        if needs_cheats && !self.me.cheats {
             self.say(t("cmd.no_cheats"), chat::RED);
             return;
         }
@@ -85,19 +85,19 @@ impl Game {
                 }
                 None => self.say(tf("cmd.bad_item", &[item]), chat::RED),
             },
-            ["tp", coords @ ..] if coords.len() == 3 => match parse_pos(coords, self.player.pos) {
+            ["tp", coords @ ..] if coords.len() == 3 => match parse_pos(coords, self.me.body.pos) {
                 Some(p) => {
-                    self.player.pos = p;
-                    self.player.start_tick();
-                    self.player.vel = Vec3::ZERO;
-                    self.fall_peak = p.y;
+                    self.me.body.pos = p;
+                    self.me.body.start_tick();
+                    self.me.body.vel = Vec3::ZERO;
+                    self.me.vitals.fall_peak = p.y;
                     let f = |v: f32| format!("{v:.1}");
                     self.say(tf("cmd.tp", &[&f(p.x), &f(p.y), &f(p.z)]), chat::WHITE);
                 }
                 None => self.say(t("cmd.bad_coords"), chat::RED),
             },
             ["summon", kind, coords @ ..] => match MobKind::from_key(kind) {
-                Some(kind) => match parse_pos(coords, self.player.pos) {
+                Some(kind) => match parse_pos(coords, self.me.body.pos) {
                     Some(p) => {
                         self.spawn_mob(kind, p);
                         self.say(tf("cmd.summon", &[&kind.name()]), chat::WHITE);
@@ -107,8 +107,8 @@ impl Game {
                 None => self.say(tf("cmd.bad_entity", &[kind]), chat::RED),
             },
             ["effect", "clear"] => {
-                self.needs.poison = 0.0;
-                self.needs.nausea = 0.0;
+                self.me.vitals.needs.poison = 0.0;
+                self.me.vitals.needs.nausea = 0.0;
                 self.say(t("cmd.effect_clear"), chat::WHITE);
             }
             ["effect", "give", name, rest @ ..] => {
@@ -124,7 +124,7 @@ impl Game {
                     .unwrap_or(30.0);
                 match kind {
                     Some(k) => {
-                        self.needs.add_effect(k, secs.clamp(1.0, 3600.0));
+                        self.me.vitals.needs.add_effect(k, secs.clamp(1.0, 3600.0));
                         self.say(tf("cmd.effect", &[&t(k.key())]), chat::WHITE);
                     }
                     None => self.say(tf("cmd.bad_effect", &[name]), chat::RED),
@@ -135,13 +135,13 @@ impl Game {
                 self.say(t("cmd.spawn"), chat::WHITE);
             }
             ["kill"] => {
-                self.health = 0.0;
+                self.me.vitals.health = 0.0;
                 self.die("death.kill");
             }
             ["save"] => {
                 self.save_world();
                 // (the world itself is its server's to save)
-                if self.local.is_some() {
+                if self.session.local.is_some() {
                     self.send(crate::net::Msg::Command(line.to_string()));
                 }
                 self.say(t("cmd.saved"), chat::WHITE);

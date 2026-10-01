@@ -151,7 +151,7 @@ impl ApplicationHandler for App {
             }
             _ => {
                 event_loop.set_control_flow(ControlFlow::Poll);
-                g.window.request_redraw();
+                g.request_redraw();
             }
         }
     }
