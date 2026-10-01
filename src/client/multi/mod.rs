@@ -103,6 +103,12 @@ pub(super) struct Session {
 }
 
 impl Session {
+    /// This game's own world, not open to LAN, nobody else in it: pausing stops it (the
+    /// server stands still too).
+    pub(in crate::client) fn stands_still(&self) -> bool {
+        self.local.is_some() && self.lan_address.is_none() && self.remotes.is_empty()
+    }
+
     pub(super) fn new() -> Self {
         Self {
             net: None,

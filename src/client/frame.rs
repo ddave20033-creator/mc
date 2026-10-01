@@ -338,13 +338,13 @@ impl Game {
             Screen::Playing => (Some(true), true),
             Screen::Chat | Screen::Container(_) | Screen::Spectate => (Some(false), true),
             Screen::Dead => (None, true),
-            // A LAN game keeps running behind the pause menu (not the game's own world with
-            // nobody else in it: its server stands still too).
+            // A world open to LAN (or another's) keeps running behind the pause menu; only the
+            // game's own world, closed, with nobody else in it, stands still (its server too).
             Screen::Paused
             | Screen::Options { in_game: true }
             | Screen::ResourcePacks { in_game: true }
             | Screen::KeyBinds { in_game: true }
-                if !(self.session.local.is_some() && self.session.remotes.is_empty()) =>
+                if !self.session.stands_still() =>
             {
                 (Some(false), true)
             }
@@ -368,6 +368,11 @@ impl Game {
             }
         }
         self.clock.between = self.clock.ticks.between(now);
+        if player.is_none() {
+            // (standing still, it is drawn where it stands: not swaying between its last two
+            // ticks, as it would be if it was stopped mid-step)
+            self.me.body.prev_pos = self.me.body.pos;
+        }
         if let Some(control) = player {
             self.update_player(dt, control);
         }

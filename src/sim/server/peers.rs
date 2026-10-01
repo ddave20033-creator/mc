@@ -167,9 +167,9 @@ impl Server {
         for id in gone {
             self.peer_left(id);
         }
-        // The owner paused, alone in the world: it stands still.
+        // The owner paused, alone in a world not open to LAN: it stands still.
         let others = self.peers.iter().any(|p| !p.owner && p.joined);
-        self.paused = !others && self.peers.iter().any(|p| p.owner && p.paused);
+        self.paused = !others && self.lan.is_none() && self.peers.iter().any(|p| p.owner && p.paused);
     }
 
     // ------------------------------------------------------------------ sending
