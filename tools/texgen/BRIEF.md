@@ -40,7 +40,7 @@ not pixel art:
 - Read `tools/texgen/flat.py` and use it: `Canvas` (draws at 4x and averages down: smooth
   edges), shape makers (`disk`, `ellipse`, `box`, `capsule`, `poly`, `ring`, `tiled`...),
   `tones`, `Canvas.raised`, `Canvas.facets`, `scatter`, `outlined`. Add helpers to your own
-  module (do not edit `flat.py`, `common.py` or `build.py`).
+  module (do not edit `flat.py` or `build.py`).
 - `Canvas.finish(opaque=True)` for blocks (full alpha), `finish(cutout=True)` for anything
   with see-through parts: alpha must be all or nothing (leaves, plants, items, sprites,
   overlays), only the colours are anti-aliased.

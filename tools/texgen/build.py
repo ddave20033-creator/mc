@@ -6,7 +6,7 @@ this folder, and a contact sheet to look at.
 
 Each painter module has `TEXTURES = {path: painter}`: `path` is under
 `assets/minecraft/textures/` without `.png` (Minecraft's names, so the game and other packs
-agree), and `painter(seed)` returns an RGBA float array (see common.py), or for an animation
+agree), and `painter(seed)` returns an RGBA float array (see flat.py), or for an animation
 `(frames, frametime)` - a list of equal square arrays and the ticks per frame, saved as a
 vertical strip with a `.png.mcmeta` like Minecraft's.
 """
@@ -26,7 +26,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import importlib  # noqa: E402
 
-import common  # noqa: E402
 
 MODULES = ["terrain", "flora", "crafted", "items", "entities", "furnaces", "player"]
 MODULE_OF: dict[str, str] = {}
@@ -99,6 +98,14 @@ REQUIRED: list[tuple[str, tuple[int, int] | None]] = [
 ]
 
 
+def to_u8(img: np.ndarray) -> np.ndarray:
+    return np.clip(np.round(img), 0, 255).astype(np.uint8)
+
+
+def save(img: np.ndarray, path) -> None:
+    Image.fromarray(to_u8(img), "RGBA").save(path, optimize=True)
+
+
 def painters() -> dict:
     out = {}
     for name in MODULES:
@@ -139,7 +146,7 @@ def render(path: str, fn, size):
 def write(path: str, frames, frametime) -> None:
     dst = TEXTURES / f"{path}.png"
     dst.parent.mkdir(parents=True, exist_ok=True)
-    common.save(np.concatenate(frames, 0), dst)
+    save(np.concatenate(frames, 0), dst)
     if frametime is not None:
         meta = {"animation": {"frametime": frametime, "interpolate": False}}
         (TEXTURES / f"{path}.png.mcmeta").write_text(json.dumps(meta, indent=2) + "\n")
@@ -156,7 +163,7 @@ def sheet(rendered: dict) -> Image.Image:
     bg = np.where(checker[..., None] == 0, 70, 95).astype(np.uint8).repeat(3, 2)
     for i, name in enumerate(names):
         frame = rendered[name][0][0]
-        tile = Image.fromarray(common.to_u8(frame), "RGBA")
+        tile = Image.fromarray(to_u8(frame), "RGBA")
         if tile.size != (128, 128):
             tile = tile.resize((128, 128 * tile.size[1] // tile.size[0]), Image.NEAREST)
         base = Image.fromarray(bg[: tile.size[1]].copy(), "RGB")
@@ -199,7 +206,7 @@ def compare(rendered: dict) -> Image.Image:
         ref = REFERENCE / f"{name}.png"
         if ref.exists():
             img.paste(tile(Image.open(ref)), (x, y))
-        ours = Image.fromarray(common.to_u8(rendered[name][0][0]), "RGBA")
+        ours = Image.fromarray(to_u8(rendered[name][0][0]), "RGBA")
         img.paste(tile(ours), (x + 134, y))
         draw.text((x, y + 130), name.split("/")[-1][:40], fill=(220, 220, 220))
     return img
@@ -236,7 +243,7 @@ def main(filters: list[str]) -> None:
         json.dumps({"pack": {"pack_format": 46,
                              "description": "RustCraft's own textures"}}, indent=2) + "\n")
     icon = rendered["block/grass_block_side"][0][0]
-    common.save(icon, PACK / "pack.png")
+    save(icon, PACK / "pack.png")
     sheet(rendered).save(OUT / "sheet.png")
     print(f"{len(rendered)} textures -> {PACK}; sheet: {OUT / 'sheet.png'}")
 

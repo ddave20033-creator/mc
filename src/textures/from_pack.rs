@@ -263,7 +263,7 @@ fn double_chest_faces(left: &Image, right: &Image, put: &mut impl FnMut(u32, &Im
     }
 }
 
-/// A log's end with square rings (Minecraft's, for a square log) redrawn round, for the
+/// A log's end with square rings (a Minecraft pack's, for a square log) redrawn round, for the
 /// round logs: each point takes the ring as far out as it is (round), in its direction (the
 /// square ring there). The corners outside the outermost ring are bark.
 fn round_rings(img: &Image) -> Image {
@@ -308,13 +308,14 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) -> Vec<bool> {
         base[layer as usize * layer_bytes..][..layer_bytes].copy_from_slice(&px);
     };
     for &(layer, paths) in PACK_TEXTURES {
-        if let Some(img) = pack.texture(paths) {
+        if let Some((img, builtin)) = pack.texture_of(paths) {
             // Blocks drawn as full cubes (cactus) have transparent margins in Minecraft.
             let img = match (is_cutout(layer), img.opaque_bounds()) {
                 (false, Some((x, y, w, h))) => img.crop(x, y, w, h),
                 _ => img,
             };
-            let img = if matches!(layer, tex::OAK_LOG_TOP | tex::SPRUCE_LOG_TOP | tex::BIRCH_LOG_TOP) {
+            // (the built-in pack draws its rings round already)
+            let img = if !builtin && matches!(layer, tex::OAK_LOG_TOP | tex::SPRUCE_LOG_TOP | tex::BIRCH_LOG_TOP) {
                 round_rings(&img)
             } else {
                 img

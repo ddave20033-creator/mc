@@ -127,25 +127,6 @@ def spiral(cy, cx, r0, r1, turns, width, a0=0.0):
     return union(*[capsule(p, q, width) for p, q in zip(pts[:-1], pts[1:])])
 
 
-# Kept for `player.py` (another module imports these two from here; not used below).
-
-
-def aniso(seed: int, h: int, w: int, cy: float, cx: float) -> np.ndarray:
-    """Smooth non-tiling noise 0..1 with features about cy x cx pixels."""
-    from scipy import ndimage
-
-    gh, gw = int(np.ceil(h / cy)) + 3, int(np.ceil(w / cx)) + 3
-    g = np.random.default_rng(seed).random((gh, gw)).astype(np.float32)
-    z = ndimage.zoom(g, (cy, cx), order=3, mode="nearest")
-    oy, ox = int(cy), int(cx)
-    return np.clip(z[oy : oy + h, ox : ox + w], 0, 1)
-
-
-def put(atlas, img, x, y, k):
-    h, w = img.shape[:2]
-    atlas[int(y * k) : int(y * k) + h, int(x * k) : int(x * k) + w] = img
-
-
 # ---------------------------------------------------------------------------- chest
 
 WOOD = dict(base=C("#b98a55"), alt=C("#b2834f"), light=C("#d3a76f"), dark=C("#966a3e"),

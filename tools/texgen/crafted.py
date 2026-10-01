@@ -986,56 +986,6 @@ def destroy(k):
     return paint_stage
 
 
-# ---------------------------------------------------------------------------- for furnaces.py
-# furnaces.py (not yet redrawn) imports these palettes and helpers from here; kept until it
-# is rewritten in the flat style. Not used by the textures above.
-
-import common as _common  # noqa: E402
-
-BRICK = _common.Ramp("733f31", "7c4536", "8f503f", "9b5643", "b1624d", "c66851")
-MORTAR = _common.Ramp("8b6e67", "a2867d", "a9948d")
-STONE = _common.Ramp("3c3b3b", "504e4e", "5d5b5b", "686868", "777777", "858585", "919191",
-                     "9d9d9d", "a8a8a8", "b0b0b0", "c5c5c5")
-COPPER = _common.Ramp("9c4e2e", "a85634", "b45f3a", "c26b44", "c9724a", "d07b52", "d6845a",
-                      "dc8f64", "e39a70", "e8a57c", "f0b890")
-UP_ARCH = (56, 64, 42, 32)    # centre y, centre x, rx, ry of the upper opening
-LOW_ARCH = (114, 64, 44, 22)  # the fire opening
-
-
-def ints():
-    return np.mgrid[0:S, 0:S]
-
-
-def level(ramp, i: float) -> float:
-    return i / (len(ramp) - 1)
-
-
-def stepped(t, ramp, dither=0.25):
-    return ramp.shade(t, dither)
-
-
-def anoise(seed: int, cy: float, cx: float, h: int = S, w: int = S) -> np.ndarray:
-    """Smooth tiling value noise, features `cy` tall and `cx` wide."""
-    gh, gw = max(1, int(round(h / cy))), max(1, int(round(w / cx)))
-    g = np.random.default_rng(seed).random((gh, gw)).astype(np.float32)
-    ys = np.arange(h, dtype=np.float32) * gh / h
-    xs = np.arange(w, dtype=np.float32) * gw / w
-    y0, x0 = np.floor(ys).astype(int), np.floor(xs).astype(int)
-    fy, fx = ys - y0, xs - x0
-    fy, fx = fy * fy * (3 - 2 * fy), fx * fx * (3 - 2 * fx)
-    y1, x1 = (y0 + 1) % gh, (x0 + 1) % gw
-    top = g[y0][:, x0] * (1 - fx) + g[y0][:, x1] * fx
-    bot = g[y1][:, x0] * (1 - fx) + g[y1][:, x1] * fx
-    return top * (1 - fy[:, None]) + bot * fy[:, None]
-
-
-def arch(cy, cx, rx, ry, flat_bottom):
-    """An arch: a half ellipse on top of a rectangle reaching down to `flat_bottom`."""
-    yy, xx = np.mgrid[0:S, 0:S].astype(np.float32) + 0.5
-    return ((((yy - cy) / ry) ** 2 + ((xx - cx) / rx) ** 2 <= 1)
-            | ((yy >= cy) & (np.abs(xx - cx) <= rx))) & (yy < flat_bottom)
-
-
 TEXTURES = {
     "block/oak_planks": paint_oak_planks,
     "block/glass": paint_glass,

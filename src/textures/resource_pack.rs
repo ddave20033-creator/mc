@@ -179,6 +179,11 @@ impl Pack {
         Some(Self::with_source(name, source))
     }
 
+    /// Whether this is the pack built into the game.
+    pub fn is_builtin(&self) -> bool {
+        self.name == BUILTIN
+    }
+
     /// The pack built into the game.
     pub fn builtin() -> Pack {
         Self::with_source(BUILTIN, Source::Embedded(BUILTIN_FILES))
@@ -263,9 +268,15 @@ impl Packs {
     /// A texture (see `Pack::texture`) from the highest pack that has it. Alternative names
     /// are separated by `|`; each pack is asked for all of them before the next one.
     pub fn texture(&self, paths: &str) -> Option<Image> {
-        self.0
-            .iter()
-            .find_map(|pack| paths.split('|').find_map(|p| pack.texture(p)))
+        self.texture_of(paths).map(|(img, _)| img)
+    }
+
+    /// As `texture`, and whether it is the built-in pack's.
+    pub fn texture_of(&self, paths: &str) -> Option<(Image, bool)> {
+        self.0.iter().find_map(|pack| {
+            let img = paths.split('|').find_map(|p| pack.texture(p))?;
+            Some((img, pack.is_builtin()))
+        })
     }
 
     /// The animation frames of a texture (see `texture`): one image per square of its strip.
