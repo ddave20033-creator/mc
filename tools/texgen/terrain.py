@@ -191,7 +191,7 @@ def periodic(seed: int, waves: int, f: float, kmax: int = 3, tmax: int = 0, kxma
 
 # ---------------------------------------------------------------------------- stone & ores
 
-STONE_T = tones("#9a9ca3", 4, spread=0.085)
+STONE_T = [hexc("#7f828b"), hexc("#8a8d95"), hexc("#9699a0"), hexc("#a3a5aa")]
 STONE_CREASE = shift(hexc("#8d8f96"), dv=-0.2, ds=0.03)
 STONE_SEED = seed_of("block/stone")
 
@@ -216,7 +216,7 @@ def stone_canvas() -> Canvas:
 
 
 def ore(seed: int, clusters: int, per: tuple, size: tuple, cols, outline, gloss, n=6,
-        squash=(0.75, 1.0), table=0.42, pointy=0.0, min_dist=40.0) -> np.ndarray:
+        squash=(0.75, 1.0), table=0.42, pointy=0.0, min_dist=46.0) -> np.ndarray:
     """The stone with `clusters` groups of `per` crystals of radius `size` drawn over it."""
     c = stone_canvas()
     r = np.random.default_rng(seed)
@@ -243,13 +243,13 @@ DIAMOND_T = [hexc("#1f9c98"), hexc("#35bfb8"), hexc("#4fd8cf"), hexc("#9ff1ea")]
 
 def paint_coal_ore(seed):
     """Angular black coal lumps, matte, with a faint grey glint."""
-    return ore(seed, 4, (3, 4), (8.0, 10.0), COAL_T, hexc("#15151a"), hexc("#7a7a86"), n=5,
-               squash=(0.65, 0.95), table=0.0, min_dist=44.0)
+    return ore(seed, 4, (2, 4), (10.5, 13.0), COAL_T, hexc("#15151a"), hexc("#7a7a86"), n=5,
+               squash=(0.65, 0.95), table=0.0, min_dist=48.0)
 
 
 def paint_iron_ore(seed):
     """Warm beige-pink faceted iron nuggets."""
-    return ore(seed, 4, (2, 4), (8.0, 10.0), IRON_T, hexc("#7d5a44"), hexc("#fff6ea"), n=6)
+    return ore(seed, 4, (2, 3), (11.5, 14.0), IRON_T, hexc("#7d5a44"), hexc("#fff6ea"), n=6)
 
 
 def paint_copper_ore(seed):
@@ -257,12 +257,12 @@ def paint_copper_ore(seed):
     c = stone_canvas()
     r = np.random.default_rng(seed)
     pat = [hexc("#2f7566"), hexc("#3f8f7c"), hexc("#4fa38f"), hexc("#7cc8b2")]
-    for i, (cx, cy) in enumerate(flat.scatter(seed, 4, 40.0)):
-        k = int(r.integers(2, 5))
+    for i, (cx, cy) in enumerate(flat.scatter(seed, 4, 46.0)):
+        k = int(r.integers(2, 4))
         a0 = r.uniform(0, TAU)
         for j in range(k):
-            rr = r.uniform(7.5, 9.5) * (1.0 if j == 0 else 0.72)
-            off = 0.0 if j == 0 else 10.0
+            rr = r.uniform(10.5, 13.0) * (1.0 if j == 0 else 0.72)
+            off = 0.0 if j == 0 else 13.5
             a = a0 + j * TAU / k + r.uniform(-0.4, 0.4)
             cols = pat if (i + j) % 3 == 2 else COPPER_T
             gem(c, cx + np.cos(a) * off, cy + np.sin(a) * off, rr, cols, r, n=6,
@@ -273,12 +273,12 @@ def paint_copper_ore(seed):
 
 def paint_gold_ore(seed):
     """Bright gold nuggets with a white gloss."""
-    return ore(seed, 4, (2, 4), (7.5, 9.5), GOLD_T, hexc("#7a4f10"), hexc("#fffbe8"), n=7)
+    return ore(seed, 4, (2, 3), (11.0, 13.5), GOLD_T, hexc("#7a4f10"), hexc("#fffbe8"), n=7)
 
 
 def paint_diamond_ore(seed):
     """Long pointed cyan crystals with clear cut faces."""
-    return ore(seed, 4, (2, 3), (7.0, 8.5), DIAMOND_T, hexc("#0f5e5e"), hexc("#ffffff"), n=6,
+    return ore(seed, 4, (2, 3), (9.5, 11.5), DIAMOND_T, hexc("#0f5e5e"), hexc("#ffffff"), n=6,
                squash=(0.5, 0.6), table=0.38, pointy=0.9)
 
 
@@ -360,26 +360,9 @@ def paint_grass_block_side(seed):
 GRASS_T = [hexc("#8e8e8e"), hexc("#9e9e9e"), hexc("#ababab"), hexc("#bcbcbc"), hexc("#cacaca")]
 
 
-def clump(x: float, y: float, s: float, rng, turn: float = 0.0) -> list:
-    """A grass clump seen from above: three pointed blades fanning up from a shared base."""
-    out = []
-    for a, L in ((-0.62, 0.78), (0.0, 1.0), (0.62, 0.78)):
-        a += rng.uniform(-0.1, 0.1) + turn
-        ux, uy = np.sin(a), -np.cos(a)
-        bx, by = x + ux * s * 0.1, y + uy * s * 0.1
-        w = s * 0.15
-        tip = (bx + ux * s * L, by + uy * s * L)
-        mid = (bx + ux * s * L * 0.35, by + uy * s * L * 0.35)
-        out.append(np.array([(bx - uy * w * 0.5, by + ux * w * 0.5),
-                             (mid[0] - uy * w, mid[1] + ux * w), tip,
-                             (mid[0] + uy * w, mid[1] - ux * w),
-                             (bx + uy * w * 0.5, by - ux * w * 0.5)]))
-    return out
-
-
 def paint_grass_block_top(seed):
-    """Flat light grey (tinted green by the game): a few big soft patches, short rounded
-    blades lying every way, each lit blade with a darker shadow blade under it."""
+    """Flat light grey (tinted green by the game): a few big soft patches and clusters of
+    slim tapered blades lying in a few directions, each with a faint shadow; low contrast."""
     c = Canvas(bg=GRASS_T[2])
     r = np.random.default_rng(seed)
     for i, (x, y) in enumerate(flat.scatter(seed + 3, 6, 44.0)):
@@ -388,13 +371,17 @@ def paint_grass_block_top(seed):
         for k in range(3):
             c.fill(ellipse(y + r.uniform(-7, 7), x + r.uniform(-9, 9), r.uniform(7, 10),
                            r.uniform(11, 15), a + r.uniform(-0.4, 0.4)), col)
-    for i, (x, y) in enumerate(flat.scatter(seed, 14, 30.0)):
-        s = r.uniform(11.0, 14.0)
-        blades = clump(x, y, s, r, r.uniform(-0.45, 0.45))
-        for pts in blades:
-            c.fill(wpoly(pts + [1.2, 1.4]), GRASS_T[0])
-        for pts in blades:
-            c.fill(wpoly(pts), GRASS_T[4] if i % 3 else GRASS_T[3])
+    # clusters of slim tapered blades lying in a few directions, each with a faint shadow
+    for i, (x, y) in enumerate(flat.scatter(seed, 26, 22.0)):
+        a0 = r.uniform(0, np.pi)
+        light = GRASS_T[3] if i % 3 else lerp(GRASS_T[3], GRASS_T[4], 0.5)
+        for k in range(int(r.integers(4, 7))):
+            bx, by = x + r.uniform(-5, 5), y + r.uniform(-5, 5)
+            a = a0 + r.uniform(-0.45, 0.45)
+            L, w = r.uniform(4.5, 7.0), r.uniform(1.1, 1.5)
+            lshape(c, bx, by, L + 3, ellipse(by + 1.0, bx + 0.8, w, L, a),
+                   lerp(GRASS_T[1], GRASS_T[2], 0.3))
+            lshape(c, bx, by, L + 3, ellipse(by, bx, w, L, a), light)
     return c.finish(opaque=True)
 
 
