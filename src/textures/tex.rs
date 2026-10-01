@@ -289,7 +289,7 @@ pub const STATE_ICONS: u32 = RIFLE_STATION_MODEL + crate::model::gun_station::RI
 pub const STATE_ICON_COUNT: u32 = 64;
 /// The wolf's atlases (wild, tame, angry, and its collar, tinted by the game), a bone and
 /// the wolf spawn egg.
-/// (each `entity::mob::wolf_skin::PAGES` layers, see `entity::skin_pages`)
+/// (each `entity::mob::wolf_skin::PAGES` layers, see `textures::skin_pages`)
 pub const WOLF: u32 = STATE_ICONS + STATE_ICON_COUNT;
 pub const WOLF_TAME: u32 = WOLF + crate::entity::mob::wolf_skin::PAGES;
 pub const WOLF_ANGRY: u32 = WOLF_TAME + crate::entity::mob::wolf_skin::PAGES;
@@ -312,7 +312,7 @@ pub const BUCKET_METAL: u32 = COOKED_FISH + 1;
 /// The mark of a cut-down trunk on grass, a stage each (`world::STUMP_MARK`): bare soil
 /// in a circle, the rest see-through.
 pub const STUMP_MARK: u32 = BUCKET_METAL + 1;
-/// The game's logo (`ui/logo.png`), in tiles from its left.
+/// The game's logo (`textures/logo.png`), in tiles from its left.
 pub const LOGO: u32 = STUMP_MARK + crate::world::STUMP_STAGES as u32;
 pub const LOGO_TILES: u32 = 8;
 pub const LAYERS: usize = (LOGO + LOGO_TILES) as usize;

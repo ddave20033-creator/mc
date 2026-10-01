@@ -1,4 +1,4 @@
-"""Draws the game's logo, "YOUR WORLDS", into src/ui/logo.png (1024x128, eight 128x128 tiles
+"""Draws the game's logo, "YOUR WORLDS", into src/textures/logo.png (1024x128, eight 128x128 tiles
 the game loads as texture layers, also the start-up splash): the words in a heavy sans
 typeface (Segoe UI Black), "YOUR" in an indigo-to-violet gradient, "WORLDS" in white
 fading to a pale lavender, with a soft shadow under them.
@@ -67,8 +67,8 @@ def main():
     dy = (H - (bottom - top + 4)) // 2 - top
     centred = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     centred.paste(out, (0, dy))
-    centred.save("src/ui/logo.png")
-    print(f"src/ui/logo.png: {W}x{H}, words {total} wide, letters {top}..{bottom}")
+    centred.save("src/textures/logo.png")
+    print(f"src/textures/logo.png: {W}x{H}, words {total} wide, letters {top}..{bottom}")
 
 
 if __name__ == "__main__":

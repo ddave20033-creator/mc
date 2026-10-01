@@ -4,7 +4,7 @@
 use crate::engine::Gpu;
 use crate::app::lang::t;
 use crate::render::Renderer;
-use crate::world::textures;
+use crate::textures;
 use std::collections::HashMap;
 use std::sync::Arc;
 use winit::window::Window;
@@ -30,7 +30,7 @@ pub(super) struct Gfx {
 /// The uploaded skins by player slot (this player's own in slot 0 out of a world, and in its
 /// own player id's slot in one), and the PNGs they came from (sent to the other players).
 pub(super) struct Skins {
-    pub(super) custom: HashMap<u8, crate::pack::Image>,
+    pub(super) custom: HashMap<u8, crate::textures::resource_pack::Image>,
     pngs: HashMap<u8, Vec<u8>>,
     /// This player's own skin (`skins/custom.png`), if it has one.
     pub(super) local_png: Option<Vec<u8>>,
@@ -74,7 +74,7 @@ impl Gfx {
 
     /// Remakes the textures from the enabled resource packs (after the pack screen).
     pub(super) fn reload_packs(&mut self, enabled: &[String]) {
-        let packs = crate::pack::Packs::load(enabled);
+        let packs = crate::textures::resource_pack::Packs::load(enabled);
         self.texture_base = Arc::new(textures::generate_base(&packs));
         self.torch_particles = torch_particles(&packs);
         self.pack_credit = pack_credit(&packs);
@@ -134,12 +134,12 @@ impl Gfx {
 }
 
 /// The resource packs draw torch fire as flame/smoke particles (like Minecraft).
-pub(super) fn torch_particles(packs: &crate::pack::Packs) -> bool {
+pub(super) fn torch_particles(packs: &crate::textures::resource_pack::Packs) -> bool {
     packs.texture("particle/flame").is_some()
 }
 
 /// (title, description) of the resource pack on top, for the credits (none: the built-in one).
-pub(super) fn pack_credit(packs: &crate::pack::Packs) -> Option<(String, String)> {
+pub(super) fn pack_credit(packs: &crate::textures::resource_pack::Packs) -> Option<(String, String)> {
     packs.0.last().map(|p| (p.title().to_string(), p.description.clone()))
 }
 

@@ -5,7 +5,7 @@
 
 use crate::model::emit_box;
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Vec2, Vec3};
 use std::f32::consts::PI;
 

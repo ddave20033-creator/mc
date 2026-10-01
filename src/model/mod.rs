@@ -25,7 +25,7 @@ pub use rig::{spring, viewmodel};
 use crate::item::{icon, Icon, ItemId};
 use crate::world::mesh::{flags, Vertex};
 use prim::{quad, quad_at, tri_at, BoxUv, Paint, Sides};
-use crate::world::textures::{tex, ITEM_MASKS, MASK};
+use crate::textures::{tex, ITEM_MASKS, MASK};
 use crate::world::block::Block;
 use crate::world::{
     face_texture, icon_tint, is_log, is_plant, is_stairs, is_water, log_axis, log_radius, tint_kind,
@@ -329,7 +329,7 @@ fn sprite_walls(layer: u32) -> std::sync::Arc<[SpriteWall]> {
     use std::sync::{Arc, Mutex};
     type Cache = (u32, Vec<Option<Arc<[SpriteWall]>>>);
     static CACHE: Mutex<Cache> = Mutex::new((u32::MAX, Vec::new()));
-    let version = crate::world::textures::ITEM_MASKS_VERSION.load(Ordering::Acquire);
+    let version = crate::textures::ITEM_MASKS_VERSION.load(Ordering::Acquire);
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if cache.0 != version {
         *cache = (version, Vec::new());

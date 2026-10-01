@@ -8,7 +8,7 @@ use crate::entity::Furnace;
 use crate::item::Slot;
 use crate::app::lang::{t, tf};
 use crate::net::{container, pose_flags, Conn, EntitySync, Frame, ItemNet, Msg, PlayerState, Pose, PROTOCOL};
-use crate::save::rle;
+use crate::world::save::rle;
 use crate::world::*;
 use glam::{IVec3, Vec3};
 use std::path::PathBuf;
@@ -141,7 +141,7 @@ impl Server {
         let Some(lan) = &self.lan else { return };
         for stream in lan.accept() {
             let Ok(mut conn) = Conn::new(stream) else { continue };
-            let Some(id) = (0..crate::world::textures::tex::CUSTOM_SKIN_SLOTS).find(|id| self.peers.iter().all(|p| p.id != *id)) else {
+            let Some(id) = (0..crate::textures::tex::CUSTOM_SKIN_SLOTS).find(|id| self.peers.iter().all(|p| p.id != *id)) else {
                 conn.send(&Msg::Refuse(t("lan.full").to_string()));
                 conn.close();
                 continue;
@@ -233,7 +233,7 @@ impl Server {
             return;
         }
         let _ = std::fs::create_dir_all(self.players_dir());
-        crate::save::write(self.player_file(name), &Msg::Save(state.clone()).encode());
+        crate::world::save::write(self.player_file(name), &Msg::Save(state.clone()).encode());
     }
 
     /// A player said hello: they get the world (its edited chunks, what lies on its tables...)

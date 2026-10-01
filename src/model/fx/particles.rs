@@ -2,7 +2,7 @@
 
 use crate::util::{vertex_light, Rng};
 use crate::world::mesh::{flags, Vertex};
-use crate::world::textures::{tex, SMOKE_FRAMES};
+use crate::textures::{tex, SMOKE_FRAMES};
 use crate::world::{face_texture, is_solid, Block, World};
 use glam::Vec3;
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -118,7 +118,7 @@ impl Particles {
                 vel,
                 life,
                 max_life: life,
-                layer: crate::world::textures::tex::WOOL,
+                layer: crate::textures::tex::WOOL,
                 uv0: [0.4, 0.4],
                 size,
                 tint: [255, green, 90],

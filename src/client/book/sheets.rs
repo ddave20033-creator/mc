@@ -8,7 +8,7 @@ use super::layout::{PAGE_PX, contents_entry};
 use crate::client::Game;
 use crate::item::GUIDE_BOOK;
 use crate::model::book::{BookHit, BookView, SHEET_LAYERS, TAB_LAYERS};
-use crate::world::textures::{TILE, tex};
+use crate::textures::{TILE, tex};
 
 /// Pages drawn onto the textures in one frame at most (the rest wait for the next ones), and
 /// how many of them may be redrawn only to move their animations on.

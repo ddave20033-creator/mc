@@ -6,7 +6,7 @@
 use crate::item::{ItemId, BUCKET, LAVA_BUCKET, WATER_BUCKET};
 use crate::model::prim::{tri_at, Paint, Sides};
 use crate::world::mesh::{flags, Vertex};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Vec2, Vec3};
 use std::f32::consts::TAU;
 

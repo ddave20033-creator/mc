@@ -5,7 +5,7 @@
 use super::Server;
 use crate::item::{inventory, Slot, ARMOR_SLOTS};
 use crate::net::{mode, PlayerState};
-use crate::save::{self, PlayerSave};
+use crate::world::save::{self, PlayerSave};
 use std::sync::Arc;
 
 impl Server {

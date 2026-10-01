@@ -9,7 +9,7 @@ use crate::model::revolver_vm as vm;
 use crate::model::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_bone, Anim, BonePose};
 use crate::item::{chamber, revolver_next};
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Vec3};
 
 /// Moments of the reload animation (seconds; see `gen_revolver.py`): the cylinder is out and

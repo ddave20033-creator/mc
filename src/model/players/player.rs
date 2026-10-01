@@ -6,7 +6,7 @@ use crate::model::emit_box;
 use crate::item::{icon, tool_of, Icon, ItemId, NONE, STICK};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Vec3};
 use std::f32::consts::{PI, TAU};
 
@@ -676,7 +676,7 @@ pub fn emit_armor(out: &mut Vec<Vertex>, f: &ArmorFrames, armor: u16, tint: [u8;
 
 /// A body part's texture layers (`HEAD`, `BODY`, `ARM`, `LEG`) in the player's skin `skin`.
 pub fn skinned(layers: [u32; 6], skin: u8) -> [u32; 6] {
-    layers.map(|layer| crate::world::textures::skin_layer(layer, skin))
+    layers.map(|layer| crate::textures::skin_layer(layer, skin))
 }
 
 /// `glass`: where the held gun's see-through glass goes (drawn blended).

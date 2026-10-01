@@ -14,7 +14,7 @@ use crate::model::crack_overlay;
 use crate::model::player::{PlayerPose, build_player, hand_pivot, limb_targets};
 use crate::world::*;
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{IVec3, Mat4, Vec3};
 
 use super::frame::View;

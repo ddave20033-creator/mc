@@ -7,7 +7,7 @@
 use super::*;
 use crate::entity::mob::{animal_root, emit_paged, head_turn, part, Look};
 use crate::item::{BONE, WOLF_SPAWN_EGG};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use crate::world::{is_lava, SNOWY_GRASS};
 use glam::Mat4;
 use std::f32::consts::{FRAC_PI_2, PI};
@@ -272,7 +272,7 @@ fn used(m: &mut Mob, held: ItemId, who: &str, r: f32) -> Used {
 /// The wolf's skin, as detailed as the blocks: Minecraft's 64x32 unit wolf atlas at 8
 /// texels per unit (512x256), its faces on `PAGES` texture layers (`skin_pages`).
 pub mod skin {
-    use crate::entity::skin_pages::{BoxUv, SkinPages};
+    use crate::textures::skin_pages::{BoxUv, SkinPages};
 
     pub const PAGES: u32 = 8;
     /// The model's boxes: texture offset and size (units), as in Minecraft's `WolfModel`.

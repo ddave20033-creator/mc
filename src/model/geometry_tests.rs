@@ -372,7 +372,7 @@ const EXPECTED: [(&str, u64); 9] = [
 #[test]
 fn models_are_built_vertex_for_vertex_as_before() {
     // The flat items' side walls follow their textures' opaque pixels.
-    crate::world::textures::generate(&crate::pack::Packs::none());
+    crate::textures::generate(&crate::textures::resource_pack::Packs::none());
     for (name, n) in [("items", items().len()), ("logs", logs().len()), ("players", players().len()), ("hands", hands().len())] {
         println!("{name}: {n} vertices");
         assert!(n > 0);

@@ -16,7 +16,7 @@ use crate::entity::player::look_dir;
 use crate::item::{GunKind, ItemId, Slot, armor_code};
 use crate::model::player::{LimbSmoother, PlayerPose, build_player, hand_pivot, limb_targets};
 use crate::net::{Conn, Msg, NO_BLOCK, Pose, container, pose_flags};
-use crate::save::PlayerSave;
+use crate::world::save::PlayerSave;
 use crate::ui::{Color, chat};
 use crate::util::lerp_angle;
 use crate::world::{AIR, Block, FastMap, World, facing_dir, facing_of, is_chest};

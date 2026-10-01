@@ -22,7 +22,7 @@ use crate::client::{Game, Screen};
 use crate::item::GUIDE_BOOK;
 use crate::app::keys::Bind;
 use crate::model::book::{BookHit, BookView, RIFFLE_TIME, TURN_TIME};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use winit::keyboard::KeyCode;
 
 use layout::{Layout, layout};

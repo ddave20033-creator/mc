@@ -9,7 +9,7 @@ use super::*;
 /// The Blockbench models' texture pages, made by `tools/blockbench/bbmodel_to_rust.py`:
 /// 128x128 pages one under the other, from layer `first`.
 pub(super) fn synth_model_pages(base: &mut [u8], png: &[u8], pages: u32, first: u32) {
-    let Some(img) = crate::pack::decode_png(png) else {
+    let Some(img) = crate::textures::resource_pack::decode_png(png) else {
         return;
     };
     let layer_bytes = TILE * TILE * 4;

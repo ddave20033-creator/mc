@@ -11,7 +11,7 @@ pub(super) mod logs;
 use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
 use crate::entity::mob::Mob;
 use crate::model::particles::Particles;
-use crate::save::WorldMeta;
+use crate::world::save::WorldMeta;
 use crate::world::FastMap;
 use glam::IVec3;
 

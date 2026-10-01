@@ -26,7 +26,7 @@ mod tests;
 use crate::entity::mob::Mob;
 use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
 use crate::net::{Conn, Msg};
-use crate::save::{ChunkSaver, WorldMeta};
+use crate::world::save::{ChunkSaver, WorldMeta};
 use crate::sim::clock::{Clock, TICK_SECS};
 use crate::util::Rng;
 use crate::world::fluid::Fluids;
@@ -226,7 +226,7 @@ impl Server {
             autosave: AUTOSAVE_SECONDS,
             saver: ChunkSaver::default(),
             next_entity_id: 0,
-            rng: Rng::new(crate::save::now_secs() as u32 ^ meta.seed),
+            rng: Rng::new(crate::world::save::now_secs() as u32 ^ meta.seed),
             peers: Vec::new(),
             skins: FastMap::default(),
             lan: None,

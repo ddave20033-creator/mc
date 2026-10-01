@@ -1,6 +1,6 @@
 //! World list, world creation/deletion, loading and saving.
 
-use crate::save;
+use crate::world::save;
 use crate::client::{Game, MAX_AIR, Screen};
 use crate::client::gui::BenchUi;
 use crate::client::player::{GameMode, Me};
@@ -9,7 +9,7 @@ use crate::client::tools::Tools;
 use crate::entity::player::Player;
 use crate::entity::survival::Needs;
 use crate::app::lang::{t, tf};
-use crate::save::{WorldMeta, list_worlds, seed_from_text};
+use crate::world::save::{WorldMeta, list_worlds, seed_from_text};
 use crate::ui::{
     ACCENT, ACCENT_LIGHT, ButtonKind, DANGER, GLASS_BOTTOM, GLASS_TOP, WHITE, chat, rgba, screens,
     with_alpha,

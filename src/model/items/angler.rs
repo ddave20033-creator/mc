@@ -4,7 +4,7 @@
 
 use crate::model::fishing_rod::{self, RodPoints, RodPose, LENGTH};
 use crate::world::mesh::{flags, Vertex};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Vec3};
 
 /// Seconds the whip of a cast takes (back over the shoulder, forward and down, then up again

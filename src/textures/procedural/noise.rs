@@ -6,7 +6,7 @@
 
 use super::*;
 
-pub(in crate::world::textures) fn hash(l: u32, x: i32, y: i32, s: u32) -> f32 {
+pub(in crate::textures) fn hash(l: u32, x: i32, y: i32, s: u32) -> f32 {
     let mut h = l.wrapping_mul(0x9E37_79B1)
         ^ (x as u32).wrapping_mul(0x85EB_CA77)
         ^ (y as u32).wrapping_mul(0xC2B2_AE3D)
@@ -112,7 +112,7 @@ pub(super) fn voronoi(l: u32, x: i32, y: i32, count: u32, s: u32) -> Cell {
 // would change those textures, so they stay as they are.
 
 /// A hash of a texel for noise, 0..1.
-pub(in crate::world::textures) fn texel_noise(x: usize, y: usize, salt: u32) -> f32 {
+pub(in crate::textures) fn texel_noise(x: usize, y: usize, salt: u32) -> f32 {
     let h = (x as u32)
         .wrapping_mul(0x9E37_79B1)
         .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B))
@@ -122,7 +122,7 @@ pub(in crate::world::textures) fn texel_noise(x: usize, y: usize, salt: u32) -> 
 }
 
 /// Smooth value noise in 0..1 with `cell` texel wide lattice cells.
-pub(in crate::world::textures) fn value_noise(x: usize, y: usize, cell: usize, salt: u32) -> f32 {
+pub(in crate::textures) fn value_noise(x: usize, y: usize, cell: usize, salt: u32) -> f32 {
     let (fx, fy) = (x as f32 / cell as f32, y as f32 / cell as f32);
     let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
     let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
@@ -135,7 +135,7 @@ pub(in crate::world::textures) fn value_noise(x: usize, y: usize, cell: usize, s
 
 /// Smooth value noise over `texel_noise` with cells of `size` texels, tiling across the
 /// texture's edges (the last cell blends into the first; `value_noise` does not wrap).
-pub(in crate::world::textures) fn tiled_value_noise(x: usize, y: usize, size: usize, salt: u32) -> f32 {
+pub(in crate::textures) fn tiled_value_noise(x: usize, y: usize, size: usize, salt: u32) -> f32 {
     let n = TILE / size;
     let (fx, fy) = (x as f32 / size as f32, y as f32 / size as f32);
     let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
@@ -149,7 +149,7 @@ pub(in crate::world::textures) fn tiled_value_noise(x: usize, y: usize, size: us
 
 /// The grime's hash of a lattice point, 0..1 (`synth_grime`). Like `hash` without the layer
 /// and the last mixing round, 16 bits out.
-pub(in crate::world::textures) fn grime_hash(x: i32, y: i32, s: u32) -> f32 {
+pub(in crate::textures) fn grime_hash(x: i32, y: i32, s: u32) -> f32 {
     let mut h = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77) ^ s.wrapping_mul(0xC2B2_AE3D);
     h ^= h >> 15;
     h = h.wrapping_mul(0x2C1B_3C6D);
@@ -159,7 +159,7 @@ pub(in crate::world::textures) fn grime_hash(x: i32, y: i32, s: u32) -> f32 {
 
 /// The grime's smooth value noise over `grime_hash` with `cell` wide cells, at any point
 /// (not tiling: the model pages are not tiles).
-pub(in crate::world::textures) fn grime_noise(x: f32, y: f32, cell: f32, s: u32) -> f32 {
+pub(in crate::textures) fn grime_noise(x: f32, y: f32, cell: f32, s: u32) -> f32 {
     let (gx, gy) = (x / cell, y / cell);
     let (ix, iy) = (gx.floor() as i32, gy.floor() as i32);
     let (fx, fy) = (gx - ix as f32, gy - iy as f32);

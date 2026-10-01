@@ -161,7 +161,7 @@ pub fn loading(ui: &mut Ui, progress: f32) {
     backdrop(ui, 1.6);
     let lw = (220.0 * s).round();
     let ly = (h * 0.26).round();
-    ui.logo(crate::world::textures::tex::LOGO, w * 0.5, ly, lw);
+    ui.logo(crate::textures::tex::LOGO, w * 0.5, ly, lw);
     let cy = (ly + lw / 8.0 + 30.0 * s).round();
     ui.text_centered(t("loading.generating"), w * 0.5, cy - 16.0 * s, s, WHITE, true);
     let (bw, bh) = ((220.0 * s).round(), (4.0 * s).round());

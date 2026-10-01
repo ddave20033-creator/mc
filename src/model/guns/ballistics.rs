@@ -5,7 +5,7 @@ use crate::item::GunKind;
 use crate::model::prim::{quad_at, Paint, Sides};
 use crate::util::vertex_light;
 use crate::world::mesh::{flags, Vertex};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use crate::world::{is_solid, World};
 use glam::{Mat4, Quat, Vec3};
 

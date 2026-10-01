@@ -9,7 +9,7 @@ use crate::entity::mob::Mob;
 use crate::entity::survival::Needs;
 use crate::app::lang::{t, tf};
 use crate::net::{Conn, ItemNet, Msg, PROTOCOL, PlayerState};
-use crate::save::{PlayerSave, WorldMeta, unrle};
+use crate::world::save::{PlayerSave, WorldMeta, unrle};
 use crate::sim::clock::TICK_SECS;
 use crate::ui::chat;
 use crate::world::{Block, ChunkData, FastMap, FastSet, HEIGHT, World};
@@ -346,7 +346,7 @@ impl Game {
         let (sky, blk) = self.terrain.world.light_estimate(pos);
         match kind {
             fx::WOLF_TAKES | fx::WOLF_REFUSES => {
-                self.level.particles.crumbs(pos, crate::world::textures::tex::BONE, 6, sky, blk);
+                self.level.particles.crumbs(pos, crate::textures::tex::BONE, 6, sky, blk);
                 if kind == fx::WOLF_TAKES {
                     self.audio.play(crate::audio::Sound::WolfBark, Some(pos), 0.8);
                 } else {

@@ -10,16 +10,16 @@
 //! here are made from the blocks' table, with the block's id as theirs.
 //!
 //! Ids are not written anywhere: they follow from the order of the lines (and of the files,
-//! see `PARTS`), from `FIRST_ITEM` on. Save files keep the items' keys (`save`), so the order
+//! see `PARTS`), from `FIRST_ITEM` on. Save files keep the items' keys (`world::save`), so the order
 //! can change. Adding an item is adding a line to its file (and its icon: `tex`, a painter in
-//! `textures::procedural` and a resource pack name in `textures::pack`); a recipe for it goes
+//! `textures::procedural` and a resource pack name in `textures::from_pack`); a recipe for it goes
 //! in `item::crafting`.
 
 pub use crate::content::Creative;
 use crate::content::blocks::{BlockDef, BlockItem, BLOCKS, BLOCK_IDS};
 use crate::entity::survival::{Consumable, Sickness};
 use crate::sim::grenade::GrenadeKind;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use crate::world::Block;
 use std::collections::HashMap;
 use std::sync::OnceLock;

@@ -996,7 +996,7 @@ impl Game {
             let v: [Vertex; 4] = std::array::from_fn(|i| Vertex {
                 pos: corners[i].to_array(),
                 uv: uv[i],
-                layer: crate::world::textures::tex::BULLET_HOLE as f32,
+                layer: crate::textures::tex::BULLET_HOLE as f32,
                 light: [255, 255, 0, 0],
                 tint: [255, 255, 255, flags::OVERLAY],
             });

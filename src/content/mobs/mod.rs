@@ -317,7 +317,7 @@ impl MobState {
         }
     }
 
-    /// Reads back `save`'s text (what does not make sense is left as it is).
+    /// Reads back `world::save`'s text (what does not make sense is left as it is).
     pub fn load(&mut self, s: &str) {
         match self {
             MobState::Sheep(w) => w.load(s),

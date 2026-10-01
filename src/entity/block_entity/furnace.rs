@@ -5,7 +5,7 @@ use crate::item::{
     fuel_time, icon, meat, meat_with_sides, smelt, smelt_tier, Icon, ItemId, Slot, Stack, BUCKET,
     LAVA_BUCKET, MEAT_SIDES,
 };
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::Vec3;
 
 /// Seconds an item takes to smelt in a furnace (the better ones are faster, see

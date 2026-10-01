@@ -6,14 +6,14 @@ use crate::ui::*;
 
 /// A pack on the resource pack screen.
 pub struct PackEntry {
-    /// Name in `resourcepacks/` (or `pack::BUILTIN`).
+    /// Name in `resourcepacks/` (or `resource_pack::BUILTIN`).
     pub name: String,
     pub title: String,
     pub description: String,
 }
 
 impl PackEntry {
-    fn new(pack: &crate::pack::Pack) -> PackEntry {
+    fn new(pack: &crate::textures::resource_pack::Pack) -> PackEntry {
         PackEntry {
             name: pack.name.clone(),
             title: pack.title().to_string(),
@@ -39,12 +39,12 @@ pub struct PackScreen {
 impl PackScreen {
     pub fn open(&mut self, enabled: &[String]) {
         *self = PackScreen {
-            builtin: Some(PackEntry::new(&crate::pack::Pack::builtin())),
+            builtin: Some(PackEntry::new(&crate::textures::resource_pack::Pack::builtin())),
             ..Default::default()
         };
-        let packs = crate::pack::list();
+        let packs = crate::textures::resource_pack::list();
         for name in enabled.iter().filter(|n| packs.contains(n)) {
-            if let Some(pack) = crate::pack::Pack::open(name) {
+            if let Some(pack) = crate::textures::resource_pack::Pack::open(name) {
                 self.selected.push(PackEntry::new(&pack));
             }
         }
@@ -53,13 +53,13 @@ impl PackScreen {
 
     /// Adds new packs of the folder to the available ones and drops the removed ones.
     fn rescan_folder(&mut self) {
-        let packs = crate::pack::list();
+        let packs = crate::textures::resource_pack::list();
         self.available.retain(|e| packs.contains(&e.name));
         self.selected.retain(|e| packs.contains(&e.name));
         for name in packs {
             let known = self.available.iter().chain(&self.selected).any(|e| e.name == name);
             if !known {
-                if let Some(pack) = crate::pack::Pack::open(&name) {
+                if let Some(pack) = crate::textures::resource_pack::Pack::open(&name) {
                     self.available.push(PackEntry::new(&pack));
                 }
             }

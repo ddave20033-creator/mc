@@ -4,7 +4,7 @@
 use super::*;
 use crate::entity::mob::{animal_root, emit_paged, head_turn, part, quadruped_legs};
 use crate::item::{BONE, COOKED_PORKCHOP, PIG_SPAWN_EGG, PORKCHOP};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::Mat4;
 use std::f32::consts::FRAC_PI_2;
 
@@ -31,7 +31,7 @@ pub const DEF: MobDef = MobDef {
 /// The pig's skin (Minecraft's 64x64 unit `pig_temperate` atlas at 8 texels per unit, 512x512)
 /// on `PAGES` texture layers.
 pub mod skin {
-    use crate::entity::skin_pages::{BoxUv, SkinPages};
+    use crate::textures::skin_pages::{BoxUv, SkinPages};
 
     pub const PAGES: u32 = 6;
     /// `PigModel`'s boxes: head, snout, body, leg.

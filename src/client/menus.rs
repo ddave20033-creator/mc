@@ -3,7 +3,7 @@
 
 use crate::client::{Game, Screen};
 use crate::app::lang::t;
-use crate::save::WorldMeta;
+use crate::world::save::WorldMeta;
 use crate::ui::screens;
 use crate::ui::screens::Action;
 use glam::Vec3;
@@ -190,8 +190,8 @@ impl Game {
                 }
             }
             Action::OpenPackFolder => {
-                let _ = std::fs::create_dir_all(crate::pack::DIR);
-                if let Ok(dir) = std::fs::canonicalize(crate::pack::DIR) {
+                let _ = std::fs::create_dir_all(crate::textures::resource_pack::DIR);
+                if let Ok(dir) = std::fs::canonicalize(crate::textures::resource_pack::DIR) {
                     // Without the \\?\ prefix, which Explorer does not take.
                     let dir = dir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
                     open_url(&dir);

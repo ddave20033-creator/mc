@@ -8,7 +8,7 @@
 
 use crate::model::prim::{self, BoxUv, Paint, Sides};
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Quat, Vec2, Vec3};
 use std::f32::consts::FRAC_PI_4;
 

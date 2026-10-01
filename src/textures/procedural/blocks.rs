@@ -431,7 +431,7 @@ pub(super) fn crack_pixel(layer: u32, x: i32, y: i32, crack: &[u16]) -> [u8; 4] 
 }
 
 /// Rank (0..100) of each pixel in a random crack pattern; lower ranks appear first.
-pub(in crate::world::textures) fn crack_pattern() -> Vec<u16> {
+pub(in crate::textures) fn crack_pattern() -> Vec<u16> {
     let mut rank = vec![u16::MAX; TILE * TILE];
     let branches = 8;
     for b in 0..branches {

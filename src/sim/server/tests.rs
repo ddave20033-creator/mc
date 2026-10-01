@@ -101,7 +101,7 @@ fn a_block_placed_stays_after_the_world_is_left_and_played_again() {
     let chunk = World::chunk_pos(at.x, at.z);
     let placed = hello.iter().any(|m| match m {
         Msg::Chunk { pos, rle } if *pos == chunk => {
-            let c = ChunkData::from_vec(&crate::save::unrle(rle)).unwrap();
+            let c = ChunkData::from_vec(&crate::world::save::unrle(rle)).unwrap();
             c.get(at.x as usize, at.y as usize, at.z as usize) == GLOWSTONE
         }
         _ => false,

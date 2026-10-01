@@ -230,8 +230,8 @@ fn all_blocks(px: i32, pz: i32) -> ([Arc<ChunkData>; 9], [(glam::IVec3, Notch); 
 /// terrain.
 #[test]
 fn plain_faces_have_no_see_through_texels() {
-    let levels = crate::world::textures::generate(&crate::pack::Packs::none());
-    let layers = levels[0].len() / (crate::world::textures::TILE * crate::world::textures::TILE * 4);
+    let levels = crate::textures::generate(&crate::textures::resource_pack::Packs::none());
+    let layers = levels[0].len() / (crate::textures::TILE * crate::textures::TILE * 4);
     let opaque_layer = |l: usize| {
         levels.iter().all(|lv| {
             let n = lv.len() / layers;

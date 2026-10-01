@@ -3,12 +3,12 @@
 
 use super::*;
 
-/// The logo (`ui/logo.png`, a row of `tex::LOGO_TILES` squares) as that many texture layers.
+/// The logo (`textures/logo.png`, a row of `tex::LOGO_TILES` squares) as that many texture layers.
 pub fn logo_layers() -> Vec<u8> {
     let layer_bytes = TILE * TILE * 4;
     let tiles = tex::LOGO_TILES as usize;
     let mut out = vec![0u8; layer_bytes * tiles];
-    let Some(img) = crate::pack::decode_png(include_bytes!("../../ui/logo.png")) else {
+    let Some(img) = crate::textures::resource_pack::decode_png(include_bytes!("logo.png")) else {
         return out;
     };
     if img.w as usize != TILE * tiles || img.h as usize != TILE {

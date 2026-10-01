@@ -5,7 +5,7 @@
 use crate::item::{Icon, Stack, block_of, icon, max_damage};
 use crate::ui::{Color, Font};
 use crate::world::{TintKind, face_texture, icon_tint, tint_kind};
-use crate::world::textures::{TILE, tex};
+use crate::textures::{TILE, tex};
 use glam::Vec2;
 
 pub struct Canvas<'a> {

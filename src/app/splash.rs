@@ -1,4 +1,4 @@
-//! The start-up splash: just the logo (`ui/logo.png`) floating in the middle of the screen in
+//! The start-up splash: just the logo (`textures/logo.png`) floating in the middle of the screen in
 //! a window of its own with no frame and no background, while the game gets ready behind it.
 //! The logo is the progress bar: its letters fill with their colour from the left as the game
 //! loads, the rest still grey.
@@ -251,7 +251,7 @@ mod imp {
 
     impl Window {
         pub fn new() -> Option<Window> {
-            let img = crate::pack::decode_png(include_bytes!("../ui/logo.png"))?;
+            let img = crate::textures::resource_pack::decode_png(include_bytes!("../textures/logo.png"))?;
             let (sw, sh) = unsafe { (GetSystemMetrics(0), GetSystemMetrics(1)) };
             if sw <= 0 || sh <= 0 {
                 return None;

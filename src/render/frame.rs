@@ -105,7 +105,7 @@ pub struct ScopeView {
 mod shader_tests {
     use super::*;
     use crate::world::mesh::flags;
-    use crate::world::textures::tex;
+    use crate::textures::tex;
 
     /// The value of `const <type> <name> = <value>;` in a shader.
     fn value(src: &str, name: &str) -> f32 {

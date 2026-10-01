@@ -18,7 +18,7 @@ pub use data::PAGES;
 
 use crate::model::viewmodel::{cube_matrix, emit_cube, find_bone, rot_zyx, Bone};
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Quat, Vec3};
 
 /// The texture pages (`PAGES` of 128x128, one under the other), loaded into the texture

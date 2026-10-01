@@ -6,7 +6,7 @@
 use super::*;
 use crate::entity::mob::{animal_root, emit_paged, head_turn, part, per_tick, quadruped_legs};
 use crate::item::{BONE, COOKED_MUTTON, MUTTON, SHEARS, SHEEP_SPAWN_EGG};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use crate::world::{TALL_GRASS, WOOL};
 use glam::{IVec3, Mat4};
 use std::f32::consts::FRAC_PI_2;
@@ -114,7 +114,7 @@ fn wool_loot(m: &Mob) -> Vec<Stack> {
 /// The sheep's skin and its wool coat (Minecraft's 64x32 unit atlases at 8 texels per unit,
 /// 512x256) on `PAGES` and `WOOL_PAGES` texture layers.
 pub mod skin {
-    use crate::entity::skin_pages::{BoxUv, SkinPages};
+    use crate::textures::skin_pages::{BoxUv, SkinPages};
 
     pub const PAGES: u32 = 5;
     pub const WOOL_PAGES: u32 = 4;

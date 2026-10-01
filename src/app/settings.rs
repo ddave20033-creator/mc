@@ -29,7 +29,7 @@ pub struct Settings {
     /// Dark theme for the item screens.
     pub dark_ui: bool,
     /// Enabled packs from `resourcepacks/`, highest priority first. The built-in pack is
-    /// always under them (see `pack::Packs`).
+    /// always under them (see `resource_pack::Packs`).
     pub resource_packs: Vec<String>,
     /// Player name shown to others in LAN games.
     pub name: String,
@@ -119,7 +119,7 @@ impl Settings {
             }
         }
         // Packs removed from the folder since.
-        let available = crate::pack::list();
+        let available = crate::textures::resource_pack::list();
         s.resource_packs.retain(|n| available.contains(n));
         s.fov = s.fov.clamp(30.0, 110.0);
         s.sensitivity = s.sensitivity.clamp(10.0, 200.0);
@@ -133,7 +133,7 @@ impl Settings {
         }
         // Always on: 2x at least.
         s.msaa = [2, 4, 8].into_iter().rfind(|&n| n <= s.msaa).unwrap_or(2);
-        s.skin = s.skin.min(crate::world::textures::tex::SKIN_COUNT - 1);
+        s.skin = s.skin.min(crate::textures::tex::SKIN_COUNT - 1);
         crate::app::lang::set_hungarian(s.hungarian);
         s
     }

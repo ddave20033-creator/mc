@@ -10,7 +10,7 @@ mod script;
 use crate::client::{Container, Game, Screen};
 use crate::item::{GunKind, Stack};
 use crate::app::lang::t;
-use crate::save::WorldMeta;
+use crate::world::save::WorldMeta;
 use crate::app::settings::Settings;
 use crate::world::*;
 use crate::world::gen::SEA;
@@ -514,7 +514,7 @@ impl Game {
         self.screen = match name {
             "main" => Screen::MainMenu,
             "worlds" | "delete" => {
-                self.menus.worlds = crate::save::list_worlds();
+                self.menus.worlds = crate::world::save::list_worlds();
                 self.menus.selected_world = (!self.menus.worlds.is_empty()).then_some(0);
                 if name == "delete" && self.menus.selected_world.is_some() {
                     Screen::DeleteWorld
@@ -616,7 +616,7 @@ impl Game {
                 lines.insert(0, format!("{items} item models, {bad} overlapping triangle pairs"));
             }
             "textures" => {
-                let layer_bytes = crate::world::textures::TILE * crate::world::textures::TILE * 4;
+                let layer_bytes = crate::textures::TILE * crate::textures::TILE * 4;
                 let base = &self.gfx.texture_base;
                 let empty = |l: u32| {
                     base.get(l as usize * layer_bytes..(l as usize + 1) * layer_bytes)
@@ -689,7 +689,7 @@ fn test_world(seed: Option<u32>) -> WorldMeta {
     let folder = std::env::temp_dir().join(format!("yourworlds-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     let _ = std::fs::create_dir_all(&folder);
-    let latest = if seed.is_none() { crate::save::list_worlds().into_iter().next() } else { None };
+    let latest = if seed.is_none() { crate::world::save::list_worlds().into_iter().next() } else { None };
     if let Some(w) = &latest {
         let src = std::path::Path::new("saves").join(&w.folder);
         for e in std::fs::read_dir(src).into_iter().flatten().flatten() {

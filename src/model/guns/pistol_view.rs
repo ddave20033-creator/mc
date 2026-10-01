@@ -11,7 +11,7 @@ use crate::model::viewmodel::{add_anim, cube_matrix, emit_cube, find_anim, find_
 use crate::model::{ak_vm, pistol_vm};
 use crate::item::{gun_mod, GunKind};
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Vec3};
 
 /// Moments of the reload animation (seconds): the old magazine drops out, the new one is in,

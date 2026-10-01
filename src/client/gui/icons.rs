@@ -1,6 +1,6 @@
 //! Item icons for things as they are: a magazine or speedloader shows the rounds in it, a gun
 //! its attachments, its magazine (or none), its slide held back and its dirt, a part its dirt
-//! and what is fitted on it. The fixed icons (`world::textures::render_item_icons`) show each
+//! and what is fitted on it. The fixed icons (`textures::render_item_icons`) show each
 //! item one way; one in another state gets its own icon, drawn from its 3D model the same way
 //! into one of `tex::STATE_ICON_COUNT` texture layers kept for this, the ones not seen for
 //! longest drawn over first. An icon asked for is drawn on a thread of its own (a few
@@ -8,7 +8,7 @@
 
 use crate::client::Game;
 use crate::item::*;
-use crate::world::textures::{TILE, tex};
+use crate::textures::{TILE, tex};
 use std::cell::RefCell;
 
 /// What an icon shows of a stack: its item and the state that changes how it looks.
@@ -39,7 +39,7 @@ fn start_worker() -> Option<(std::sync::mpsc::Sender<Job>, std::sync::mpsc::Rece
         .name("item-icons".into())
         .spawn(move || {
             for (k, st, base) in job_rx {
-                let img = crate::world::textures::render_icon(&base, &Stack { count: 1, ..st });
+                let img = crate::textures::render_icon(&base, &Stack { count: 1, ..st });
                 let px: Vec<[u8; 4]> = img.chunks_exact(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
                 if done_tx.send((k, crate::client::book::sheet_levels(&px, TILE, 1, 1))).is_err() {
                     break;
@@ -197,12 +197,12 @@ mod timing {
     #[test]
     #[ignore]
     fn how_long_things_take() {
-        let base = crate::world::textures::generate_base(&crate::pack::Packs(Vec::new()));
+        let base = crate::textures::generate_base(&crate::textures::resource_pack::Packs(Vec::new()));
         let mut st = Stack::one(PISTOL);
         set_gun_mods(&mut st, gun_mod::SCOPE | gun_mod::SILENCER);
         let t = std::time::Instant::now();
         for _ in 0..5 {
-            let _ = crate::world::textures::render_icon(&base, &st);
+            let _ = crate::textures::render_icon(&base, &st);
         }
         println!("icon: {:?} each", t.elapsed() / 5);
         let t = std::time::Instant::now();

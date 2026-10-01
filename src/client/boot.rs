@@ -3,7 +3,7 @@
 //! then the window is shown with the title screen.
 
 use crate::client::Game;
-use crate::world::textures;
+use crate::textures;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
@@ -27,10 +27,10 @@ const LONGEST: f32 = 8.0;
 
 impl Boot {
     /// Starts making the textures (from the enabled resource packs, with the uploaded skins).
-    pub(super) fn start(packs: Vec<String>, skins: std::collections::HashMap<u8, crate::pack::Image>) -> Self {
+    pub(super) fn start(packs: Vec<String>, skins: std::collections::HashMap<u8, crate::textures::resource_pack::Image>) -> Self {
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let packs = crate::pack::Packs::load(&packs);
+            let packs = crate::textures::resource_pack::Packs::load(&packs);
             let base = textures::generate_base(&packs);
             let levels = textures::with_skins(&base, &skins);
             let _ = tx.send(BootTextures {

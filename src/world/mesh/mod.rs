@@ -18,7 +18,7 @@ pub use notches::Notch;
 pub use shapes::{chest_open_layer, torch_transform, CHEST_FLOOR, FURNACE_HOLLOWS};
 
 use super::gen::Generator;
-use super::textures::tex;
+use crate::textures::tex;
 use super::*;
 use face::glass_mask;
 use region::Region;
@@ -132,7 +132,7 @@ impl Builder {
 }
 
 /// Texture layers of whole-block faces with see-through texels (alpha tested). Every other
-/// layer of a whole-block face is opaque throughout (a resource pack's too: `textures::pack`
+/// layer of a whole-block face is opaque throughout (a resource pack's too: `textures::from_pack`
 /// fills in the alpha of layers that are not cut out), so it needs no alpha test; the test
 /// `plain_faces_have_no_see_through_texels` checks the procedural ones.
 fn has_cutout(layer: u32) -> bool {

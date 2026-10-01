@@ -3,7 +3,7 @@
 //! in the temp folder (not among the saves) and the mouse is never grabbed.
 
 use crate::client::{Game, Screen};
-use crate::save::WorldMeta;
+use crate::world::save::WorldMeta;
 use crate::world::gen::SEA;
 use glam::Vec3;
 use std::f32::consts::TAU;
@@ -46,7 +46,7 @@ impl Game {
                 let folder = std::env::temp_dir().join("rustcraft-bench");
                 let _ = std::fs::remove_dir_all(&folder);
                 let _ = std::fs::create_dir_all(&folder);
-                let latest = crate::save::list_worlds().into_iter().next();
+                let latest = crate::world::save::list_worlds().into_iter().next();
                 if let Some(w) = &latest {
                     let src = std::path::Path::new("saves").join(&w.folder);
                     for e in std::fs::read_dir(src).into_iter().flatten().flatten() {
@@ -394,7 +394,7 @@ impl Game {
             let read = |k: &str| {
                 std::fs::read(s.dir.join(format!("{name}_{k}.png")))
                     .ok()
-                    .and_then(|d| crate::pack::decode_png(&d))
+                    .and_then(|d| crate::textures::resource_pack::decode_png(&d))
             };
             let (Some(a), Some(b)) = (read("a"), read("b")) else {
                 continue;

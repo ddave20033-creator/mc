@@ -5,7 +5,7 @@
 use super::draw::{Draw, phase};
 use crate::item::*;
 use crate::ui::{rgba, with_alpha};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use crate::world::*;
 use glam::Vec2;
 use std::f32::consts::PI;

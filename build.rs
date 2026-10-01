@@ -1,6 +1,6 @@
 //! Compiles the GLSL shaders to SPIR-V (with glslc from the Vulkan SDK) into OUT_DIR, where
 //! `render` includes them, and lists the built-in resource pack's files (`builtin/rustcraft`)
-//! for `pack` to embed (made by `tools/texgen/build.py`).
+//! for `textures::resource_pack` to embed (made by `tools/texgen/build.py`).
 
 use std::env;
 use std::path::{Path, PathBuf};

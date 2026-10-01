@@ -133,7 +133,7 @@ impl Renderer {
             let vm_flame = if f
                 .viewmodel
                 .last()
-                .is_some_and(|v| v.layer == crate::world::textures::tex::TORCH_FLAME as f32)
+                .is_some_and(|v| v.layer == crate::textures::tex::TORCH_FLAME as f32)
             {
                 vn.min(24)
             } else {

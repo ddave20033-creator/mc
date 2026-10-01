@@ -78,7 +78,7 @@ if Faithful had made a 128x version).
 - **Lantern** block texture uses Minecraft's lantern layout in 16 units (8 px each): body
   sides (0,2)-(6,9), cap sides (1,0)-(5,2), body top/bottom (0,9)-(6,15), cap top
   (1,10)-(5,14), hanging ring (11,1)-(14,5), standing handle (11,10)-(14,12); see
-  `src/model/lantern.rs`. `iron_chain`: Minecraft's chain texture layout (links in two
+  `src/model/items/lantern.rs`. `iron_chain`: Minecraft's chain texture layout (links in two
   narrow vertical strips, see lantern.rs for the UVs used).
 - **Potion**: `potion` is the empty-looking bottle, `potion_overlay` only the liquid area in
   light grey (the game tints it).
@@ -88,7 +88,7 @@ if Faithful had made a 128x version).
   chest `normal`, `normal_left`, `normal_right` (1.15+ layout, 512x512 = 8 px per unit),
   `player/wide/steve` (64x64 skin layout at 8x = 512x512; an original Steve-like character),
   `pig/pig_temperate` (64x64 layout at 8x = 512x512), `sheep/sheep` and `sheep/sheep_wool`
-  (64x32 layout at 8x = 512x256), `wolf/wolf*` (64x32 layout at 8x = 512x256). See `src/entity/mob.rs` and `src/world/textures/pack.rs`
+  (64x32 layout at 8x = 512x256), `wolf/wolf*` (64x32 layout at 8x = 512x256). See `src/entity/mob.rs` and `src/textures/from_pack.rs`
   for the exact UVs the game reads.
 - **Particles**: `flame` (small flame sprite), `generic_0..7` smoke puffs from small to large,
   light grey, transparent background.

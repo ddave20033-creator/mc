@@ -63,7 +63,7 @@ pub fn block_name(b: Block) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::textures::tex;
+    use crate::textures::tex;
 
     #[test]
     fn every_item_has_a_unique_key_and_a_name() {

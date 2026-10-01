@@ -7,18 +7,18 @@
 //!
 //! Ids are not written anywhere: they follow from the order of the lines (and of the files,
 //! see `PARTS`). A block with a state (a facing, a door's halves...) takes `states` ids after
-//! its constant, the state being `b - BASE`. Save files keep the blocks' keys (`save`), so the
+//! its constant, the state being `b - BASE`. Save files keep the blocks' keys (`world::save`), so the
 //! order can change.
 //!
 //! Adding a plain block is adding a line to its file (and its texture: `tex`, the painter in
-//! `textures::procedural` and a resource pack name in `textures::pack`).
+//! `textures::procedural` and a resource pack name in `textures::from_pack`).
 
 use crate::item::{
     smelts, ItemId, Smelt, Stack, ToolKind, CHARCOAL, CLAY_BALL, COAL, COPPER_INGOT, DIAMOND, GOLD_INGOT, IRON_INGOT,
     LAVA_BUCKET, SHEARS, STICK, WATER_BUCKET,
 };
 use crate::world::block::*;
-use crate::world::textures::tex;
+use crate::textures::tex;
 
 /// A block id: a block and its state.
 pub type Block = u16;

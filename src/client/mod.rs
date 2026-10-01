@@ -38,7 +38,7 @@ use crate::app::settings::Settings;
 use crate::ui::{Color, Ui};
 use crate::ui::chat::Chat;
 use crate::util::Rng;
-use crate::world::*;
+use crate::textures;
 use crate::world::gen::SEA;
 use crate::world::terrain::Terrain;
 use glam::{IVec3, Vec3};

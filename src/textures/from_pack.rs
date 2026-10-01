@@ -470,7 +470,7 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) -> Vec<bool> {
     }
 
     // The wolf's, the pig's and the sheep's skins: each box's faces cut out of the atlas (64
-    // units wide, at whatever resolution) onto their pages (`entity::skin_pages`).
+    // units wide, at whatever resolution) onto their pages (`textures::skin_pages`).
     {
         use crate::entity::mob::{pig_skin, sheep_skin, wolf_skin};
         for (base, skin, path) in [
@@ -513,10 +513,10 @@ pub(super) fn apply_pack(pack: &Packs, base: &mut [u8]) -> Vec<bool> {
     given
 }
 
-/// A skin's pages (`entity::skin_pages`) cut out of its atlas (64 units wide, at any
+/// A skin's pages (`textures::skin_pages`) cut out of its atlas (64 units wide, at any
 /// resolution): each piece of a face scaled to the pages' texels per unit, its border (if the
 /// skin has one) repeating its edge.
-pub(super) fn skin_pages(skin: &crate::entity::skin_pages::SkinPages, atlas: &Image) -> Vec<Image> {
+pub(super) fn skin_pages(skin: &crate::textures::skin_pages::SkinPages, atlas: &Image) -> Vec<Image> {
     let k = atlas.w as f32 / 64.0;
     let mut pages: Vec<Image> = (0..skin.pages).map(|_| Image::blank(TILE as u32, TILE as u32)).collect();
     for p in skin.all() {

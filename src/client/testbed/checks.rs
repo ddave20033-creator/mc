@@ -137,7 +137,7 @@ fn overlap_2d(a: &[Vec2; 3], b: &[Vec2; 3]) -> bool {
 /// surfaces just shifting would), written as a picture (changed pixels red over the first
 /// picture darkened). Returns the share of pixels that changed.
 pub fn flicker_diff(a: &std::path::Path, b: &std::path::Path, out: &std::path::Path) -> Option<f32> {
-    let (ia, ib) = (crate::pack::decode_png(&std::fs::read(a).ok()?)?, crate::pack::decode_png(&std::fs::read(b).ok()?)?);
+    let (ia, ib) = (crate::textures::resource_pack::decode_png(&std::fs::read(a).ok()?)?, crate::textures::resource_pack::decode_png(&std::fs::read(b).ok()?)?);
     if ia.w != ib.w || ia.h != ib.h {
         return None;
     }

@@ -1155,10 +1155,10 @@ impl Ui {
         self.rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, rgba(17, 17, 22, 236), r - 1.0);
     }
 
-    /// The game's logo (`ui/logo.png`: `tex::LOGO_TILES` square texture layers from
+    /// The game's logo (`textures/logo.png`: `tex::LOGO_TILES` square texture layers from
     /// `first_layer`), `width` wide, its top middle at (`cx`, `y`), its edges smooth.
     pub fn logo(&mut self, first_layer: u32, cx: f32, y: f32, width: f32) {
-        let tiles = crate::world::textures::tex::LOGO_TILES;
+        let tiles = crate::textures::tex::LOGO_TILES;
         let t = (width / tiles as f32).round();
         let x0 = (cx - t * tiles as f32 * 0.5).round();
         for i in 0..tiles {

@@ -66,7 +66,7 @@ pub fn decode_skin_png(data: &[u8]) -> Result<Image, &'static str> {
     if !(64..=1024).contains(&w) || w % 64 != 0 || (h != w && h * 2 != w) {
         return Err("64x64 vagy 64x32 arányú Minecraft skin PNG kell.");
     }
-    crate::pack::decode_png(data).ok_or("Nem sikerült beolvasni a skin PNG-t.")
+    crate::textures::resource_pack::decode_png(data).ok_or("Nem sikerült beolvasni a skin PNG-t.")
 }
 
 /// The extra outfits, made from the final texture set, including resource packs. Keep

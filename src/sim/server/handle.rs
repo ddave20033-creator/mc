@@ -250,7 +250,7 @@ impl Server {
                 }
             }
             Msg::Skin { png, .. } => {
-                if id < crate::world::textures::tex::CUSTOM_SKIN_SLOTS && crate::world::textures::decode_skin_png(&png).is_ok() {
+                if id < crate::textures::tex::CUSTOM_SKIN_SLOTS && crate::textures::decode_skin_png(&png).is_ok() {
                     self.skins.insert(id, png.clone());
                     self.broadcast(&Msg::Skin { id, png }, Some(id));
                 }

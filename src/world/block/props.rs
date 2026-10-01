@@ -2,7 +2,7 @@
 //! what glows, and the texture and tint of each face.
 
 use super::*;
-use crate::world::textures::tex;
+use crate::textures::tex;
 
 #[inline]
 fn model(b: Block) -> Model {

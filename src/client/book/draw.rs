@@ -7,7 +7,7 @@ use super::layout::{INDENT, Layout, MARGIN_TOP, MARGIN_X, Metrics, PAGE_PX, Piec
 use super::pages::smelt_time;
 use crate::item::*;
 use crate::ui::{Color, Font, rgba, with_alpha};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::Vec2;
 
 /// The page's colors.
@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn every_page_draws() {
         let font = Font::new();
-        let texture = vec![200u8; crate::world::textures::TILE * crate::world::textures::TILE * 4 * tex::LAYERS];
+        let texture = vec![200u8; crate::textures::TILE * crate::textures::TILE * 4 * tex::LAYERS];
         let lay = layout(&font, true, &("E".into(), "R".into()));
         for theme in [&LIGHT, &DARK] {
             for n in 0..lay.pages.len() {

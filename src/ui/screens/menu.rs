@@ -28,7 +28,7 @@ pub fn main_menu(ui: &mut Ui, skin: u8, preview: &mut PreviewRotation) -> Action
 
     let (bx, bw, bh) = ((20.0 * s).round(), (sw - 40.0 * s).round(), (22.0 * s).round());
     let logo_y = (h * 0.16).round().max(16.0 * s);
-    ui.logo(crate::world::textures::tex::LOGO, sw * 0.5, logo_y, bw);
+    ui.logo(crate::textures::tex::LOGO, sw * 0.5, logo_y, bw);
 
     // The menu.
     let gap = (27.0 * s).round();
@@ -423,7 +423,7 @@ mod menu_player_tests {
             ui.age = 10.0;
             main_menu(ui, 1, preview);
             // (the character's textured faces, not the logo's)
-            let logo = crate::world::textures::tex::LOGO as f32;
+            let logo = crate::textures::tex::LOGO as f32;
             ui.verts.iter().filter(|v| v.mode == 3.0 && v.rect[0] < logo).map(|v| v.pos).collect::<Vec<_>>()
         };
         let first = frame(&mut ui, &mut preview);

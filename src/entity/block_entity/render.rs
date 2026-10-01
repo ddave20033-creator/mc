@@ -6,7 +6,7 @@ use crate::item::{icon, Icon, ItemId, Slot, Stack, BUCKET, COAL, LAVA_BUCKET};
 use crate::model::prim::{self, quad_at, BoxUv, Paint, Sides};
 use crate::util::vertex_light;
 use crate::world::mesh::{box_uv, corner_pos, flags, Vertex, CORNERS, FACE_N, FURNACE_HOLLOWS};
-use crate::world::textures::tex;
+use crate::textures::tex;
 use crate::world::*;
 use glam::{IVec3, Mat4, Vec3};
 use std::f32::consts::{FRAC_PI_2, PI};

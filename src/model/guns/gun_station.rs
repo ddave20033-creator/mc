@@ -22,7 +22,7 @@ use small::{BONES, CUBES};
 
 use crate::model::viewmodel::{add_anim, bone_matrices, cube_matrix, emit_cube, find_anim, find_bone, Anim, Bone, BonePose, Cube};
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{IVec3, Mat4, Vec3};
 
 /// The texture pages (`PAGES` of 128x128, one under the other), loaded into the texture

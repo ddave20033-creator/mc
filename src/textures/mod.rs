@@ -1,25 +1,29 @@
-//! Block, item and entity textures: one 128x128 layer each in a texture array. Every layer
-//! is drawn procedurally first (`procedural`), then replaced by the resource packs' texture
-//! where they have one (`pack`); the layers made from others follow (`synth`, `icons`,
-//! `skins`, `logo`), and the mipmaps (`mips`) and the item sprite masks (`masks`) are made
-//! from the result.
+//! Block, item and entity textures: one 128x128 layer each in a texture array (`tex` names
+//! the layers). Every layer is drawn procedurally first (`procedural`), then replaced by the
+//! resource packs' texture where they have one (`from_pack`; the packs themselves, zip files
+//! or folders, are read by `resource_pack`); the layers made from others follow (`synth`,
+//! `icons`, `skins`, `logo`), and the mipmaps (`mips`) and the item sprite masks (`masks`)
+//! are made from the result. `skin_pages` lays the detailed mob skins out over several
+//! layers (used by `from_pack` and by the mob models).
 
+mod from_pack;
 mod icons;
 mod logo;
 mod masks;
 mod mips;
-mod pack;
 mod procedural;
+pub mod resource_pack;
+pub mod skin_pages;
 mod skins;
 mod synth;
 pub mod tex;
 
-use crate::pack::{Image, Packs};
+use from_pack::apply_pack;
 use icons::render_item_icons;
 use masks::update_item_masks;
 use mips::{is_cutout, mip_chain};
-use pack::apply_pack;
 use procedural::{crack_pattern, pixel};
+use resource_pack::{Image, Packs};
 use skins::{skin_slot_layers, synth_outfits};
 use synth::*;
 
@@ -286,7 +290,7 @@ mod tests {
     /// The layer numbers `world.frag` keeps its own copies of are the game's.
     #[test]
     fn shader_layer_numbers_match() {
-        let src = include_str!("../../../shaders/world.frag");
+        let src = include_str!("../../shaders/world.frag");
         let value = |name: &str| -> u32 {
             let line = src
                 .lines()

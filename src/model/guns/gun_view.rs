@@ -9,7 +9,7 @@ use crate::model::revolver_vm;
 use crate::model::viewmodel::{find_bone, Anim, Bone, BonePose, Cube};
 use crate::item::{GunKind, GUN_KINDS};
 use crate::world::mesh::Vertex;
-use crate::world::textures::tex;
+use crate::textures::tex;
 use glam::{Mat4, Vec3};
 
 /// How much bigger a gun is held than it is modelled (the models are to scale with each

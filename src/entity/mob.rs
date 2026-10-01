@@ -11,10 +11,10 @@
 //!
 //! Models use Minecraft's entity model format: cubes with box UVs into a 64 unit wide atlas;
 //! the atlases are drawn at 8 texels per unit, their faces spread over several texture layers
-//! (`super::skin_pages`). Each mob's model is in its file; the pieces they share are here.
+//! (`textures::skin_pages`). Each mob's model is in its file; the pieces they share are here.
 
 use crate::content::mobs::{MobDef, MobState};
-use crate::entity::skin_pages::{face_uv, SkinPages};
+use crate::textures::skin_pages::{face_uv, SkinPages};
 use crate::model::prim::{quad_at, Paint, Sides};
 use crate::util::{ray_box, vertex_light, wrap_angle, Rng};
 use crate::world::mesh::{flags, Vertex};
@@ -23,7 +23,7 @@ use glam::{Mat4, Vec2, Vec3};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 pub use crate::content::mobs::MobKind;
-// (the skins' texture layers are laid out by `world::textures`)
+// (the skins' texture layers are laid out by `textures`)
 pub use crate::content::mobs::pig::skin as pig_skin;
 pub use crate::content::mobs::sheep::skin as sheep_skin;
 pub use crate::content::mobs::wolf::skin as wolf_skin;

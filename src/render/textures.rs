@@ -3,7 +3,7 @@
 
 use super::Renderer;
 use crate::engine::{Buffer, Gpu, SamplerKind, Texture};
-use crate::world::textures::TILE;
+use crate::textures::TILE;
 use ash::vk;
 
 impl Renderer {
