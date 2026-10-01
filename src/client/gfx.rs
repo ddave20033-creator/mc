@@ -2,7 +2,7 @@
 //! start-up, `boot`, and again when the packs change) and the players' skins.
 
 use crate::engine::Gpu;
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::render::Renderer;
 use crate::world::textures;
 use std::collections::HashMap;

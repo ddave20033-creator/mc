@@ -20,7 +20,7 @@ pub(super) use sheets::sheet_levels;
 
 use crate::client::{Game, Screen};
 use crate::item::GUIDE_BOOK;
-use crate::keys::Bind;
+use crate::app::keys::Bind;
 use crate::model::book::{BookHit, BookView, RIFFLE_TIME, TURN_TIME};
 use crate::world::textures::tex;
 use winit::keyboard::KeyCode;
@@ -179,13 +179,13 @@ impl Game {
     }
 
     fn book_hu(&self) -> bool {
-        crate::lang::is_hungarian()
+        crate::app::lang::is_hungarian()
     }
 
     /// Lays the book out in a language, if it is not yet (or the keys it names were bound
     /// to others since: its pages are drawn again).
     fn book_layout(&mut self, hu: bool) {
-        use crate::keys::display;
+        use crate::app::keys::display;
         let keys = (
             display(self.settings.keys.get(Bind::Inventory)),
             display(self.settings.keys.get(Bind::Reload)),

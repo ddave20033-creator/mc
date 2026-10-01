@@ -152,7 +152,7 @@ impl Server {
     /// After a panic: everyone is told, and what can be saved is.
     fn crashed(&mut self) {
         for p in &self.peers {
-            p.conn.send(&Msg::Refuse(crate::lang::t("server.crashed").to_string()));
+            p.conn.send(&Msg::Refuse(crate::app::lang::t("server.crashed").to_string()));
         }
         let saved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.save_all();
@@ -278,7 +278,7 @@ impl Server {
         }
         // Anyone else still in is told the world closed.
         for p in self.peers.iter().filter(|p| !p.owner && p.joined) {
-            p.conn.send(&Msg::Refuse(crate::lang::t("lan.host_left").to_string()));
+            p.conn.send(&Msg::Refuse(crate::app::lang::t("lan.host_left").to_string()));
         }
         self.save_all();
         self.saver.wait();

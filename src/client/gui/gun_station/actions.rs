@@ -11,7 +11,7 @@ use crate::client::Game;
 use crate::entity::{BenchEvent, BenchItem, GunBench, bench_event};
 use crate::item::inventory::take;
 use crate::item::*;
-use crate::lang::t;
+use crate::app::lang::t;
 use glam::{IVec3, Vec3};
 
 /// Seconds between sending the table to the others while scrubbing.

@@ -9,9 +9,9 @@ mod script;
 
 use crate::client::{Container, Game, Screen};
 use crate::item::{GunKind, Stack};
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::save::WorldMeta;
-use crate::settings::Settings;
+use crate::app::settings::Settings;
 use crate::world::*;
 use crate::world::gen::SEA;
 use glam::{IVec3, Mat4, Vec2, Vec3};
@@ -404,7 +404,7 @@ impl Game {
                     "dark" => self.settings.dark_ui = on,
                     "lang" => {
                         self.settings.hungarian = value == "hu";
-                        crate::lang::set_hungarian(self.settings.hungarian);
+                        crate::app::lang::set_hungarian(self.settings.hungarian);
                     }
                     _ => tb.problems.push(format!("set: unknown `{what}`")),
                 }
@@ -732,7 +732,7 @@ fn block_named(name: &str) -> Option<Block> {
 /// A key by a bind's name (`forward`, `jump`, `reload`...), winit's name (`KeyW`, `Space`,
 /// `ArrowUp`) or a letter or digit (`W`, `1`).
 fn key_named(settings: &Settings, name: &str) -> Option<KeyCode> {
-    if let Some((b, _, _)) = crate::keys::BINDS.iter().find(|(_, n, _)| *n == name) {
+    if let Some((b, _, _)) = crate::app::keys::BINDS.iter().find(|(_, n, _)| *n == name) {
         return Some(settings.keys.get(*b));
     }
     use KeyCode as K;
@@ -749,7 +749,7 @@ fn key_named(settings: &Settings, name: &str) -> Option<KeyCode> {
         _ => None,
     };
     special
-        .or_else(|| crate::keys::parse(name))
-        .or_else(|| crate::keys::parse(&format!("Key{}", name.to_uppercase())))
-        .or_else(|| crate::keys::parse(&format!("Digit{name}")))
+        .or_else(|| crate::app::keys::parse(name))
+        .or_else(|| crate::app::keys::parse(&format!("Key{}", name.to_uppercase())))
+        .or_else(|| crate::app::keys::parse(&format!("Digit{name}")))
 }

@@ -1,6 +1,6 @@
 //! Rebindable keys: the actions, their default keys and the key names shown in the options.
 
-use crate::lang::is_hungarian;
+use crate::app::lang::is_hungarian;
 use winit::keyboard::KeyCode;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -1,5 +1,5 @@
 //! Starting up: the textures are made on another thread and the title screen's world loads
-//! while the game's window is still hidden (the splash, `crate::splash`, shows the progress);
+//! while the game's window is still hidden (the splash, `crate::app::splash`, shows the progress);
 //! then the window is shown with the title screen.
 
 use crate::client::Game;

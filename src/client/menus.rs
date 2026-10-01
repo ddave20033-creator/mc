@@ -2,7 +2,7 @@
 //! back, and what the buttons of a screen ask for (`apply`).
 
 use crate::client::{Game, Screen};
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::save::WorldMeta;
 use crate::ui::screens;
 use crate::ui::screens::Action;
@@ -175,7 +175,7 @@ impl Game {
             Action::Respawn => self.respawn(),
             Action::Language => {
                 self.settings.hungarian = !self.settings.hungarian;
-                crate::lang::set_hungarian(self.settings.hungarian);
+                crate::app::lang::set_hungarian(self.settings.hungarian);
             }
             Action::OpenLink(url) => open_url(url),
             Action::ResourcePacks => {

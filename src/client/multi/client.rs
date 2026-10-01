@@ -7,7 +7,7 @@ use crate::client::player::GameMode;
 use crate::entity::{FallingBlock, ItemEntity};
 use crate::entity::mob::Mob;
 use crate::entity::survival::Needs;
-use crate::lang::{t, tf};
+use crate::app::lang::{t, tf};
 use crate::net::{Conn, ItemNet, Msg, PROTOCOL, PlayerState};
 use crate::save::{PlayerSave, WorldMeta, unrle};
 use crate::sim::clock::TICK_SECS;

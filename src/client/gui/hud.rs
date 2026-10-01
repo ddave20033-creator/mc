@@ -5,8 +5,8 @@ use crate::item;
 use crate::client::{Game, MAX_AIR, Screen, gui};
 use crate::entity::survival::EffectKind;
 use crate::item::NONE;
-use crate::keys::Bind;
-use crate::lang::t;
+use crate::app::keys::Bind;
+use crate::app::lang::t;
 use crate::ui::{Color, Ui, WHITE, rgba, with_alpha};
 use glam::{Vec2, Vec3};
 

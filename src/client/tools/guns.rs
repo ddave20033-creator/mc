@@ -8,8 +8,8 @@ use crate::audio::Sound;
 use crate::client::{Game, Screen, gui};
 use crate::entity::player::{look_dir, ray_boxes, raycast_solid};
 use crate::item::*;
-use crate::keys::Bind;
-use crate::lang::{t, tf};
+use crate::app::keys::Bind;
+use crate::app::lang::{t, tf};
 use crate::model::ballistics;
 use crate::model::ballistics::Cases;
 use crate::model::pistol_view::{
@@ -584,7 +584,7 @@ impl Game {
         if revolver && gun_rounds(&gun) == 0 && (self.creative() || self.me.items.inventory.count(kind.ammo()) > 0 || self.me.items.inventory.slots.iter().flatten().any(|s| s.item == SPEEDLOADER && gun_rounds(s) > 0)) {
             // Nothing live in the cylinder, and something to load it with: it only clicks (R
             // reloads), like the others.
-            let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
+            let key = crate::app::keys::display(self.settings.keys.get(Bind::Reload));
             self.dry_fire(Some(&tf("gun.empty_reload", &[&key])));
             return;
         }
@@ -593,7 +593,7 @@ impl Game {
             // aimed alike).
             let can_reload = (gun_has_mag(&gun) && gun_rounds(&gun) > 0) || self.has_loaded_magazine(kind);
             if can_reload {
-                let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
+                let key = crate::app::keys::display(self.settings.keys.get(Bind::Reload));
                 self.dry_fire(Some(&tf("gun.empty_reload", &[&key])));
             } else {
                 self.dry_fire(Some(t("gun.no_ammo")));
@@ -1072,7 +1072,7 @@ impl Game {
         self.ui.text(&big, x, y - 3.0 * s, fs, color, true);
         self.ui
             .text(&small, x + bw, y + 4.0 * s, s, rgba(200, 200, 205, 255), true);
-        let key = crate::keys::display(self.settings.keys.get(Bind::Reload));
+        let key = crate::app::keys::display(self.settings.keys.get(Bind::Reload));
         let note = if let Some(t) = self.tools.guns.reload {
             // A bar filling up under the counter.
             let (bx, by, bw2) = (x - 20.0 * s, y + 14.0 * s, bw + sw + 20.0 * s);

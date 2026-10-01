@@ -8,7 +8,7 @@ use crate::client::shown::Level;
 use crate::client::tools::Tools;
 use crate::entity::player::Player;
 use crate::entity::survival::Needs;
-use crate::lang::{t, tf};
+use crate::app::lang::{t, tf};
 use crate::save::{WorldMeta, list_worlds, seed_from_text};
 use crate::ui::{
     ACCENT, ACCENT_LIGHT, ButtonKind, DANGER, GLASS_BOTTOM, GLASS_TOP, WHITE, chat, rgba, screens,
@@ -197,7 +197,7 @@ impl Game {
         }
         y += 4.0 * s;
         if self.ui.button(
-            &tf("create.cheats", &[&crate::lang::on_off(self.menus.create_cheats)]),
+            &tf("create.cheats", &[&crate::app::lang::on_off(self.menus.create_cheats)]),
             fx,
             y,
             fw,

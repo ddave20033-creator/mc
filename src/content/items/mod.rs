@@ -425,7 +425,7 @@ pub fn from_key(k: &str) -> Option<ItemId> {
 /// Display name in the current language.
 pub fn name(id: ItemId) -> String {
     let d = def(id);
-    (if crate::lang::is_hungarian() { d.hu } else { d.en }).to_string()
+    (if crate::app::lang::is_hungarian() { d.hu } else { d.en }).to_string()
 }
 
 /// Food and drink that is eaten (`food` of a line).

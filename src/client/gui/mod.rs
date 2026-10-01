@@ -27,7 +27,7 @@ pub(super) use slots::Drag;
 use crate::client::{Container, Game};
 use crate::item::*;
 use crate::item::inventory::take;
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::ui::rgba;
 use crate::world::is_rifle_bench;
 use glam::Vec3;

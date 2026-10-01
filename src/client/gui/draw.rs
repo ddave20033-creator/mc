@@ -4,7 +4,7 @@
 use crate::client::Game;
 use crate::client::gui::{SLOT, SlotRef};
 use crate::item::*;
-use crate::lang::tf;
+use crate::app::lang::tf;
 use crate::ui::{Color, Ui, WHITE, rgba, with_alpha};
 use crate::world::{
     OAK_LOG, TintKind, face_texture, icon_tint, is_log, is_stairs, log_radius, tint_kind,
@@ -251,7 +251,7 @@ impl Game {
             let rounds = if gun_has_mag(st) {
                 tf("gun.magazine", &[&gun_ready_rounds(st), &size])
             } else {
-                crate::lang::t("gun.no_mag").split('!').next().unwrap_or("").to_string()
+                crate::app::lang::t("gun.no_mag").split('!').next().unwrap_or("").to_string()
             };
             text = format!("{text}  ({rounds})");
         } else if st.item == AMMO_BOX {
@@ -263,7 +263,7 @@ impl Game {
             text = format!(
                 "{text}  ({}, {})",
                 tf("gun.magazine", &[&gun_rounds(st), &cap]),
-                crate::lang::t("gun.mag_hint")
+                crate::app::lang::t("gun.mag_hint")
             );
         } else if max > 0 && st.damage > 0 && !gets_dirty(st.item) {
             text = format!(

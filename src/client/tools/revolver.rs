@@ -8,7 +8,7 @@
 use crate::audio::Sound;
 use crate::client::Game;
 use crate::item::*;
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::model::revolver_view::{
     LOAD_END, LOAD_SEAT, RELOAD_CLOSE, RELOAD_EJECT, RELOAD_END, RELOAD_OPEN, RELOAD_RELEASE,
 };

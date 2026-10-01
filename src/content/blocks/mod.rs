@@ -375,7 +375,7 @@ pub fn block_name(b: Block) -> String {
         BlockItem::As(other) => def(other),
         _ => def(b),
     };
-    (if crate::lang::is_hungarian() { d.hu } else { d.en }).to_string()
+    (if crate::app::lang::is_hungarian() { d.hu } else { d.en }).to_string()
 }
 
 // Hot properties, asked for every block and its neighbours in the mesher's and the lighting's

@@ -207,9 +207,9 @@ fn crafting_snapshot() -> String {
 fn item_data_and_crafting_are_unchanged() {
     let items = items_snapshot();
     let en = names_snapshot();
-    crate::lang::set_hungarian(true);
+    crate::app::lang::set_hungarian(true);
     let hu = names_snapshot();
-    crate::lang::set_hungarian(false);
+    crate::app::lang::set_hungarian(false);
     let craft = crafting_snapshot();
     if let Ok(dir) = std::env::var("ITEM_SNAPSHOT_DIR") {
         for (f, t) in [("items", &items), ("en", &en), ("hu", &hu), ("craft", &craft)] {

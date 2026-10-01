@@ -1,4 +1,7 @@
-use crate::keys::{KeyMap, BINDS};
+//! The options, kept in `options.txt` next to the game: the view, the controls (with the key
+//! binds, `keys`), the language, the resource packs and the rest of the options screens.
+
+use crate::app::keys::{KeyMap, BINDS};
 
 const PATH: &str = "options.txt";
 
@@ -108,7 +111,7 @@ impl Settings {
                         let bind = k.strip_prefix("key_").and_then(|n| {
                             BINDS.iter().position(|(_, name, _)| *name == n)
                         });
-                        if let (Some(i), Some(code)) = (bind, crate::keys::parse(v)) {
+                        if let (Some(i), Some(code)) = (bind, crate::app::keys::parse(v)) {
                             s.keys.0[i] = code;
                         }
                     }
@@ -131,7 +134,7 @@ impl Settings {
         // Always on: 2x at least.
         s.msaa = [2, 4, 8].into_iter().rfind(|&n| n <= s.msaa).unwrap_or(2);
         s.skin = s.skin.min(crate::world::textures::tex::SKIN_COUNT - 1);
-        crate::lang::set_hungarian(s.hungarian);
+        crate::app::lang::set_hungarian(s.hungarian);
         s
     }
 
@@ -162,7 +165,7 @@ impl Settings {
             self.volume_other
         );
         for (i, (_, name, _)) in BINDS.iter().enumerate() {
-            text += &format!("key_{name}:{}\n", crate::keys::code_name(self.keys.0[i]));
+            text += &format!("key_{name}:{}\n", crate::app::keys::code_name(self.keys.0[i]));
         }
         let _ = std::fs::write(PATH, text);
     }

@@ -3,7 +3,7 @@
 
 use crate::client::{Game, Screen};
 use crate::client::multi::{NAME_RANGE, OWNER_ID};
-use crate::lang::{t, tf};
+use crate::app::lang::{t, tf};
 use crate::net::Finder;
 use crate::ui::{Color, Ui, WHITE, rgba, screens, with_alpha};
 use crate::ui::screens::Action;

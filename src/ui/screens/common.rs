@@ -2,7 +2,7 @@
 //! menu backdrop, a title bar, card titles and the bottom action bar.
 
 use super::Action;
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::ui::*;
 use glam::Vec2;
 

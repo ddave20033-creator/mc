@@ -6,7 +6,7 @@
 use super::Server;
 use crate::entity::Furnace;
 use crate::item::Slot;
-use crate::lang::{t, tf};
+use crate::app::lang::{t, tf};
 use crate::net::{container, pose_flags, Conn, EntitySync, Frame, ItemNet, Msg, PlayerState, Pose, PROTOCOL};
 use crate::save::rle;
 use crate::world::*;

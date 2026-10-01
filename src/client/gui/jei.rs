@@ -7,7 +7,7 @@
 use crate::client::Game;
 use crate::client::gui::{SLOT, SlotRef, Tab, creative_grid, draw_stack, search_fold};
 use crate::item::{ItemId, Stack, key, name, recipes_for, smelted_from};
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::ui::{WHITE, rgba};
 use crate::world::{ADV_FURNACE, BLAST_FURNACE, FURNACE};
 use winit::keyboard::KeyCode;
@@ -31,7 +31,7 @@ fn jei_items(search: &str) -> std::rc::Rc<Vec<ItemId>> {
     thread_local! {
         static MADE: RefCell<Option<((String, bool), Rc<Vec<ItemId>>)>> = const { RefCell::new(None) };
     }
-    let wanted = (search.to_string(), crate::lang::is_hungarian());
+    let wanted = (search.to_string(), crate::app::lang::is_hungarian());
     MADE.with_borrow_mut(|made| {
         if let Some((k, items)) = made.as_ref() {
             if *k == wanted {

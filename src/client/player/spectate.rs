@@ -4,8 +4,8 @@
 use crate::client::{Game, MAX_AIR, Screen};
 use crate::client::player::GameMode;
 use crate::entity::player::MoveInput;
-use crate::keys::Bind;
-use crate::lang::{t, tf};
+use crate::app::keys::Bind;
+use crate::app::lang::{t, tf};
 use crate::sim::clock::TICK_SECS;
 use crate::ui::{WHITE, chat, rgba};
 use glam::Vec3;

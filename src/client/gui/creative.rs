@@ -3,7 +3,7 @@
 use crate::client::Game;
 use crate::client::gui::{SLOT, SlotRef, draw_stack};
 use crate::item::*;
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::ui::{WHITE, rgba};
 use crate::world::{CHEST, CRAFTING_TABLE, Creative, GRASS};
 use glam::Vec2;
@@ -164,7 +164,7 @@ pub(in crate::client) fn creative_grid(tab: Tab, query: &str) -> std::rc::Rc<Vec
     thread_local! {
         static MADE: RefCell<Vec<(Key, Rc<Vec<Option<ItemId>>>)>> = const { RefCell::new(Vec::new()) };
     }
-    let key = (tab, query.to_string(), crate::lang::is_hungarian());
+    let key = (tab, query.to_string(), crate::app::lang::is_hungarian());
     MADE.with_borrow_mut(|made| {
         if let Some((_, grid)) = made.iter().find(|(k, _)| *k == key) {
             return grid.clone();

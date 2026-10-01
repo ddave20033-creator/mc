@@ -62,7 +62,7 @@ impl MobKind {
     /// Its name in the current language.
     pub fn name(self) -> &'static str {
         let d = self.def();
-        if crate::lang::is_hungarian() {
+        if crate::app::lang::is_hungarian() {
             d.hu
         } else {
             d.en

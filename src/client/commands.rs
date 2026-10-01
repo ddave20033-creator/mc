@@ -4,7 +4,7 @@ use crate::client::Game;
 use crate::client::player::GameMode;
 use crate::entity::mob::MobKind;
 use crate::item::{Stack, from_key, key, max_stack};
-use crate::lang::{t, tf};
+use crate::app::lang::{t, tf};
 use crate::ui::chat;
 use glam::Vec3;
 

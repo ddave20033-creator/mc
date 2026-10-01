@@ -1,7 +1,7 @@
 //! The title screen with the turnable player preview, the skin screen and the credits.
 
 use super::{backdrop, Action};
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::ui::*;
 use glam::{Vec2, Vec3};
 

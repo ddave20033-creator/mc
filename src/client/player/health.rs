@@ -5,7 +5,7 @@ use crate::client::{Container, Game, MAX_AIR, MAX_HEALTH, Screen};
 use crate::client::player::sleep;
 use crate::entity::survival::Needs;
 use crate::item::*;
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::ui::chat;
 use crate::world::{AIR, Block, CACTUS, is_lava, is_opaque, is_water};
 use glam::{IVec3, Vec3};

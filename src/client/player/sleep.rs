@@ -2,8 +2,8 @@
 //! it. When every player is asleep for a few seconds the night is skipped, like Minecraft.
 
 use crate::client::{Game, Screen};
-use crate::keys::Bind;
-use crate::lang::{t, tf};
+use crate::app::keys::Bind;
+use crate::app::lang::{t, tf};
 use crate::ui::chat;
 use crate::world::*;
 use glam::{IVec3, Vec3};

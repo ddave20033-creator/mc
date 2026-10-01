@@ -34,7 +34,7 @@ use testbed::TestModes;
 use tools::Tools;
 
 use crate::item::ItemId;
-use crate::settings::Settings;
+use crate::app::settings::Settings;
 use crate::ui::{Color, Ui};
 use crate::ui::chat::Chat;
 use crate::util::Rng;

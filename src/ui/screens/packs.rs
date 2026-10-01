@@ -1,7 +1,7 @@
 //! The resource pack screen: available packs on the left, active ones on the right.
 
 use super::{backdrop, Action};
-use crate::lang::t;
+use crate::app::lang::t;
 use crate::ui::*;
 
 /// A pack on the resource pack screen.

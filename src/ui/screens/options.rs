@@ -1,8 +1,8 @@
 //! The options screen (in tabs) and the key binds screen.
 
 use super::{backdrop, Action};
-use crate::lang::{on_off, t};
-use crate::settings::Settings;
+use crate::app::lang::{on_off, t};
+use crate::app::settings::Settings;
 use crate::ui::*;
 
 /// What the options screen remembers between frames.
@@ -296,7 +296,7 @@ pub fn options(
 /// putting that one back to its default. Click a key, then press the new one (Escape
 /// cancels).
 pub fn key_binds(ui: &mut Ui, st: &mut Settings, in_game: bool, os: &mut OptionsState) -> Action {
-    use crate::keys::{display, BINDS, CATEGORIES};
+    use crate::app::keys::{display, BINDS, CATEGORIES};
     let (w, h, s) = (ui.w, ui.h, ui.s);
     if in_game {
         ui.gradient(0.0, 0.0, w, h, rgba(0, 0, 0, 150), rgba(0, 0, 0, 120));
@@ -329,7 +329,7 @@ pub fn key_binds(ui: &mut Ui, st: &mut Settings, in_game: bool, os: &mut Options
     if ui.pressed {
         os.listening = None;
     }
-    let defaults = crate::keys::KeyMap::default();
+    let defaults = crate::app::keys::KeyMap::default();
     let mut hint: Option<String> = None;
     ui.set_clip(Some([lx, top, lw, bottom - top]));
     let mut y = (top + 4.0 * s - os.scroll).round();
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn every_key_bind_has_its_own_name() {
-        for (_, id, _) in crate::keys::BINDS {
+        for (_, id, _) in crate::app::keys::BINDS {
             assert_eq!(key_label(id), format!("key.{id}"));
         }
     }

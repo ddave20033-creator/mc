@@ -10,24 +10,19 @@
 // No console window next to the game in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app;
 mod audio;
 mod content;
-mod devtools;
 mod engine;
 mod entity;
 mod client;
 mod item;
-mod keys;
-mod lang;
 mod model;
 mod net;
 mod pack;
 mod render;
 mod save;
-mod settings;
 mod sim;
-mod splash;
-mod stats;
 mod ui;
 mod util;
 mod world;
@@ -43,7 +38,7 @@ use winit::window::{Window, WindowId};
 struct App {
     game: Option<client::Game>,
     /// The start-up splash (the logo filling up), while the game gets ready.
-    splash: Option<splash::Splash>,
+    splash: Option<app::splash::Splash>,
     bench: bool,
     /// `--aa-shots <folder>`: anti-aliasing comparison pictures.
     shots: Option<std::path::PathBuf>,
@@ -67,7 +62,7 @@ impl ApplicationHandler for App {
             return;
         }
         // 16:9 window at most 1280x720 and at most ~75% of the monitor height (leaves room for the taskbar).
-        let mut splash = splash::Splash::new();
+        let mut splash = app::splash::Splash::new();
         splash.set_progress(0.02);
         let mut size = LogicalSize::new(1280.0, 720.0);
         if let Some(m) = event_loop.primary_monitor() {
@@ -210,7 +205,7 @@ fn main() {
     }
     report_crashes();
     let args: Vec<String> = std::env::args().collect();
-    if devtools::run(&args) {
+    if app::devtools::run(&args) {
         return;
     }
     let event_loop = EventLoop::new().expect("failed to create event loop");

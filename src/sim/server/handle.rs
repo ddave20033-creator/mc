@@ -308,7 +308,7 @@ impl Server {
     /// A command a player typed that is the world's (the time; their own run in their game),
     /// with cheats on; the answer goes to them.
     fn command(&mut self, id: u8, line: &str) {
-        use crate::lang::{t, tf};
+        use crate::app::lang::{t, tf};
         let args: Vec<&str> = line.trim_start_matches('/').split_whitespace().collect();
         let owner = self.peers.iter().any(|p| p.id == id && p.owner);
         if args.as_slice() == ["save"] && owner {

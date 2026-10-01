@@ -3,7 +3,7 @@
 //! mouse grabbed while playing.
 
 use crate::client::{Container, Game, Screen};
-use crate::keys::{Bind, HOTBAR};
+use crate::app::keys::{Bind, HOTBAR};
 use crate::ui::chat::ChatInput;
 use glam::Vec2;
 use std::collections::HashSet;
@@ -169,7 +169,7 @@ impl Game {
                     {
                         if code == KeyCode::Escape {
                             self.menus.options.listening = None;
-                        } else if crate::keys::bindable(code) {
+                        } else if crate::app::keys::bindable(code) {
                             self.settings.keys.0[i] = code;
                             self.menus.options.listening = None;
                         }

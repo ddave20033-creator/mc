@@ -251,7 +251,7 @@ mod imp {
 
     impl Window {
         pub fn new() -> Option<Window> {
-            let img = crate::pack::decode_png(include_bytes!("ui/logo.png"))?;
+            let img = crate::pack::decode_png(include_bytes!("../ui/logo.png"))?;
             let (sw, sh) = unsafe { (GetSystemMetrics(0), GetSystemMetrics(1)) };
             if sw <= 0 || sh <= 0 {
                 return None;

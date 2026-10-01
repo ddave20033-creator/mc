@@ -7,7 +7,7 @@
 use crate::client::{Container, Game, Screen};
 use crate::entity::player::MoveInput;
 use crate::item::*;
-use crate::keys::Bind;
+use crate::app::keys::Bind;
 use crate::sim::clock::TICK_SECS;
 use crate::world::{AIR, TORCH, is_torch};
 use glam::Vec3;

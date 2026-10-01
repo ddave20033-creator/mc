@@ -20,8 +20,8 @@ use crate::client::{Game, Screen};
 use crate::entity::player::look_dir;
 use crate::item::{FISHING_ROD, RAW_FISH, ROD_GEARS, Stack, rod_gear, set_rod_gear};
 use crate::item::inventory::damage;
-use crate::keys::Bind;
-use crate::lang::t;
+use crate::app::keys::Bind;
+use crate::app::lang::t;
 use crate::model::angler;
 use crate::model::angler::{CAST_TIME, LIFT_TIME, RodAnim, WHIP_FORWARD};
 use crate::ui::{Color, WHITE, rgba, with_alpha};
@@ -406,7 +406,7 @@ fn smooth(x: f32) -> f32 {
 /// "2.4" or "2,4" (Hungarian).
 fn kilos(w: f32) -> String {
     let s = format!("{w:.1}");
-    if crate::lang::is_hungarian() {
+    if crate::app::lang::is_hungarian() {
         s.replace('.', ",")
     } else {
         s
@@ -949,8 +949,8 @@ impl Game {
     /// A fish brought in: it flies out of the water to the player and is theirs.
     fn land_fish(&mut self, fight: &Fight, at: Vec3) {
         let sp = &SPECIES[fight.species];
-        let name = if crate::lang::is_hungarian() { sp.hu } else { sp.en };
-        let msg = crate::lang::tf("fish.caught", &[&kilos(fight.weight), &name]);
+        let name = if crate::app::lang::is_hungarian() { sp.hu } else { sp.en };
+        let msg = crate::app::lang::tf("fish.caught", &[&kilos(fight.weight), &name]);
         self.say(msg.clone(), rgba(120, 220, 255, 255));
         self.toast(msg, rgba(150, 230, 255, 255));
         self.audio.play(Sound::FishLand, Some(at), 1.0);

@@ -4,7 +4,7 @@
 use crate::client::{Game, SHADOW_DISTANCE, Screen};
 use crate::client::gui::hud;
 use crate::entity::player::look_dir;
-use crate::keys::Bind;
+use crate::app::keys::Bind;
 use crate::render::FrameInfo;
 use crate::ui::screens;
 use crate::ui::screens::Action;
@@ -52,7 +52,7 @@ pub(super) struct FrameClock {
     pub(super) between_ms: f32,
     /// Recent frame times in milliseconds (newest last), for the F3 graph.
     pub(super) frame_times: std::collections::VecDeque<f32>,
-    pub(super) sys_stats: crate::stats::Monitor,
+    pub(super) sys_stats: crate::app::stats::Monitor,
     /// Video memory (used, budget) in bytes, refreshed once a second.
     pub(super) vram: Option<(u64, u64)>,
     vram_timer: f32,
@@ -77,7 +77,7 @@ impl FrameClock {
             frame_end: Instant::now(),
             between_ms: 0.0,
             frame_times: std::collections::VecDeque::with_capacity(hud::FRAME_GRAPH),
-            sys_stats: crate::stats::start(),
+            sys_stats: crate::app::stats::start(),
             vram: None,
             vram_timer: 0.0,
             time: 0.0,
