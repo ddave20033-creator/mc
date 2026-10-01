@@ -2,7 +2,9 @@
 //! `lan block <x> <y> <z>`): two game windows, one hosting and one joining, each with its
 //! script, and what each sees in its report.
 
-use super::*;
+use crate::client::Game;
+use crate::world::{Block, World, base, def};
+use glam::IVec3;
 
 impl Game {
     /// Runs `lan <args>`; the lines for the report.

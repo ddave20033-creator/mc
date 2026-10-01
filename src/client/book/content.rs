@@ -4,12 +4,12 @@
 //! in a light or a dark theme, with small looping animations in the pictures.
 
 use super::canvas::Canvas;
-use crate::entity::block_entity::{BURN_TIME, FLIP_TIME, GRILL_TIME};
 use crate::entity::Furnace;
+use crate::entity::block_entity::{BURN_TIME, FLIP_TIME, GRILL_TIME};
 use crate::item::*;
-use crate::ui::{rgba, Color, Font};
-use crate::world::textures::tex;
+use crate::ui::{Color, Font, rgba};
 use crate::world::*;
+use crate::world::textures::tex;
 use glam::Vec2;
 
 /// A page's size and margins in book units.
@@ -729,7 +729,6 @@ fn content(hu: bool, keys: &(String, String)) -> Vec<El> {
     }
     v
 }
-
 
 fn pieces(font: &Font, m: &Metrics, el: El) -> Vec<Piece> {
     let u = m.u;

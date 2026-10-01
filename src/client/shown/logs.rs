@@ -5,9 +5,13 @@
 //! it is made of; aimed at, a pale ring round the bark shows where it will come off. The last
 //! block left is not cut: it comes apart by itself.
 
-use crate::client::*;
-use crate::client::felling::Struck;
-use crate::item::{tool_of, ToolKind};
+use crate::client::Game;
+use crate::client::shown::felling::Struck;
+use crate::item::{ToolKind, tool_of};
+use crate::world::{PLANKS, face_texture};
+use crate::world::mesh::Vertex;
+use glam::{Mat4, Vec3};
+use std::f32::consts::TAU;
 
 /// How far from the eye a lying trunk can be aimed at.
 const AIM_REACH: f32 = 5.0;

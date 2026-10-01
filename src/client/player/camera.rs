@@ -3,9 +3,9 @@
 //! walls, and picking blocks under the crosshair when it is not at the eye.
 
 use crate::entity::player::raycast;
-use crate::util::{ray_box, wrap_angle};
-use crate::world::{is_solid, World};
 use crate::model::player::LimbSmoother;
+use crate::util::{ray_box, wrap_angle};
+use crate::world::{World, is_solid};
 use glam::{IVec3, Mat4, Vec3};
 use std::f32::consts::PI;
 

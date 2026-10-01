@@ -4,15 +4,24 @@
 //! (crosshair, scope, ammo). Guns are put together, taken apart, cleaned and tuned at the gun
 //! station (`gui::gun_station`).
 
-use crate::client::*;
-use crate::entity::player::{ray_boxes, raycast_solid};
-use crate::item::*;
-use crate::lang::tf;
-use crate::model::ballistics::{self, Cases};
 use crate::audio::Sound;
+use crate::client::{Game, Screen, gui};
+use crate::entity::player::{look_dir, ray_boxes, raycast_solid};
+use crate::item::*;
+use crate::keys::Bind;
+use crate::lang::{t, tf};
+use crate::model::ballistics;
+use crate::model::ballistics::Cases;
 use crate::model::pistol_view::{
-    reload_anim_time, reload_seconds, GunAnim, ReloadKind, RELOAD_MAG_IN, RELOAD_MAG_OUT, RELOAD_SLIDE,
+    GunAnim, RELOAD_MAG_IN, RELOAD_MAG_OUT, RELOAD_SLIDE, ReloadKind, reload_anim_time,
+    reload_seconds,
 };
+use crate::ui::{WHITE, rgba, with_alpha};
+use crate::util::smoothstep;
+use crate::world::{Block, WOOL};
+use crate::world::mesh::Vertex;
+use glam::{IVec3, Vec2, Vec3};
+use std::f32::consts::TAU;
 
 /// Seconds to raise the gun to the eye.
 const AIM_TIME: f32 = 0.16;
@@ -76,7 +85,7 @@ pub(in crate::client) struct Guns {
     /// Reloading (the R key): seconds so far, and what it does (a revolver's: `cylinder`).
     pub(in crate::client) reload: Option<f32>,
     pub(in crate::client) plan: ReloadPlan,
-    pub(in crate::client) cylinder: Option<crate::client::revolver::Cylinder>,
+    pub(in crate::client) cylinder: Option<super::revolver::Cylinder>,
     /// The gun a reload is for (its hotbar slot and item): put away, or another one taken up,
     /// the reload stops (it must not go on with the other gun).
     reload_owner: Option<(usize, ItemId)>,

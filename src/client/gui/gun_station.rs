@@ -19,18 +19,27 @@
 //! world and the same for every player; each change goes to the others (`Msg::Bench`), with
 //! the animation everyone plays (`BenchEvent`).
 
-use super::super::station::{hit_plane, Screen2};
-use super::*;
-use crate::entity::{bench_event, BenchEvent, BenchItem, GunBench};
-use crate::model::gun::{BARREL, FRAME, MAGAZINE, PARTS, SLIDE, SPRING};
+use super::station::{hit_plane, Screen2};
+use crate::client::{Container, Game, Screen};
+use crate::client::gui::SlotRef;
+use crate::entity::{BenchEvent, BenchItem, GunBench, bench_event};
+use crate::item::*;
+use crate::item::inventory::take;
+use crate::lang::t;
 use crate::model::gun_view;
-use crate::model::pistol_view::bench::{self as rig, Bones};
-use crate::model::pistol_view::{self as pv, dirt_level};
+use crate::model::gun::{BARREL, FRAME, MAGAZINE, PARTS, SLIDE, SPRING};
+use crate::model::pistol_view::dirt_level;
+use crate::model::pistol_view::bench::Bones;
+use crate::model::pistol_view::bench::self as rig;
+use crate::model::pistol_view::self as pv;
 use crate::model::revolver_view::bench as rrig;
-use crate::model::viewmodel::{bone_matrices, cube_matrix, emit_cube, find_bone, BonePose, Cube};
+use crate::model::viewmodel::{BonePose, Cube, bone_matrices, cube_matrix, emit_cube, find_bone};
+use crate::ui::rgba;
 use crate::util::{ray_box, vertex_light};
-use crate::world::mesh::flags;
-use glam::{Mat3, Quat};
+use crate::world::{Block, bench_main, bench_width, chest_right, facing, facing_dir, is_gun_bench};
+use crate::world::mesh::{Vertex, flags};
+use glam::{IVec3, Mat3, Mat4, Quat, Vec2, Vec3};
+use std::f32::consts::{FRAC_PI_2, PI};
 
 /// At the open gun station: the brush, the mouse on its table and in its drawer, the camera,
 /// scrubbing, and what was last sent.
@@ -104,7 +113,6 @@ const ASSEMBLE_SPEED: f32 = 1.6;
 const ROUND_TIME: f32 = 0.34;
 /// Gun model units to the station model's pixels (the table's `PX`, a pixel a sixteenth).
 const MODEL_TO_STATION: f32 = PX * 16.0;
-
 
 /// The magazine on the loader as it is drawn, lying in its cradle on its side, its feed lips
 /// toward the feed block (`mount`: the loader's frame there, `loader_mount`).

@@ -1,8 +1,12 @@
 //! Chat commands.
 
-use super::*;
-use crate::item::{from_key, key, max_stack, Stack};
-use crate::lang::tf;
+use crate::client::Game;
+use crate::client::player::GameMode;
+use crate::entity::mob::MobKind;
+use crate::item::{Stack, from_key, key, max_stack};
+use crate::lang::{t, tf};
+use crate::ui::chat;
+use glam::Vec3;
 
 /// "x y z" relative to `here` where written with `~` ("~" alone, or "~2"); missing
 /// coordinates stay at `here`.

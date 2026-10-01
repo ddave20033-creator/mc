@@ -1,7 +1,13 @@
 //! The creative inventory: its tabs and what each lists, the search, and the hotbar under it.
 
-use super::*;
-
+use crate::client::Game;
+use crate::client::gui::{SLOT, SlotRef, draw_stack};
+use crate::item::*;
+use crate::lang::t;
+use crate::ui::{WHITE, rgba};
+use crate::world::{CHEST, CRAFTING_TABLE, Creative, GRASS};
+use glam::Vec2;
+use winit::keyboard::KeyCode;
 
 /// Lowercase without Hungarian accents, so "gyemant" finds "Gyémánt".
 pub(super) fn search_fold(s: &str) -> String {

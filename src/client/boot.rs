@@ -2,8 +2,10 @@
 //! while the game's window is still hidden (the splash, `crate::splash`, shows the progress);
 //! then the window is shown with the title screen.
 
-use super::*;
-use std::sync::mpsc::{channel, Receiver};
+use crate::client::Game;
+use crate::world::textures;
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, channel};
 
 /// What the texture thread makes.
 pub(super) struct BootTextures {

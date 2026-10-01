@@ -1,8 +1,14 @@
 //! The player's health: damage (falls, lava, fire, cactus, suffocation, drowning, the void),
 //! death, and hunger, thirst and effects.
 
-use crate::client::*;
+use crate::client::{Game, MAX_AIR, MAX_HEALTH, Screen};
+use crate::client::player::sleep;
+use crate::entity::survival::Needs;
 use crate::item::*;
+use crate::lang::t;
+use crate::ui::chat;
+use crate::world::{AIR, Block, CACTUS, is_lava, is_opaque, is_water};
+use glam::{IVec3, Vec3};
 
 /// Health and what goes on with it: hurt, burning, out of breath, falling, hungry and
 /// thirsty; death, and where the player comes back to life; sleeping.

@@ -5,12 +5,14 @@
 //! ground to be picked up), then it is loaded from a loaded speedloader carried, or one round
 //! at a time from the magnum rounds carried (shooting stops the loading), and swung shut.
 
-use crate::client::*;
 use crate::audio::Sound;
+use crate::client::Game;
 use crate::item::*;
+use crate::lang::t;
 use crate::model::revolver_view::{
     LOAD_END, LOAD_SEAT, RELOAD_CLOSE, RELOAD_EJECT, RELOAD_END, RELOAD_OPEN, RELOAD_RELEASE,
 };
+use glam::Vec3;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {

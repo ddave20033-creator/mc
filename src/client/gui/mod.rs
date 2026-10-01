@@ -24,11 +24,13 @@ pub(super) use creative::{creative_grid, Tab, TABS};
 pub(super) use draw::draw_stack;
 pub(super) use slots::Drag;
 
-use super::*;
-use crate::item::inventory::{add_to, click, take};
+use crate::client::{Container, Game};
 use crate::item::*;
-use crate::lang::tf;
+use crate::item::inventory::take;
+use crate::lang::t;
 use crate::ui::rgba;
+use crate::world::is_rifle_bench;
+use glam::Vec3;
 
 /// The inventory screens: the creative tabs, list and search, the JEI panel, dragging and
 /// clicking slots, and what the mouse is on at an open chest or table.
@@ -497,6 +499,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::FURNACE;
 
     #[test]
     fn every_category_tab_has_items() {

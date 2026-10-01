@@ -2,10 +2,10 @@
 //! layers onto the 3D book): filled shapes, the UI's bitmap font, and the block textures for
 //! item icons, the way the item screens draw them.
 
-use crate::item::{block_of, icon, max_damage, Icon, Stack};
+use crate::item::{Icon, Stack, block_of, icon, max_damage};
 use crate::ui::{Color, Font};
-use crate::world::textures::{tex, TILE};
-use crate::world::{face_texture, icon_tint, tint_kind, TintKind};
+use crate::world::{TintKind, face_texture, icon_tint, tint_kind};
+use crate::world::textures::{TILE, tex};
 use glam::Vec2;
 
 pub struct Canvas<'a> {

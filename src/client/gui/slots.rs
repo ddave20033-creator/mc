@@ -1,8 +1,11 @@
 //! The rules of the item screens: opening and closing a container, clicking, shift-clicking,
 //! dragging and double-clicking slots, and crafting (one or as many as the grid makes).
 
-use super::*;
-
+use crate::client::{Container, Game, Screen};
+use crate::client::gui::SlotRef;
+use crate::item::{Slot, Stack, armor_of, craft, max_stack};
+use crate::item::inventory::{add_to, click, take};
+use glam::IVec3;
 
 /// Mouse drag with a held stack: left spreads it evenly, right drops one per slot.
 pub(in crate::client) struct Drag {

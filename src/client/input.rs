@@ -2,7 +2,15 @@
 //! going to the screen open (a menu, the chat, a text field), the game's keys, and the
 //! mouse grabbed while playing.
 
-use super::*;
+use crate::client::{Container, Game, Screen};
+use crate::keys::{Bind, HOTBAR};
+use crate::ui::chat::ChatInput;
+use glam::Vec2;
+use std::collections::HashSet;
+use winit::dpi::PhysicalPosition;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::{CursorGrabMode, Fullscreen};
 
 /// The keyboard and the mouse as they are this frame (`end_frame` lets go of what was only
 /// this frame's).

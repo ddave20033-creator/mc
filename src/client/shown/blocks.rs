@@ -2,9 +2,12 @@
 //! this player does it, shown at once (the other blocks that go with it too, `sim::rules`)
 //! and sent to the server, which has the last word.
 
-use crate::client::*;
-use crate::item::inventory::{self};
+use crate::client::Game;
+use crate::entity::ItemEntity;
 use crate::item::*;
+use crate::world::*;
+use glam::{IVec3, Vec3};
+
 impl Game {
     pub(in crate::client) fn block_tint(&self, p: IVec3, b: Block) -> [u8; 3] {
         let (g, f) = self.terrain.gen.tints(p.x, p.z);
@@ -130,6 +133,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     pub(in crate::client) fn wall_torch_needs_its_mounting_block() {

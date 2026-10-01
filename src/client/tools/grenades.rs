@@ -9,20 +9,22 @@
 //! Every player's game flies its own copy of every grenade, but the server's copy decides the
 //! blast: it breaks the blocks, hurts, and tells everyone where it went off.
 
-use crate::client::*;
 use crate::audio::Sound;
+use crate::client::Game;
 use crate::entity::player::raycast_solid;
-use crate::item::inventory::take;
 use crate::item::*;
+use crate::item::inventory::take;
+use crate::model::grenade::{RAISE_TIME, power};
 use crate::net::Msg;
-use crate::util::vertex_light;
 use crate::sim::grenade::*;
+use crate::util::vertex_light;
+use crate::world::mesh::Vertex;
+use glam::{Mat4, Vec3};
 
 /// The right button held (seconds): the grenade comes up in front, then the other hand
 /// pulls the pin and it is ready to throw once the pin is out; held until `FULL_POWER`,
 /// it is thrown the farthest (`model::grenade`, as the hands show it). How fast it leaves
 /// the hand, the least and the most.
-use crate::model::grenade::{power, RAISE_TIME};
 const PIN_OUT: f32 = RAISE_TIME + 0.35;
 const THROW_SPEED: (f32, f32) = (6.0, 21.0);
 
@@ -308,6 +310,8 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::*;
+    use glam::IVec3;
 
     #[test]
     fn a_blast_takes_the_same_ragged_ball_everywhere() {

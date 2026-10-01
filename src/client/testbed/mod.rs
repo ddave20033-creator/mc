@@ -7,11 +7,19 @@
 mod checks;
 mod script;
 
-use super::*;
+use crate::client::{Container, Game, Screen};
 use crate::item::{GunKind, Stack};
-use script::{Cmd, Origin, WorldKind};
+use crate::lang::t;
+use crate::save::WorldMeta;
+use crate::settings::Settings;
+use crate::world::*;
+use crate::world::gen::SEA;
+use glam::{IVec3, Mat4, Vec2, Vec3};
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use winit::keyboard::KeyCode;
+
+use script::{Cmd, Origin, WorldKind};
 
 /// The built-in scripts (`testbed/*.txt`), by name.
 pub const BUILT_IN: &[(&str, &str)] = &[

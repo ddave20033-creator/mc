@@ -1,7 +1,14 @@
 //! The HUD: hotbar, hearts, hunger and thirst, air, effects, crosshair, item names, hints,
 //! the chat and the F3 debug and performance screens.
 
-use crate::client::*;
+use crate::item;
+use crate::client::{Game, MAX_AIR, Screen, gui};
+use crate::entity::survival::EffectKind;
+use crate::item::NONE;
+use crate::keys::Bind;
+use crate::lang::t;
+use crate::ui::{Color, Ui, WHITE, rgba, with_alpha};
+use glam::{Vec2, Vec3};
 
 /// Frames shown in the F3 frame time graph.
 pub(in crate::client) const FRAME_GRAPH: usize = 240;

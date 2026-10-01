@@ -1,13 +1,28 @@
 //! One frame: timing, chunk streaming, the world update, the camera, lighting and sky,
 //! the geometry built on the CPU (entities, particles, the hand), the UI, and rendering.
 
-use super::*;
+use crate::client::{Container, Game, MENU_TIME_OF_DAY, SHADOW_DISTANCE, Screen, multi};
+use crate::client::gui::{SlotRef, hud};
 use crate::entity::block_entity::{
     build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow,
     build_table_items, build_table_made, chest_side,
 };
-use crate::render::MAX_HELD_LIGHTS;
+use crate::entity::player::look_dir;
+use crate::item::ItemId;
+use crate::keys::Bind;
+use crate::model::crack_overlay;
+use crate::model::player::{PlayerPose, build_player, hand_pivot, limb_targets};
+use crate::render::{FrameInfo, FrameUbo, MAX_HELD_LIGHTS, SHADOW_SIZE};
+use crate::ui::screens;
+use crate::ui::screens::Action;
+use crate::util::smoothstep;
+use crate::world::*;
+use crate::world::mesh::Vertex;
+use crate::world::terrain::TerrainEvent;
 use crate::world::textures::tex;
+use glam::{IVec3, Mat4, Vec3};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::time::Instant;
 
 struct SkyState {
     sun: Vec3,
@@ -529,7 +544,7 @@ impl Game {
         if third_person {
             if self.me.look.camera.mode == 2 {
                 fwd = -fwd;
-            } else if matches!(self.me.look.camera.mode, super::camera::SIDE_VIEW | super::camera::SIDE_LEFT | super::camera::FIXED_FRONT) {
+            } else if matches!(self.me.look.camera.mode, super::player::camera::SIDE_VIEW | super::player::camera::SIDE_LEFT | super::player::camera::FIXED_FRONT) {
                 fwd = (eye - Vec3::Y * 0.5 - cam).normalize_or_zero();
             } else {
                 // Keep view rotation independent of changing nearby blocks and plants.
@@ -990,8 +1005,8 @@ impl Game {
                 // out than the eye's: finer depth, so the bullet holes stay on their blocks
                 // far off.
                 let world = &self.terrain.world;
-                let from = cam + super::camera::clamp_offset(world, cam, to_world_view(mid) - cam);
-                let free = super::camera::clamp_offset(world, from, dir * 0.5).length();
+                let from = cam + super::player::camera::clamp_offset(world, cam, to_world_view(mid) - cam);
+                let free = super::player::camera::clamp_offset(world, from, dir * 0.5).length();
                 let near = (free * 0.5).clamp(0.01, 0.25);
                 scene.scope = Some((from, dir, up, (2.0 * half / magnify).max(0.2f32.to_radians()), near));
             }
@@ -1244,7 +1259,7 @@ impl Game {
                 if open > 0.0 {
                     // What is inside shows while it is open (lifted: under the mouse).
                     let lift = match (self.inv_ui.station_hover, &self.station) {
-                        (Some(gui::SlotRef::Chest(i)), Some(st)) => {
+                        (Some(SlotRef::Chest(i)), Some(st)) => {
                             let (a, b) = self.chest_halves(st.pos);
                             if *p == a && i < 27 {
                                 Some(i)
@@ -1313,7 +1328,7 @@ impl Game {
         if let Some(p) = open_table {
             // The open table: its grid (lifted under the mouse), and what was crafted.
             let lift = match self.inv_ui.station_hover {
-                Some(gui::SlotRef::Craft(i)) => Some(i),
+                Some(SlotRef::Craft(i)) => Some(i),
                 _ => None,
             };
             let (sky, blk) = light(p);
@@ -1321,7 +1336,7 @@ impl Game {
             build_table_items(target, p, side, &self.me.items.craft, lift, sky, blk);
             if let Some(made) = &self.me.items.craft_out {
                 let (t, used) = self.me.items.craft_fx.unwrap_or((10.0, [None; 9]));
-                let hovered = self.inv_ui.station_hover == Some(gui::SlotRef::CraftOut);
+                let hovered = self.inv_ui.station_hover == Some(SlotRef::CraftOut);
                 build_table_made(target, p, side, made, &used, t, hovered, sky, blk);
             }
         }

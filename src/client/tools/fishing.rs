@@ -15,13 +15,20 @@
 //! Only the angler's own game runs this; the others see the rod, the line and the bobber from
 //! the pose (`net::Pose::rod`).
 
-use crate::client::*;
 use crate::audio::Sound;
+use crate::client::{Game, Screen};
+use crate::entity::player::look_dir;
+use crate::item::{FISHING_ROD, RAW_FISH, ROD_GEARS, Stack, rod_gear, set_rod_gear};
 use crate::item::inventory::damage;
-use crate::item::{rod_gear, set_rod_gear, Stack, FISHING_ROD, RAW_FISH, ROD_GEARS};
-use crate::model::angler::{self, RodAnim, CAST_TIME, LIFT_TIME, WHIP_FORWARD};
+use crate::keys::Bind;
+use crate::lang::t;
+use crate::model::angler;
+use crate::model::angler::{CAST_TIME, LIFT_TIME, RodAnim, WHIP_FORWARD};
+use crate::ui::{Color, WHITE, rgba, with_alpha};
 use crate::util::vertex_light;
-use crate::world::mesh::fluid_height;
+use crate::world::{HEIGHT, World, fluid_level, is_solid, is_water, opens_on_use};
+use crate::world::mesh::{Vertex, fluid_height};
+use glam::{IVec3, Mat4, Vec2, Vec3};
 
 /// Seconds of drawing back for the farthest cast.
 const CHARGE_TIME: f32 = 1.2;

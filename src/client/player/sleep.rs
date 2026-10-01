@@ -1,11 +1,14 @@
 //! Beds: using one sets where the player comes back to life, and at night they lie down in
 //! it. When every player is asleep for a few seconds the night is skipped, like Minecraft.
 
-use crate::client::*;
-use crate::lang::tf;
+use crate::client::{Game, Screen};
+use crate::keys::Bind;
+use crate::lang::{t, tf};
+use crate::ui::chat;
+use crate::world::*;
+use glam::{IVec3, Vec3};
 
 pub use crate::sim::is_night;
-
 
 /// Lying in a bed.
 #[derive(Clone, Copy, Debug)]

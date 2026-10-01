@@ -1,7 +1,22 @@
 //! The connection to the world's server: joining (the game's own world, or a LAN game),
 //! leaving, and following what the server sends.
 
-use super::*;
+use crate::client::{AUTOSAVE_SECONDS, Game, MAX_HEALTH, Screen};
+use crate::client::multi::{Client, Session, color_from};
+use crate::client::player::GameMode;
+use crate::entity::{FallingBlock, ItemEntity};
+use crate::entity::mob::Mob;
+use crate::entity::survival::Needs;
+use crate::lang::{t, tf};
+use crate::net::{Conn, ItemNet, Msg, PROTOCOL, PlayerState};
+use crate::save::{PlayerSave, WorldMeta, unrle};
+use crate::sim::clock::TICK_SECS;
+use crate::ui::chat;
+use crate::world::{Block, ChunkData, FastMap, FastSet, HEIGHT, World};
+use crate::world::terrain::Terrain;
+use glam::{IVec3, Vec3};
+use std::sync::Arc;
+
 impl Game {
     /// Connects to a LAN game at "ip:port" (or just "ip").
     pub(in crate::client) fn join_server(&mut self, addr: &str) {

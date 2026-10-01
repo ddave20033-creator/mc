@@ -5,12 +5,16 @@
 //! What is smelted stays in the mouth until taken. The corner of the top under the
 //! crosshair is lit up a little.
 
-use crate::client::*;
-use crate::entity::block_entity::{doneness, grill_box, part, Doneness, BURN_TIME};
 use crate::audio::Sound;
+use crate::client::Game;
 use crate::entity::Furnace;
-use crate::item::inventory;
+use crate::entity::block_entity::{BURN_TIME, Doneness, doneness, grill_box, part};
 use crate::item::*;
+use crate::world::{
+    ADV_FURNACE, BLAST_FURNACE, FURNACE, facing, facing_dir, furnace_base, furnace_right,
+    furnace_tier, is_chimney, is_furnace,
+};
+use glam::{IVec3, Vec3};
 
 impl Game {
     /// The furnace part a ray hitting `hit` (from the air block `prev`) at `target_point`

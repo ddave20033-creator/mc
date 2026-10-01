@@ -10,16 +10,18 @@ mod client;
 mod lan_ui;
 mod testbed;
 
-use super::*;
-
-use crate::item::{armor_code, GunKind};
-use crate::lang::tf;
-use crate::model::player::{hand_pivot, limb_targets};
-use crate::net::{
-    container, pose_flags, Conn, Finder, ItemNet, Msg, PlayerState, Pose, NO_BLOCK, PROTOCOL,
-};
-use crate::save::unrle;
+use crate::client::{AUTOSAVE_SECONDS, Container, Game, Screen};
+use crate::entity::ItemEntity;
+use crate::entity::player::look_dir;
+use crate::item::{GunKind, ItemId, Slot, armor_code};
+use crate::model::player::{LimbSmoother, PlayerPose, build_player, hand_pivot, limb_targets};
+use crate::net::{Conn, Msg, NO_BLOCK, Pose, container, pose_flags};
+use crate::save::PlayerSave;
+use crate::ui::{Color, chat};
 use crate::util::lerp_angle;
+use crate::world::{AIR, Block, FastMap, World, facing_dir, facing_of, is_chest};
+use crate::world::mesh::Vertex;
+use glam::{IVec3, Vec3};
 
 /// `Msg::Open` at this height means the player closed their container.
 const CLOSED_Y: i32 = i32::MIN;

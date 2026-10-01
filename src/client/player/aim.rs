@@ -2,9 +2,10 @@
 //! and what their hands are doing with it: mining, chopping, blocking with a sword, eating or
 //! drinking, and the wait before the next use.
 
-use crate::client::*;
+use crate::client::Game;
 use crate::entity::player::raycast;
-use crate::item::break_time;
+use crate::item::{ItemId, break_time};
+use glam::{IVec3, Vec3};
 
 /// What the crosshair is on and what the hands do.
 #[derive(Default)]

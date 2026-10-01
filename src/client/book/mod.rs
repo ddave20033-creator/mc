@@ -9,10 +9,13 @@
 mod canvas;
 mod content;
 
-use super::*;
+use crate::client::{Game, Screen};
 use crate::item::GUIDE_BOOK;
+use crate::keys::Bind;
 use crate::model::book::{BookHit, BookView, RIFFLE_TIME, SHEET_LAYERS, TAB_LAYERS, TURN_TIME};
-use crate::world::textures::{tex, TILE};
+use crate::world::textures::{TILE, tex};
+use winit::keyboard::KeyCode;
+
 use content::{contents_entry, draw_page, draw_tabs, layout, Layout, Look, DARK, LIGHT, PAGE_PX};
 
 /// Pages drawn onto the textures in one frame at most (the rest wait for the next ones), and

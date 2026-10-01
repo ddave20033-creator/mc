@@ -1,7 +1,16 @@
 //! What LAN play shows: names above the other players, the player list (Tab), and the
 //! multiplayer and connection screens.
 
-use super::*;
+use crate::client::{Game, Screen};
+use crate::client::multi::{NAME_RANGE, OWNER_ID};
+use crate::lang::{t, tf};
+use crate::net::Finder;
+use crate::ui::{Color, Ui, WHITE, rgba, screens, with_alpha};
+use crate::ui::screens::Action;
+use crate::world::is_opaque;
+use glam::{Vec2, Vec3};
+use std::f32::consts::TAU;
+
 impl Game {
     /// Names above the other players' heads.
     pub(in crate::client) fn draw_name_tags(&mut self) {

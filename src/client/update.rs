@@ -4,9 +4,14 @@
 //! furnaces, particles and sounds, and the things the server sent gliding on between its
 //! updates). The world itself runs on the server (`sim::server`).
 
-use super::*;
+use crate::client::{Container, Game, Screen};
 use crate::entity::player::MoveInput;
 use crate::item::*;
+use crate::keys::Bind;
+use crate::sim::clock::TICK_SECS;
+use crate::world::{AIR, TORCH, is_torch};
+use glam::Vec3;
+
 impl Game {
     /// The player's tick: moving (with the keys held, `control`: no screen open), health,
     /// hunger and thirst.

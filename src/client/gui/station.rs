@@ -3,12 +3,18 @@
 //! inventory runs along the bottom of the screen. At a table, a click anywhere but on a slot
 //! crafts what the grid makes into its middle. Closing glides the camera back into the head.
 
+use crate::client::{Container, Game, Screen};
 use crate::client::gui::SlotRef;
-use crate::client::*;
 use crate::entity::block_entity::{
-    chest_cell, chest_cell_at, chest_cell_size, chest_side, table_cell, table_cell_at, CHEST_FLOOR,
-    CRAFT_SLIDE, TABLE_CELL,
+    CHEST_FLOOR, CRAFT_SLIDE, TABLE_CELL, chest_cell, chest_cell_at, chest_cell_size, chest_side,
+    table_cell, table_cell_at,
 };
+use crate::ui::{WHITE, rgba};
+use crate::util::smoothstep;
+use crate::world::{
+    CRAFTING_TABLE, chest_right, facing, facing_dir, facing_of, is_chest, is_gun_bench,
+};
+use glam::{IVec3, Mat4, Vec2, Vec3};
 
 /// Vertical field of view over the block.
 const FOV: f32 = 60.0;
@@ -234,7 +240,7 @@ impl Game {
             // Moved to one side, it turns a little back toward the middle.
             let fwd = glam::Quat::from_rotation_y(sway * GUN_TURN.to_radians()) * fwd;
             let origin = Vec3::new(center.x, st.pos.y as f32 + 1.45, center.z);
-            let cam = origin + crate::client::camera::clamp_offset(w, origin, want - origin);
+            let cam = origin + crate::client::player::camera::clamp_offset(w, origin, want - origin);
             return Some((cam, fwd));
         } else {
             let f = facing(b).filter(|_| is_chest(b))?;
@@ -248,7 +254,7 @@ impl Game {
         // Not into a wall or ceiling over the block (checked from high enough above it that
         // the block itself is not in the way).
         let origin = Vec3::new(center.x, st.pos.y as f32 + 1.45, center.z);
-        let cam = origin + crate::client::camera::clamp_offset(w, origin, want - origin);
+        let cam = origin + crate::client::player::camera::clamp_offset(w, origin, want - origin);
         Some((cam, fwd))
     }
 

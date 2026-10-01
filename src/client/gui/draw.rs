@@ -1,8 +1,15 @@
 //! Drawing the item screens: the slots and the stacks in them, tooltips, the panels, and the
 //! light and dark themes.
 
-use super::*;
-
+use crate::client::Game;
+use crate::client::gui::{SLOT, SlotRef};
+use crate::item::*;
+use crate::lang::tf;
+use crate::ui::{Color, Ui, WHITE, rgba, with_alpha};
+use crate::world::{
+    OAK_LOG, TintKind, face_texture, icon_tint, is_log, is_stairs, log_radius, tint_kind,
+};
+use glam::Vec2;
 
 /// Colors of the item screens; light is classic Minecraft, dark is the optional dark mode.
 pub(super) struct Theme {

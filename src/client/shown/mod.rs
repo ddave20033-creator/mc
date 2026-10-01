@@ -8,8 +8,8 @@ pub(super) mod furnace;
 pub(super) mod felling;
 pub(super) mod logs;
 
-use crate::entity::mob::Mob;
 use crate::entity::{BlockEntities, FallingBlock, ItemEntity};
+use crate::entity::mob::Mob;
 use crate::model::particles::Particles;
 use crate::save::WorldMeta;
 use crate::world::FastMap;

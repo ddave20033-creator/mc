@@ -1,9 +1,12 @@
 //! Mobs from the game's side: attacking mobs and other players, items used on mobs, spawn
 //! eggs. (The server runs them; what a kind does is in its file, `content::mobs`.)
 
-use crate::client::*;
-use crate::item::inventory::{self, take};
+use crate::client::Game;
+use crate::entity::mob::{Mob, MobKind};
 use crate::item::*;
+use crate::item::inventory::take;
+use crate::world::{AIR, STONE, is_solid};
+use glam::Vec3;
 
 impl Game {
     /// Left click on a mob (index into `mobs`) or another LAN player: damage by the held item

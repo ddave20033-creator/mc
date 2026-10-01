@@ -1,9 +1,14 @@
 //! Spectator mode: flying through blocks without touching anything, and watching another
 //! LAN player through their eyes (picked from a menu, like Minecraft's spectator menu).
 
-use crate::client::*;
+use crate::client::{Game, MAX_AIR, Screen};
+use crate::client::player::GameMode;
 use crate::entity::player::MoveInput;
-use crate::lang::tf;
+use crate::keys::Bind;
+use crate::lang::{t, tf};
+use crate::sim::clock::TICK_SECS;
+use crate::ui::{WHITE, chat, rgba};
+use glam::Vec3;
 
 impl Game {
     /// Switches this player's game mode (the /gamemode command).

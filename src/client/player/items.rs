@@ -1,10 +1,14 @@
 //! What the player carries (`Items`), and using items: throwing, placing blocks, buckets,
 //! bottles, eating and drinking, and opening containers.
 
-use crate::client::*;
-use crate::entity::player::raycast_fluid;
-use crate::item::inventory::take;
+use crate::client::{Container, Game, Screen};
+use crate::entity::ItemEntity;
+use crate::entity::mob::MobKind;
+use crate::entity::player::{look_dir, raycast_fluid};
 use crate::item::*;
+use crate::item::inventory::{Inventory, take};
+use crate::world::*;
+use glam::{IVec3, Vec3};
 
 /// The inventory and the hotbar, and what is in the hands at the item screens: on the mouse,
 /// in the crafting grid and made by it.

@@ -2,7 +2,11 @@
 //! prints frame, CPU and GPU timings, so performance changes can be measured. The world lives
 //! in the temp folder (not among the saves) and the mouse is never grabbed.
 
-use super::*;
+use crate::client::{Game, Screen};
+use crate::save::WorldMeta;
+use crate::world::gen::SEA;
+use glam::Vec3;
+use std::f32::consts::TAU;
 
 /// Seconds of flight before measuring (chunks load around the spawn) and measured seconds.
 const WARMUP: f32 = 6.0;

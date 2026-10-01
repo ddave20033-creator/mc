@@ -6,9 +6,9 @@
 //! longest drawn over first. An icon asked for is drawn on a thread of its own (a few
 //! milliseconds each) and shows once it is done; until then the fixed one shows.
 
-use crate::client::*;
+use crate::client::Game;
 use crate::item::*;
-use crate::world::textures::{tex, TILE};
+use crate::world::textures::{TILE, tex};
 use std::cell::RefCell;
 
 /// What an icon shows of a stack: its item and the state that changes how it looks.

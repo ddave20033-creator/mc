@@ -1,7 +1,8 @@
 //! The player standing in the inventory screen, turned toward the mouse, in their armor.
 
-use super::*;
-
+use crate::client::Game;
+use crate::item::{armor_code, unpack_armor};
+use glam::{Vec2, Vec3};
 
 impl Game {
     /// Player figure for the inventory screen, inside the dark box at (x, y, w, h).

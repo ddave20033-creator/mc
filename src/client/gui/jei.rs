@@ -4,7 +4,13 @@
 //! shows how that is made; in creative a click takes the item, a right click shows the
 //! recipe.
 
-use super::*;
+use crate::client::Game;
+use crate::client::gui::{SLOT, SlotRef, Tab, creative_grid, draw_stack, search_fold};
+use crate::item::{ItemId, Stack, key, name, recipes_for, smelted_from};
+use crate::lang::t;
+use crate::ui::{WHITE, rgba};
+use crate::world::{ADV_FURNACE, BLAST_FURNACE, FURNACE};
+use winit::keyboard::KeyCode;
 
 /// What the JEI panel remembers: how far it is scrolled, what is searched for (and whether
 /// the search box has the keyboard), and the item whose recipe is shown (which of its ways).

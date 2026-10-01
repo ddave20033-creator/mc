@@ -12,10 +12,14 @@
 //! the head and brought straight down into it (`chop_rig::Kind::Stump`); when the axe is
 //! pulled out again the stump comes apart into its logs.
 
-use crate::client::*;
+use crate::client::Game;
 use crate::item::{inventory, tool_of};
-use crate::model::chop_rig::{self, Aim, ChopPose, Kind, Swing, EDGE};
+use crate::model::chop_rig;
+use crate::model::chop_rig::{Aim, ChopPose, EDGE, Kind, Swing};
 use crate::sim::felling::*;
+use crate::world::{Block, STONE, face_texture, is_leaves, is_log, is_solid, log_radius};
+use crate::world::mesh::Vertex;
+use glam::{IVec3, Mat4, Vec2, Vec3};
 
 /// What the axe is stuck in, to come apart when it is pulled out: a stump, or a lying trunk
 /// (which, and where it is cut).

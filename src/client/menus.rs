@@ -1,7 +1,12 @@
 //! The menus' state (`Menus`) and going between the screens: pausing and resuming, going
 //! back, and what the buttons of a screen ask for (`apply`).
 
-use super::*;
+use crate::client::{Game, Screen};
+use crate::lang::t;
+use crate::save::WorldMeta;
+use crate::ui::screens;
+use crate::ui::screens::Action;
+use glam::Vec3;
 
 /// The menus' state: the world list and the new world's settings, the multiplayer screen,
 /// the options, the resource packs, and the title screen's player and panorama.
