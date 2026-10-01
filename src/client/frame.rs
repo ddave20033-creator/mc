@@ -63,6 +63,11 @@ pub(super) struct FrameClock {
     /// toward where they are).
     ticks: crate::sim::clock::Clock,
     pub(super) between: f32,
+    /// The ticks run this frame and how long they took (ms).
+    ticks_run: u32,
+    tick_ms: f32,
+    /// Where the frames' time goes (read by the testbed's `stats`).
+    pub(super) perf: super::perf::Perf,
 }
 
 impl FrameClock {
@@ -83,6 +88,9 @@ impl FrameClock {
             time: 0.0,
             ticks: crate::sim::clock::Clock::new(Instant::now()),
             between: 1.0,
+            ticks_run: 0,
+            tick_ms: 0.0,
+            perf: Default::default(),
         }
     }
 }
@@ -169,7 +177,9 @@ impl Game {
         let dt = self.frame_clock(now);
         // LAN game: messages in and out.
         self.net_tick(dt);
+        let t_net = Instant::now();
         self.stream_chunks();
+        let t_chunks = Instant::now();
 
         let size = self.gfx.window.inner_size();
         if size.width == 0 || size.height == 0 {
@@ -191,7 +201,9 @@ impl Game {
         self.audio.set_volumes(st.volume / 100.0, [st.volume_weapons / 100.0, st.volume_other / 100.0]);
         let medium = self.medium(&view);
         let lighting = self.lighting(&view, medium);
+        let t_camera = Instant::now();
         let mut scene = self.build_scene(&view, dt);
+        let t_scene = Instant::now();
         let action = self.draw_ui(w, h, dt, view.in_world, medium);
         // Out of a world (the title screen's and the other menus' panorama), the world
         // behind the menu is blurred: drawn small by the scope pass, spread over the screen.
@@ -283,6 +295,23 @@ impl Game {
         ];
         // This frame's own duration (the frame time measured at the start is the previous one's).
         self.bench_record(self.clock.between_ms + ms(now, t_end));
+        let c = &mut self.clock;
+        let phases = [
+            ms(now, t_net),
+            ms(t_net, t_chunks),
+            c.tick_ms,
+            (ms(t_chunks, t_update) - c.tick_ms).max(0.0),
+            ms(t_update, t_camera),
+            ms(t_camera, t_scene),
+            ms(t_scene, t_build),
+            self.gfx.renderer.cpu_detail[0],
+            (c.cpu_ms[2] - self.gfx.renderer.cpu_detail[0]).max(0.0),
+            c.cpu_ms[3],
+        ];
+        let frame_ms = c.frame_times.back().copied().unwrap_or(0.0);
+        c.perf.record(frame_ms, phases, c.ticks_run, self.gfx.renderer.uploaded);
+        let mob = self.level.mobs.first().map(|m| (m.id, m.pos));
+        c.perf.moved(dt, view.cam, self.me.hand.walk_phase(), mob);
         self.gfx.scene = scene;
         self.input.end_frame();
         self.clock.frame_end = Instant::now();
@@ -358,7 +387,9 @@ impl Game {
     fn update(&mut self, dt: f32) {
         let now = Instant::now();
         let (player, world) = self.running();
-        for _ in 0..self.clock.ticks.due(now) {
+        let due = self.clock.ticks.due(now);
+        self.clock.ticks_run = due;
+        for _ in 0..due {
             if let Some(control) = player {
                 self.tick_player(control);
             }
@@ -367,12 +398,15 @@ impl Game {
                 self.fall_trees_here(crate::sim::clock::TICK_SECS);
             }
         }
+        self.clock.tick_ms = (Instant::now() - now).as_secs_f32() * 1000.0;
         self.clock.between = self.clock.ticks.between(now);
         if player.is_none() {
             // (standing still, it is drawn where it stands: not swaying between its last two
             // ticks, as it would be if it was stopped mid-step)
             self.me.body.prev_pos = self.me.body.pos;
+            self.me.body.prev_vel = self.me.body.vel;
         }
+        self.me.body.settle(dt);
         if let Some(control) = player {
             self.update_player(dt, control);
         }
@@ -392,12 +426,14 @@ impl Game {
         self.me.hand.sprinting = self.me.body.sprinting;
         self.me.hand.crouching = self.me.body.sneaking;
         let (fwd, right) = (look_dir(self.me.look.yaw, 0.0), look_dir(self.me.look.yaw + FRAC_PI_2, 0.0));
-        let v = self.me.body.vel;
+        // (the speed as drawn, between the last two ticks: the walk's bobbing and the hand's
+        // lag follow it smoothly, not in steps 20 times a second)
+        let v = self.me.body.drawn_vel(self.clock.between);
         self.me.hand.motion = Vec3::new(v.dot(right), v.y, v.dot(fwd));
         self.me.hand.update(
             dt,
             mining,
-            self.me.body.horizontal_speed(),
+            self.me.body.drawn_speed(self.clock.between),
             self.me.body.on_ground && !self.me.body.flying,
             self.input.look_delta,
         );

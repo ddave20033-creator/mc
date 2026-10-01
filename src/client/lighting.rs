@@ -105,15 +105,14 @@ impl Game {
             Vec3::Y
         };
         let focus_pos = if in_world { self.eye() } else { cam };
-        let mut light_view =
-            Mat4::look_at_rh(focus_pos + sky.light_dir * 220.0, focus_pos, light_up);
-        let lc = light_view.transform_point3(focus_pos);
-        let snap = Vec3::new(
-            (lc.x / texel).round() * texel - lc.x,
-            (lc.y / texel).round() * texel - lc.y,
-            0.0,
-        );
-        light_view = Mat4::from_translation(snap) * light_view;
+        // (the light's turn alone, about the world's origin: the player's place in it is
+        // rounded to whole texels, then the map centred there, 220 blocks toward the light; a
+        // view centred on the player itself would slide by fractions of a texel as they walk,
+        // and the shadows' edges crawl)
+        let turn = Mat4::look_to_rh(Vec3::ZERO, -sky.light_dir, light_up);
+        let lc = turn.transform_point3(focus_pos);
+        let centre = Vec3::new((lc.x / texel).round() * texel, (lc.y / texel).round() * texel, lc.z + 220.0);
+        let light_view = Mat4::from_translation(-centre) * turn;
         let light_proj = Mat4::orthographic_rh(
             -SHADOW_DISTANCE,
             SHADOW_DISTANCE,

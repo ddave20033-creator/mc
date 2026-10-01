@@ -106,6 +106,8 @@ pub struct Mob {
     pub id: u32,
     /// A player's copy: the latest state from the server, which the mob glides toward.
     net_target: Option<crate::net::MobNet>,
+    /// The glide to it (an even pace from one state sent to the next).
+    glide: crate::util::Glide,
     pub kind: MobKind,
     /// Feet position (center of the bottom face).
     pub pos: Vec3,
@@ -256,6 +258,7 @@ impl Mob {
         Self {
             id,
             net_target: None,
+            glide: Default::default(),
             kind,
             pos,
             vel: Vec3::ZERO,
@@ -402,6 +405,7 @@ impl Mob {
 
     pub fn apply_net(&mut self, s: &crate::net::MobNet) {
         self.net_target = Some(*s);
+        self.glide.restart();
         self.hurt_time = if s.hurt { HURT_TIME } else { 0.0 };
         self.death = (s.death >= 0.0).then_some(s.death);
         self.health = s.health;
@@ -414,12 +418,13 @@ impl Mob {
         self.def().size
     }
 
-    /// A player's copy: glides toward the server's latest state (sent 20 times a second).
+    /// A player's copy: glides toward the server's latest state (sent 20 times a second) at
+    /// an even pace (`Glide`).
     pub fn follow(&mut self, dt: f32) {
         let Some(s) = self.net_target else {
             return;
         };
-        let k = crate::util::damp(15.0, dt);
+        let k = self.glide.step(dt);
         self.pos = if self.pos.distance_squared(s.pos) > 16.0 {
             s.pos
         } else {

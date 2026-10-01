@@ -85,6 +85,10 @@ pub struct MeshData {
     pub stump_marks: Vec<glam::IVec3>,
     /// The chunk's light (see `ChunkLight`), for things drawn outside chunk meshes.
     pub light: ChunkLight,
+    /// The vertices packed for the GPU (`render::chunks::pack_mesh`, by the worker; `vertices`
+    /// is then empty), and the time the fluids' change times in them are kept relative to.
+    pub packed: Vec<crate::render::chunks::ChunkVertex>,
+    pub packed_time: f32,
 }
 
 struct Builder {
@@ -361,5 +365,7 @@ pub fn mesh_chunk(
             h: r.h,
             data: light.into(),
         },
+        packed: Vec::new(),
+        packed_time: 0.0,
     }
 }

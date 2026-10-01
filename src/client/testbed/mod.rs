@@ -34,6 +34,7 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("book", include_str!("../../../testbed/book.txt")),
     ("station", include_str!("../../../testbed/station.txt")),
     ("skin", include_str!("../../../testbed/skin.txt")),
+    ("perf", include_str!("../../../testbed/perf.txt")),
 ];
 
 /// The runs that drive the game themselves (no settings saved, the mouse not grabbed, going
@@ -496,7 +497,10 @@ impl Game {
                     mb(used),
                     retired,
                     mb(ram),
-                ))
+                ));
+                for line in self.clock.perf.take() {
+                    self.test.testbed.as_mut().unwrap().log(line);
+                }
             }
             Cmd::Lan(args) => {
                 for line in self.testbed_lan(&args) {

@@ -94,7 +94,12 @@ impl Workers {
                                 Done::Generated(p, Box::new(gen.generate_chunk(p.0, p.1)))
                             }
                             Job::Mesh { pos, ticket, nb, anim, notches } => {
-                                Done::Meshed(mesh_chunk(pos, &nb, &anim, &notches, &gen), ticket)
+                                let mut m = mesh_chunk(pos, &nb, &anim, &notches, &gen);
+                                // (the fluids' change times kept relative to the latest of
+                                // them: any time on the game's clock would do)
+                                let time = anim.iter().map(|a| a.2).fold(0.0, f32::max);
+                                crate::render::chunks::pack_mesh(&mut m, time);
+                                Done::Meshed(m, ticket)
                             }
                         }))
                         .unwrap_or(Done::Failed(pos, ticket));

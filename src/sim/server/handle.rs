@@ -42,8 +42,18 @@ impl Server {
                 }
                 // (inside the world's bounds: far out, positions stop being exact)
                 pose.pos = pose.pos.clamp(glam::Vec3::new(-3.0e7, -64.0, -3.0e7), glam::Vec3::new(3.0e7, 512.0, 3.0e7));
-                if let Some(p) = self.peer(id) {
-                    p.pose = Some(pose);
+                let joined = match self.peer(id) {
+                    Some(p) => {
+                        p.pose = Some(pose);
+                        p.joined
+                    }
+                    None => false,
+                };
+                // Passed on to the others at once: they see it move at the pace it was sent
+                // (passed on with the ticks instead, the two clocks beating against each other
+                // would now and then bring none and then two at once).
+                if joined {
+                    self.broadcast(&Msg::Poses(vec![(id, pose)]), Some(id));
                 }
             }
             Msg::Place { p, b } => {

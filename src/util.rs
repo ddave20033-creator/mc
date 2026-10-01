@@ -44,6 +44,38 @@ pub fn damp(rate: f32, dt: f32) -> f32 {
     1.0 - (-rate * dt).exp()
 }
 
+/// Following values sent 20 times a second (a mob, an item, another player) at an even pace:
+/// each new one is reached from where it is drawn in a little over a tick, so the motion is a
+/// steady glide. (An exponential chase rushes at each new value and slows before the next:
+/// the motion pulses 20 times a second.) Not yet at it when the next comes, it goes on toward
+/// that one from where it is; a value that comes late leaves it waiting a moment at the last.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Glide {
+    /// How far through the way to the latest value (0..1).
+    done: f32,
+}
+
+impl Glide {
+    /// Seconds to reach a value (a tick and a fifth: a value a frame late does not stop it).
+    const SPAN: f32 = 1.2 / crate::sim::clock::TICKS_PER_SECOND as f32;
+
+    /// A new value came: the way to it starts from where it is drawn.
+    pub fn restart(&mut self) {
+        self.done = 0.0;
+    }
+
+    /// A frame of `dt` seconds: the share of what is left of the way to go now
+    /// (`x += (target - x) * k`, like `damp`).
+    pub fn step(&mut self, dt: f32) -> f32 {
+        let left = 1.0 - self.done;
+        if left <= 1e-6 {
+            return 1.0;
+        }
+        self.done = (self.done + dt / Self::SPAN).min(1.0);
+        1.0 - (1.0 - self.done) / left
+    }
+}
+
 /// An angle wrapped into -PI..PI.
 pub fn wrap_angle(a: f32) -> f32 {
     (a + PI).rem_euclid(TAU) - PI
@@ -123,5 +155,32 @@ mod tests {
         assert_eq!(windows_safe("com1".into()), "_com1");
         assert_eq!(windows_safe("Console".into()), "Console");
         assert_eq!(windows_safe("COMx".into()), "COMx");
+    }
+
+    #[test]
+    fn a_glide_goes_at_an_even_pace_at_any_frame_rate() {
+        // A value every tick, 1 further each time: drawn, it moves the same each frame (once
+        // under way), at 60 and at 144 frames a second.
+        for fps in [60.0f32, 144.0] {
+            let dt = 1.0 / fps;
+            let (mut glide, mut x, mut target, mut clock) = (Glide::default(), 0.0f32, 0.0f32, 0.0f32);
+            let mut steps = Vec::new();
+            for frame in 0..(fps as usize * 2) {
+                let t = frame as f32 * dt;
+                if t >= clock {
+                    clock += 0.05;
+                    target += 1.0;
+                    glide.restart();
+                }
+                let was = x;
+                x += (target - x) * glide.step(dt);
+                if t > 0.5 {
+                    steps.push((x - was) / dt);
+                }
+            }
+            let (lo, hi) = steps.iter().fold((f32::MAX, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+            assert!(lo > 14.0 && hi < 26.0, "at {fps} fps the speed went {lo}..{hi} (20 a second)");
+            assert!(target - x < 1.5, "it keeps up");
+        }
     }
 }
