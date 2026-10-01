@@ -257,7 +257,7 @@ pub const BOOK_COVER: u32 = BOOK + 1;
 pub const BOOK_EDGE: u32 = BOOK + 2;
 pub const BOOK_PAGE: u32 = BOOK + 3;
 /// Pages of the guide book open in players' hands, drawn while the game runs
-/// (`game::book`): `BOOK_SHEET_COUNT` pages of `model::book::SHEET_LAYERS` layers each.
+/// (`client::book`): `BOOK_SHEET_COUNT` pages of `model::book::SHEET_LAYERS` layers each.
 pub const BOOK_SHEETS: u32 = BOOK_PAGE + 1;
 pub const BOOK_SHEET_COUNT: u32 = 12;
 /// The chapter tabs along the top of this player's guide book (`model::book::TAB_LAYERS`).
@@ -279,7 +279,7 @@ pub const REVOLVER_VIEW: u32 = GRENADE_MODEL + crate::model::grenade::PAGES;
 /// The target dummy made in Blockbench: its texture pages (`model::dummy`).
 pub const DUMMY_MODEL: u32 = REVOLVER_VIEW + crate::model::revolver_vm::PAGES * PISTOL_DIRT_LEVELS;
 /// Item icons drawn while the game runs for things as they are (a magazine as full as it
-/// is, a gun with its attachments and dirt...: `game::icons`).
+/// is, a gun with its attachments and dirt...: `client::gui::icons`).
 /// The AK-47 made in Blockbench: its texture pages (`model::ak_vm`), clean and dirtier,
 /// like the pistol's (`PISTOL_DIRT_LEVELS` sets).
 pub const AK_VIEW: u32 = DUMMY_MODEL + crate::model::dummy::PAGES;

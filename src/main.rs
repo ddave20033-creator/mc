@@ -15,7 +15,7 @@ mod content;
 mod devtools;
 mod engine;
 mod entity;
-mod game;
+mod client;
 mod item;
 mod keys;
 mod lang;
@@ -41,13 +41,13 @@ use winit::window::{Window, WindowId};
 
 #[derive(Default)]
 struct App {
-    game: Option<game::Game>,
+    game: Option<client::Game>,
     /// The start-up splash (the logo filling up), while the game gets ready.
     splash: Option<splash::Splash>,
     bench: bool,
     /// `--aa-shots <folder>`: anti-aliasing comparison pictures.
     shots: Option<std::path::PathBuf>,
-    /// `--test <script> [folder]`: a test script (see `game::testbed`).
+    /// `--test <script> [folder]`: a test script (see `client::testbed`).
     test: Option<(String, Option<std::path::PathBuf>)>,
 }
 
@@ -86,7 +86,7 @@ impl ApplicationHandler for App {
                 .create_window(attrs)
                 .expect("failed to create window"),
         );
-        let mut game = game::Game::new(window, self.bench, self.shots.clone(), self.test.clone());
+        let mut game = client::Game::new(window, self.bench, self.shots.clone(), self.test.clone());
         splash.set_progress(0.1);
         game.frame();
         self.game = Some(game);

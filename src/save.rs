@@ -327,7 +327,7 @@ pub fn load_inventory(folder: &str, out: &mut [Slot]) {
     }
 }
 
-/// The axe's cuts in trunks and the stumps of felled trees (`game::felling`).
+/// The axe's cuts in trunks and the stumps of felled trees (`client::shown::felling`).
 pub fn save_notches(folder: &str, text: &str) {
     write(dir(folder).join("notches.txt"), text.as_bytes());
 }
@@ -336,7 +336,7 @@ pub fn load_notches(folder: &str) -> String {
     fs::read_to_string(dir(folder).join("notches.txt")).unwrap_or_default()
 }
 
-/// The trunks of felled trees lying on the ground (`game::logs`).
+/// The trunks of felled trees lying on the ground (`client::shown::logs`).
 pub fn save_logs(folder: &str, text: &str) {
     write(dir(folder).join("logs.txt"), text.as_bytes());
 }

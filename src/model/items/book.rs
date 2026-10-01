@@ -1,5 +1,5 @@
 //! The guide book held open: two covers, the stacks of pages with the pages the reader is on
-//! drawn onto them (texture layers made by `game::book`), and a page turning over when its
+//! drawn onto them (texture layers made by `client::book`), and a page turning over when its
 //! reader turns one. Held in both hands in first person, and in front of the chest on the
 //! player model, where the others see which page it is open at and what is on it.
 

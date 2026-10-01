@@ -106,7 +106,7 @@ pub enum BlockItem {
 
 pub use crate::content::Creative;
 
-/// How the block's item is placed (`game::player::items`).
+/// How the block's item is placed (`client::player::items`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     /// As it is.

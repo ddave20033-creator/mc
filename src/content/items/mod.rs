@@ -4,7 +4,7 @@
 //! does to a mob, what it is as a tool, armor, food, fuel, something to smelt, a gun's part or
 //! a grenade, what the right mouse button does with it (`OnUse`), and where it is in the
 //! creative inventory. Code of its own an item has where its `OnUse` says (the game's side of
-//! using items, `game::player::items`).
+//! using items, `client::player::items`).
 //!
 //! The blocks' items are the blocks' own (`content::blocks`, `BlockItem::Own`): their lines
 //! here are made from the blocks' table, with the block's id as theirs.
@@ -77,7 +77,7 @@ pub enum GunRole {
     Attachment(u8),
 }
 
-/// What holding the item and pressing the right mouse button does (`game::player::items`).
+/// What holding the item and pressing the right mouse button does (`client::player::items`).
 /// Eating and drinking go by `food` (the button held).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OnUse {
@@ -87,9 +87,9 @@ pub enum OnUse {
     Place,
     /// Aims (a gun): nothing is opened or placed with it.
     Aim,
-    /// Readied and thrown by holding the button (a grenade, `game::tools::grenades`).
+    /// Readied and thrown by holding the button (a grenade, `client::tools::grenades`).
     Throw,
-    /// Cast by holding the button (the fishing rod, `game::tools::fishing`), unless there is
+    /// Cast by holding the button (the fishing rod, `client::tools::fishing`), unless there is
     /// something to open.
     Cast,
     /// Nothing at all (a magazine: it is loaded at the gun station).

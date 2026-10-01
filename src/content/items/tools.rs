@@ -150,7 +150,7 @@ items! {
         creative: Creative::Tools(4), ..SINGLE
     };
     /// A fishing rod: cast with the right button held (the longer, the farther), reeled in
-    /// with the mouse wheel (see `game::fishing`). Its `data` is the reel's gear (`rod_gear`).
+    /// with the mouse wheel (see `client::tools::fishing`). Its `data` is the reel's gear (`rod_gear`).
     FISHING_ROD = ItemDef {
         key: "fishing_rod", en: "Fishing Rod", hu: "Horgászbot", icon: Icon::Flat(tex::FISHING_ROD),
         durability: FISHING_ROD_DURABILITY, on_use: OnUse::Cast, creative: Creative::Tools(4), ..SINGLE

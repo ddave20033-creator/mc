@@ -1,7 +1,7 @@
 //! Trees felled with an axe, the same for the server and the players' games: which of a
 //! tree comes down when its trunk is cut through, how it falls over, and its trunk lying on
 //! the ground after, cut up piece by piece. (The chopping itself, the axe's swing and where
-//! its edge bites in, is the player's game's: `game::shown::felling`.)
+//! its edge bites in, is the player's game's: `client::shown::felling`.)
 
 use crate::item::{tool_of, ItemId, Tier, ToolKind};
 use crate::world::mesh::{stump_heights, Notch};

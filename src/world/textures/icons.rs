@@ -1,5 +1,5 @@
 //! Item icons drawn from the items' 3D models: the fixed ones made with the textures, and
-//! `render_icon` for an item as it is (drawn while the game runs, `game::gui::icons`).
+//! `render_icon` for an item as it is (drawn while the game runs, `client::gui::icons`).
 
 use super::*;
 

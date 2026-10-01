@@ -42,7 +42,7 @@ items! {
         on_use: OnUse::FillBottle, creative: Creative::Tools(4), ..ITEM
     };
     /// The guide book: held open in both hands, its pages turned with the mouse buttons; it
-    /// explains crafting, the furnaces and the guns (see `game::book`).
+    /// explains crafting, the furnaces and the guns (see `client::book`).
     GUIDE_BOOK = ItemDef {
         key: "guide_book", en: "Guide Book", hu: "Kézikönyv", icon: Icon::Flat(tex::BOOK),
         creative: Creative::Tools(4), ..SINGLE

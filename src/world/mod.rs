@@ -30,7 +30,7 @@ pub struct World {
     pub pending: FastMap<ChunkPos, Vec<(IVec3, Block)>>,
     /// The light of each meshed chunk, as the mesher flood-filled it.
     pub light: FastMap<ChunkPos, ChunkLight>,
-    /// The axe's cuts in trunks and the stumps of felled trees (`game::felling`). A block
+    /// The axe's cuts in trunks and the stumps of felled trees (`client::shown::felling`). A block
     /// changed takes its cut with it.
     pub notches: FastMap<IVec3, mesh::Notch>,
 }
