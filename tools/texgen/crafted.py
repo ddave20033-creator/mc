@@ -520,19 +520,25 @@ def paint_iron_block(seed):
 
 
 def paint_copper_block(seed):
-    """Four bevelled copper tiles, teal patina gathering in the seams."""
+    """One heavy bevelled copper slab: rivets along the frame, two flat brushed highlight
+    bands across the face, soft teal patina creeping in from the lower left corner."""
     c = Canvas(tile=False)
-    c.fill(box(0, 0, 128, 128), COPPER_T[0])
-    for y0 in (0, 64):
-        for x0 in (0, 64):
-            bevel_plate(c, COPPER_T, y0 + 1.5, x0 + 1.5, y0 + 62.5, x0 + 62.5, bevel=5, r=3)
-            rivet(c, y0 + 32, x0 + 32, COPPER_T, 3.5)
-    # patina where the tiles meet
-    for cy, cx, ry, rx in ((64, 64, 7, 9), (64, 2, 4, 7), (126, 64, 5, 8), (30, 64, 6, 3.5),
-                           (98, 126, 7, 3.5), (2, 100, 3.5, 6)):
-        p = ellipse(cy, cx, ry, rx, tile=False)
-        c.fill(p, PATINA[1])
-        c.fill(ellipse(cy - ry * 0.3, cx - rx * 0.3, ry * 0.45, rx * 0.45, tile=False), PATINA[2])
+    bevel_plate(c, COPPER_T, 0, 0, 128, 128, bevel=8, r=0)
+    face = box(8, 8, 120, 120)
+    # brushed highlight bands (diagonal, flat)
+    for o, w in ((70, 16), (100, 6)):
+        c.fill(lambda y, x, o=o, w=w: face(y, x) & (np.abs(x + y - o * 1.0) <= w / 2)
+               & (x - y > -60) & (x - y < 60), shift(COPPER_T[2], dv=0.05, ds=-0.06))
+    # patina: overlapping flat patches in the lower left corner and along the bottom edge
+    pat = union(ellipse(128, 0, 30, 34, tile=False), ellipse(125, 46, 4.5, 28, tile=False),
+                ellipse(80, 2.5, 26, 4, tile=False))
+    inner = union(ellipse(129, -2, 17, 20, tile=False), ellipse(126.5, 40, 2, 16, tile=False))
+    c.fill(pat, PATINA[1])
+    c.fill(inner, PATINA[2])
+    # rivets along the frame (not where the patina lies)
+    for cy, cx in ((4, 20), (4, 64), (4, 108), (64, 124), (124, 108), (20, 124),
+                   (108, 124), (20, 4)):
+        rivet(c, cy, cx, COPPER_T, 3.0)
     return c.finish(opaque=True)
 
 
@@ -775,20 +781,23 @@ def paint_oak_door_bottom(seed):
 
 
 def paint_white_wool(seed):
-    """Soft round tufts of different sizes heaped over each other (lower ones on top), each
-    lit on its top left with a soft grey-beige shadow on its lower right: a puffy fleece."""
+    """Knitted wool: columns of interlocking V stitches (two soft slanted loops each), in
+    close cream tones, the loops lit on their upper left; tiles seamlessly."""
     c = Canvas()
     c.fill(np.ones_like(c.alpha, bool), WOOL[0])
-    r = np.random.default_rng(seed)
-    pts = flat.scatter(seed, 26, 22)
-    for (x, y) in sorted(pts, key=lambda p: p[1] + p[0] * 0.3):
-        rad = r.uniform(13, 17)
-        d = tiled(disk(y, x, rad, tile=False))
-        c.fill(d, WOOL[1])
-        c.fill(tiled(disk(y - 1.5, x - 1.5, rad - 2.0, tile=False)), WOOL[2])
-        lit = minus(tiled(disk(y - 1.5, x - 1.5, rad - 2.0, tile=False)),
-                    tiled(disk(y + 1.0, x + 1.0, rad - 2.0, tile=False)))
-        c.fill(lit, WOOL[3])
+    cw, rh = 16.0, 14.2222  # 8 columns, 9 rows
+    for row in range(9):
+        cy = row * rh + rh / 2
+        for col in range(8):
+            cx = col * cw + cw / 2
+            for side, ang in ((-1, -0.5), (1, 0.5)):
+                lx = cx + side * 3.7
+                leg = tiled(ellipse(cy, lx, 8.6, 3.9, angle=ang, tile=False))
+                c.fill(leg, WOOL[1])
+                top = tiled(ellipse(cy - 0.9, lx - 0.6, 7.4, 3.0, angle=ang, tile=False))
+                c.fill(top, WOOL[2])
+                c.fill(minus(top, tiled(ellipse(cy + 0.6, lx + 0.7, 7.4, 3.0, angle=ang,
+                                                tile=False))), WOOL[3])
     return c.finish(opaque=True)
 
 
