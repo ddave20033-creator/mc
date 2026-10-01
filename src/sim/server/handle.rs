@@ -94,6 +94,12 @@ impl Server {
                     _ => return,
                 };
                 let Some((dmg, knock)) = checks::clamp_hit(dmg, knock, cap) else { return };
+                // (within reach of the hand, or of the bullets of their last shot, as for mobs)
+                let reach = if kind == hurt::BULLET { 400.0 } else { 8.0 };
+                let at = self.peers.iter().find(|p| p.id == target && p.joined).and_then(|p| p.pose).map(|p| p.pos);
+                if at.is_none_or(|at| at.distance(from) >= reach) {
+                    return;
+                }
                 self.attacked(Foe::Player(target), id);
                 self.send_to(target, &Msg::Hurt { dmg, from, knock, kind });
             }
