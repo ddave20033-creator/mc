@@ -24,7 +24,7 @@ pub(super) struct Gfx {
     pub(super) pack_credit: Option<(String, String)>,
     pub(super) skins: Skins,
     /// Last frame's geometry lists, to be filled again (see `frame::Scene`).
-    pub(super) scene: super::frame::Scene,
+    pub(super) scene: super::scene::Scene,
 }
 
 /// The uploaded skins by player slot (this player's own in slot 0 out of a world, and in its
