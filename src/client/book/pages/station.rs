@@ -27,8 +27,8 @@ pub(super) fn write(w: &mut Writer) {
     );
     w.head("Assemble and take apart", "Összerakás és szétszedés");
     w.text(
-        "Right-click a gun on the table and it comes apart there; its magazine goes back into your inventory. Right-click one of the parts and the parts on the table (frame, barrel, recoil spring and slide) fly to the middle and go together.",
-        "Jobb klikk egy fegyverre az asztalon, és ott szétszedi; a tára visszakerül a tárgylistádba. Jobb klikk valamelyik alkatrészre, és az asztalon lévő alkatrészek (váz, cső, helyretoló rugó és szán) középre repülnek és összeállnak.",
+        "Right-click a gun on the table and it comes apart there; its magazine is laid on the table beside the parts. Right-click one of the parts and the parts on the table (frame, barrel, recoil spring and slide) fly to the middle and go together.",
+        "Jobb klikk egy fegyverre az asztalon, és ott szétszedi; a tára az asztalra kerül az alkatrészek mellé. Jobb klikk valamelyik alkatrészre, és az asztalon lévő alkatrészek (váz, cső, helyretoló rugó és szán) középre repülnek és összeállnak.",
     );
     w.head("Clean", "Tisztítás");
     w.text(
@@ -42,7 +42,7 @@ pub(super) fn write(w: &mut Writer) {
     );
     w.head("Loading magazines", "Tárak töltése");
     w.text(
-        "Move the mouse down to the drawer: on its right are three boxes of rounds, 128 in each, the count written on them. Drop rounds from your inventory into a box, click a box to take a round out (right-click: a magazine's worth), and drag rounds onto a magazine lying on the table: they are pushed in one by one. The witness holes on its side show how many are in it.",
-        "Vidd le az egeret a fiókhoz: a jobb oldalán három doboz töltény van, mindegyikben 128 fér el, a szám rá van írva. A tárgylistádból dobj töltényt a dobozba, kattints egy dobozra, hogy kivegyél egy töltényt (jobb klikk: egy tárnyit), és húzd a töltényeket az asztalon fekvő tárra: egyenként belenyomja őket. Az oldalán lévő lyukakban látszik, mennyi van benne.",
+        "Move the mouse down to the drawer: on its right are three boxes of rounds, 128 in each, the count written on them. Drop rounds from your inventory into a box, right-click a box to take a round out (a click takes the whole box), and drag rounds onto a magazine lying on the table: they are pushed in one by one. The witness holes on its side show how many are in it.",
+        "Vidd le az egeret a fiókhoz: a jobb oldalán három doboz töltény van, mindegyikben 128 fér el, a szám rá van írva. A tárgylistádból dobj töltényt a dobozba, jobb klikk egy dobozra, hogy kivegyél egy töltényt (bal klikkel az egész dobozt kiveszed), és húzd a töltényeket az asztalon fekvő tárra: egyenként belenyomja őket. Az oldalán lévő lyukakban látszik, mennyi van benne.",
     );
 }
