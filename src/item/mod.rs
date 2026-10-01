@@ -1,5 +1,5 @@
 //! Items in use: stacks and slots, the inventory, mining, crafting, what a worn set of armor
-//! does and what a gun holds. What each item is (its id, key, names, icon, stacking, tool,
+//! does, what a gun holds and the gun station's rules. What each item is (its id, key, names, icon, stacking, tool,
 //! armor, food, fuel, smelting, gun facts, what using it does) is its line in
 //! `content::items`, re-exported here, so `crate::item::*` brings all of it.
 //!
@@ -8,6 +8,7 @@
 pub mod armor;
 pub mod crafting;
 pub mod firearm;
+pub mod gun_bench;
 pub mod inventory;
 pub mod mining;
 #[cfg(test)]
@@ -17,6 +18,7 @@ pub use crate::content::items::*;
 pub use armor::*;
 pub use crafting::*;
 pub use firearm::*;
+pub use gun_bench::*;
 pub use mining::*;
 
 use crate::world::*;

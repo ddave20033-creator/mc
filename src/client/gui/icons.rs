@@ -56,7 +56,7 @@ thread_local! {
 
 /// How dirty something looks (as drawn).
 fn dirt(st: &Stack) -> u16 {
-    crate::model::pistol_view::dirt_level(st.damage, max_damage(st.item)) as u16
+    crate::model::pistol_view::stack_dirt(st) as u16
 }
 
 /// The state of a stack its icon shows, when that is not the fixed icon's (None: the fixed

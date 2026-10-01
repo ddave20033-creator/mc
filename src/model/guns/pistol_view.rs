@@ -415,6 +415,11 @@ pub fn dirt_level(damage: u16, max: u16) -> u8 {
     ((damage as f32 / max as f32 * top as f32).round() as u32).min(top) as u8
 }
 
+/// How dirty a gun, a part of one or a magazine looks (`dirt_level`; anything else: clean).
+pub fn stack_dirt(st: &crate::item::Stack) -> u8 {
+    dirt_level(st.damage, crate::item::max_damage(st.item))
+}
+
 /// The first texture layer of the gun's pages as dirty as `dirt` (`dirt_level`).
 pub fn layers(r: &Rig, dirt: u8) -> u32 {
     crate::model::gun_view::dirty_layer(r.view, r.pages, dirt)
@@ -498,10 +503,10 @@ pub fn eyepiece(r: &Rig, mats: &[Mat4], shown: &[bool]) -> Option<(Vec3, Vec3, V
 /// The pistol on the gun station's table, taken apart ("strip") and with attachments going on
 /// ("fit_*"): which bones each part is, and the part's window of the strip animation.
 pub mod bench {
-    use crate::model::gun::{BARREL, FRAME, MAGAZINE, PARTS, SLIDE};
+    use crate::model::gun::{FRAME, MAGAZINE, PARTS};
     use crate::model::viewmodel::{add_anim, find_anim, BonePose};
     use super::Rig;
-    use crate::item::gun_mod;
+    use crate::item::{attachments_on, gun_mod};
 
     /// A set of bones (bit i: bone i).
     pub type Bones = u64;
@@ -521,16 +526,6 @@ pub mod bench {
         .iter()
         .filter(|(bit, _)| bits & bit != 0)
         .fold(0, |b, (_, name)| b | subtree(r, name))
-    }
-
-    /// The attachments that sit on a part.
-    fn attachments_on(part: usize) -> u8 {
-        match part {
-            FRAME => gun_mod::RAIL,
-            BARREL => gun_mod::SILENCER,
-            SLIDE => gun_mod::SCOPE,
-            _ => 0,
-        }
     }
 
     /// The bones a part is (`gun::FRAME` ..), without the attachments on it; with `mods`,
@@ -583,13 +578,7 @@ pub mod bench {
         if st.item == r.kind.ammo() {
             return Some((round(r), pose(r, none, 0, false, true), None, side));
         }
-        let bit = match st.item {
-            SCOPE => gun_mod::SCOPE,
-            SILENCER => gun_mod::SILENCER,
-            LASER_SIGHT => gun_mod::LASER,
-            FLASHLIGHT => gun_mod::LIGHT,
-            _ => return None,
-        };
+        let bit = attachment_bit(st.item)?;
         let bones = attachment(r, bit);
         (bones != 0).then(|| (bones, pose(r, none, bit, false, false), None, side))
     }

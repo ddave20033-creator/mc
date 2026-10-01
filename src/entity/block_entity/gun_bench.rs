@@ -84,6 +84,17 @@ impl GunBench {
         self.boxes.iter().position(|b| b.and_then(box_ammo) == Some(kind.ammo()))
     }
 
+    /// Whether a click in the rifle station's loader bay does something, with `held`: the
+    /// loader put in (held, none there), a magazine laid on it (held, the loader there and
+    /// bare), or taken out (empty-handed: the magazine on it, or the loader).
+    pub fn loader_takes(&self, held: Option<Stack>) -> bool {
+        match held {
+            None => self.loader,
+            Some(st) if st.item == crate::item::MAG_LOADER => !self.loader,
+            Some(st) => crate::item::is_gun_magazine(st.item) && self.loader && self.loader_mag.is_none(),
+        }
+    }
+
     /// Puts a stack on the table; returns its id.
     pub fn add(&mut self, stack: Stack, x: f32, z: f32, turn: f32) -> u16 {
         self.next_id = self.next_id.wrapping_add(1).max(1);

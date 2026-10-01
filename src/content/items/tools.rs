@@ -31,6 +31,9 @@ pub const TIERS: [Tier; 6] = [Tier::Wood, Tier::Stone, Tier::Iron, Tier::Gold, T
 /// From the first tool to the last.
 pub const TIER_ORDER: [Tier; 6] = [Tier::Wood, Tier::Stone, Tier::Copper, Tier::Iron, Tier::Gold, Tier::Diamond];
 
+/// The shapes each tier is made in.
+pub const TOOL_KINDS: [ToolKind; 4] = [ToolKind::Pickaxe, ToolKind::Axe, ToolKind::Shovel, ToolKind::Sword];
+
 impl Tier {
     /// Mining speed multiplier with the right tool.
     pub const fn speed(self) -> f32 {

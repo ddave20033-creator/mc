@@ -58,7 +58,8 @@ pub enum Cmd {
     Screen(String),
     /// `turn <deg/s> <secs>`: the view turning.
     Turn(f32, f32),
-    /// `set <name> <value>`: body on|off, blur on|off, hud on|off, fov <deg>, gui <scale>.
+    /// `set <name> <value>`: body on|off, blur on|off, hud on|off, fov <deg>, gui <scale>,
+    /// view <chunks>, debug on|off, dark on|off, lang en|hu.
     Set(String, String),
     /// `wait <secs>`, `frames <n>`.
     Wait(f32),

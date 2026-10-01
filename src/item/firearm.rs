@@ -117,3 +117,28 @@ pub fn set_gun_mods(s: &mut Stack, mods: u8) {
     }
     s.data = (s.data & !0x6f00) | ((mods as u16 & 0x0f) << 8) | ((mods as u16 & 0x30) << 9);
 }
+
+/// The magazine in a gun as its own item (the extended one if that is in it), with the
+/// gun's rounds and as dirty as the gun.
+pub fn magazine_in(gun: &Stack) -> Stack {
+    let standard = GunKind::of(gun.item).and_then(|k| k.magazine_item()).unwrap_or(PISTOL_MAGAZINE);
+    let item = if gun_mods(gun) & gun_mod::EXTENDED_MAGAZINE != 0 { EXTENDED_MAGAZINE } else { standard };
+    let mut mag = Stack { damage: gun.damage, ..Stack::one(item) };
+    set_gun_rounds(&mut mag, gun_rounds(gun));
+    mag
+}
+
+/// Takes the magazine out of a gun (its rounds go with it; the round in the chamber stays).
+pub fn remove_magazine(gun: &mut Stack) {
+    set_gun_state(gun, gun_state::NO_MAG, true);
+    set_gun_rounds(gun, 0);
+    set_gun_mods(gun, gun_mods(gun) & !gun_mod::EXTENDED_MAGAZINE);
+}
+
+/// Puts a magazine into a gun (its rounds, and whether it is an extended one).
+pub fn insert_magazine(gun: &mut Stack, mag: &Stack) {
+    set_gun_state(gun, gun_state::NO_MAG, false);
+    set_gun_rounds(gun, gun_rounds(mag));
+    let ext = if mag.item == EXTENDED_MAGAZINE { gun_mod::EXTENDED_MAGAZINE } else { 0 };
+    set_gun_mods(gun, (gun_mods(gun) & !gun_mod::EXTENDED_MAGAZINE) | ext);
+}

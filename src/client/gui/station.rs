@@ -136,13 +136,18 @@ pub(in crate::client) fn bench_framing(c: Vec3, right: Vec3, toward: Vec3, half_
     (cam, fwd)
 }
 
-/// Where the ray meets the horizontal plane at height `y` (in front of it).
-pub(in crate::client) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
+/// How far along the ray it meets the horizontal plane at height `y` (in front of it).
+pub(in crate::client) fn hit_plane_t(o: Vec3, d: Vec3, y: f32) -> Option<f32> {
     if d.y.abs() < 1e-5 {
         return None;
     }
     let t = (y - o.y) / d.y;
-    (t > 0.0).then(|| o + d * t)
+    (t > 0.0).then_some(t)
+}
+
+/// Where the ray meets the horizontal plane at height `y` (in front of it).
+pub(in crate::client) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
+    hit_plane_t(o, d, y).map(|t| o + d * t)
 }
 
 impl Game {

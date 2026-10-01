@@ -230,7 +230,7 @@ impl Game {
     /// How dirty the held gun looks (`pistol_view::dirt_level`).
     pub(in crate::client) fn held_gun_dirt(&self) -> u8 {
         self.held_gun()
-            .map_or(0, |(s, _)| crate::model::pistol_view::dirt_level(s.damage, max_damage(s.item)))
+            .map_or(0, |(s, _)| crate::model::pistol_view::stack_dirt(&s))
     }
 
     /// How much the gun narrows the view now (1 = not at all).
@@ -520,15 +520,9 @@ impl Game {
         if !gun_has_mag(gun) {
             return;
         }
-        let mods = gun_mods(gun);
-        let standard = GunKind::of(gun.item).and_then(|k| k.magazine_item()).unwrap_or(PISTOL_MAGAZINE);
-        let item = if mods & gun_mod::EXTENDED_MAGAZINE != 0 { EXTENDED_MAGAZINE } else { standard };
         // As dirty as it looked in the gun (like one taken out at the gun station).
-        let mut mag = Stack { damage: gun.damage, ..Stack::one(item) };
-        set_gun_rounds(&mut mag, gun_rounds(gun));
-        set_gun_rounds(gun, 0);
-        set_gun_state(gun, gun_state::NO_MAG, true);
-        set_gun_mods(gun, mods & !gun_mod::EXTENDED_MAGAZINE);
+        let mag = magazine_in(gun);
+        remove_magazine(gun);
         if self.creative() {
             return;
         }
@@ -546,11 +540,7 @@ impl Game {
             self.give(mag);
             return;
         };
-        set_gun_state(gun, gun_state::NO_MAG, false);
-        set_gun_rounds(gun, gun_rounds(&mag));
-        let mods = gun_mods(gun) & !gun_mod::EXTENDED_MAGAZINE;
-        let ext = if mag.item == EXTENDED_MAGAZINE { gun_mod::EXTENDED_MAGAZINE } else { 0 };
-        set_gun_mods(gun, mods | ext);
+        insert_magazine(gun, &mag);
     }
 
     /// The slide pulled back and let go: it takes the magazine's top round into the chamber,

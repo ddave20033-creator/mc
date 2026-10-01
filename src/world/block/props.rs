@@ -65,6 +65,8 @@ pub fn furnace_base(b: Block) -> Option<Block> {
         _ => None,
     }
 }
+/// The furnaces, in the order of their tiers (`furnace_tier` 1, 2, 3).
+pub const FURNACES: [Block; 3] = [FURNACE, BLAST_FURNACE, ADV_FURNACE];
 /// What a furnace can smelt (`item::smelt_tier`): 1 the furnace, 2 the blast furnace, 3 the
 /// advanced furnace.
 pub fn furnace_tier(b: Block) -> u8 {

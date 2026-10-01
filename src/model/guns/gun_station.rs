@@ -70,7 +70,7 @@ use crate::item::{box_ammo, box_count, BOX_MAGNUM, BOX_RIFLE};
 
 /// The rounds stand in a box nose up in rows, as many as it has (up to a full grid): across
 /// it, along it, and the station's pixels per unit of the guns' models (the same size as the
-/// rounds lying on the table, `gui::gun_station::PX`).
+/// rounds lying on the table, `gui::gun_station::table::PX`).
 const BOX_ACROSS: usize = 7;
 const BOX_ALONG: usize = 18;
 const ROUND_PX: f32 = 0.026 * 16.0;

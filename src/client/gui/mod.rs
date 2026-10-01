@@ -491,7 +491,7 @@ impl Game {
             && (self.bench_ui.spot.is_some() || self.bench_ui.drawer_spot.is_some())
             && self.me.items.cursor.is_some_and(|st| {
                 let rifle = matches!(c, Container::GunStation(p) if is_rifle_bench(self.terrain.world.geti(p)));
-                gun_station::belongs_on_bench(st.item, rifle)
+                belongs_on_bench(st.item, rifle)
             });
         if let (Some(st), false) = (self.me.items.cursor, on_bench) {
             let m = self.ui.mouse;

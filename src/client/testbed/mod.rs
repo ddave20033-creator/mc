@@ -31,6 +31,8 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("blocks", include_str!("../../../testbed/blocks.txt")),
     ("felling", include_str!("../../../testbed/felling.txt")),
     ("mobs", include_str!("../../../testbed/mobs.txt")),
+    ("book", include_str!("../../../testbed/book.txt")),
+    ("station", include_str!("../../../testbed/station.txt")),
 ];
 
 /// The runs that drive the game themselves (no settings saved, the mouse not grabbed, going
@@ -399,6 +401,11 @@ impl Game {
                     "gui" => self.settings.gui_scale = value.parse().unwrap_or(self.settings.gui_scale),
                     "view" => self.settings.render_distance = value.parse().unwrap_or(self.settings.render_distance),
                     "debug" => self.hud.debug = on,
+                    "dark" => self.settings.dark_ui = on,
+                    "lang" => {
+                        self.settings.hungarian = value == "hu";
+                        crate::lang::set_hungarian(self.settings.hungarian);
+                    }
                     _ => tb.problems.push(format!("set: unknown `{what}`")),
                 }
             }
