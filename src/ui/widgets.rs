@@ -4,7 +4,7 @@
 use super::*;
 
 impl Ui {
-    fn anim(&mut self, id: u64, on: bool) -> f32 {
+    pub(crate) fn anim(&mut self, id: u64, on: bool) -> f32 {
         let k = crate::util::damp(self.dt, 16.0);
         let v = self.anims.entry(id).or_insert(0.0);
         *v += ((on as i32 as f32) - *v) * k;
