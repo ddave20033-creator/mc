@@ -527,6 +527,11 @@ const TABLE: &[(&str, &str, &str)] = &[
     // Containers
     ("gui.inventory", "Inventory", "Tárgylista"),
     ("gui.crafting", "Crafting", "Barkácsolás"),
+    ("craft.what", "What you can make", "Mit készíthetsz"),
+    ("craft.needs", "Needs:", "Kell hozzá:"),
+    ("craft.make", "Craft", "Elkészít"),
+    ("craft.can", "Enough for {} (shift-click: all of them)", "{} darabra elég (shift-kattintás: mind)"),
+    ("craft.need_table", "Needs a crafting table nearby", "Barkácsasztal kell a közelben"),
     ("gui.trash", "Destroy Item", "Tárgy megsemmisítése"),
     ("gui.search", "Search...", "Keresés..."),
     ("gui.no_results", "No items found", "Nincs találat"),

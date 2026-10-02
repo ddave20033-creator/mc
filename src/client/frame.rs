@@ -418,6 +418,7 @@ impl Game {
         }
         self.level.particles.update(dt, &self.terrain.world);
         self.update_craft_fx(dt);
+        self.update_craft_job(dt);
         self.update_book(dt);
         if self.in_world_view() {
             self.check_stations();

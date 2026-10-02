@@ -12,6 +12,7 @@ pub(super) use jei::Jei;
 pub(super) mod hud;
 pub(crate) mod icons;
 pub(super) mod station;
+mod craft_menu;
 mod creative;
 mod draw;
 mod preview;
@@ -61,6 +62,8 @@ pub(super) struct InventoryUi {
     /// The mouse is over the open chest or table, or the inventory under it: a click there
     /// does not throw the held stack.
     station_inside: bool,
+    /// The inventory's crafting tab.
+    craft: craft_menu::CraftMenu,
 }
 
 impl InventoryUi {
@@ -79,6 +82,7 @@ impl InventoryUi {
             station_hover: None,
             station_frame: None,
             station_inside: false,
+            craft: Default::default(),
         }
     }
 
@@ -141,9 +145,14 @@ impl Game {
         let (px, py) = if c == Container::Creative {
             self.panel_below(panel_w, panel_h, TAB_H + 4.0)
         } else {
-            self.panel(panel_w, panel_h)
+            self.panel_below(panel_w, panel_h, craft_menu::INV_TAB_H + 3.0)
         };
-        let over_tabs = c == Container::Creative && self.creative_tabs(px, py, panel_w);
+        let over_tabs = if c == Container::Creative {
+            self.creative_tabs(px, py, panel_w)
+        } else {
+            self.inventory_tabs(px, py)
+        };
+        let crafting_tab = c == Container::Inventory && self.inv_ui.craft.open;
         if matches!(c, Container::Inventory | Container::Creative) {
             self.draw_effects_list(px, py, panel_w * s);
         }
@@ -151,50 +160,19 @@ impl Game {
 
         match c {
             Container::Chest(_) | Container::Crafting(_) | Container::GunStation(_) => {}
+            Container::Inventory if crafting_tab => self.craft_tab(px, py),
             Container::Inventory => {
-                let n = Self::craft_size(c);
-                // Grid origin, result slot frame (26 px) origin, arrow x and width.
-                let (grid_x, grid_y, out_x, out_y, arrow_x, arrow_w) = if n == 3 {
-                    (30.0, 17.0, 120.0, 31.0, 90.0, 24.0)
-                } else {
-                    (86.0, 18.0, 144.0, 23.0, 125.0, 17.0)
-                };
-                let title = t("gui.crafting");
-                let (tx, ty) = at(if n == 3 { 30.0 } else { 86.0 }, 6.0);
-                self.label(title, tx, ty);
-                if n == 2 {
-                    let (ax, ay) = at(26.0, 8.0);
-                    self.player_preview(ax, ay, 51.0 * s, 70.0 * s);
-                    // What is worn: the four pieces down the left, the vest by the figure.
-                    let spots: [(f32, f32); ARMOR_SLOTS] = std::array::from_fn(|i| {
-                        if i == VEST_SLOT {
-                            at(77.0, 60.0)
-                        } else {
-                            at(7.0, 8.0 + i as f32 * SLOT)
-                        }
-                    });
-                    self.armor_slots(spots, &mut hovered);
-                }
-                for i in 0..n * n {
-                    let (x, y) = at(
-                        grid_x + (i % n) as f32 * SLOT,
-                        grid_y + (i / n) as f32 * SLOT,
-                    );
-                    if self.draw_slot(x, y, self.me.items.craft[i]) {
-                        hovered = Some(SlotRef::Craft(i));
+                // The figure with what is worn down its left and the vest beside it.
+                let (ax, ay) = at(26.0, 8.0);
+                self.player_preview(ax, ay, 51.0 * s, 70.0 * s);
+                let spots: [(f32, f32); ARMOR_SLOTS] = std::array::from_fn(|i| {
+                    if i == VEST_SLOT {
+                        at(77.0, 60.0)
+                    } else {
+                        at(7.0, 8.0 + i as f32 * SLOT)
                     }
-                }
-                let (ax, ay) = at(arrow_x, out_y + 5.5);
-                self.arrow(ax, ay, arrow_w, 0.0);
-                let result = self.craft_result(c);
-                let (ox, oy) = at(out_x, out_y);
-                if self.draw_slot_sized(ox, oy, 26.0, result) {
-                    hovered = Some(SlotRef::CraftOut);
-                }
-                if n == 3 {
-                    let (lx, ly) = at(8.0, 73.0);
-                    self.label(t("gui.inventory"), lx, ly);
-                }
+                });
+                self.armor_slots(spots, &mut hovered);
                 self.inventory_slots(px, py, 84.0, &mut hovered);
             }
             Container::Creative if TABS[self.inv_ui.creative_tab] == Tab::Inventory => {
@@ -327,7 +305,7 @@ impl Game {
         }
 
         // JEI: every item beside the inventory (and the creative "inventory" tab).
-        let jei = matches!(c, Container::Inventory)
+        let jei = (matches!(c, Container::Inventory) && !crafting_tab)
             || (c == Container::Creative && TABS[self.inv_ui.creative_tab] == Tab::Inventory);
         let over_jei = jei && self.jei_panel(px + panel_w * s, &mut hovered, &mut hovered_stack);
         let panel = (px, py, panel_w * s, panel_h * s);

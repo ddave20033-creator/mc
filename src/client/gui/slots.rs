@@ -65,6 +65,7 @@ impl Game {
         self.inv_ui.drag = None;
         self.inv_ui.press_pick = None;
         self.inv_ui.search_focused = false;
+        self.inv_ui.craft.job = None;
         if let Screen::Container(c) = self.screen {
             if Self::container_pos(c).is_some() {
                 // (the last changes go to the server before closing)

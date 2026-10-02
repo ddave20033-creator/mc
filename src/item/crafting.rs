@@ -540,3 +540,88 @@ pub fn craft(grid: &[Slot], size: usize) -> Option<Stack> {
     LAST.set(Some((f, out)));
     out
 }
+
+/// A recipe as the craft menu lists it: what it makes, what it takes (each ingredient: the
+/// items that will do, and how many) and whether it needs a crafting table (bigger than 2x2).
+pub struct ListedRecipe {
+    pub result: Stack,
+    pub needs: Vec<(Vec<ItemId>, u8)>,
+    pub table: bool,
+}
+
+/// Every recipe for the craft menu, in the order of `recipes`.
+pub fn craft_list() -> &'static [ListedRecipe] {
+    static L: std::sync::OnceLock<Vec<ListedRecipe>> = std::sync::OnceLock::new();
+    L.get_or_init(|| {
+        recipes()
+            .iter()
+            .map(|r| {
+                let needs = r
+                    .keys
+                    .iter()
+                    .map(|(k, items)| {
+                        let n = r.pattern.iter().map(|row| row.chars().filter(|c| c == k).count()).sum::<usize>();
+                        (items.clone(), n as u8)
+                    })
+                    .filter(|(_, n)| *n > 0)
+                    .collect();
+                ListedRecipe { result: r.result, needs, table: r.pattern.len() > 2 || r.pattern[0].len() > 2 }
+            })
+            .collect()
+    })
+}
+
+/// How many of an ingredient's items `slots` hold.
+pub fn craft_have(slots: &[Slot], items: &[ItemId]) -> u32 {
+    slots.iter().flatten().filter(|s| items.contains(&s.item)).map(|s| s.count as u32).sum()
+}
+
+/// Takes what `needs` asks for out of `slots` (from the largest stacks first); false, with
+/// `slots` as they were, if they do not hold it all.
+pub fn craft_pay(slots: &mut [Slot], needs: &[(Vec<ItemId>, u8)]) -> bool {
+    let before = slots.to_vec();
+    for (items, n) in needs {
+        let mut left = *n;
+        while left > 0 {
+            let best = slots
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| s.filter(|s| items.contains(&s.item)).map(|s| (i, s.count)))
+                .max_by_key(|&(_, c)| c);
+            let Some((i, c)) = best else {
+                slots.copy_from_slice(&before);
+                return false;
+            };
+            let k = c.min(left);
+            inventory::take(&mut slots[i], k);
+            left -= k;
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod craft_list_tests {
+    use super::*;
+
+    #[test]
+    fn planks_from_any_log_and_a_table_from_four_planks() {
+        let planks = craft_list().iter().find(|l| l.result.item == PLANKS as ItemId).unwrap();
+        assert!(!planks.table);
+        let mut slots: Vec<Slot> = vec![Some(Stack::new(BIRCH_LOG as ItemId, 2)), None];
+        assert!(craft_pay(&mut slots, &planks.needs));
+        assert_eq!(slots[0].unwrap().count, 1);
+        let table = craft_list().iter().find(|l| l.result.item == CRAFTING_TABLE as ItemId).unwrap();
+        assert_eq!(table.needs, vec![(vec![PLANKS as ItemId], 4)]);
+        let mut few: Vec<Slot> = vec![Some(Stack::new(PLANKS as ItemId, 3))];
+        assert!(!craft_pay(&mut few, &table.needs));
+        assert_eq!(few[0].unwrap().count, 3);
+    }
+
+    #[test]
+    fn three_by_three_recipes_need_a_table() {
+        let pick = tool_id(ToolKind::Pickaxe, Tier::Wood);
+        assert!(craft_list().iter().find(|l| l.result.item == pick).unwrap().table);
+    }
+}
+

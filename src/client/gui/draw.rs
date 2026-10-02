@@ -15,18 +15,18 @@ use glam::Vec2;
 pub(super) struct Theme {
     pub(super) border: Color,
     pub(super) bevel_hi: Color,
-    bevel_lo: Color,
+    pub(super) bevel_lo: Color,
     pub(super) fill_top: Color,
     fill_bottom: Color,
     pub(super) slot: Color,
     pub(super) slot_shadow: Color,
     pub(super) slot_light: Color,
-    slot_inner: Color,
-    hover: Color,
-    label: Color,
-    label_shadow: bool,
+    pub(super) slot_inner: Color,
+    pub(super) hover: Color,
+    pub(super) label: Color,
+    pub(super) label_shadow: bool,
     pub(super) idle: Color,
-    progress: Color,
+    pub(super) progress: Color,
     pub(super) preview_top: Color,
     pub(super) preview_bottom: Color,
     pub(super) scroll_track: Color,
@@ -317,10 +317,6 @@ impl Game {
                     .solid(x + s, y + s, 16.0 * s, 16.0 * s, with_alpha(th.slot_inner, 0.8));
             }
         }
-    }
-
-    pub(super) fn panel(&mut self, pw: f32, ph: f32) -> (f32, f32) {
-        self.panel_below(pw, ph, 0.0)
     }
 
     /// A window centered together with `top` GUI pixels above it (the creative tabs).
