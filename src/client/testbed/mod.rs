@@ -539,6 +539,7 @@ impl Game {
             "credits" => Screen::Credits,
             "multi" => Screen::Multiplayer,
             "skin" => Screen::Skin,
+            "minigames" => Screen::Minigames,
             "dead" => {
                 self.me.vitals.death_message = t("death.fall").to_string();
                 Screen::Dead

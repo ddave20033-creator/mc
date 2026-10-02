@@ -610,6 +610,7 @@ impl Game {
         let action = match self.screen {
             Screen::MainMenu => screens::main_menu(&mut self.ui, skin, &mut self.menus.menu_preview),
             Screen::Skin => screens::skin_menu(&mut self.ui),
+            Screen::Minigames => screens::minigames(&mut self.ui),
             Screen::Options { in_game } => screens::options(
                 &mut self.ui,
                 &mut self.settings,

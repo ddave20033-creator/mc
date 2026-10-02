@@ -70,6 +70,7 @@ pub enum Container {
 pub enum Screen {
     MainMenu,
     Skin,
+    Minigames,
     Options {
         in_game: bool,
     },

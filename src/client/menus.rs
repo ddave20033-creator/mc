@@ -111,7 +111,7 @@ impl Game {
                 self.screen = Screen::Options { in_game };
             }
             Screen::Credits => self.screen = Screen::MainMenu,
-            Screen::Skin => self.screen = Screen::MainMenu,
+            Screen::Skin | Screen::Minigames => self.screen = Screen::MainMenu,
             _ => {}
         }
     }
@@ -122,6 +122,7 @@ impl Game {
             Action::Singleplayer => self.open_world_list(),
             Action::Multiplayer => self.open_multiplayer(),
             Action::SkinMenu => self.screen = Screen::Skin,
+            Action::Minigames => self.screen = Screen::Minigames,
             Action::OpenLan => self.open_to_lan(),
             Action::Options => {
                 self.screen = Screen::Options {

@@ -22,6 +22,7 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("menu.singleplayer", "Singleplayer", "Egyjátékos"),
     ("menu.multiplayer", "Multiplayer", "Többjátékos"),
     ("menu.skin", "Skin", "Skin"),
+    ("menu.minigames", "Minigames", "Minijátékok"),
     ("skin.soon", "Coming soon", "Hamarosan"),
     ("menu.credits", "Credits", "Készítők"),
     ("menu.options", "Options...", "Beállítások..."),

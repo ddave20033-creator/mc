@@ -40,13 +40,16 @@ pub fn main_menu(ui: &mut Ui, skin: u8, preview: &mut PreviewRotation) -> Action
     if ui.button(t("menu.multiplayer"), bx, y0 + gap, bw, bh, true) {
         act = Action::Multiplayer;
     }
-    if ui.button(t("menu.options"), bx, y0 + 2.0 * gap, bw, bh, true) {
+    if ui.button(t("menu.minigames"), bx, y0 + 2.0 * gap, bw, bh, true) {
+        act = Action::Minigames;
+    }
+    if ui.button(t("menu.options"), bx, y0 + 3.0 * gap, bw, bh, true) {
         act = Action::Options;
     }
-    if ui.button(t("menu.credits"), bx, y0 + 3.0 * gap, bw, bh, true) {
+    if ui.button(t("menu.credits"), bx, y0 + 4.0 * gap, bw, bh, true) {
         act = Action::Credits;
     }
-    if ui.button_ex(t("menu.quit"), bx, y0 + 4.0 * gap + 8.0 * s, bw, bh, true, ButtonKind::Danger) {
+    if ui.button_ex(t("menu.quit"), bx, y0 + 5.0 * gap + 8.0 * s, bw, bh, true, ButtonKind::Danger) {
         act = Action::Quit;
     }
     ui.text(VERSION, bx, h - 14.0 * s, s, rgba(120, 124, 140, 190), false);
@@ -180,12 +183,21 @@ fn draw_menu_player(ui: &mut Ui, rect: [f32; 4], skin: u8, preview: &mut Preview
 
 /// The skin screen: the skin choice is coming later, only a note says so for now.
 pub fn skin_menu(ui: &mut Ui) -> Action {
+    coming_soon(ui, t("menu.skin"))
+}
+
+/// The minigames screen: none yet, only a note says they are coming.
+pub fn minigames(ui: &mut Ui) -> Action {
+    coming_soon(ui, t("menu.minigames"))
+}
+
+fn coming_soon(ui: &mut Ui, title: &str) -> Action {
     let (w, h, s) = (ui.w, ui.h, ui.s);
     backdrop(ui, 1.1);
     let (pw, ph) = (236.0 * s, 104.0 * s);
     let (x, y) = ((w - pw) * 0.5, (h - ph) * 0.5);
     ui.panel(x, y, pw, ph);
-    ui.text_centered(t("menu.skin"), w * 0.5, y + 11.0 * s, 1.3 * s, WHITE, true);
+    ui.text_centered(title, w * 0.5, y + 11.0 * s, 1.3 * s, WHITE, true);
     ui.text_centered(t("skin.soon"), w * 0.5, y + 46.0 * s, 1.1 * s, rgba(200, 204, 216, 255), true);
     if ui.button(t("gui.back"), x + 14.0 * s, y + 76.0 * s, pw - 28.0 * s, 20.0 * s, true) {
         Action::Back

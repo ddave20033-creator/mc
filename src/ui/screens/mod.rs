@@ -7,7 +7,7 @@ mod options;
 mod packs;
 
 pub use common::{action_bar, backdrop, card_title, death, loading, pause, screen_header, PauseLan};
-pub use menu::{credits, main_menu, skin_menu, PreviewRotation};
+pub use menu::{credits, main_menu, minigames, skin_menu, PreviewRotation};
 pub use options::{key_binds, options, OptionsState};
 pub use packs::{resource_packs, PackScreen};
 
@@ -27,6 +27,7 @@ pub enum Action {
     Language,
     Multiplayer,
     SkinMenu,
+    Minigames,
     /// Pause menu: open this world to the LAN.
     OpenLan,
     /// Open a web page in the browser (clicked link).
