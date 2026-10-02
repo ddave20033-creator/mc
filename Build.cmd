@@ -14,6 +14,23 @@ if not errorlevel 1 (
     goto running
 )
 
+rem Ha a cargo nincs a PATH-ban (pl. friss telepites utan nem nyitottal uj ablakot),
+rem megnezzuk a rustup alapertelmezett helyen is.
+where cargo >nul 2>nul
+if errorlevel 1 if exist "%USERPROFILE%\.cargo\bin\cargo.exe" set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+where cargo >nul 2>nul
+if errorlevel 1 (
+    echo.
+    echo ============================================================
+    echo  HIBA: nincs telepitve a Rust ^(cargo nem talalhato^).
+    echo.
+    echo  1. Toltsd le es futtasd: https://rustup.rs  ^(rustup-init.exe^)
+    echo     - ha Visual Studio Build Tools-t ker, fogadd el
+    echo  2. Utana zard be ezt az ablakot, es inditsd ujra a Build.cmd-t.
+    echo ============================================================
+    goto end
+)
+
 echo Forditas...
 cargo build --release
 if errorlevel 1 (
