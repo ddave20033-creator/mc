@@ -28,6 +28,7 @@ mod content;
 mod engine;
 mod entity;
 mod item;
+mod minigames;
 mod model;
 mod net;
 mod render;
