@@ -71,74 +71,132 @@ pub(super) fn new_block(l: u32, x: i32, y: i32) -> [u8; 4] {
     }
 }
 
+/// The crafting table as the built-in pack draws it (`tools/texgen/crafted.py`), simpler: a
+/// dark-oak workbench with a 3x3 grid carved into its top and iron brackets on its corners;
+/// round its sides the worktop's edge, the legs and planks on a shelf at the bottom, with a
+/// pegboard of tools (a hammer, a screwdriver, a wrench) on the side and two drawers over a
+/// rack of chisels on the front.
 pub(super) fn crafting(l: u32, x: i32, y: i32) -> [u8; 4] {
     let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-    let frame = [98.0, 66.0, 36.0];
-    match l {
-        tex::CRAFTING_TOP => {
-            // 3x3 work surface matching where items are shown on top.
-            let border = fx < 10.0 || fy < 10.0 || fx > 118.0 || fy > 118.0;
-            let cell = |a: f32| {
-                let t = (a - 10.0) / 36.0;
-                (t - t.round()).abs() * 36.0 < 1.5 && a > 12.0 && a < 116.0
-            };
-            if border {
-                return col(
-                    frame,
-                    bevel(fx, fy, 0.0, 0.0, 128.0, 128.0, 6.0) * (0.9 + 0.12 * grain(l, x, y, 510)),
-                    UNTINTED,
-                );
-            }
-            if cell(fx) || cell(fy) {
-                return col(frame, 0.72, UNTINTED);
-            }
-            let p = planks(l, x, y);
-            [
-                ((p[0] as f32) * 1.04) as u8,
-                ((p[1] as f32) * 1.04) as u8,
-                ((p[2] as f32) * 1.04) as u8,
-                UNTINTED,
-            ]
+    let wood = |v: f32| col([110.0, 69.0, 41.0], v * (0.95 + 0.08 * grain(l, x, y, 510)), UNTINTED);
+    let gap = col([43.0, 26.0, 16.0], 1.0, UNTINTED);
+    let iron = |v: f32| col([170.0, 174.0, 182.0], v, UNTINTED);
+    let dark_iron = col([61.0, 64.0, 72.0], 1.0, UNTINTED);
+    let plank = |v: f32| col([185.0, 138.0, 85.0], v, UNTINTED);
+    let within = |x0: f32, y0: f32, x1: f32, y1: f32| (x0..x1).contains(&fx) && (y0..y1).contains(&fy);
+    if l == tex::CRAFTING_TOP {
+        // An iron L on each corner.
+        let (ex, ey) = (fx.min(128.0 - fx), fy.min(128.0 - fy));
+        if (3.0..10.0).contains(&ex) && (3.0..24.0).contains(&ey) || (3.0..10.0).contains(&ey) && (3.0..24.0).contains(&ex) {
+            return dark_iron;
         }
-        _ => {
-            if y < 22 {
-                return col(
-                    frame,
-                    bevel(fx, fy, 0.0, 0.0, 128.0, 22.0, 5.0) * (0.9 + 0.12 * grain(l, x, y, 511)),
-                    UNTINTED,
-                );
+        // The end rails, and the boards between them.
+        if !(14.0..114.0).contains(&fx) {
+            return wood(0.85 * bevel(fx, fy, 0.0, 0.0, 128.0, 128.0, 2.0));
+        }
+        // The grid: sunk cells, in shadow along their top and left and lit along the rest.
+        if within(26.0, 26.0, 102.0, 102.0) {
+            const CELL: f32 = 24.33;
+            let (ux, uy) = ((fx - 29.0).rem_euclid(CELL), (fy - 29.0).rem_euclid(CELL));
+            let cell = within(29.0, 29.0, 29.0 + 3.0 * CELL, 29.0 + 3.0 * CELL) && ux < 21.33 && uy < 21.33;
+            return match cell {
+                false => wood(0.62),
+                true if ux < 2.0 || uy < 2.0 => gap,
+                true if ux > 19.8 || uy > 19.8 => wood(1.3),
+                true => wood(0.92),
+            };
+        }
+        let yb = fy % 32.0;
+        if !(1.0..31.0).contains(&yb) {
+            return gap;
+        }
+        let shade = [1.0, 1.03, 0.975, 1.015][(y / 32) as usize];
+        return wood(shade * bevel(fx, yb, 14.0, 1.0, 114.0, 31.0, 2.0));
+    }
+    // Iron straps where the worktop meets the legs; the worktop's edge, the legs, the rail
+    // under the top and the shelf at the bottom.
+    if (4.0..26.0).contains(&fy) && ((2.0..16.0).contains(&fx) || (112.0..126.0).contains(&fx)) {
+        return dark_iron;
+    }
+    if fy < 18.0 {
+        return wood(if fy < 3.0 { 1.25 } else if fy >= 14.0 { 0.72 } else { 1.0 });
+    }
+    if !(16.0..112.0).contains(&fx) {
+        let inner = fx < 16.0 && fx >= 13.0 || fx >= 112.0 && fx < 115.0;
+        return wood(if inner { 0.72 } else { 0.88 });
+    }
+    if fy < 28.0 || fy >= 118.0 {
+        return wood(0.88 * bevel(fx, fy, 14.0, if fy < 28.0 { 18.0 } else { 118.0 }, 114.0, 128.0, 2.0));
+    }
+    if l == tex::CRAFTING_SIDE {
+        // The pegboard and its tools.
+        if seg_dist(fx, fy, (38.0, 48.0), (38.0, 92.0)) < 3.5 {
+            return col([138.0, 96.0, 56.0], 1.0, UNTINTED);
+        }
+        if within(28.0, 39.0, 50.0, 50.0) || within(22.0, 41.0, 29.0, 48.0) {
+            return iron(if fy < 41.0 { 1.12 } else { 1.0 });
+        }
+        if seg_dist(fx, fy, (64.0, 42.0), (64.0, 64.0)) < 5.0 {
+            return col([180.0, 72.0, 58.0], 1.0, UNTINTED);
+        }
+        if within(62.5, 62.0, 65.5, 90.0) {
+            return iron(1.0);
+        }
+        let jaw = (fx - 90.0).hypot(fy - 48.0) < 8.0 && !within(87.0, 36.0, 93.0, 49.0);
+        let ring = (3.0..6.0).contains(&(fx - 90.0).hypot(fy - 86.0));
+        if jaw || ring || within(87.0, 52.0, 93.0, 82.0) {
+            return iron(1.0);
+        }
+        if within(18.0, 33.0, 110.0, 97.0) {
+            let hole = (fx - 25.0).rem_euclid(10.0).min(10.0 - (fx - 25.0).rem_euclid(10.0)).hypot(
+                (fy - 40.0).rem_euclid(10.0).min(10.0 - (fy - 40.0).rem_euclid(10.0)),
+            ) < 1.3;
+            return col([154.0, 106.0, 62.0], if hole { 0.7 } else { bevel(fx, fy, 18.0, 33.0, 110.0, 97.0, 1.6) }, UNTINTED);
+        }
+        // Three planks lying on the shelf.
+        for (y0, x0, x1) in [(100.0, 22.0, 98.0), (106.0, 30.0, 106.0), (112.0, 18.0, 102.0)] {
+            if within(x0, y0, x1, y0 + 6.0) {
+                return plank(bevel(fx, fy, x0, y0, x1, y0 + 6.0, 1.4));
             }
-            let (px, py) = (d(x), d(y));
-            let metal = [150.0, 152.0, 158.0];
-            let handle = [120.0, 84.0, 46.0];
-            if l == tex::CRAFTING_SIDE {
-                // Saw: blade with teeth and a wooden grip.
-                let blade = px > 6.0 && px < 13.0 && py > 9.0 && py < 26.0 - (px - 6.0) * 0.4;
-                let teeth =
-                    (13.0..14.0).contains(&px) && (py as i32) % 2 == 0 && py > 9.0 && py < 24.0;
-                if blade || teeth {
-                    return col(metal, 0.95 + 0.1 * (py - 9.0) / 17.0, UNTINTED);
-                }
-                if seg_dist(px, py, (9.5, 6.5), (9.5, 9.0)) < 2.0 {
-                    return col(handle, 1.0, UNTINTED);
-                }
-            } else {
-                // Hammer and a pair of tongs.
-                if seg_dist(px, py, (22.0, 12.0), (22.0, 27.0)) < 1.1 {
-                    return col(handle, 1.0 + (22.0 - px) * 0.08, UNTINTED);
-                }
-                if seg_dist(px, py, (18.0, 11.0), (26.0, 11.0)) < 2.2 {
-                    return col(metal, 1.0 + (11.0 - py) * 0.06, UNTINTED);
-                }
-                if seg_dist(px, py, (7.0, 10.0), (10.0, 26.0)) < 0.8
-                    || seg_dist(px, py, (12.0, 10.0), (9.0, 26.0)) < 0.8
-                {
-                    return col([80.0, 80.0, 86.0], 1.0, UNTINTED);
-                }
+        }
+        return gap;
+    }
+    // Two drawers with brass pulls.
+    for (x0, x1) in [(18.0, 63.0), (65.0, 110.0)] {
+        if within(x0, 33.0, x1, 58.0) {
+            let mid = (x0 + x1) * 0.5;
+            if seg_dist(fx, fy, (mid - 8.0, 45.5), (mid + 8.0, 45.5)) < 2.3 {
+                return col([201.0, 154.0, 62.0], 1.0, UNTINTED);
             }
-            planks(l, x, y)
+            let inner = within(x0 + 4.0, 37.0, x1 - 4.0, 54.0);
+            return wood(if inner { 0.88 } else { bevel(fx, fy, x0, 33.0, x1, 58.0, 2.0) });
         }
     }
+    // The chisel rack: a bar, the chisels' grips above it and their blades below.
+    if within(18.0, 66.0, 110.0, 72.0) {
+        return wood(1.0);
+    }
+    for (k, cx) in [32.0f32, 52.0, 74.0, 96.0].into_iter().enumerate() {
+        if seg_dist(fx, fy, (cx, 63.0), (cx, 73.0)) < 4.0 {
+            return col([[138.0, 96.0, 56.0], [180.0, 72.0, 58.0], [138.0, 96.0, 56.0], [201.0, 154.0, 62.0]][k], 1.0, UNTINTED);
+        }
+        if (fx - cx).abs() < 3.0 && (72.0..90.0).contains(&fy) {
+            return iron(1.0);
+        }
+    }
+    if within(18.0, 61.0, 110.0, 98.0) {
+        return wood(0.6);
+    }
+    // Planks on the shelf, seen end on.
+    for (row, y0) in [100.0f32, 109.0].into_iter().enumerate() {
+        for k in 0..4 {
+            let x0 = 20.0 + k as f32 * 23.0 + if row == 0 { 6.0 } else { 0.0 };
+            if x0 + 20.0 <= 110.0 && within(x0, y0, x0 + 20.0, y0 + 8.0) {
+                return plank(bevel(fx, fy, x0, y0, x0 + 20.0, y0 + 8.0, 1.4));
+            }
+        }
+    }
+    gap
 }
 
 pub(super) fn furnace(l: u32, x: i32, y: i32) -> [u8; 4] {

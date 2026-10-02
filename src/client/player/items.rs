@@ -1,7 +1,7 @@
 //! What the player carries (`Items`), and using items: throwing, placing blocks, buckets,
 //! bottles, eating and drinking, and opening containers.
 
-use crate::client::{Container, Game, Screen};
+use crate::client::{Container, Game};
 use crate::entity::ItemEntity;
 use crate::content::mobs::MobKind;
 use crate::entity::player::{look_dir, raycast_fluid};
@@ -10,21 +10,12 @@ use crate::item::inventory::{Inventory, take};
 use crate::world::*;
 use glam::{IVec3, Vec3};
 
-/// The inventory and the hotbar, and what is in the hands at the item screens: on the mouse,
-/// in the crafting grid and made by it.
+/// The inventory and the hotbar, and what is on the mouse at the item screens.
 pub(in crate::client) struct Items {
     pub(in crate::client) inventory: Inventory,
     pub(in crate::client) hotbar_slot: usize,
     /// On the mouse at an item screen.
     pub(in crate::client) cursor: Slot,
-    /// The crafting grid in use: the inventory's 2x2 or an open table's 3x3 (stored back into
-    /// the table when it closes, `stash_table`).
-    pub(in crate::client) craft: [Slot; 9],
-    /// What was crafted at the open table, lying in the middle of its grid until taken.
-    pub(in crate::client) craft_out: Slot,
-    /// The ingredients sliding into the middle of the table: seconds since, and the grid as
-    /// it was.
-    pub(in crate::client) craft_fx: Option<(f32, [Slot; 9])>,
 }
 
 impl Items {
@@ -33,9 +24,6 @@ impl Items {
             inventory: Inventory::new(),
             hotbar_slot: 0,
             cursor: None,
-            craft: [None; 9],
-            craft_out: None,
-            craft_fx: None,
         }
     }
 
@@ -92,16 +80,13 @@ impl Game {
         self.level.mobs.iter().position(|m| m.id == id)
     }
 
-    /// The inventory as it is saved: items in the 2x2 grid or on the cursor count as carried
-    /// (an open crafting table keeps its own grid).
+    /// The inventory as it is saved: items on the cursor count as carried.
     pub(in crate::client) fn carried_slots(&self) -> [Slot; crate::item::inventory::SIZE] {
-        let at_table = matches!(self.screen, Screen::Container(Container::Crafting(_)));
         let mut slots = self.me.items.inventory.slots;
-        let grid = if at_table { &[][..] } else { &self.me.items.craft[..] };
         // A magazine on its way into a gun (a reload going on) is still the player's.
         let reloading = self.tools.guns.reload.is_some() && !self.creative();
-        let held = [self.me.items.cursor, self.me.items.craft_out, self.tools.guns.plan.new_mag.filter(|_| reloading)];
-        for s in grid.iter().chain(held.iter()).flatten() {
+        let held = [self.me.items.cursor, self.tools.guns.plan.new_mag.filter(|_| reloading)];
+        for s in held.iter().flatten() {
             let _ = inventory::add_to(&mut slots, *s);
         }
         slots
@@ -162,13 +147,6 @@ impl Game {
             }
             if !sneaking {
                 if hb == CRAFTING_TABLE {
-                    // Whatever was left on the table is still there.
-                    self.me.items.craft = self
-                        .level.block_entities
-                        .tables
-                        .get(&hit)
-                        .copied()
-                        .unwrap_or([None; 9]);
                     self.open_container(Container::Crafting(hit));
                     return;
                 }

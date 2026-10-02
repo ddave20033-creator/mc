@@ -1,5 +1,5 @@
-//! Item screens: the inventory and the creative inventory, and the slot handling shared
-//! with the chest and crafting table views (`station`).
+//! Item screens: the inventory (with its crafting tab, also opened at a crafting table) and
+//! the creative inventory, and the slot handling shared with the chest view (`station`).
 //! Slot interaction follows Minecraft: left click picks up / places / swaps, right click
 //! splits / places one, shift-click moves between sections, 1-9 swaps with the hotbar,
 //! dragging a held stack spreads it over slots and double-click collects matching items.
@@ -34,7 +34,7 @@ use crate::world::is_rifle_bench;
 use glam::Vec3;
 
 /// The inventory screens: the creative tabs, list and search, the JEI panel, dragging and
-/// clicking slots, and what the mouse is on at an open chest or table.
+/// clicking slots, and what the mouse is on at an open chest.
 pub(super) struct InventoryUi {
     /// Creative list scroll in rows: the target set by the wheel, and the eased position.
     creative_scroll: f32,
@@ -55,12 +55,11 @@ pub(super) struct InventoryUi {
     press_pick: Option<SlotRef>,
     /// Time and slot of the last left click, for double-click collecting.
     slot_click: (f32, Option<SlotRef>),
-    /// What the mouse points at in the open chest or on the open table, and the corners of
-    /// its highlighted slot.
+    /// What the mouse points at in the open chest, and the corners of its highlighted slot.
     pub(super) station_hover: Option<SlotRef>,
     pub(super) station_frame: Option<[Vec3; 4]>,
-    /// The mouse is over the open chest or table, or the inventory under it: a click there
-    /// does not throw the held stack.
+    /// The mouse is over the open chest, or the inventory under it: a click there does not
+    /// throw the held stack.
     station_inside: bool,
     /// The inventory's crafting tab.
     craft: craft_menu::CraftMenu,
@@ -106,8 +105,6 @@ const SLOT: f32 = 18.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum SlotRef {
     Inv(usize),
-    Craft(usize),
-    CraftOut,
     Chest(usize),
     Creative(ItemId),
     Trash,
@@ -125,9 +122,9 @@ impl Game {
             self.slot_input(c, hovered, None, inside);
             return;
         }
-        if matches!(c, Container::Chest(_) | Container::Crafting(_)) {
+        if let Container::Chest(_) = c {
             let mut hovered = self.station_screen(c);
-            // JEI beside the inventory strip, most useful at a crafting table.
+            // JEI beside the inventory strip.
             let mut hovered_stack = None;
             let strip_right = (self.ui.w + 176.0 * self.ui.s) * 0.5;
             let over_jei = self.jei_panel(strip_right, &mut hovered, &mut hovered_stack);
@@ -147,21 +144,24 @@ impl Game {
         } else {
             self.panel_below(panel_w, panel_h, craft_menu::INV_TAB_H + 3.0)
         };
+        // (opened at a crafting table, the crafting tab has every recipe)
+        let at_table = matches!(c, Container::Crafting(_));
         let over_tabs = if c == Container::Creative {
             self.creative_tabs(px, py, panel_w)
         } else {
-            self.inventory_tabs(px, py)
+            self.inventory_tabs(px, py, at_table)
         };
-        let crafting_tab = c == Container::Inventory && self.inv_ui.craft.open;
-        if matches!(c, Container::Inventory | Container::Creative) {
+        let inventory = matches!(c, Container::Inventory | Container::Crafting(_));
+        let crafting_tab = inventory && self.inv_ui.craft.open;
+        if inventory || c == Container::Creative {
             self.draw_effects_list(px, py, panel_w * s);
         }
         let at = |gx: f32, gy: f32| (px + gx * s, py + gy * s);
 
         match c {
-            Container::Chest(_) | Container::Crafting(_) | Container::GunStation(_) => {}
-            Container::Inventory if crafting_tab => self.craft_tab(px, py),
-            Container::Inventory => {
+            Container::Chest(_) | Container::GunStation(_) => {}
+            _ if crafting_tab => self.craft_tab(px, py, at_table),
+            Container::Inventory | Container::Crafting(_) => {
                 // The figure with what is worn down its left and the vest beside it.
                 let (ax, ay) = at(26.0, 8.0);
                 self.player_preview(ax, ay, 51.0 * s, 70.0 * s);
@@ -305,7 +305,7 @@ impl Game {
         }
 
         // JEI: every item beside the inventory (and the creative "inventory" tab).
-        let jei = (matches!(c, Container::Inventory) && !crafting_tab)
+        let jei = (inventory && !crafting_tab)
             || (c == Container::Creative && TABS[self.inv_ui.creative_tab] == Tab::Inventory);
         let over_jei = jei && self.jei_panel(px + panel_w * s, &mut hovered, &mut hovered_stack);
         let panel = (px, py, panel_w * s, panel_h * s);
@@ -315,7 +315,7 @@ impl Game {
 
     /// Tooltips, clicks, drags and number keys on the slot under the mouse (`hovered`;
     /// `hovered_stack` for creative items), and the stack on the cursor. A click that is not
-    /// `inside` (the window, or the chest or table and the inventory) throws the held stack.
+    /// `inside` (the window, or the chest and the inventory) throws the held stack.
     fn slot_input(
         &mut self,
         c: Container,
@@ -324,7 +324,7 @@ impl Game {
         inside: bool,
     ) {
         if !self.container_ready(c) {
-            // (the server's copy of the chest or table is still on its way)
+            // (the server's copy of the chest is still on its way)
             return;
         }
         let s = self.ui.s;
@@ -345,7 +345,6 @@ impl Game {
             if let Some(r) = hovered {
                 let st = match r {
                     SlotRef::Creative(_) => hovered_stack,
-                    SlotRef::CraftOut => self.craft_out_stack(c),
                     SlotRef::Trash => None,
                     _ => self.slot_mut(c, r).and_then(|s| *s),
                 };
@@ -384,7 +383,6 @@ impl Game {
             if middle && self.creative() && self.me.items.cursor.is_none() {
                 let st = match r {
                     SlotRef::Creative(id) => Some(Stack::one(id)),
-                    SlotRef::CraftOut => self.craft_out_stack(c),
                     SlotRef::Trash => None,
                     _ => self.slot_mut(c, r).and_then(|s| *s),
                 };
@@ -424,13 +422,7 @@ impl Game {
                 // Number key: swap with that hotbar slot.
                 // Swapping a hotbar slot with itself is a no-op (and would otherwise lose the item).
                 if r != SlotRef::Inv(d)
-                    && !matches!(
-                        r,
-                        SlotRef::CraftOut
-                            | SlotRef::Creative(_)
-                            | SlotRef::Trash
-                            | SlotRef::Armor(_)
-                    )
+                    && !matches!(r, SlotRef::Creative(_) | SlotRef::Trash | SlotRef::Armor(_))
                 {
                     let mut hot = self.me.items.inventory.slots[d].take();
                     if let Some(slot) = self.slot_mut(c, r) {
@@ -439,15 +431,8 @@ impl Game {
                     self.me.items.inventory.slots[d] = hot;
                 }
             }
-        } else if self.ui.pressed
-            && self.me.items.cursor.is_none()
-            && matches!(c, Container::Crafting(_))
-            && self.in_station()
-        {
-            // At a table with nothing in hand: a click anywhere but on a slot crafts.
-            self.craft_batch(c);
         } else if self.ui.pressed || self.ui.right_pressed {
-            // Clicking outside the window (or away from the chest or table and the inventory)
+            // Clicking outside the window (or away from the chest and the inventory)
             // throws the held stack: all of it with the left button, one with the right.
             if !inside {
                 if let Some(st) = self.me.items.cursor {

@@ -1,5 +1,5 @@
 //! The gun station: a bench two blocks wide. Opened, the camera glides over its table (as over
-//! a crafting table) and sways a little left and right with the mouse; its drawer slides out,
+//! a chest) and sways a little left and right with the mouse; its drawer slides out,
 //! the cleaning brush in it. There is nothing on the screen but the inventory along the
 //! bottom: everything happens on the table, in 3D.
 //!

@@ -1,27 +1,21 @@
-//! Chests and crafting tables without a window: the camera glides from the eye over the
-//! block, what is in it or on it lies there in 3D and is picked with the mouse, and the
-//! inventory runs along the bottom of the screen. At a table, a click anywhere but on a slot
-//! crafts what the grid makes into its middle. Closing glides the camera back into the head.
+//! Chests and gun stations without a window: the camera glides from the eye over the block,
+//! what is in it or on it lies there in 3D and is picked with the mouse, and the inventory
+//! runs along the bottom of the screen. Closing glides the camera back into the head.
 
 use crate::client::{Container, Game, Screen};
 use crate::client::gui::SlotRef;
-use crate::entity::block_entity::{
-    CRAFT_SLIDE, TABLE_CELL, chest_cell, chest_cell_at, chest_cell_size, chest_side,
-    table_cell, table_cell_at,
-};
+use crate::entity::block_entity::{chest_cell, chest_cell_at, chest_cell_size, chest_side};
 use crate::ui::{WHITE, rgba};
 use crate::util::smoothstep;
 use crate::world::mesh::CHEST_FLOOR;
-use crate::world::{
-    CRAFTING_TABLE, chest_right, facing, facing_dir, facing_of, is_chest, is_gun_bench,
-};
+use crate::world::{CRAFTING_TABLE, chest_right, facing, facing_dir, is_chest, is_gun_bench};
 use glam::{IVec3, Mat4, Vec2, Vec3};
 
 /// Vertical field of view over the block.
 const FOV: f32 = 60.0;
 /// Seconds the camera takes to glide there (and back).
 const GLIDE: f32 = 0.4;
-/// How steeply the camera looks down at the chest or table, and at a gun station.
+/// How steeply the camera looks down at the chest, and at a gun station.
 const PITCH: f32 = 55.0;
 const GUN_PITCH: f32 = 60.0;
 /// How steeply it looks down into the gun station's drawer.
@@ -30,8 +24,11 @@ const DRAWER_PITCH: f32 = 68.0;
 /// turns toward that side (degrees).
 const GUN_SWAY: f32 = 0.3;
 const GUN_TURN: f32 = 6.0;
+/// How far (from the eye to its middle) the player may get from the crafting table they
+/// opened before its screen closes: a little more than the reach it was opened from.
+const TABLE_REACH: f32 = 6.5;
 
-/// The chest or table the view is over, and how far the camera has glided.
+/// The chest or gun station the view is over, and how far the camera has glided.
 pub(in crate::client) struct Station {
     pub pos: IVec3,
     /// 0 at the player's eye .. 1 over the block.
@@ -152,19 +149,9 @@ pub(in crate::client) fn hit_plane(o: Vec3, d: Vec3, y: f32) -> Option<Vec3> {
 }
 
 impl Game {
-    /// Starts gliding over a chest or crafting table.
+    /// Starts gliding over a chest or gun station.
     pub(super) fn open_station(&mut self, c: Container) {
-        let pos = match c {
-            Container::Chest(p) => p,
-            Container::GunStation(p) => p,
-            Container::Crafting(p) => {
-                // The grid reads like a page from where the player stands.
-                let d = self.me.body.pos - (p.as_vec3() + Vec3::splat(0.5));
-                self.level.table_sides.insert(p, facing_of(d.x, d.z));
-                p
-            }
-            _ => return,
-        };
+        let (Container::Chest(pos) | Container::GunStation(pos)) = c else { return };
         let blend = match &self.station {
             Some(st) if st.pos == pos => st.blend,
             _ => 0.0,
@@ -176,61 +163,31 @@ impl Game {
         });
     }
 
-    /// Keeps the chest and table views right: one whose block is gone (mined by someone
-    /// else) closes, and a table another player has open faces them, as it does for them.
+    /// Closes a chest, gun station or crafting table screen whose block is gone (mined by
+    /// someone else), or a crafting table's that the player is no longer at (pushed away).
     pub(in crate::client) fn check_stations(&mut self) {
-        if let Screen::Container(
-            c @ (Container::Chest(p) | Container::Crafting(p) | Container::GunStation(p)),
-        ) = self.screen
-        {
-            let b = self.terrain.world.geti(p);
-            let there = match c {
-                Container::Chest(_) => is_chest(b),
-                Container::GunStation(_) => is_gun_bench(b),
-                _ => b == CRAFTING_TABLE,
-            };
-            if !there {
-                self.close_container();
-            }
-        }
-        for (p, at) in self.remote_open_blocks() {
-            if self.terrain.world.geti(p) == CRAFTING_TABLE {
-                let d = at - (p.as_vec3() + Vec3::splat(0.5));
-                self.level.table_sides.insert(p, facing_of(d.x, d.z));
-            }
+        let Screen::Container(c @ (Container::Chest(p) | Container::Crafting(p) | Container::GunStation(p))) =
+            self.screen
+        else {
+            return;
+        };
+        let b = self.terrain.world.geti(p);
+        let there = match c {
+            Container::Chest(_) => is_chest(b),
+            Container::GunStation(_) => is_gun_bench(b),
+            _ => b == CRAFTING_TABLE && self.eye().distance(p.as_vec3() + Vec3::splat(0.5)) <= TABLE_REACH,
+        };
+        if !there {
+            self.close_container();
         }
     }
 
-    /// Which way a crafting table's grid faces (toward who last used it).
-    pub(in crate::client) fn table_side(&self, p: IVec3) -> u8 {
-        self.level.table_sides.get(&p).copied().unwrap_or(2)
-    }
-
-    /// The ingredients slide into the middle of the table.
-    pub(in crate::client) fn update_craft_fx(&mut self, dt: f32) {
-        if let Some((t, _)) = &mut self.me.items.craft_fx {
-            *t += dt;
-            if *t > CRAFT_SLIDE + 1.0 {
-                self.me.items.craft_fx = None;
-            }
-        }
-    }
-
-    /// The camera over the open chest or table: (position, look direction), framed so what is
-    /// in or on it fills the upper part of the screen above the inventory.
+    /// The camera over the open chest or gun station: (position, look direction), framed so
+    /// what is in or on it fills the upper part of the screen above the inventory.
     fn station_target(&self, st: &Station, aspect: f32) -> Option<(Vec3, Vec3)> {
         let w = &self.terrain.world;
         let b = w.geti(st.pos);
-        let (center, toward, half_w, half_d, pitch) = if b == CRAFTING_TABLE {
-            let toward = facing_dir(self.table_side(st.pos)).as_vec3();
-            (
-                st.pos.as_vec3() + Vec3::new(0.5, 1.05, 0.5),
-                toward,
-                0.4,
-                0.4,
-                PITCH,
-            )
-        } else if is_gun_bench(b) {
+        let (center, toward, half_w, half_d, pitch) = if is_gun_bench(b) {
             // The long table, the camera swaying along it with the mouse.
             let table = self.bench_table(st.pos)?;
             let center = table.center + Vec3::Y * 0.03;
@@ -264,7 +221,7 @@ impl Game {
     }
 
     /// The camera for this frame, gliding between the eye (`cam`, `fwd`, `fov` in degrees)
-    /// and the open chest or table. Ends the glide once it is back at the eye.
+    /// and the open chest or gun station. Ends the glide once it is back at the eye.
     pub(in crate::client) fn station_camera(
         &mut self,
         cam: Vec3,
@@ -278,9 +235,7 @@ impl Game {
         };
         let open = matches!(
             self.screen,
-            Screen::Container(
-                Container::Chest(p) | Container::Crafting(p) | Container::GunStation(p)
-            ) if p == pos
+            Screen::Container(Container::Chest(p) | Container::GunStation(p)) if p == pos
         );
         if !open {
             self.inv_ui.station_hover = None;
@@ -315,15 +270,14 @@ impl Game {
         )
     }
 
-    /// The camera is (partly) over a chest or table: the hand and the first-person body are
-    /// not drawn.
+    /// The camera is (partly) over a chest or gun station: the hand and the first-person body
+    /// are not drawn.
     pub(in crate::client) fn in_station(&self) -> bool {
         self.station.is_some()
     }
 
-    /// The chest or table view: the inventory along the bottom, the counts of the stacks lying
-    /// in the chest or on the table, and what the mouse points at (in 3D or in the
-    /// inventory).
+    /// The chest view: the inventory along the bottom, the counts of the stacks lying in the
+    /// chest, and what the mouse points at (in 3D or in the inventory).
     pub(super) fn station_screen(&mut self, c: Container) -> Option<SlotRef> {
         let (w, h, s) = (self.ui.w, self.ui.h, self.ui.s);
         let mut hovered = None;
@@ -386,37 +340,6 @@ impl Game {
                 }
             }
         }
-        if let Container::Crafting(p) = c {
-            let side = self.table_side(p);
-            let toward = facing_dir(side).as_vec3();
-            let right = (-toward).cross(Vec3::Y);
-            let top = p.y as f32 + 1.0;
-            let point = hit_plane(o, d, top).filter(|_| ready && !over_inventory);
-            if let Some(i) = point.and_then(|pt| table_cell_at(p, side, pt)) {
-                // What was crafted lies in the middle, over that cell.
-                let made = i == 4 && self.me.items.craft_out.is_some();
-                hovered = Some(if made {
-                    SlotRef::CraftOut
-                } else {
-                    SlotRef::Craft(i)
-                });
-                let c = table_cell(p, side, i) + Vec3::Y * 0.002;
-                let (x, z) = (right * TABLE_CELL * 0.47, toward * TABLE_CELL * 0.47);
-                frame = Some([c - x - z, c + x - z, c + x + z, c - x + z]);
-            }
-            let label = |i: usize| table_cell(p, side, i) + toward * 0.05 + right * 0.06;
-            for (i, st) in self.me.items.craft.iter().enumerate() {
-                if let Some(st) = st.filter(|st| st.count > 1) {
-                    if i != 4 || self.me.items.craft_out.is_none() {
-                        labels.push((label(i), st.count));
-                    }
-                }
-            }
-            let settled = self.me.items.craft_fx.is_none_or(|(t, _)| t >= CRAFT_SLIDE);
-            if let Some(st) = self.me.items.craft_out.filter(|st| st.count > 1 && settled) {
-                labels.push((label(4) + Vec3::Y * 0.04, st.count));
-            }
-        }
         // How many of each stack there are, under it.
         for (at, n) in labels {
             if let Some(sp) = view.to_screen(at) {
@@ -427,13 +350,12 @@ impl Game {
         }
         self.inv_ui.station_hover = hovered.filter(|r| !matches!(r, SlotRef::Inv(_)));
         self.inv_ui.station_frame = frame;
-        // Over the chest (both halves) or the table itself, or the inventory.
+        // Over the chest (both halves), or the inventory.
         let blocks: Vec<IVec3> = match c {
             Container::Chest(p) => {
                 let (a, b) = self.chest_halves(p);
                 std::iter::once(a).chain(b).collect()
             }
-            Container::Crafting(p) => vec![p],
             _ => Vec::new(),
         };
         let over_block = blocks.iter().any(|q| {

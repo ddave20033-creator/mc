@@ -1,20 +1,17 @@
 //! The inventory's crafting tab: what can be made down the left (what the inventory holds
 //! enough for first), the chosen one's ingredients on the right, and the button that makes it.
 //! Making takes a moment (a bar fills on the button); shift-click queues as many as the
-//! inventory holds enough for. Recipes bigger than 2x2 need a crafting table nearby.
+//! inventory holds enough for. Opened with the inventory key it lists what is made by hand;
+//! opened at a crafting table, every recipe.
 
 use super::*;
 use crate::item::{craft_have, craft_list, craft_pay, ListedRecipe};
 use crate::app::lang::tf;
 use crate::ui::{lerp_color, with_alpha, WHITE};
-use crate::world::CRAFTING_TABLE;
-use glam::IVec3;
 
 /// The list: columns and rows of recipe slots seen at once.
 const COLS: usize = 4;
 const ROWS: usize = 8;
-/// How far (in blocks) a crafting table counts as nearby.
-const TABLE_REACH: i32 = 4;
 
 /// The open tab and what is being made.
 #[derive(Default)]
@@ -35,12 +32,11 @@ pub(super) struct Job {
     time: f32,
 }
 
-/// One line of the list: a result, the recipe it is made with here, whether that can be made
-/// now and whether a table is missing for it.
+/// One slot of the list: a result by the recipe it is made with here, and whether that can
+/// be made now.
 struct Entry {
     recipe: usize,
     ready: bool,
-    no_table: bool,
 }
 
 /// Seconds making one takes: a little more for more ingredients.
@@ -50,37 +46,24 @@ fn craft_time(r: &ListedRecipe) -> f32 {
 }
 
 impl Game {
-    /// A crafting table within reach of the player.
-    fn near_crafting_table(&self) -> bool {
-        let at = self.me.body.pos.floor().as_ivec3();
-        let r = TABLE_REACH;
-        (-r..=r).any(|x| {
-            (-2..=3).any(|y| (-r..=r).any(|z| self.terrain.world.geti(at + IVec3::new(x, y, z)) == CRAFTING_TABLE))
-        })
-    }
-
-    /// Each result once: the first of its recipes that can be made now (else its first), the
-    /// ones that can be made first.
+    /// Each result made here (at a crafting table everything, else what is made by hand)
+    /// once: the first of its recipes that can be made now (else its first), the ones that
+    /// can be made first.
     fn craft_entries(&self, table: bool) -> Vec<Entry> {
         let list = craft_list();
         let slots = self.me.items.inventory.slots;
+        let here = |j: usize| table || list[j].hand;
         let mut seen: Vec<ItemId> = Vec::new();
         let mut out = Vec::new();
-        for (i, r) in list.iter().enumerate() {
+        for (i, r) in list.iter().enumerate().filter(|&(i, _)| here(i)) {
             if seen.contains(&r.result.item) {
                 continue;
             }
             seen.push(r.result.item);
-            let ways = (i..list.len()).filter(|&j| list[j].result.item == r.result.item);
-            let can = |j: usize| (table || !list[j].table) && craft_pay(&mut slots.clone(), &list[j].needs);
-            let entry = match ways.clone().find(|&j| can(j)) {
-                Some(j) => Entry { recipe: j, ready: true, no_table: false },
-                None => {
-                    // (one whose ingredients are there but whose table is not says so)
-                    let blocked = ways.clone().find(|&j| craft_pay(&mut slots.clone(), &list[j].needs));
-                    let j = blocked.unwrap_or(i);
-                    Entry { recipe: j, ready: false, no_table: !table && list[j].table }
-                }
+            let mut ways = (i..list.len()).filter(|&j| here(j) && list[j].result.item == r.result.item);
+            let entry = match ways.find(|&j| craft_pay(&mut slots.clone(), &list[j].needs)) {
+                Some(j) => Entry { recipe: j, ready: true },
+                None => Entry { recipe: i, ready: false },
             };
             out.push(entry);
         }
@@ -122,15 +105,16 @@ impl Game {
         }
     }
 
-    /// The tabs over the inventory window ("Inventory", "Crafting"); true when the mouse is on
-    /// them.
-    pub(super) fn inventory_tabs(&mut self, px: f32, py: f32) -> bool {
+    /// The tabs over the inventory window ("Inventory", and "Crafting" or at a crafting
+    /// `table` "Crafting Table"); true when the mouse is on them.
+    pub(super) fn inventory_tabs(&mut self, px: f32, py: f32, table: bool) -> bool {
         let s = self.ui.s;
         let th = self.theme();
         let fs = (s * 0.75).round().max(1.0);
         let mut over = false;
         let mut x = px;
-        for (i, label) in [t("gui.inventory"), t("gui.crafting")].into_iter().enumerate() {
+        let crafting = if table { t("gui.crafting_table") } else { t("gui.crafting") };
+        for (i, label) in [t("gui.inventory"), crafting].into_iter().enumerate() {
             let open = (i == 1) == self.inv_ui.craft.open;
             let w = (self.ui.text_width(label, fs) + 14.0 * s).round();
             let h = INV_TAB_H * s;
@@ -157,11 +141,11 @@ impl Game {
         over
     }
 
-    /// The crafting tab inside the inventory window at (px, py).
-    pub(super) fn craft_tab(&mut self, px: f32, py: f32) {
+    /// The crafting tab inside the inventory window at (px, py), with every recipe at a
+    /// crafting `table`.
+    pub(super) fn craft_tab(&mut self, px: f32, py: f32, table: bool) {
         let s = self.ui.s;
         let at = |gx: f32, gy: f32| (px + gx * s, py + gy * s);
-        let table = self.near_crafting_table();
         let entries = self.craft_entries(table);
         let list = craft_list();
         let th = self.theme();
@@ -206,6 +190,13 @@ impl Game {
             }
             if chosen {
                 frame(&mut self.ui, x, y, SLOT * s, s, th.progress);
+            }
+        }
+        if !table {
+            // By hand only a few things: the rest is made at a crafting table.
+            let y = gy + (entries.len().div_ceil(COLS) as f32 * SLOT + 5.0) * s;
+            for (i, line) in self.ui.wrap(t("craft.more_at_table"), lw - 3.0 * s, fs).iter().take(3).enumerate() {
+                self.ui.text(line, gx + s, y + i as f32 * 9.0 * fs, fs, rgba(150, 150, 158, 255), th.label_shadow);
             }
         }
         // The scroll bar.
@@ -259,48 +250,42 @@ impl Game {
             self.ui.text(&text, x + 19.0 * s, y + 6.0 * s, fs, c, th.label_shadow);
         }
 
-        // The button, or why it cannot be made here.
+        // The button.
         let (bx, by, bw, bh) = (px + 94.0 * s, py + 136.0 * s, 75.0 * s, 20.0 * s);
-        if e.no_table {
-            for (i, line) in self.ui.wrap(t("craft.need_table"), bw, fs).iter().take(3).enumerate() {
-                self.ui.text_centered(line, cx, by + (1.0 + i as f32 * 8.0) * s, fs, rgba(236, 120, 96, 255), th.label_shadow);
-            }
+        let can = self.craftable_count(&r.needs);
+        let job = self.inv_ui.craft.job.as_ref().filter(|j| j.recipe == e.recipe);
+        let progress = job.map(|j| j.time / craft_time(r));
+        let queued = job.map_or(0, |j| j.left);
+        let enabled = e.ready || job.is_some();
+        let hovered = self.ui.hit(bx, by, bw, bh);
+        self.ui.rect(bx - s, by - s, bw + 2.0 * s, bh + 2.0 * s, th.border, 3.0 * s);
+        let fill = if !enabled {
+            th.idle
+        } else if hovered {
+            lerp_color(th.slot_light, th.progress, 0.35)
         } else {
-            let can = self.craftable_count(&r.needs);
-            let job = self.inv_ui.craft.job.as_ref().filter(|j| j.recipe == e.recipe);
-            let progress = job.map(|j| j.time / craft_time(r));
-            let queued = job.map_or(0, |j| j.left);
-            let enabled = e.ready || job.is_some();
-            let hovered = self.ui.hit(bx, by, bw, bh);
-            self.ui.rect(bx - s, by - s, bw + 2.0 * s, bh + 2.0 * s, th.border, 3.0 * s);
-            let fill = if !enabled {
-                th.idle
-            } else if hovered {
-                lerp_color(th.slot_light, th.progress, 0.35)
-            } else {
-                th.slot_light
-            };
-            self.ui.rect(bx, by, bw, bh, fill, 2.0 * s);
-            if let Some(k) = progress {
-                self.ui.rect(bx, by, (bw * k.clamp(0.0, 1.0)).max(2.0 * s), bh, with_alpha(th.progress, 0.85), 2.0 * s);
-            }
-            let label = if queued > 1 {
-                format!("{} ({queued})", t("craft.make"))
-            } else {
-                t("craft.make").to_string()
-            };
-            let tw = self.ui.text_width(&label, s);
-            let tc = if enabled { WHITE } else { rgba(150, 150, 158, 255) };
-            self.ui.text(&label, (bx + (bw - tw) * 0.5).round(), (by + (bh - 7.0 * s) * 0.5).round(), s, tc, true);
-            if hovered && enabled {
-                self.ui.set_tooltip(&tf("craft.can", &[&can]));
-            }
-            if hovered && self.ui.pressed && can > 0 {
-                let more = if self.ui.shift { can } else { 1 };
-                match &mut self.inv_ui.craft.job {
-                    Some(j) if j.recipe == e.recipe => j.left = (j.left + more).min(can.max(j.left)),
-                    job => *job = Some(Job { recipe: e.recipe, left: more, time: 0.0 }),
-                }
+            th.slot_light
+        };
+        self.ui.rect(bx, by, bw, bh, fill, 2.0 * s);
+        if let Some(k) = progress {
+            self.ui.rect(bx, by, (bw * k.clamp(0.0, 1.0)).max(2.0 * s), bh, with_alpha(th.progress, 0.85), 2.0 * s);
+        }
+        let label = if queued > 1 {
+            format!("{} ({queued})", t("craft.make"))
+        } else {
+            t("craft.make").to_string()
+        };
+        let tw = self.ui.text_width(&label, s);
+        let tc = if enabled { WHITE } else { rgba(150, 150, 158, 255) };
+        self.ui.text(&label, (bx + (bw - tw) * 0.5).round(), (by + (bh - 7.0 * s) * 0.5).round(), s, tc, true);
+        if hovered && enabled {
+            self.ui.set_tooltip(&tf("craft.can", &[&can]));
+        }
+        if hovered && self.ui.pressed && can > 0 {
+            let more = if self.ui.shift { can } else { 1 };
+            match &mut self.inv_ui.craft.job {
+                Some(j) if j.recipe == e.recipe => j.left = (j.left + more).min(can.max(j.left)),
+                job => *job = Some(Job { recipe: e.recipe, left: more, time: 0.0 }),
             }
         }
         if let Some(st) = hovered_stack {

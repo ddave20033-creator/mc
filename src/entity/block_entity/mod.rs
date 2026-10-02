@@ -1,10 +1,10 @@
-//! Block entities: furnaces (smelting and grilling), chests and crafting tables with their
-//! contents, and their models: chest lids, and the items lying in chests, on tables and
-//! on furnaces; and gun stations with what lies on them.
+//! Block entities: furnaces (smelting and grilling), chests with their contents, and their
+//! models: chest lids, and the items lying in chests and on furnaces; and gun stations with
+//! what lies on them.
 //!
 //! - `furnace`: smelting and grilling.
 //! - `gun_bench`: what lies on a gun station and the last change there.
-//! - `render`: the models, and where slots lie in chests and on tables.
+//! - `render`: the models, and where slots lie in chests.
 
 mod furnace;
 mod gun_bench;
@@ -13,9 +13,8 @@ mod render;
 pub use furnace::{doneness, grill_box, part, Doneness, Furnace, Grilled, BURN_TIME, FLIP_TIME, GRILL_TIME};
 pub use gun_bench::{bench_event, BenchEvent, BenchItem, GunBench, LOADER_ROUND};
 pub use render::{
-    build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow,
-    build_table_items, build_table_made, chest_cell, chest_cell_at, chest_cell_size, chest_side,
-    furnace_flame_spot, table_cell, table_cell_at, CRAFT_SLIDE, TABLE_CELL,
+    build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow, chest_cell,
+    chest_cell_at, chest_cell_size, chest_side, furnace_flame_spot,
 };
 
 use crate::item::{Slot, Stack};
@@ -28,8 +27,6 @@ use glam::IVec3;
 pub struct BlockEntities {
     pub furnaces: FastMap<IVec3, Furnace>,
     pub chests: FastMap<IVec3, Box<[Slot; 27]>>,
-    /// Crafting tables keep whatever is left in their 3x3 grid.
-    pub tables: FastMap<IVec3, [Slot; 9]>,
     /// Gun stations (by their left half) and what lies on them.
     pub benches: FastMap<IVec3, GunBench>,
 }
@@ -57,52 +54,33 @@ impl BlockEntities {
         }
     }
 
-    /// What is in the chest (both halves of a double one) or crafting table at `p`, as it is
-    /// sent (`Msg::Container`): its kind and its slots.
+    /// What is in the chest (both halves of a double one) at `p`, as it is sent
+    /// (`Msg::Container`): its kind and its slots.
     pub fn container(&self, w: &World, p: IVec3) -> Option<(u8, Vec<Slot>)> {
-        let b = w.geti(p);
-        if is_chest(b) {
-            self.chests.get(&p)?;
-            Some((container::CHEST, self.chest_slots(w, p)))
-        } else if b == CRAFTING_TABLE {
-            Some((container::TABLE, self.tables.get(&p).copied().unwrap_or([None; 9]).to_vec()))
-        } else {
-            None
+        if !is_chest(w.geti(p)) {
+            return None;
         }
+        self.chests.get(&p)?;
+        Some((container::CHEST, self.chest_slots(w, p)))
     }
 
-    /// Stores what a `Msg::Container` says is in the chest or crafting table at `p`.
+    /// Stores what a `Msg::Container` says is in the chest at `p`.
     pub fn apply_container(&mut self, w: &World, p: IVec3, kind: u8, slots: &[Slot]) {
-        let get = |i: usize| slots.get(i).copied().flatten();
-        match kind {
-            container::CHEST => {
-                let n = if crate::sim::rules::chest_halves(w, p).1.is_some() { 54 } else { 27 };
-                let all: Vec<Slot> = (0..n).map(get).collect();
-                self.set_chest_slots(w, p, &all);
-            }
-            container::TABLE => {
-                let grid: [Slot; 9] = std::array::from_fn(get);
-                if grid.iter().any(|s| s.is_some()) {
-                    self.tables.insert(p, grid);
-                } else {
-                    self.tables.remove(&p);
-                }
-            }
-            _ => {}
+        if kind == container::CHEST {
+            let n = if crate::sim::rules::chest_halves(w, p).1.is_some() { 54 } else { 27 };
+            let all: Vec<Slot> = (0..n).map(|i| slots.get(i).copied().flatten()).collect();
+            self.set_chest_slots(w, p, &all);
         }
     }
 
     /// The block at `p` is now `b`: a block entity there of another kind is gone (a furnace,
-    /// chest, table or gun station broken).
+    /// chest or gun station broken).
     pub fn forget_unless(&mut self, p: IVec3, b: Block) {
         if !is_furnace(b) {
             self.furnaces.remove(&p);
         }
         if !is_chest(b) {
             self.chests.remove(&p);
-        }
-        if b != CRAFTING_TABLE {
-            self.tables.remove(&p);
         }
         if !is_gun_bench(b) {
             self.benches.remove(&p);
@@ -117,9 +95,6 @@ impl BlockEntities {
         }
         if let Some(c) = self.chests.remove(&p) {
             out.extend(c.iter().flatten().copied());
-        }
-        if let Some(t) = self.tables.remove(&p) {
-            out.extend(t.iter().flatten().copied());
         }
         if let Some(b) = self.benches.remove(&p) {
             // What lies on it (the boxes of rounds belong to it: their rounds drop), and the

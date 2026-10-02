@@ -141,9 +141,6 @@ pub fn save_entities(
     for (p, c) in &be.chests {
         s += &format!("chest:{}:{}\n", pos_str(*p), slots_str(&c[..]));
     }
-    for (p, t) in &be.tables {
-        s += &format!("table:{}:{}\n", pos_str(*p), slots_str(&t[..]));
-    }
     // What lies on the gun stations: each thing's stack and where (x/z/turn), `|` between.
     for (p, b) in &be.benches {
         let items: Vec<String> = b
@@ -245,10 +242,13 @@ pub fn load_entities(
                 parse_slots(parts[2], &mut slots[..]);
                 be.chests.insert(p, slots);
             }
+            // What lay on a crafting table's old 3x3 grid (tables no longer hold anything):
+            // it lies on top of the table, to be picked up.
             "table" if parts.len() >= 3 => {
                 let mut slots = [None; 9];
                 parse_slots(parts[2], &mut slots);
-                be.tables.insert(p, slots);
+                let at = p.as_vec3() + Vec3::new(0.5, 1.1, 0.5);
+                items.extend(slots.into_iter().flatten().map(|st| ItemEntity::new(at, Vec3::ZERO, st, 0.0)));
             }
             "bench" if parts.len() >= 3 => {
                 let mut bench = crate::entity::GunBench::default();
@@ -309,7 +309,7 @@ pub fn apply_notches(w: &mut crate::world::World, text: &str) {
 }
 
 #[cfg(test)]
-mod bench_tests {
+mod tests {
     use super::*;
 
     #[test]
@@ -337,5 +337,22 @@ mod bench_tests {
         assert_eq!(got.items.len(), 2);
         assert_eq!(got.items[0].stack, mag);
         assert_eq!(crate::item::box_rounds(&got.items[1].stack), 40);
+    }
+
+    #[test]
+    fn what_lay_on_an_old_crafting_table_grid_lies_on_the_table() {
+        let folder = "zz_old_table_save_test";
+        let _ = fs::create_dir_all(dir(folder));
+        let mut grid: [Slot; 9] = [None; 9];
+        grid[0] = Some(Stack::new(crate::world::PLANKS as crate::item::ItemId, 3));
+        grid[4] = Some(Stack::one(crate::item::STICK));
+        let line = format!("table:{}:{}\n", pos_str(IVec3::new(2, 64, -5)), slots_str(&grid));
+        write(dir(folder).join("entities.txt"), line.as_bytes());
+        let mut items = Vec::new();
+        load_entities(folder, &mut BlockEntities::default(), &mut Vec::new(), &mut items, &mut Vec::new());
+        let _ = fs::remove_dir_all(dir(folder));
+        let stacks: Vec<Stack> = items.iter().map(|it| it.stack).collect();
+        assert_eq!(stacks, vec![grid[0].unwrap(), grid[4].unwrap()]);
+        assert!(items.iter().all(|it| it.pos.y > 65.0 && it.pos.x > 2.0 && it.pos.x < 3.0));
     }
 }

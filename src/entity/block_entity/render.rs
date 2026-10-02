@@ -1,5 +1,5 @@
 //! Models of block entities and where things lie on them: chest lids and doors, the items in
-//! chests, on crafting tables and in and on furnaces, and the slot highlights.
+//! chests and in and on furnaces, and the slot highlights.
 
 use super::furnace::{grill_box, Furnace, FLIP_TIME};
 use crate::item::{icon, Icon, ItemId, Slot, Stack, BUCKET, COAL, LAVA_BUCKET};
@@ -301,106 +301,6 @@ pub fn build_door(out: &mut Vec<Vertex>, p: IVec3, b: Block, open: f32, sky: u8,
     }
 }
 
-/// Spacing of the 3x3 grid drawn on the crafting table's top (about 3.3 of 16 pixels).
-pub const TABLE_CELL: f32 = 0.207;
-
-/// A table's grid as seen by someone standing on its `side` (a facing: the direction from
-/// the table to them): (top center, their right, toward them).
-fn table_top(p: IVec3, side: u8) -> (Vec3, Vec3, Vec3) {
-    let toward = facing_dir(side).as_vec3();
-    (
-        p.as_vec3() + Vec3::new(0.5, 1.0, 0.5),
-        (-toward).cross(Vec3::Y),
-        toward,
-    )
-}
-
-/// Where cell `i` of a crafting table's grid is, read like a page from `side` (cell 4 is the
-/// middle, where what is crafted appears).
-pub fn table_cell(p: IVec3, side: u8, i: usize) -> Vec3 {
-    let (o, right, toward) = table_top(p, side);
-    o + right * ((i % 3) as f32 - 1.0) * TABLE_CELL + toward * ((i / 3) as f32 - 1.0) * TABLE_CELL
-}
-
-/// The grid cell of a crafting table under `point` on its top.
-pub fn table_cell_at(p: IVec3, side: u8, point: Vec3) -> Option<usize> {
-    let (o, right, toward) = table_top(p, side);
-    let x = (point - o).dot(right) / TABLE_CELL + 1.5;
-    let z = (point - o).dot(toward) / TABLE_CELL + 1.5;
-    if !(0.0..3.0).contains(&x) || !(0.0..3.0).contains(&z) {
-        return None;
-    }
-    Some(z as usize * 3 + x as usize)
-}
-
-/// Items left in a crafting table grid, lying on its top in a 3x3 layout facing whoever
-/// last used it from `side`; `lift` is the cell under the mouse.
-#[allow(clippy::too_many_arguments)]
-pub fn build_table_items(
-    out: &mut Vec<Vertex>,
-    p: IVec3,
-    side: u8,
-    grid: &[Slot; 9],
-    lift: Option<usize>,
-    sky: u8,
-    blk: u8,
-) {
-    let light = vertex_light(sky, blk);
-    let toward = facing_dir(side).as_vec3();
-    let face_yaw = toward.x.atan2(toward.z);
-    for (i, st) in grid.iter().enumerate() {
-        let Some(st) = st else { continue };
-        let c = table_cell(p, side, i);
-        // A little turn per slot so it looks placed by hand.
-        let turn = ((p.x * 31 + p.z * 17 + i as i32 * 7).rem_euclid(9)) as f32 * 0.07 - 0.28;
-        let up = if lift == Some(i) { 0.04 } else { 0.0 };
-        lying_item(out, c, face_yaw + turn, 0.2, up, st, light);
-    }
-}
-
-/// Seconds the ingredients take to slide together into the middle of the table.
-pub const CRAFT_SLIDE: f32 = 0.3;
-
-/// What was crafted at a table, lying in the middle of the grid (over whatever is left there).
-/// `t` is the seconds since it was made: the ingredients (`used`, one of each cell) slide into
-/// the middle, shrinking, and it swells up there. `hovered`: lifted a little.
-#[allow(clippy::too_many_arguments)]
-pub fn build_table_made(
-    out: &mut Vec<Vertex>,
-    p: IVec3,
-    side: u8,
-    made: &Stack,
-    used: &[Slot; 9],
-    t: f32,
-    hovered: bool,
-    sky: u8,
-    blk: u8,
-) {
-    let light = vertex_light(sky, blk);
-    let toward = facing_dir(side).as_vec3();
-    let face_yaw = toward.x.atan2(toward.z);
-    let middle = table_cell(p, side, 4);
-    let k = (t / CRAFT_SLIDE).clamp(0.0, 1.0);
-    if k < 1.0 {
-        let ease = k * k * (3.0 - 2.0 * k);
-        for (i, st) in used.iter().enumerate() {
-            let Some(st) = st else { continue };
-            let at = table_cell(p, side, i).lerp(middle, ease) + Vec3::Y * 0.02;
-            let turn = face_yaw + ease * 2.0;
-            lying_item(out, at, turn, 0.2 * (1.0 - 0.6 * ease), 0.0, st, light);
-        }
-    }
-    // It appears as they meet, a little bigger at first, then settles: within the middle
-    // cell, just above whatever is left there.
-    let grow = ((k - 0.7) / 0.3).clamp(0.0, 1.0);
-    if grow > 0.0 {
-        let pop = 1.0 + 0.15 * (grow * PI).sin() * (1.0 - (t - CRAFT_SLIDE).clamp(0.0, 1.0));
-        let up = 0.02 + if hovered { 0.03 } else { 0.0 };
-        let size = TABLE_CELL * 0.78 * grow * pop;
-        lying_item(out, middle, face_yaw, size, up, made, light);
-    }
-}
-
 /// What lies on and in a furnace: meat on the corners of its top (with the side on the fire
 /// underneath, turning over while flipped), and what is being smelted in its mouth.
 #[allow(clippy::too_many_arguments)]
@@ -697,9 +597,6 @@ mod tests {
                     let c = chest_cell(q, facing, side, i);
                     assert_eq!(chest_cell_at(q, facing, side, c), Some(i));
                 }
-            }
-            for i in 0..9 {
-                assert_eq!(table_cell_at(q, facing, table_cell(q, facing, i)), Some(i));
             }
         }
     }

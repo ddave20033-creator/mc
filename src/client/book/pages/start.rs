@@ -2,7 +2,7 @@
 
 use super::{El, Writer};
 use crate::item::*;
-use crate::world::{CHEST, CRAFTING_TABLE, FURNACE, PLANKS, TORCH};
+use crate::world::{CHEST, CRAFTING_TABLE, FURNACE, TORCH};
 
 pub(super) fn write(w: &mut Writer) {
     w.chapter(("Getting Started", "Első lépések"), ("Start", "Kezdés"));
@@ -12,28 +12,27 @@ pub(super) fn write(w: &mut Writer) {
     );
     w.head("Your first tools", "Az első eszközök");
     w.text(
-        "Punch a tree to get logs. Logs make planks, planks make sticks and a crafting table. At the table you can make a wooden pickaxe: with it, go for stone.",
-        "Üss meg egy fát, hogy rönköt kapj. A rönkből deszka lesz, a deszkából bot és barkácsasztal. Az asztalon fa csákányt készíthetsz, azzal pedig jöhet a kő.",
+        "Chop a tree to get logs. Planks are not crafted: saw the logs into planks at a sawbench (you make one by hand from logs). Planks make sticks and a crafting table, and at the table you can make a wooden pickaxe: with it, go for stone.",
+        "Vágj ki egy fát, hogy rönköt kapj. A deszkát nem barkácsolod: a rönköt fűrészasztalon fűrészeled deszkára (azt kézzel készíted rönkből). A deszkából bot és barkácsasztal lesz, az asztalnál pedig fa csákányt készíthetsz, azzal jöhet a kő.",
     );
-    for id in [PLANKS as ItemId, STICK, CRAFTING_TABLE as ItemId, tool_id(ToolKind::Pickaxe, Tier::Wood)] {
+    for id in [STICK, CRAFTING_TABLE as ItemId, tool_id(ToolKind::Pickaxe, Tier::Wood)] {
         w.recipe(id);
     }
     w.head("Crafting", "Barkácsolás");
     let inv = &w.keys.0;
     let text = if w.hu {
-        format!("Az {inv} gombbal nyílik a tárgylistád, benne egy 2x2-es barkácsráccsal. A nagyobb receptekhez a barkácsasztal 3x3-as rácsa kell: kattints rá jobb gombbal, és a nézet az asztal fölé úszik. Rakd a tárgyakat az asztal rácsára.")
+        format!("Az {inv} gombbal nyílik a tárgylistád; a Barkácsolás fülén az van, amit kézzel elkészíthetsz: csak néhány alapdolog. Minden máshoz barkácsasztal kell: kattints rá jobb gombbal, és a tárgylistád a Barkácsasztal fülön nyílik meg, rajta minden recepttel.")
     } else {
-        format!("Press {inv} to open your inventory: it has a 2x2 crafting grid. Bigger recipes need the 3x3 grid of a crafting table: right-click it and the view glides over the table. Lay the items onto its grid.")
+        format!("Press {inv} to open your inventory: its Crafting tab lists what you can make by hand, only a few basic things. Everything else needs a crafting table: right-click one and your inventory opens on its Crafting Table tab, with every recipe.")
     };
     w.push(El::Text(text));
     w.bullet(
-        "At the table, click anywhere off the slots with an empty hand: it crafts a whole stack into the middle of the table.",
-        "Az asztalnál üres kézzel kattints bárhová a mezőkön kívül: egy egész köteget elkészít az asztal közepére.",
+        "Pick what to make from the list (what you have enough for comes first): the ingredients show on the right. Craft makes one; shift-click makes as many as you have enough for.",
+        "Válaszd ki a listából, mit készítenél (elöl az, amihez elég minden): jobb oldalt látod a hozzávalókat. Az Elkészít gomb egyet készít, shift-kattintással annyit, amennyire elég.",
     );
-    w.bullet("A recipe can sit anywhere on the grid, and works mirrored too.", "A recept bárhol lehet a rácson, és tükrözve is működik.");
     w.bullet(
-        "Where a cell in this book keeps changing, any of those items will do (any log, coal or charcoal).",
-        "Ahol ebben a könyvben egy mező váltakozik, ott bármelyik tárgy jó (bármilyen rönk, szén vagy faszén).",
+        "The recipes in this book show the ingredients laid out; where a cell keeps changing, any of those items will do (coal or charcoal, say).",
+        "A könyv receptjei kirakva mutatják a hozzávalókat; ahol egy mező váltakozik, ott bármelyik tárgy jó (például szén vagy faszén).",
     );
     for id in [TORCH as ItemId, CHEST as ItemId, FURNACE as ItemId, GUIDE_BOOK] {
         w.recipe(id);

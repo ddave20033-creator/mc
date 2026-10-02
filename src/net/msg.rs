@@ -315,7 +315,7 @@ pub enum Msg {
         p: IVec3,
         bench: GunBench,
     },
-    /// Contents of a chest or crafting table.
+    /// Contents of a chest.
     Container {
         p: IVec3,
         kind: u8,

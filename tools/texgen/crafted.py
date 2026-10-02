@@ -231,26 +231,15 @@ def paint_stone_bricks(seed):
 
 
 # ---------------------------------------------------------------------------- crafting table
+# A sturdy dark-oak workbench: a thick top of boards with a 3 x 3 grid carved into it and iron
+# brackets on its corners; legs and rails round a pegboard with tools hanging on it (side)
+# or drawers and a rack of chisels (front); lumber on the shelf at the bottom.
 
-TOP_WOOD = tones("#d2a46a", 4, 0.12)
-
-
-def table_body(seed: int) -> Canvas:
-    """Side/front base: a plank panel between two corner posts, under a thick top rail."""
-    c = Canvas(tile=False)
-    planks(c, seed, (32, 32, 32, 32), (64, 24, 96, 40), knots=False)
-    # corner posts
-    for x0, x1 in ((0, 14), (114, 128)):
-        p = box(0, x0, 128, x1)
-        c.fill(p, OAK[1])
-        rim(c, p, OAK[2], OAK[0], 2.0)
-    # top rail (the overhanging worktop)
-    top = box(0, 0, 22, 128)
-    c.fill(top, TOP_WOOD[2])
-    c.fill(box(0, 0, 3, 128), TOP_WOOD[3])
-    c.fill(box(17, 0, 22, 128), OAK[0])
-    c.fill(box(22, 14, 25, 114), OAK_GAP)  # shadow under the worktop
-    return c
+BENCH = tones("#6e4529", 4, 0.13)        # dark oak: dark .. light
+BENCH_GAP = hexc("#2b1a10")
+PEGBOARD = tones("#9a6a3e", 3, 0.1)
+BRASS = tones("#c99a3e", 3, 0.12)
+HANDLE_RED = tones("#b4483a", 3, 0.12)
 
 
 def metal(c, shape, t=IRON, w=1.6):
@@ -258,94 +247,157 @@ def metal(c, shape, t=IRON, w=1.6):
     rim(c, shape, t[3], t[0], w)
 
 
+def bench_board(c: Canvas, shape, k: int = 2) -> None:
+    """A dark-oak part, raised: tone `k` with light and shadow rims."""
+    c.fill(shape, BENCH[k])
+    rim(c, shape, BENCH[min(k + 1, 3)], BENCH[max(k - 1, 0)], 2.0)
+
+
+def bench_body(lumber) -> Canvas:
+    """Side/front base: the worktop's edge on top, a leg down each side, a rail under the top
+    and a shelf at the bottom with `lumber(c)` lying on it; the middle (y 30..98, x 16..112)
+    is left for the face's own things, on a dark gap."""
+    c = Canvas(tile=False)
+    c.fill(box(0, 0, 128, 128), BENCH_GAP)
+    # the shelf board and what lies on it
+    lumber(c)
+    bench_board(c, box(118, 14, 128, 114), 1)
+    # legs, the rail under the top, the worktop's thick edge (overhanging the legs)
+    for x0, x1 in ((0, 16), (112, 128)):
+        bench_board(c, box(18, x0, 128, x1), 1)
+        c.fill(box(18, x1 - 3 if x0 else x0, 128, x1 if x0 == 0 else x0 + 3), BENCH[0])
+    bench_board(c, box(18, 14, 28, 114), 1)
+    top = box(0, 0, 18, 128)
+    c.fill(top, BENCH[2])
+    c.fill(box(0, 0, 3, 128), BENCH[3])
+    c.fill(box(14, 0, 18, 128), BENCH[0])
+    c.fill(box(28, 16, 31, 112), BENCH_GAP)  # shadow under the rail
+    # iron straps where the top meets the legs, with rivets
+    for x in (2, 112):
+        strap = box(4, x, 26, x + 14, r=2)
+        metal(c, strap, DARK_IRON, 1.4)
+        for ry in (9, 21):
+            c.fill(disk(ry, x + 7, 1.8, tile=False), DARK_IRON[3])
+    return c
+
+
+def boards_lying(c: Canvas) -> None:
+    """Three planks lying on the shelf, seen from their long side."""
+    for i, (y0, x0, x1) in enumerate(((100, 22, 98), (106, 30, 106), (112, 18, 102))):
+        b = box(y0, x0, y0 + 6, x1, r=1.5)
+        t = shift(OAK[2], dv=(0.0, 0.04, -0.03)[i])
+        c.fill(b, t)
+        rim(c, b, shift(t, dv=0.09, ds=-0.06), shift(t, dv=-0.16, ds=0.05), 1.4)
+
+
+def board_ends(c: Canvas) -> None:
+    """Planks stacked on the shelf, seen end on: two rows of short rectangles."""
+    for row, y0 in enumerate((100, 109)):
+        for k in range(4):
+            x0 = 20 + k * 23 + (0 if row else 6)
+            if x0 + 20 > 110:
+                continue
+            b = box(y0, x0, y0 + 8, x0 + 20, r=1.5)
+            t = shift(OAK[2], dv=(0.03, -0.02, 0.0, 0.05)[k])
+            c.fill(b, t)
+            rim(c, b, shift(t, dv=0.09, ds=-0.06), shift(t, dv=-0.16, ds=0.05), 1.4)
+            c.fill(box(y0 + 3.5, x0 + 4, y0 + 4.5, x0 + 16), shift(t, dv=-0.1))
+
+
 def paint_crafting_table_side(seed):
-    """A saw hanging on the panel."""
-    c = table_body(seed)
-    # hook
-    c.fill(disk(38, 64, 3, tile=False), DARK_IRON[2])
-    # blade: a long trapezoid with a toothed lower edge
-    blade = poly([(26, 46), (98, 46), (98, 66), (34, 82), (26, 82)])
-    teeth = poly([p for k in range(9) for p in ((26 + k * 8, 82), (30 + k * 8, 87))] + [(98, 66)])
-    metal(c, union(blade), IRON, 2.0)
-    c.fill(lambda y, x: teeth(y, x) & ~blade(y, x) & (x < 92), IRON[1])
-    c.fill(disk(52, 88, 3, tile=False), IRON[0])
-    # handle: a rounded grip with an eye
-    hnd = box(42, 92, 90, 112, r=7)
+    """A pegboard with a hammer, a screwdriver and a wrench hanging on it."""
+    c = bench_body(boards_lying)
+    panel = box(33, 18, 97, 110, r=2)
+    c.fill(panel, PEGBOARD[1])
+    rim(c, panel, PEGBOARD[2], PEGBOARD[0], 1.6)
+    for hy in range(40, 96, 10):
+        for hx in range(25, 108, 10):
+            c.fill(disk(hy, hx, 1.3, tile=False), PEGBOARD[0])
+    # hammer: handle down, head across the top, a claw on its right
+    hnd = capsule((38, 48), (38, 92), 7)
     c.fill(hnd, STICK[1])
-    rim(c, hnd, STICK[2], STICK[0], 2.0)
-    c.fill(box(52, 98, 74, 106, r=4), OAK_GAP)
+    rim(c, hnd, STICK[2], STICK[0], 1.6)
+    head = union(box(39, 28, 50, 50, r=2), box(41, 22, 48, 29, r=1))
+    metal(c, head, IRON, 1.8)
+    # screwdriver: a red grip and a steel shaft
+    c.fill(disk(37, 64, 2.4, tile=False), DARK_IRON[1])
+    grip = capsule((64, 42), (64, 64), 10)
+    c.fill(grip, HANDLE_RED[1])
+    rim(c, grip, HANDLE_RED[2], HANDLE_RED[0], 1.6)
+    shaft = box(64, 62.5, 90, 65.5, r=1)
+    metal(c, shaft, IRON, 1.0)
+    # wrench: an open jaw on top, a ring at the bottom
+    jaw = minus(disk(48, 90, 8, tile=False), box(36, 87, 49, 93))
+    ring_ = minus(disk(86, 90, 6, tile=False), disk(86, 90, 3, tile=False))
+    wrench = union(jaw, box(52, 87, 82, 93, r=1.5), ring_)
+    metal(c, wrench, IRON, 1.6)
+    c.fill(disk(37, 90, 2.4, tile=False), DARK_IRON[1])
     return c.finish(opaque=True)
 
 
 def paint_crafting_table_front(seed):
-    """A drawer with a round knob and a hammer and a try square on the rack above it."""
-    c = table_body(seed)
-    dr = box(78, 22, 116, 106, r=4)
-    c.fill(dr, OAK[2])
-    rim(c, dr, OAK[3], OAK[0], 2.5)
-    c.fill(box(84, 28, 110, 100, r=3), OAK[1])
-    c.fill(box(84, 28, 86.5, 100), OAK[0])
-    knob = disk(97, 64, 6, tile=False)
-    c.fill(knob, DARK_IRON[2])
-    rim(c, knob, DARK_IRON[3], DARK_IRON[0], 1.6)
-    # rack hooks
-    for hx in (44, 86):
-        c.fill(disk(32, hx, 2.5, tile=False), DARK_IRON[1])
-    # hammer (hanging head down)
-    hh = box(30, 34, 70, 42, r=3)
-    c.fill(hh, STICK[1])
-    rim(c, hh, STICK[2], STICK[0], 1.6)
-    head = box(58, 26, 72, 54, r=3)
-    metal(c, head, IRON, 2.0)
-    # try square (an L of wood and steel)
-    blade = box(36, 80, 44, 108, r=2)
-    metal(c, blade, IRON, 1.6)
-    stock = box(30, 78, 72, 88, r=2)
-    c.fill(stock, STICK[1])
-    rim(c, stock, STICK[2], STICK[0], 1.6)
-    for k in range(4):
-        c.fill(box(38, 92 + k * 4, 41, 93.5 + k * 4), IRON[0])
+    """Two drawers with brass pulls, and a rack of chisels under them."""
+    c = bench_body(board_ends)
+    for x0, x1 in ((18, 63), (65, 110)):
+        dr = box(33, x0, 58, x1, r=3)
+        bench_board(c, dr, 2)
+        c.fill(box(37, x0 + 4, 54, x1 - 4, r=2), BENCH[1])
+        c.fill(box(37, x0 + 4, 39, x1 - 4), BENCH[0])
+        pull = capsule(((x0 + x1) / 2 - 8, 45.5), ((x0 + x1) / 2 + 8, 45.5), 4.5)
+        c.fill(moved_shape(pull, 1.5, 1.5), BENCH[0])
+        c.fill(pull, BRASS[1])
+        rim(c, pull, BRASS[2], BRASS[0], 1.2)
+    # the chisel rack: a bar with four chisels hanging through it, blades down
+    c.fill(box(61, 18, 98, 110), BENCH[0])
+    for k, x in enumerate((32, 52, 74, 96)):
+        blade = poly([(x - 3, 72), (x + 3, 72), (x + 3.5 - k * 0.3, 92 - k * 2), (x - 3.5 + k * 0.3, 92 - k * 2)])
+        metal(c, blade, IRON, 1.3)
+        grip = capsule((x, 63), (x, 73), 8)
+        t = (STICK, HANDLE_RED, STICK, BRASS)[k]
+        c.fill(grip, t[1])
+        rim(c, grip, t[2], t[0], 1.4)
+    bar = box(66, 18, 72, 110, r=1)
+    bench_board(c, bar, 2)
     return c.finish(opaque=True)
 
 
 def paint_crafting_table_top(seed):
-    """A workbench top: dark wood border, a pale board with a measuring grid (a ruler with
-    ticks along its top edge) and a mallet and a pencil lying on it."""
+    """The worktop: dark-oak boards between two end rails, a 3 x 3 grid carved into the
+    middle (sunk cells: shadow on their top/left, light on their bottom/right) and iron
+    brackets on the corners."""
     c = Canvas(tile=False)
-    c.fill(box(0, 0, 128, 128), OAK[1])
-    rim(c, box(0, 0, 128, 128), OAK[2], OAK[0], 3.0)
-    board = box(10, 10, 118, 118, r=4)
-    c.fill(board, TOP_WOOD[2])
-    c.fill(minus(board, box(12, 12, 120, 120, r=4)), OAK[0])
-    # measuring grid: 3 x 3 squares
-    for k in (1, 2):
-        g = 12 + k * 35.33
-        c.fill(box(12, g - 0.75, 116, g + 0.75), TOP_WOOD[1])
-        c.fill(box(g - 0.75, 12, g + 0.75, 116), TOP_WOOD[1])
-    # ruler ticks along the board's top and left edges
-    for k in range(1, 12):
-        t = 12 + k * 9.6
-        ln = 7 if k % 3 == 0 else 4
-        c.fill(box(12, t - 0.8, 12 + ln, t + 0.8), OAK[0])
-        c.fill(box(t - 0.8, 12, t + 0.8, 12 + ln), OAK[0])
-    # mallet lying diagonally (handle bottom left, head top right)
-    hd = capsule((34, 96), (78, 52), 7)
-    c.fill(moved_shape(hd, 2, 2), TOP_WOOD[0])
-    c.fill(hd, STICK[1])
-    rim(c, hd, STICK[2], STICK[0], 1.6)
-    head = poly([(68, 38), (82, 24), (102, 44), (88, 58)])
-    c.fill(moved_shape(head, 2.5, 2.5), TOP_WOOD[0])
-    c.fill(head, OAK[2])
-    rim(c, head, OAK[3], OAK[0], 2.2)
-    c.fill(poly([(68, 38), (82, 24), (85, 27), (71, 41)]), OAK_GAP)
-    c.fill(poly([(99, 41), (102, 44), (88, 58), (85, 55)]), OAK_GAP)
-    # pencil
-    pen = capsule((70, 104), (104, 86), 5)
-    c.fill(moved_shape(pen, 1.5, 1.5), TOP_WOOD[0])
-    c.fill(pen, hexc("#d9a43a"))
-    c.fill(lambda y, x: pen(y, x) & (x > 98), hexc("#efd2a0"))
-    c.fill(disk(86.6, 104.6, 1.8, tile=False), hexc("#3a3a40"))
-    c.fill(lambda y, x: pen(y, x) & (x < 75), hexc("#d2685c"))
+    c.fill(box(0, 0, 128, 128), BENCH_GAP)
+    for i, (y0, y1) in enumerate(rows_of((32, 32, 32, 32))):
+        b = box(y0 + 1, 14, y1 - 1, 114, r=1.5)
+        t = shift(BENCH[2], dv=(0.0, 0.03, -0.025, 0.015)[i])
+        c.fill(b, t)
+        rim(c, b, shift(t, dv=0.08, ds=-0.05), shift(t, dv=-0.12, ds=0.04), 1.6)
+        gy = y0 + (11, 21, 14, 19)[i]
+        c.fill(capsule((20 + i * 9, gy), (64 + i * 9, gy), 1.8), shift(t, dv=-0.06))
+    for x0, x1 in ((0, 14), (114, 128)):
+        bench_board(c, box(0, x0, 128, x1), 1)
+    # the carved grid
+    c.fill(box(26, 26, 102, 102, r=4), BENCH[0])
+    for gy in range(3):
+        for gx in range(3):
+            y0, x0 = 29 + gy * 24.33, 29 + gx * 24.33
+            cell = box(y0, x0, y0 + 21.33, x0 + 21.33, r=2)
+            c.fill(cell, shift(BENCH[1], dv=0.02))
+            c.fill(cell, shift(BENCH[1], dv=0.02))
+            c.fill(lambda y, x, cell=cell: cell(y, x) & ~moved_shape(cell, 2.0, 2.0)(y, x), BENCH_GAP)
+            c.fill(lambda y, x, cell=cell: cell(y, x) & ~moved_shape(cell, -1.5, -1.5)(y, x), BENCH[3])
+    # corner brackets: an iron L on each corner, with rivets
+    for cy, cx, sy, sx in ((0, 0, 1, 1), (0, 128, 1, -1), (128, 0, -1, 1), (128, 128, -1, -1)):
+        def span(a, b, s):
+            return (a, b) if s > 0 else (b, a)
+        ya, yb = span(cy + sy * 3, cy + sy * 24, sy)
+        xa, xb = span(cx + sx * 3, cx + sx * 10, sx)
+        yc, yd = span(cy + sy * 3, cy + sy * 10, sy)
+        xc, xd = span(cx + sx * 3, cx + sx * 24, sx)
+        bracket = union(box(ya, xa, yb, xb, r=1.5), box(yc, xc, yd, xd, r=1.5))
+        metal(c, bracket, DARK_IRON, 1.4)
+        for ry, rx in ((cy + sy * 6.5, cx + sx * 6.5), (cy + sy * 19, cx + sx * 6.5), (cy + sy * 6.5, cx + sx * 19)):
+            c.fill(disk(ry, rx, 1.7, tile=False), DARK_IRON[3])
     return c.finish(opaque=True)
 
 

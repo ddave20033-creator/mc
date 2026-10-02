@@ -194,8 +194,7 @@ pub(crate) struct Server {
     // The players.
     peers: Vec<Peer>,
     lan: Option<crate::net::Server>,
-    /// Crafting table grids and furnaces as the players last got them.
-    tables_sent: FastMap<IVec3, [crate::item::Slot; 9]>,
+    /// Furnaces as the players last got them.
     furnaces_sent: FastMap<IVec3, (Vec<u8>, Vec<u8>, f32)>,
     /// The owner has the game paused and nobody else is in: the world stands still.
     paused: bool,
@@ -230,7 +229,6 @@ impl Server {
             rng: Rng::new(crate::world::save::now_secs() as u32 ^ meta.seed),
             peers: Vec::new(),
             lan: None,
-            tables_sent: FastMap::default(),
             furnaces_sent: FastMap::default(),
             paused: false,
             stop: None,

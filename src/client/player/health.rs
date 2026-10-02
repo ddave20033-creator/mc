@@ -216,12 +216,12 @@ impl Game {
         self.me.vitals.death_message = t(cause).to_string();
         let msg = self.me.vitals.death_message.clone();
         self.say(msg, chat::WHITE);
-        // Everything you carry drops where you died (a crafting table keeps its own grid); a
-        // magazine being put in goes back among it first.
+        // Everything you carry drops where you died; a magazine being put in goes back among
+        // it first.
         self.cancel_reload();
         self.inv_ui.drag = None;
         if let Screen::Container(c) = self.screen {
-            // (an open chest or table: its last changes go to the server, and it is closed)
+            // (an open chest: its last changes go to the server, and it is closed)
             if Self::container_pos(c).is_some() {
                 self.net_container_sync();
                 self.net_container_closed();
@@ -230,14 +230,10 @@ impl Game {
                 self.close_gun_station();
             }
         }
-        self.stash_table(true);
-        let mut loose: Vec<Stack> = self.me.items.craft.iter_mut().filter_map(|s| s.take()).collect();
-        loose.extend(self.me.items.cursor.take());
+        let mut loose: Vec<Stack> = self.me.items.cursor.take().into_iter().collect();
         if !self.creative() {
             loose.extend(self.me.items.inventory.armor.iter_mut().filter_map(|s| s.take()));
         }
-        loose.extend(self.me.items.craft_out.take());
-        self.me.items.craft_fx = None;
         if !self.creative() {
             let center = self.me.body.pos + Vec3::Y * 0.8;
             let mut stacks: Vec<Stack> = self
@@ -251,7 +247,7 @@ impl Game {
                 self.spawn_drop(center, s);
             }
         } else {
-            // Creative keeps the inventory; the 2x2 grid and the cursor go back into it.
+            // Creative keeps the inventory; the cursor goes back into it.
             for s in loose {
                 self.give(s);
             }

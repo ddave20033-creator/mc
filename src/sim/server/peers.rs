@@ -1,13 +1,13 @@
 //! The players on the server: their connections (the owner's in memory, LAN players' over
 //! TCP), joining and leaving, and what they are told every tick: the others' poses, the
-//! mobs, items and falling blocks near them, block changes, open containers, what lies on
-//! crafting tables and in furnaces, and the time.
+//! mobs, items and falling blocks near them, block changes, open containers, what lies in
+//! furnaces, and the time.
 
 use super::Server;
 use crate::entity::Furnace;
 use crate::item::Slot;
 use crate::app::lang::{t, tf};
-use crate::net::{container, pose_flags, Conn, EntitySync, Frame, ItemNet, Msg, PlayerState, Pose, PROTOCOL};
+use crate::net::{pose_flags, Conn, EntitySync, Frame, ItemNet, Msg, PlayerState, Pose, PROTOCOL};
 use crate::world::save::rle;
 use crate::world::*;
 use glam::{IVec3, Vec3};
@@ -99,11 +99,6 @@ fn chunk_in_view(feet: Vec3, c: ChunkPos, view: i32) -> bool {
     (c.0 - at.0).pow(2) + (c.1 - at.1).pow(2) <= r * r
 }
 
-/// The items on a crafting table (everyone sees them lying on top of it).
-fn table_msg(p: IVec3, grid: &[Slot; 9]) -> Msg {
-    Msg::Container { p, kind: container::TABLE, slots: grid.to_vec() }
-}
-
 impl Server {
     /// The game running this server joins it, as the world's owner.
     pub(super) fn add_owner(&mut self, conn: Conn) {
@@ -180,12 +175,6 @@ impl Server {
         }
     }
 
-    pub(super) fn send_frame_to(&self, id: u8, f: &Frame) {
-        if let Some(p) = self.peers.iter().find(|p| p.id == id && p.joined) {
-            p.conn.send_frame(f);
-        }
-    }
-
     /// To every player (but `except`), encoded once.
     pub fn broadcast(&self, m: &Msg, except: Option<u8>) {
         if self.peers.iter().any(|p| p.joined && Some(p.id) != except) {
@@ -236,7 +225,7 @@ impl Server {
         crate::world::save::write(self.player_file(name), &Msg::Save(state.clone()).encode());
     }
 
-    /// A player said hello: they get the world (its edited chunks, what lies on its tables...)
+    /// A player said hello: they get the world (its edited chunks, the gun stations...)
     /// and the others are told; or they are refused (another version, a name taken).
     pub(super) fn welcome(&mut self, id: u8, proto: u16, name: String, view: u8) {
         let name: String = name.trim().chars().take(16).collect();
@@ -287,7 +276,6 @@ impl Server {
             .map(|p| Msg::Join { id: p.id, name: p.name.clone() })
             .collect();
         others.extend(self.level.block_entities.benches.iter().map(|(p, b)| Msg::Bench { p: *p, bench: b.clone() }));
-        others.extend(self.level.block_entities.tables.iter().map(|(p, grid)| table_msg(*p, grid)));
         others.extend(self.level.block_entities.furnaces.iter().map(|(p, f)| furnace_msg(*p, f)));
         // The cuts in trunks, and the trunks lying about.
         others.extend(self.world.notches.iter().map(|(p, n)| Msg::Notch { p: *p, notch: Some(*n) }));
@@ -418,7 +406,6 @@ impl Server {
                 }
             }
         }
-        self.sync_tables(&players);
         self.sync_open_chests(&players);
         self.sync_furnaces();
     }
@@ -496,7 +483,7 @@ impl Server {
     }
 
     /// Contents of the block entity at `p` as a message (a chest: both halves of a double
-    /// one; a crafting table: its grid).
+    /// one).
     pub(super) fn container_msg(&self, p: IVec3) -> Option<Msg> {
         let (kind, slots) = self.level.block_entities.container(&self.world, p)?;
         Some(Msg::Container { p, kind, slots })
@@ -505,24 +492,6 @@ impl Server {
     /// Stores a container's contents (sent by the player who has it open).
     pub(super) fn apply_container(&mut self, p: IVec3, kind: u8, slots: &[Slot]) {
         self.level.block_entities.apply_container(&self.world, p, kind, slots);
-    }
-
-    /// Crafting table grids that changed go to everyone (the items lie on top of the tables),
-    /// but to a player who has that table open (they get it as their container).
-    fn sync_tables(&mut self, players: &[(u8, Option<Pose>, Option<IVec3>)]) {
-        let now = self.level.block_entities.tables.clone();
-        let mut changed: Vec<(IVec3, [Slot; 9])> =
-            now.iter().filter(|(p, g)| self.tables_sent.get(p) != Some(g)).map(|(p, g)| (*p, *g)).collect();
-        changed.extend(self.tables_sent.keys().filter(|p| !now.contains_key(p)).map(|p| (*p, [None; 9])));
-        self.tables_sent = now;
-        for (p, grid) in changed {
-            let frame = Frame::new(&table_msg(p, &grid));
-            for (id, _, open) in players {
-                if *open != Some(p) {
-                    self.send_frame_to(*id, &frame);
-                }
-            }
-        }
     }
 
     /// Furnaces that changed go to everyone (the meat on top cooks and turns over in front of

@@ -33,6 +33,7 @@ pub const BUILT_IN: &[(&str, &str)] = &[
     ("mobs", include_str!("../../../testbed/mobs.txt")),
     ("book", include_str!("../../../testbed/book.txt")),
     ("station", include_str!("../../../testbed/station.txt")),
+    ("crafting", include_str!("../../../testbed/crafting.txt")),
     ("skin", include_str!("../../../testbed/skin.txt")),
     ("perf", include_str!("../../../testbed/perf.txt")),
 ];

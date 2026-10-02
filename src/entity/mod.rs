@@ -1,5 +1,5 @@
 //! Everything in the world that is not a block: dropped items and falling blocks, block
-//! entities (furnaces, chests, crafting tables), mobs, and the player's body and needs.
+//! entities (furnaces, chests, gun stations), mobs, and the player's body and needs.
 
 pub mod block_entity;
 pub mod dropped;

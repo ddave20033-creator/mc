@@ -1,7 +1,7 @@
 //! A fingerprint of every item's data (stacking, food, damage, durability, keys, names in
-//! both languages, icons, blocks, smelting, fuel, magazines) and of what the crafting grid
-//! makes of every recipe's own grid (shifted, mirrored, spoilt a cell) and of random grids:
-//! a change to any of them changes the hash. Rewriting how items are looked up must not.
+//! both languages, icons, blocks, smelting, fuel, magazines) and of every recipe (its grid,
+//! what it takes and makes, by hand or at a crafting table): a change to any of them changes
+//! the hash. Rewriting how items are looked up must not.
 //! Items are written by their keys (their ids are not their identity: they follow the order
 //! of the items' table), and listed in the order of their keys.
 
@@ -105,91 +105,19 @@ fn names_snapshot() -> String {
     s
 }
 
-fn craft_str(grid: &[Slot], size: usize) -> String {
-    match craft(grid, size) {
-        None => "-".into(),
-        Some(st) => format!("{} {} {} {}", ik(st.item), st.count, st.damage, st.data),
-    }
-}
-
 fn crafting_snapshot() -> String {
     let mut s = String::new();
-    let mut pool: Vec<ItemId> = Vec::new();
-    let mut grids: Vec<[Option<ItemId>; 9]> = Vec::new();
     for item in recipe_results() {
-        for (cells, n) in recipes_for(item) {
-            let _ = writeln!(s, "r {} {n}", ik(item));
-            for c in &cells {
-                for &i in c {
-                    if !pool.contains(&i) {
-                        pool.push(i);
-                    }
-                }
-            }
-            // Each alternative for the cells (the first and the last), shifted about.
-            for alt in [0usize, usize::MAX] {
-                let g: [Option<ItemId>; 9] =
-                    std::array::from_fn(|i| cells[i].get(alt.min(cells[i].len().saturating_sub(1))).copied());
-                for dy in 0..3 {
-                    for dx in 0..3 {
-                        let mut h = [None; 9];
-                        let mut fits = true;
-                        for y in 0..3 {
-                            for x in 0..3 {
-                                if let Some(it) = g[y * 3 + x] {
-                                    if x + dx >= 3 || y + dy >= 3 {
-                                        fits = false;
-                                    } else {
-                                        h[(y + dy) * 3 + x + dx] = Some(it);
-                                    }
-                                }
-                            }
-                        }
-                        if fits {
-                            grids.push(h);
-                            // Mirrored.
-                            grids.push(std::array::from_fn(|i| h[(i / 3) * 3 + 2 - i % 3]));
-                        }
-                    }
-                }
-            }
+        for (cells, n, hand) in recipes_for(item) {
+            let cells: Vec<Vec<String>> = cells.iter().map(|c| c.iter().copied().map(ik).collect()).collect();
+            let _ = writeln!(s, "r {} {n} {hand} {cells:?}", ik(item));
         }
     }
-    pool.sort_by_key(|&i| key(i));
-    // Random grids, and each recipe grid with one cell spoilt.
-    let mut seed: u64 = 12345;
-    let mut rnd = |n: usize| {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        ((seed >> 33) as usize) % n
-    };
-    let base = grids.clone();
-    for g in &base {
-        for _ in 0..3 {
-            let mut h = *g;
-            let i = rnd(9);
-            h[i] = if rnd(3) == 0 { None } else { Some(pool[rnd(pool.len())]) };
-            grids.push(h);
-        }
+    for l in craft_list() {
+        let needs: Vec<(Vec<String>, u8)> =
+            l.needs.iter().map(|(items, n)| (items.iter().copied().map(ik).collect(), *n)).collect();
+        let _ = writeln!(s, "l {} {} {} {needs:?}", ik(l.result.item), l.result.count, l.hand);
     }
-    for _ in 0..6000 {
-        let few = rnd(4);
-        grids.push(std::array::from_fn(|_| (rnd(5) <= few).then(|| pool[rnd(pool.len())])));
-    }
-    for g in &grids {
-        let slots: Vec<Slot> = g.iter().map(|c| c.map(|i| Stack::new(i, 1 + (fnv(&key(i)) % 7) as u8))).collect();
-        let _ = write!(s, "{} ", craft_str(&slots, 3));
-        // The top left 2x2, as the inventory's grid.
-        let small: Vec<Slot> = [0, 1, 3, 4].iter().map(|&i| slots[i]).collect();
-        let _ = writeln!(s, "{}", craft_str(&small, 2));
-    }
-    // The same grid twice in a row, and one cell's count, damage and data changed.
-    let mut slots: Vec<Slot> = vec![None; 9];
-    slots[4] = Some(Stack::new(OAK_LOG as ItemId, 3));
-    let _ = writeln!(s, "{} {}", craft_str(&slots, 3), craft_str(&slots, 3));
-    slots[4] = Some(Stack { item: OAK_LOG as ItemId, count: 64, damage: 5, data: 9 });
-    let _ = writeln!(s, "{}", craft_str(&slots, 3));
-    slots[4] = None;
-    let _ = writeln!(s, "{}", craft_str(&slots, 3));
     for item in recipe_results() {
         let view = recipe_view(item).map(|(r, st)| {
             let r: Vec<Vec<Vec<String>>> =
@@ -221,5 +149,5 @@ fn item_data_and_crafting_are_unchanged() {
     assert_eq!(got, EXPECTED);
 }
 
-const EXPECTED: [u64; 4] = [0x5c3426ba1a7a84d0, 0x5293f6a520c67988, 0x3dbc3468aa2dc181, 0x8af34cec993be3e4];
+const EXPECTED: [u64; 4] = [0x5c3426ba1a7a84d0, 0x5293f6a520c67988, 0x3dbc3468aa2dc181, 0xb6de30d3459e7205];
 

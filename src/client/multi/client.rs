@@ -308,7 +308,7 @@ impl Game {
                     kind,
                     slots: slots.clone(),
                 };
-                self.apply_container(p, kind, &slots);
+                self.level.block_entities.apply_container(&self.terrain.world, p, kind, &slots);
                 let open_here = matches!(self.screen, Screen::Container(c) if Self::container_pos(c) == Some(p));
                 if let (true, Some(c)) = (open_here, &mut self.session.net) {
                     c.container_known = Some(msg.encode());

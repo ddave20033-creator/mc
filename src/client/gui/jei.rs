@@ -1,8 +1,8 @@
 //! JEI ("Just Enough Items"): every item in a scrollable grid beside the inventory screens,
 //! with a search box under it. In survival a click shows how the item is made (its crafting
-//! grids, or what smelts into it and in which furnace), and a click on an ingredient there
-//! shows how that is made; in creative a click takes the item, a right click shows the
-//! recipe.
+//! grids, by hand or at a crafting table, or what smelts into it and in which furnace), and a
+//! click on an ingredient there shows how that is made; in creative a click takes the item, a
+//! right click shows the recipe.
 
 use crate::client::Game;
 use crate::client::gui::{SLOT, SlotRef, Tab, creative_grid, draw_stack, search_fold};
@@ -52,9 +52,10 @@ fn jei_items(search: &str) -> std::rc::Rc<Vec<ItemId>> {
     })
 }
 
-/// One way to get an item.
+/// One way to get an item: a crafting grid (how many it makes, whether by hand), or what
+/// smelts into it (in which furnace).
 enum Way {
-    Craft([Vec<ItemId>; 9], u8),
+    Craft([Vec<ItemId>; 9], u8, bool),
     Smelt(ItemId, u8),
 }
 
@@ -68,7 +69,7 @@ fn ways(item: ItemId) -> std::rc::Rc<Vec<Way>> {
     MADE.with_borrow_mut(|made| {
         made.entry(item)
             .or_insert_with(|| {
-                let mut v: Vec<Way> = recipes_for(item).into_iter().map(|(g, n)| Way::Craft(g, n)).collect();
+                let mut v: Vec<Way> = recipes_for(item).into_iter().map(|(g, n, hand)| Way::Craft(g, n, hand)).collect();
                 v.extend(smelted_from(item).into_iter().map(|(i, t)| Way::Smelt(i, t)));
                 Rc::new(v)
             })
@@ -278,7 +279,7 @@ impl Game {
         let tick = self.clock.time as usize;
         let mut clicked = None;
         match &ways[page] {
-            Way::Craft(grid, count) => {
+            Way::Craft(grid, count, hand) => {
                 for (i, ids) in grid.iter().enumerate() {
                     let (cx, cy) = (x + (i % 3) as f32 * cell, top + (i / 3) as f32 * cell);
                     let content = (!ids.is_empty()).then(|| Stack::one(ids[tick % ids.len()]));
@@ -297,7 +298,9 @@ impl Game {
                 if self.draw_slot(ox, oy, Some(Stack::new(item, *count))) {
                     self.tooltip_for(&Stack::one(item));
                 }
-                top += 3.0 * cell;
+                let label = if *hand { "jei.hand" } else { "jei.table" };
+                self.ui.text(t(label), x, top + 3.0 * cell + 2.0 * s, fs, rgba(210, 210, 215, 255), true);
+                top += 3.0 * cell + 11.0 * s;
             }
             Way::Smelt(input, tier) => {
                 if self.draw_slot(x, top, Some(Stack::one(*input))) {

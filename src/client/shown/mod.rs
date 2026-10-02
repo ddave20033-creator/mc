@@ -40,8 +40,6 @@ pub(super) struct Level {
     pub(super) door_swing: FastMap<IVec3, f32>,
     /// How far each gun station's drawer is out (0..1): it slides out while one is used.
     pub(super) bench_drawer: FastMap<IVec3, f32>,
-    /// The side each crafting table was last used from (its grid faces that way).
-    pub(super) table_sides: FastMap<IVec3, u8>,
     /// How much each furnace near by had made when last heard (it dings when that grows).
     furnace_heard: std::collections::HashMap<IVec3, u32>,
     /// The last change seen on each gun station's table and when it started (it plays out).
@@ -68,7 +66,6 @@ impl Level {
             chest_open: Default::default(),
             door_swing: Default::default(),
             bench_drawer: Default::default(),
-            table_sides: Default::default(),
             furnace_heard: Default::default(),
             bench_anims: Default::default(),
             torches: Vec::new(),

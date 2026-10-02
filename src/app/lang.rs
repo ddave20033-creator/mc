@@ -386,8 +386,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "tip.3",
-        "Tip: punch a tree, craft planks, then a crafting table",
-        "Tipp: üss ki egy fát, barkácsolj deszkát, majd asztalt",
+        "Tip: saw logs into planks at a sawbench, then make a crafting table",
+        "Tipp: rönkből fűrészasztalon deszka lesz, deszkából barkácsasztal",
     ),
     (
         "tip.4",
@@ -527,11 +527,16 @@ const TABLE: &[(&str, &str, &str)] = &[
     // Containers
     ("gui.inventory", "Inventory", "Tárgylista"),
     ("gui.crafting", "Crafting", "Barkácsolás"),
+    ("gui.crafting_table", "Crafting Table", "Barkácsasztal"),
     ("craft.what", "What you can make", "Mit készíthetsz"),
     ("craft.needs", "Needs:", "Kell hozzá:"),
     ("craft.make", "Craft", "Elkészít"),
     ("craft.can", "Enough for {} (shift-click: all of them)", "{} darabra elég (shift-kattintás: mind)"),
-    ("craft.need_table", "Needs a crafting table nearby", "Barkácsasztal kell a közelben"),
+    (
+        "craft.more_at_table",
+        "Everything else is made at a crafting table.",
+        "Minden más a barkácsasztalnál készül.",
+    ),
     ("gui.trash", "Destroy Item", "Tárgy megsemmisítése"),
     ("gui.search", "Search...", "Keresés..."),
     ("gui.no_results", "No items found", "Nincs találat"),
@@ -541,6 +546,8 @@ const TABLE: &[(&str, &str, &str)] = &[
     ("gui.tab.armor", "Armor", "Ruházat"),
     ("gui.tab.all", "All Items", "Minden"),
     ("jei.none", "Found in the world, not crafted.", "A világban található, nem barkácsolható."),
+    ("jei.hand", "By hand", "Kézzel"),
+    ("jei.table", "At a crafting table", "Barkácsasztalnál"),
     ("jei.furnace", "Furnace", "Kemence"),
     ("jei.blast", "Blast Furnace", "Kohó"),
     ("jei.advanced", "Advanced Furnace", "Fejlett kohó"),

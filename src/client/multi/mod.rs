@@ -15,7 +15,7 @@ use crate::entity::ItemEntity;
 use crate::entity::player::look_dir;
 use crate::item::{GunKind, ItemId, Slot, armor_code};
 use crate::model::players::player::{LimbSmoother, PlayerPose, build_player, hand_pivot, limb_targets};
-use crate::net::{Conn, Msg, NO_BLOCK, Pose, container, pose_flags};
+use crate::net::{Conn, Msg, NO_BLOCK, Pose, pose_flags};
 use crate::world::save::PlayerSave;
 use crate::ui::{Color, chat};
 use crate::util::lerp_angle;
@@ -295,15 +295,6 @@ impl Game {
             | Screen::KeyBinds { in_game: true } => status::MENU,
             _ => status::NONE,
         }
-    }
-
-    /// What the other players have open, and where they stand.
-    pub(super) fn remote_open_blocks(&self) -> Vec<(IVec3, Vec3)> {
-        self.session.remotes
-            .iter()
-            .filter(|r| r.has_pose && r.target.open != NO_BLOCK)
-            .map(|r| (r.target.open, r.target.pos))
-            .collect()
     }
 
     /// The other players holding a gun station's brush: the station (its left half) and where
@@ -734,24 +725,10 @@ impl Game {
         });
     }
 
-    /// Contents of the block entity at `p` as a message (the crafting table open here: its
-    /// live grid).
+    /// Contents of the block entity at `p` as a message.
     fn container_msg(&self, p: IVec3) -> Option<Msg> {
-        let (kind, mut slots) = self.level.block_entities.container(&self.terrain.world, p)?;
-        if matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p) {
-            slots = self.me.items.craft.to_vec();
-        }
+        let (kind, slots) = self.level.block_entities.container(&self.terrain.world, p)?;
         Some(Msg::Container { p, kind, slots })
-    }
-
-    /// Stores received contents (the crafting table open here: into its live grid).
-    fn apply_container(&mut self, p: IVec3, kind: u8, slots: &[Slot]) {
-        let open_here = matches!(self.screen, Screen::Container(Container::Crafting(q)) if q == p);
-        if kind == container::TABLE && open_here {
-            self.me.items.craft = std::array::from_fn(|i| slots.get(i).copied().flatten());
-        } else {
-            self.level.block_entities.apply_container(&self.terrain.world, p, kind, slots);
-        }
     }
 
     /// A furnace as the server has it (only for showing it; the server runs it).
@@ -793,10 +770,10 @@ impl Game {
         }
     }
 
-    /// The server's copy of the open chest or crafting table has come (a change made before
-    /// it would be lost under it); the other screens are always ready.
+    /// The server's copy of the open chest has come (a change made before it would be lost
+    /// under it); the other screens are always ready.
     pub(super) fn container_ready(&self, c: Container) -> bool {
-        !matches!(c, Container::Chest(_) | Container::Crafting(_))
+        !matches!(c, Container::Chest(_))
             || self.session.net.as_ref().is_none_or(|n| n.container_known.is_some())
     }
 

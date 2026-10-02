@@ -1,12 +1,11 @@
 //! The geometry built on the CPU each frame: particles, crack overlays, the first-person
 //! hand (and body), the player model, dropped items, falling blocks and trees, mobs, the
-//! other players, chest lids and doors, and what lies on furnaces and crafting tables.
+//! other players, chest lids and doors, and what lies on furnaces.
 
-use crate::client::{Container, Game, Screen, multi};
+use crate::client::{Game, Screen, multi};
 use crate::client::gui::SlotRef;
 use crate::entity::block_entity::{
-    build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow,
-    build_table_items, build_table_made, chest_side,
+    build_chest_items, build_chest_lid, build_door, build_furnace_items, build_glow, chest_side,
 };
 use crate::entity::player::look_dir;
 use crate::item::ItemId;
@@ -66,7 +65,7 @@ impl Scene {
 impl Game {
     /// Particles, crack overlays, the first-person hand (and body), the player model, dropped
     /// items, falling blocks, mobs, the other LAN players, chest lids and the items on
-    /// crafting tables.
+    /// furnaces.
     pub(super) fn build_scene(&mut self, view: &View, dt: f32) -> Scene {
         let (in_world, third_person, cam) = (view.in_world, view.third_person, view.cam);
         let mut scene = std::mem::take(&mut self.gfx.scene);
@@ -409,7 +408,7 @@ impl Game {
     }
 
     /// Dropped items, falling blocks, mobs, the other LAN players, chest lids and items on
-    /// crafting tables near the player.
+    /// furnaces near the player.
     pub(super) fn build_world_entities(&mut self, scene: &mut Scene, third_person: bool, dt: f32) {
         // Gun stations: their model, the drawer sliding out while one is used, what lies on
         // them.
@@ -533,32 +532,7 @@ impl Game {
                 build_furnace_items(target, *p, facing, f, self.clock.time, sky, blk, inside, planes);
             }
         }
-        let open_table = match self.screen {
-            Screen::Container(Container::Crafting(p)) => Some(p),
-            _ => None,
-        };
-        for (p, grid) in self.level.block_entities.tables.iter().filter(|(p, _)| near(p)) {
-            if open_table != Some(*p) {
-                let (sky, blk) = light(*p);
-                build_table_items(target, *p, self.table_side(*p), grid, None, sky, blk);
-            }
-        }
-        if let Some(p) = open_table {
-            // The open table: its grid (lifted under the mouse), and what was crafted.
-            let lift = match self.inv_ui.station_hover {
-                Some(SlotRef::Craft(i)) => Some(i),
-                _ => None,
-            };
-            let (sky, blk) = light(p);
-            let side = self.table_side(p);
-            build_table_items(target, p, side, &self.me.items.craft, lift, sky, blk);
-            if let Some(made) = &self.me.items.craft_out {
-                let (t, used) = self.me.items.craft_fx.unwrap_or((10.0, [None; 9]));
-                let hovered = self.inv_ui.station_hover == Some(SlotRef::CraftOut);
-                build_table_made(target, p, side, made, &used, t, hovered, sky, blk);
-            }
-        }
-        // The highlighted slot in an open chest or on a table, or spot of a furnace.
+        // The highlighted slot in an open chest, or spot of a furnace.
         let glow = match self.screen {
             Screen::Container(_) if self.in_station() => self.inv_ui.station_frame,
             Screen::Playing if !self.in_station() => self.furnace_frame(),

@@ -1,0 +1,68 @@
+# Crafting: the crafting table in the world (front, side, top), opened with a right click
+# (the inventory comes up on its Crafting Table tab, every recipe there), a wooden pickaxe
+# made there, and the inventory's own crafting tab (only what is made by hand).
+world bench
+window 1600 900
+cmd gamemode survival
+empty
+lane
+time 0.3
+set body off
+place 3 0 0 crafting_table
+# The table from the front (its +Z face), its side (+X) and from above.
+pos 3 0 2.3
+look 270 -32
+wait 1.5
+shot table_front
+pos 5.3 0 0
+look 180 -32
+wait 0.3
+shot table_side
+fly on
+pos 3 2.6 0
+look 0 -89
+wait 0.3
+shot table_top
+fly off
+# Opened with a right click; planks and sticks to make a pickaxe from.
+give oak_planks 10
+give stick 4
+pos 0 0 0
+look 0 -20
+wait 0.5
+click right
+wait 0.5
+shot table_tab
+# The wooden pickaxe chosen from the list and made (the mouse positions, found by trying,
+# are the pickaxe and the Craft button at 1600x900).
+mouse 0.3825 0.4044
+wait 0.3
+shot table_pickaxe
+click left
+wait 0.2
+mouse 0.566 0.747
+wait 0.1
+click left
+wait 0.4
+shot table_making
+wait 1.0
+shot table_made
+# Pushed away from the table, its screen closes.
+pos 10 0 0
+wait 0.3
+shot walked_away
+# The inventory's own crafting tab has only what is made by hand.
+screen inventory
+wait 0.5
+shot hand_tab
+mouse 0.3575 0.238
+wait 0.1
+click left
+wait 0.5
+shot inventory_tab
+# How an item is made, in the JEI panel (by hand or at a crafting table).
+mouse 0.71375 0.431
+wait 0.1
+click left
+wait 0.4
+shot jei_recipe

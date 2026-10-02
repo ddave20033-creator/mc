@@ -1,9 +1,9 @@
 //! The rules of the item screens: opening and closing a container, clicking, shift-clicking,
-//! dragging and double-clicking slots, and crafting (one or as many as the grid makes).
+//! dragging and double-clicking slots.
 
 use crate::client::{Container, Game, Screen};
 use crate::client::gui::SlotRef;
-use crate::item::{Slot, Stack, armor_of, craft, max_stack};
+use crate::item::{Slot, Stack, armor_of, max_stack};
 use crate::item::inventory::{add_to, click, take};
 use glam::IVec3;
 
@@ -26,7 +26,7 @@ pub(super) fn fits(cur: Slot, st: &Stack) -> bool {
 
 /// Slots that accept items from the cursor.
 pub(super) fn droppable(r: SlotRef) -> bool {
-    matches!(r, SlotRef::Inv(_) | SlotRef::Craft(_) | SlotRef::Chest(_))
+    matches!(r, SlotRef::Inv(_) | SlotRef::Chest(_))
 }
 
 impl Game {
@@ -39,28 +39,17 @@ impl Game {
         self.inv_ui.press_pick = None;
         self.inv_ui.search_focused = false;
         self.inv_ui.jei.focused = false;
+        if let Container::Crafting(_) = c {
+            // (at a table the crafting tab comes up first)
+            self.inv_ui.craft.open = true;
+        }
         self.open_station(c);
         self.screen = Screen::Container(c);
         self.set_grab(false);
         self.input.keys.clear();
     }
 
-    /// Stores the crafting grid of an open crafting table back into the table.
-    pub(in crate::client) fn stash_table(&mut self, clear: bool) {
-        if let Screen::Container(Container::Crafting(p)) = self.screen {
-            if self.me.items.craft.iter().any(|s| s.is_some()) {
-                self.level.block_entities.tables.insert(p, self.me.items.craft);
-            } else {
-                self.level.block_entities.tables.remove(&p);
-            }
-            if clear {
-                self.me.items.craft = [None; 9];
-            }
-        }
-    }
-
-    /// Closes an item screen: a crafting table keeps its grid, the 2x2 grid and the cursor
-    /// go back to the inventory.
+    /// Closes an item screen: what is on the cursor goes back into the inventory.
     pub(in crate::client) fn close_container(&mut self) {
         self.inv_ui.drag = None;
         self.inv_ui.press_pick = None;
@@ -73,25 +62,21 @@ impl Game {
                 self.net_container_closed();
             }
         }
-        self.stash_table(true);
         if let Screen::Container(Container::GunStation(_)) = self.screen {
             self.close_gun_station();
         }
-        let mut back: Vec<Stack> = self.me.items.craft.iter_mut().filter_map(|s| s.take()).collect();
-        back.extend(self.me.items.cursor.take());
-        back.extend(self.me.items.craft_out.take());
-        self.me.items.craft_fx = None;
-        for s in back {
-            self.give(s);
+        if let Some(st) = self.me.items.cursor.take() {
+            self.give(st);
         }
         self.resume();
     }
 
-    /// The block a container screen belongs to.
+    /// The block a container screen belongs to, as the server is told (`Msg::Open`): a chest
+    /// or a gun station (a crafting table's screen is the player's own inventory).
     pub(in crate::client) fn container_pos(c: Container) -> Option<IVec3> {
         match c {
-            Container::Crafting(p) | Container::Chest(p) | Container::GunStation(p) => Some(p),
-            Container::Inventory | Container::Creative => None,
+            Container::Chest(p) | Container::GunStation(p) => Some(p),
+            Container::Inventory | Container::Crafting(_) | Container::Creative => None,
         }
     }
 
@@ -105,18 +90,9 @@ impl Game {
         self.level.block_entities.set_chest_slots(&self.terrain.world, p, slots);
     }
 
-    pub(super) fn craft_size(c: Container) -> usize {
-        if matches!(c, Container::Crafting(_)) {
-            3
-        } else {
-            2
-        }
-    }
-
     pub(super) fn slot_mut(&mut self, c: Container, r: SlotRef) -> Option<&mut Slot> {
         match r {
             SlotRef::Inv(i) => Some(&mut self.me.items.inventory.slots[i]),
-            SlotRef::Craft(i) => Some(&mut self.me.items.craft[i]),
             SlotRef::Chest(i) => match c {
                 Container::Chest(p) => {
                     let (a, b) = self.chest_halves(p);
@@ -127,54 +103,6 @@ impl Game {
             },
             SlotRef::Armor(i) => Some(&mut self.me.items.inventory.armor[i]),
             _ => None,
-        }
-    }
-
-    pub(super) fn craft_result(&self, c: Container) -> Option<Stack> {
-        let n = Self::craft_size(c);
-        craft(&self.me.items.craft[..n * n], n)
-    }
-
-    fn consume_craft_inputs(&mut self, c: Container) {
-        let n = Self::craft_size(c);
-        for s in &mut self.me.items.craft[..n * n] {
-            take(s, 1);
-        }
-    }
-
-    /// What the result slot shows: at a table what was crafted into its middle, in the
-    /// inventory what the 2x2 grid makes.
-    pub(super) fn craft_out_stack(&self, c: Container) -> Option<Stack> {
-        if matches!(c, Container::Crafting(_)) {
-            self.me.items.craft_out
-        } else {
-            self.craft_result(c)
-        }
-    }
-
-    /// A left click at an open table away from the slots: crafts from the grid as many as
-    /// fit in one stack (64, or one of what does not stack), into the middle of the table.
-    /// With more on the grid, the next click makes the next stack once this one is taken.
-    pub(super) fn craft_batch(&mut self, c: Container) {
-        let before = self.me.items.craft;
-        let mut made = self.me.items.craft_out;
-        while let Some(res) = self.craft_result(c) {
-            match &mut made {
-                None => made = Some(res),
-                Some(m)
-                    if m.stacks_with(&res)
-                        && m.count as u16 + res.count as u16 <= max_stack(m.item) as u16 =>
-                {
-                    m.count += res.count
-                }
-                _ => break,
-            }
-            self.consume_craft_inputs(c);
-        }
-        if made != self.me.items.craft_out {
-            self.me.items.craft_out = made;
-            self.me.items.craft_fx = Some((0.0, before));
-            self.me.hand.swing();
         }
     }
 
@@ -191,7 +119,7 @@ impl Game {
     /// Shift-click: move a stack to the "other" section.
     fn quick_move(&mut self, c: Container, r: SlotRef) {
         // In the inventory armor goes on (into its empty slot), and comes off.
-        if let (Container::Inventory | Container::Creative, SlotRef::Inv(i)) = (c, r) {
+        if let (Container::Inventory | Container::Crafting(_) | Container::Creative, SlotRef::Inv(i)) = (c, r) {
             let piece = self.me.items.inventory.slots[i].and_then(|s| armor_of(s.item)).map(|a| a.0);
             if let Some(p) = piece.filter(|&p| self.me.items.inventory.armor[p].is_none()) {
                 self.me.items.inventory.armor[p] = self.me.items.inventory.slots[i].take();
@@ -222,44 +150,6 @@ impl Game {
 
     pub(super) fn click_slot(&mut self, c: Container, r: SlotRef, right: bool, shift: bool) {
         match r {
-            SlotRef::CraftOut if matches!(c, Container::Crafting(_)) => {
-                // At a table, what was crafted lies in the middle: a click puts it straight
-                // into the inventory (what does not fit stays there).
-                if let Some(st) = self.me.items.craft_out {
-                    self.me.items.craft_out = self.me.items.inventory.add(st);
-                }
-            }
-            SlotRef::CraftOut => {
-                let Some(res) = self.craft_result(c) else {
-                    return;
-                };
-                if shift {
-                    // Craft as many as fit. Each result must fit completely, otherwise the part
-                    // that did fit would be added without consuming the ingredients.
-                    let mut n = 0;
-                    while let Some(res) = self.craft_result(c) {
-                        let mut slots = self.me.items.inventory.slots;
-                        if add_to(&mut slots, res).is_some() || n > 64 {
-                            break;
-                        }
-                        self.me.items.inventory.slots = slots;
-                        self.consume_craft_inputs(c);
-                        n += 1;
-                    }
-                    return;
-                }
-                match &mut self.me.items.cursor {
-                    None => self.me.items.cursor = Some(res),
-                    Some(cur)
-                        if cur.stacks_with(&res)
-                            && cur.count + res.count <= max_stack(res.item) =>
-                    {
-                        cur.count += res.count
-                    }
-                    _ => return,
-                }
-                self.consume_craft_inputs(c);
-            }
             SlotRef::Creative(id) => {
                 if shift {
                     // A full stack straight into the first empty slot (hotbar first).
@@ -342,8 +232,7 @@ impl Game {
     pub(super) fn collect_all(&mut self, c: Container) {
         let Some(mut cur) = self.me.items.cursor else { return };
         let max = max_stack(cur.item);
-        let n = Self::craft_size(c);
-        let mut refs: Vec<SlotRef> = (0..n * n).map(SlotRef::Craft).collect();
+        let mut refs: Vec<SlotRef> = Vec::new();
         if let Container::Chest(p) = c {
             refs.extend((0..self.chest_slots(p).len()).map(SlotRef::Chest));
         }

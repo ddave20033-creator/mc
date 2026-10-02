@@ -258,9 +258,6 @@ fn block_entities() -> Vec<Vertex> {
         slots[i * 4] = Some(Stack { count: 3, ..Stack::one(item) });
     }
     build_chest_items(&mut out, p, 2, 0, &slots, Some(4), 12, 3);
-    let grid: [crate::item::Slot; 9] = std::array::from_fn(|i| slots[i * 2]);
-    build_table_items(&mut out, p, 1, &grid, Some(0), 12, 3);
-    build_table_made(&mut out, p, 1, &Stack::one(crate::item::COAL), &grid, 0.2, true, 12, 3);
     let mut f = Furnace {
         input: Some(Stack { count: 5, ..Stack::one(crate::world::IRON_ORE as ItemId) }),
         fuel: Some(Stack { count: 4, ..Stack::one(crate::item::COAL) }),
@@ -362,7 +359,7 @@ const EXPECTED: [(&str, u64); 9] = [
     ("logs", 0x0660b16dd6a12110),
     ("players", 0xdbfa0b0dfd0ac3bb),
     ("hands", 0x878dd245685b1148),
-    ("block_entities", 0x6b356808ea31f950),
+    ("block_entities", 0x5c438e685d7199c2),
     ("mobs", 0x91bddad72a1fd33e),
     ("lanterns_buckets", 0x45576524898178b0),
     ("gun_stations", 0x2210e6ee1c04734e),

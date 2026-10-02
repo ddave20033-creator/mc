@@ -222,7 +222,7 @@ impl Game {
         }
         self.apply(action);
 
-        // Not while the camera is still gliding back from a chest or table, nor where a
+        // Not while the camera is still gliding back from a chest or gun station, nor where a
         // furnace part is marked with a frame instead.
         let outline = if self.screen == Screen::Playing
             && !self.in_station()
@@ -417,7 +417,6 @@ impl Game {
             self.audio.set_loops(&[]);
         }
         self.level.particles.update(dt, &self.terrain.world);
-        self.update_craft_fx(dt);
         self.update_craft_job(dt);
         self.update_book(dt);
         if self.in_world_view() {
@@ -504,7 +503,7 @@ impl Game {
         } else {
             self.settings.fov
         };
-        // An open chest or crafting table: the camera glides over it (and back).
+        // An open chest or gun station: the camera glides over it (and back).
         let (cam, fwd, fov) = if in_world {
             self.station_camera(cam, fwd, fov, w / h, dt)
         } else {

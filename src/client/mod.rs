@@ -56,9 +56,10 @@ const MAX_AIR: f32 = 15.0;
 /// Open item screen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Container {
-    /// Survival inventory with the 2x2 crafting grid.
+    /// Survival inventory, with its crafting tab (the recipes made by hand).
     Inventory,
-    /// Crafting table (3x3) at a position; the grid stays in the table.
+    /// The inventory opened at the crafting table at a position: its crafting tab has every
+    /// recipe.
     Crafting(IVec3),
     Chest(IVec3),
     /// Gun station: putting a pistol together and cleaning it.
@@ -126,7 +127,7 @@ pub struct Game {
     /// At the open gun station: the brush, the mouse on its table and in its drawer, the camera,
     /// scrubbing, and what was last sent.
     bench_ui: BenchUi,
-    /// The camera over an open chest or crafting table (and gliding back after).
+    /// The camera over an open chest or gun station (and gliding back after).
     station: Option<station::Station>,
     /// What the HUD keeps between frames (F1, F3, the hotbar's highlight, names and hints).
     hud: Hud,
