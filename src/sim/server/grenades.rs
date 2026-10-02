@@ -2,7 +2,7 @@
 //! blocks the blast takes, and who gets hurt; everyone's game is told (`Msg::Blast`).
 
 use super::Server;
-use crate::item::{drops, tool_id, Tier, ToolKind};
+use crate::item::{drops, tool_id, wrong_tool, Tier, ToolKind};
 use crate::net::{hurt, Msg};
 use crate::sim::grenade::{blast_blocks, blast_hurt, fly, Grenade, GrenadeKind, SMOKE_TIME};
 use crate::world::*;
@@ -48,7 +48,9 @@ impl Server {
             self.set_block(*q, AIR);
             if self.random() < 0.3 {
                 let r = self.random();
-                for s in drops(b, pick, r) {
+                // (a log drops as if cut with an axe)
+                let tool = if wrong_tool(b, pick) { tool_id(ToolKind::Axe, Tier::Diamond) } else { pick };
+                for s in drops(b, tool, r) {
                     self.spawn_drop(q.as_vec3() + Vec3::splat(0.5), s);
                 }
             }

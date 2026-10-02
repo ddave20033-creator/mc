@@ -4,7 +4,7 @@
 
 use crate::client::Game;
 use crate::entity::player::raycast;
-use crate::item::{ItemId, break_time};
+use crate::item::{ItemId, break_time, hardness};
 use glam::{IVec3, Vec3};
 
 /// What the crosshair is on and what the hands do.
@@ -127,8 +127,12 @@ impl Game {
         if can && self.input.left_down && self.me.aim.action_cooldown <= 0.0 {
             if let Some((hit, _)) = self.me.aim.target {
                 let b = self.terrain.world.geti(hit);
-                let time =
-                    break_time(b, self.held()).map(|t| if self.creative() { 0.0 } else { t });
+                // (in creative anything that can be mined breaks at once, a log by hand too)
+                let time = if self.creative() {
+                    hardness(b).map(|_| 0.0)
+                } else {
+                    break_time(b, self.held())
+                };
                 if let Some(time) = time {
                     let progress = match self.me.aim.mining {
                         Some((p, prog)) if p == hit => prog,

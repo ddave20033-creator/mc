@@ -76,9 +76,10 @@ impl Server {
                 let b = self.world.geti(p);
                 // (the blocks that go with it, which their game took away too)
                 let guessed: Vec<IVec3> = rules::other_cells(&self.world, p, b).into_iter().map(|(q, _)| q).collect();
-                if b != AIR && near_block(p) && known_item(held) {
-                    // (mined as in creative, without drops, only by a player in creative)
-                    let creative = creative && pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
+                // (mined as in creative, without drops, only by a player in creative)
+                let creative = creative && pose.is_some_and(|p| p.flags & pose_flags::CREATIVE != 0);
+                // (a log only with an axe, in survival)
+                if b != AIR && near_block(p) && known_item(held) && (creative || !crate::item::wrong_tool(b, held)) {
                     self.break_world(p, held, creative);
                     self.broadcast(&Msg::BreakFx { p, block: b }, Some(id));
                 }

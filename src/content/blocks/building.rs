@@ -28,15 +28,15 @@ blocks! {
     BIRCH_LOG_X = BlockDef { key: "birch_log_x", item: BlockItem::As(BIRCH_LOG), ..LOG };
     BIRCH_LOG_Z = BlockDef { key: "birch_log_z", item: BlockItem::As(BIRCH_LOG), ..LOG };
     /// Branches: thin round logs growing out of the trees' trunks, upright or lying along X
-    /// or Z (spruce branches only lie). Mined, they give back their tree's log.
-    OAK_BRANCH = BlockDef { key: "oak_branch", item: BlockItem::As(OAK_LOG), ..LOG };
-    OAK_BRANCH_X = BlockDef { key: "oak_branch_x", item: BlockItem::As(OAK_LOG), ..LOG };
-    OAK_BRANCH_Z = BlockDef { key: "oak_branch_z", item: BlockItem::As(OAK_LOG), ..LOG };
-    BIRCH_BRANCH = BlockDef { key: "birch_branch", item: BlockItem::As(BIRCH_LOG), ..LOG };
-    BIRCH_BRANCH_X = BlockDef { key: "birch_branch_x", item: BlockItem::As(BIRCH_LOG), ..LOG };
-    BIRCH_BRANCH_Z = BlockDef { key: "birch_branch_z", item: BlockItem::As(BIRCH_LOG), ..LOG };
-    SPRUCE_BRANCH_X = BlockDef { key: "spruce_branch_x", item: BlockItem::As(SPRUCE_LOG), ..LOG };
-    SPRUCE_BRANCH_Z = BlockDef { key: "spruce_branch_z", item: BlockItem::As(SPRUCE_LOG), ..LOG };
+    /// or Z (spruce branches only lie). Snapped off (by hand too), they give sticks.
+    OAK_BRANCH = BlockDef { key: "oak_branch", item: BlockItem::As(OAK_LOG), ..BRANCH };
+    OAK_BRANCH_X = BlockDef { key: "oak_branch_x", item: BlockItem::As(OAK_LOG), ..BRANCH };
+    OAK_BRANCH_Z = BlockDef { key: "oak_branch_z", item: BlockItem::As(OAK_LOG), ..BRANCH };
+    BIRCH_BRANCH = BlockDef { key: "birch_branch", item: BlockItem::As(BIRCH_LOG), ..BRANCH };
+    BIRCH_BRANCH_X = BlockDef { key: "birch_branch_x", item: BlockItem::As(BIRCH_LOG), ..BRANCH };
+    BIRCH_BRANCH_Z = BlockDef { key: "birch_branch_z", item: BlockItem::As(BIRCH_LOG), ..BRANCH };
+    SPRUCE_BRANCH_X = BlockDef { key: "spruce_branch_x", item: BlockItem::As(SPRUCE_LOG), ..BRANCH };
+    SPRUCE_BRANCH_Z = BlockDef { key: "spruce_branch_z", item: BlockItem::As(SPRUCE_LOG), ..BRANCH };
     PLANKS = BlockDef {
         key: "oak_planks", en: "Oak Planks", hu: "Tölgyfa deszka", faces: Faces::All(tex::PLANKS),
         mine: axe(2.0), fuel: Some(15.0), creative: Creative::Blocks(2), ..CUBE
@@ -62,13 +62,21 @@ blocks! {
     };
 }
 
-/// A round log, mined with an axe; it burns, and smelts into charcoal.
+/// A round log, broken only with an axe (not by hand); it burns, and smelts into charcoal.
 const LOG: BlockDef = BlockDef {
     model: Model::Log,
     opaque: false,
-    mine: mine(2.0, Some(ToolKind::Axe), None),
+    mine: axe_only(2.0),
     place: Place::Log,
     fuel: Some(15.0),
     smelt: smelts(CHARCOAL, 1),
     ..CUBE
 };
+
+/// A branch: a thin log that snaps off quickly by hand (faster with an axe) into sticks.
+const BRANCH: BlockDef = BlockDef { mine: axe(0.4), drops: Drops::Custom(branch_drops), ..LOG };
+
+/// One or two sticks.
+fn branch_drops(_: Block, _: ItemId, r: f32) -> Vec<Stack> {
+    vec![Stack::new(STICK, 1 + (r < 0.5) as u8)]
+}

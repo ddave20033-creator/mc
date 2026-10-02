@@ -73,12 +73,14 @@ pub enum TintKind {
 
 /// How a block is mined: Minecraft's hardness (bare hands, harvestable: hardness * 1.5 s),
 /// the tool that mines it faster, and the tool's harvest level it needs to drop anything
-/// (`Tier::level`: 0 wood, 1 stone, 2 copper, 3 iron, 4 diamond).
+/// (`Tier::level`: 0 wood, 1 stone, 2 copper, 3 iron, 4 diamond); and whether nothing but
+/// that tool breaks it at all (a tree's wood: only an axe).
 #[derive(Clone, Copy)]
 pub struct Mine {
     pub hardness: f32,
     pub tool: Option<ToolKind>,
     pub needs: Option<u8>,
+    pub tool_only: bool,
 }
 
 /// What a mined block drops (when it may drop: see `Mine::needs`).
@@ -221,7 +223,11 @@ pub(super) const PLANT: BlockDef = BlockDef {
 
 
 pub(super) const fn mine(hardness: f32, tool: Option<ToolKind>, needs: Option<u8>) -> Option<Mine> {
-    Some(Mine { hardness, tool, needs })
+    Some(Mine { hardness, tool, needs, tool_only: false })
+}
+/// Broken only with an axe (bare hands, or another tool, do nothing to it).
+pub(super) const fn axe_only(hardness: f32) -> Option<Mine> {
+    Some(Mine { hardness, tool: Some(ToolKind::Axe), needs: None, tool_only: true })
 }
 /// Mined with a pickaxe of at least harvest level `needs`.
 pub(super) const fn pick(hardness: f32, needs: u8) -> Option<Mine> {

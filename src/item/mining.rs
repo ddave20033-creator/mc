@@ -10,7 +10,7 @@ fn mining(b: Block) -> Option<Mine> {
 
 /// Can `held` mine `b` so that it drops?
 pub fn can_harvest(b: Block, held: ItemId) -> bool {
-    let Some(m) = mining(b) else { return false };
+    let Some(m) = mining(b).filter(|&m| breaks(m, held)) else { return false };
     match m.needs {
         None => true,
         Some(level) => match tool_of(held) {
@@ -31,9 +31,19 @@ pub fn hardest_mined(level: u8) -> Vec<Block> {
     crate::content::blocks::BLOCKS.iter().map(|d| d.id).filter(|&b| needs(b)).collect()
 }
 
-/// Seconds to break `b` holding `held` (None = unbreakable).
+/// Whether holding `held` breaks `b` at all (a log: only an axe).
+fn breaks(m: Mine, held: ItemId) -> bool {
+    !m.tool_only || tool_of(held).is_some_and(|(kind, _)| Some(kind) == m.tool)
+}
+
+/// Whether `b` is broken only with a tool that `held` is not (a log by hand).
+pub fn wrong_tool(b: Block, held: ItemId) -> bool {
+    mining(b).is_some_and(|m| !breaks(m, held))
+}
+
+/// Seconds to break `b` holding `held` (None = unbreakable, or not with this).
 pub fn break_time(b: Block, held: ItemId) -> Option<f32> {
-    let m = mining(b)?;
+    let m = mining(b).filter(|&m| breaks(m, held))?;
     let mut speed = 1.0;
     if let Some((kind, tier)) = tool_of(held) {
         if Some(kind) == m.tool {
@@ -124,6 +134,27 @@ mod tests {
         assert_eq!(tool_of(BULLET), None);
         for t in TIER_ORDER {
             assert_eq!(tool_of(pick(t)), Some((ToolKind::Pickaxe, t)));
+        }
+    }
+
+    /// A tree's wood breaks only with an axe; its branches snap off by hand too, into sticks.
+    #[test]
+    fn logs_need_an_axe_branches_give_sticks() {
+        let axe = tool_id(ToolKind::Axe, Tier::Wood);
+        let pick = tool_id(ToolKind::Pickaxe, Tier::Diamond);
+        for log in [OAK_LOG, BIRCH_LOG_X, SPRUCE_LOG_Z] {
+            assert_eq!(break_time(log, NONE), None);
+            assert_eq!(break_time(log, pick), None);
+            assert!(wrong_tool(log, NONE) && drops(log, NONE, 0.5).is_empty());
+            assert!(break_time(log, axe).is_some() && !wrong_tool(log, axe));
+            assert_eq!(drops(log, axe, 0.5), vec![Stack::one(item_of_block(log).unwrap())]);
+        }
+        for branch in [OAK_BRANCH, BIRCH_BRANCH_X, SPRUCE_BRANCH_Z] {
+            assert!(break_time(branch, NONE).is_some_and(|t| t < 1.0) && !wrong_tool(branch, NONE));
+            for r in [0.0, 0.99] {
+                let d = drops(branch, NONE, r);
+                assert!(d.len() == 1 && d[0].item == STICK && (1..=2).contains(&d[0].count), "{r}");
+            }
         }
     }
 }
